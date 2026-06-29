@@ -39,7 +39,7 @@ from osmosis_ai.rollout.types import (
     RolloutStatus,
 )
 from osmosis_ai.rollout.utils.imports import to_import_path
-from osmosis_ai.rollout.utils.rewards import validate_samples_have_rewards
+from osmosis_ai.rollout.utils.rewards import validate_sample_has_reward
 
 logger: logging.Logger = logging.getLogger(__name__)
 
@@ -53,7 +53,7 @@ TEST_SH_TEMPLATE = """\
 set -e
 PYTHONPATH=/workspace python -m osmosis_ai.rollout.backend.harbor.grader_runner \
     --config /logs/agent/rollout_config.json \
-    --samples /logs/agent/samples.json
+    --sample /logs/agent/sample.json
 """
 
 
@@ -424,8 +424,8 @@ class HarborBackend(ExecutionBackend):
 
         metadata = get_agent_metadata(event)
         if metadata and metadata.get("status") == "success":
-            samples = parse_samples(metadata.get("samples", {}))
-            result = ExecutionResult(status=RolloutStatus.SUCCESS, samples=samples)
+            sample = parse_sample(metadata.get("sample"))
+            result = ExecutionResult(status=RolloutStatus.SUCCESS, sample=sample)
         elif event.result and event.result.exception_info:
             err = event.result.exception_info
             result = ExecutionResult(
@@ -489,17 +489,22 @@ class HarborBackend(ExecutionBackend):
 
         if pending.on_grader_complete:
             metadata = get_agent_metadata(event)
-            samples = parse_samples(metadata.get("samples", {})) if metadata else {}
+            sample = parse_sample(metadata.get("sample") if metadata else None)
             # Read before the trial-dir cleanup further down.
             artifacts = self.read_grader_artifacts(rollout_id)
 
             if event.result and event.result.verifier_result:
+                # Harbor surfaces verifier output as ``rewards: dict[str, float]``
+                # regardless of what shape the verifier wrote — for the single-sample
+                # contract we take any one value and apply it to our single sample.
                 rewards = event.result.verifier_result.rewards or {}
-                for sid, reward in rewards.items():
-                    if sid in samples:
-                        samples[sid].reward = float(reward)
+                reward_values = [
+                    float(v) for v in rewards.values() if v is not None
+                ]
+                if sample is not None and reward_values:
+                    sample.reward = reward_values[0]
                 try:
-                    validate_samples_have_rewards(samples)
+                    validate_sample_has_reward(sample)
                 except ValueError as e:
                     if not rewards:
                         logger.warning(
@@ -515,24 +520,24 @@ class HarborBackend(ExecutionBackend):
                         )
                     result = ExecutionResult(
                         status=RolloutStatus.FAILURE,
-                        samples=samples,
+                        sample=sample,
                         err_message=str(e),
                         err_category=RolloutErrorCategory.VALIDATION_ERROR,
                     )
                 else:
                     result = ExecutionResult(
-                        status=RolloutStatus.SUCCESS, samples=samples
+                        status=RolloutStatus.SUCCESS, sample=sample
                     )
             elif event.result and event.result.exception_info:
                 err = event.result.exception_info
                 result = ExecutionResult(
                     status=RolloutStatus.FAILURE,
-                    samples=samples,
+                    sample=sample,
                     err_message=err.exception_message,
                     err_category=RolloutErrorCategory.AGENT_ERROR,
                 )
             else:
-                result = ExecutionResult(status=RolloutStatus.FAILURE, samples=samples)
+                result = ExecutionResult(status=RolloutStatus.FAILURE, sample=sample)
 
             result.artifacts = artifacts
             await pending.on_grader_complete(result)
@@ -566,11 +571,14 @@ def get_agent_metadata(event: TrialHookEvent) -> dict[str, Any] | None:
     return None
 
 
-def parse_samples(raw: dict[str, Any]) -> dict[str, RolloutSample]:
-    return {
-        sid: RolloutSample.model_validate(data) if isinstance(data, dict) else data
-        for sid, data in raw.items()
-    }
+def parse_sample(raw: Any) -> RolloutSample | None:
+    if raw is None:
+        return None
+    if isinstance(raw, RolloutSample):
+        return raw
+    if isinstance(raw, dict):
+        return RolloutSample.model_validate(raw)
+    return None
 
 
 def rewrite_url_for_docker(url: str) -> str:

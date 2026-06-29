@@ -11,22 +11,18 @@ from osmosis_ai.rollout.types import (
 
 
 class SampleSource(ABC):
-    """Produces a ``RolloutSample`` for grading from a framework-specific object.
+    """Produces the rollout's ``RolloutSample`` for grading.
 
-    Each integration ships a small source class that wraps its underlying
-    object (an Agent, a Session, etc.) and produces a sample on demand.
-    The source is decoupled from the integration's framework classes so
-    they do not need to inherit from this ABC.
-
-    RolloutContext indexes registered sources by name and calls
-    ``get_sample`` lazily at sample collection time, passing the
-    registration name so the source can stamp it onto the returned
-    ``RolloutSample.id``.
+    A rollout produces exactly one sample (one agent run, one reward). The
+    active ``RolloutContext`` holds at most one ``SampleSource``; the
+    integration registers a source that wraps its underlying object
+    (typically an Agent or a Session) and the backend pulls the sample at
+    grading time.
     """
 
     @abstractmethod
-    async def get_sample(self, name: str) -> RolloutSample:
-        """Return the current rollout sample for the given registration name."""
+    async def get_sample(self) -> RolloutSample:
+        """Return the rollout's current sample."""
 
 
 rollout_contextvar: ContextVar["RolloutContext | None"] = ContextVar(
@@ -50,7 +46,7 @@ class RolloutContext:
     chat_completions_url: str = ""
     api_key: str | None = None
     rollout_id: str = ""
-    sample_sources: dict[str, SampleSource] = field(default_factory=dict)
+    sample_source: SampleSource | None = None
 
     def __post_init__(self) -> None:
         if not self.chat_completions_url:
@@ -67,24 +63,28 @@ class RolloutContext:
     def __exit__(self, *_: Any) -> None:
         rollout_contextvar.set(None)
 
-    def register_sample_source(self, name: str, source: SampleSource) -> None:
-        """Register a sample source under the given name. The context calls
-        ``source.get_sample(name)`` lazily when ``get_samples()`` is invoked,
-        so the source can keep reflecting state that mutates until the
-        rollout ends.
-        """
-        if name in self.sample_sources:
-            raise ValueError(
-                f"Session with {name} already exists, please give your session "
-                "or agent a unique name in the workflow"
-            )
-        self.sample_sources[name] = source
+    def set_sample_source(self, source: SampleSource) -> None:
+        """Register the single sample source for this rollout.
 
-    async def get_samples(self) -> dict[str, RolloutSample]:
-        out: dict[str, RolloutSample] = {}
-        for name, source in self.sample_sources.items():
-            out[name] = await source.get_sample(name)
-        return out
+        A rollout has exactly one sample; integrations call this from their
+        agent/session constructors so the backend can pull the sample at
+        grading time. Attempting to register a second source raises, which
+        catches the common bug of putting two ``OsmosisMemorySession``s or
+        two ``OsmosisStrandsAgent``s in the same workflow.
+        """
+        if self.sample_source is not None:
+            raise ValueError(
+                "RolloutContext already has a sample source registered. "
+                "A rollout produces one sample; construct a single agent/"
+                "session per rollout."
+            )
+        self.sample_source = source
+
+    async def get_sample(self) -> RolloutSample | None:
+        """Return the rollout's sample, or ``None`` if no source was registered."""
+        if self.sample_source is None:
+            return None
+        return await self.sample_source.get_sample()
 
 
 def get_rollout_context() -> RolloutContext | None:
@@ -93,19 +93,22 @@ def get_rollout_context() -> RolloutContext | None:
 
 @dataclass
 class GraderContext:
+    """Context passed to ``Grader.grade``.
+
+    Carries the single sample produced by the rollout. Graders set its
+    reward via :meth:`set_reward`.
+    """
+
     label: str | None = None
-    samples: dict[str, RolloutSample] = field(default_factory=dict)
+    sample: RolloutSample | None = None
     project_path: str | None = None
     metadata: dict[str, Any] | None = None
     artifacts: dict[str, Any] | None = None
 
-    def get_samples(self) -> dict[str, RolloutSample]:
-        return self.samples
-
-    def set_sample_reward(self, sample_id: str, reward: float) -> None:
-        if sample_id not in self.samples:
-            raise ValueError(f"Sample {sample_id} not found")
-        self.samples[sample_id].reward = reward
+    def set_reward(self, reward: float) -> None:
+        if self.sample is None:
+            raise ValueError("GraderContext has no sample to reward")
+        self.sample.reward = reward
 
     def set_artifacts(self, artifacts: dict[str, Any]) -> None:
         """Set the rollout-level artifacts object (replaces any prior value)."""

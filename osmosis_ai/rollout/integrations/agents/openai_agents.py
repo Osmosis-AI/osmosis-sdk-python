@@ -1,6 +1,5 @@
 import uuid
 from collections.abc import AsyncIterator
-from contextvars import ContextVar
 from typing import Any
 
 from agents import Agent
@@ -17,36 +16,26 @@ from openai.types.responses.response_usage import (
 from osmosis_ai.rollout.context import SampleSource, get_rollout_context
 from osmosis_ai.rollout.types import RolloutSample
 
-current_sample_id: ContextVar[str | None] = ContextVar(
-    "osmosis_current_sample_id", default=None
-)
-
 
 class OsmosisMemorySession(SessionABC):
-    """In-memory session that doubles as the sample source for an Osmosis rollout.
+    """In-memory session that doubles as the rollout's sample source.
 
-    Behavior:
-    - Inside a ``RolloutContext``: registers itself for sample collection
-      (via ``SessionSampleSource``) and publishes its sample id
-      to a ContextVar each time the runner reads from or writes to it.
-      ``OsmosisRolloutModel`` reads that ContextVar to stamp per-rollout
-      headers.
-    - Outside a ``RolloutContext``: behaves as a plain in-memory
-      ``SessionABC`` implementation, so the same workflow code can run
-      locally without an Osmosis rollout.
+    Inside a ``RolloutContext`` this registers itself with the context so
+    the backend can pull the conversation at grading time. Outside a
+    ``RolloutContext`` it behaves as a plain in-memory ``SessionABC``, so
+    the same workflow code can run locally without an Osmosis rollout.
 
     Pass exactly one ``OsmosisMemorySession`` per ``Runner.run`` when using
-    ``OsmosisRolloutModel``.
+    ``OsmosisRolloutModel`` — a rollout produces one sample.
     """
 
-    def __init__(self, name: str | None = None) -> None:
-        self.name: str = name or uuid.uuid4().hex
-        self.session_id: str = self.name
+    def __init__(self) -> None:
+        self.session_id: str = uuid.uuid4().hex
         self.items: list[TResponseInputItem] = []
         self._registered_context_id: int | None = None
         ctx = get_rollout_context()
         if ctx is not None:
-            ctx.register_sample_source(self.name, SessionSampleSource(self))
+            ctx.set_sample_source(SessionSampleSource(self))
             self._registered_context_id = id(ctx)
 
     def _raise_if_unregistered_in_rollout_context(self) -> None:
@@ -63,14 +52,12 @@ class OsmosisMemorySession(SessionABC):
 
     async def get_items(self, limit: int | None = None) -> list[TResponseInputItem]:
         self._raise_if_unregistered_in_rollout_context()
-        current_sample_id.set(self.name)
         if limit is None:
             return list(self.items)
         return list(self.items[-limit:])
 
     async def add_items(self, items: list[TResponseInputItem]) -> None:
         self._raise_if_unregistered_in_rollout_context()
-        current_sample_id.set(self.name)
         self.items.extend(items)
 
     async def pop_item(self) -> TResponseInputItem | None:
@@ -81,7 +68,7 @@ class OsmosisMemorySession(SessionABC):
 
 
 class SessionSampleSource(SampleSource):
-    """Produces a ``RolloutSample`` from any OpenAI Agents SDK ``Session``.
+    """Produces the rollout's sample from any OpenAI Agents SDK ``Session``.
 
     Works against any ``SessionABC`` by returning the items the runner
     persisted via ``add_items`` (canonical Responses-API ``TResponseInputItem``
@@ -97,22 +84,23 @@ class SessionSampleSource(SampleSource):
     def __init__(self, session: SessionABC) -> None:
         self.session = session
 
-    async def get_sample(self, name: str) -> RolloutSample:
+    async def get_sample(self) -> RolloutSample:
         items = await self.session.get_items()
-        return RolloutSample(id=name, messages=items)
+        return RolloutSample(messages=items)
 
 
 class OsmosisRolloutModel(LitellmModel):
-    """Placeholder ``Model`` that carries litellm kwargs for use in workflow configs.
+    """Placeholder ``Model`` that carries litellm kwargs for workflow configs.
 
-    This is *not* a usable model on its own: ``OsmosisAgent`` replaces it
-    with a real :class:`OsmosisLitellmModel` (wired to the active
-    ``RolloutContext``) at agent construction time. Any direct call into
-    ``stream_response`` / ``get_response`` raises ``NotImplementedError``
-    because the placeholder has no connection params.
+    Not a usable model on its own: ``OsmosisAgent`` replaces it with a real
+    :class:`OsmosisLitellmModel` (wired to the active ``RolloutContext``)
+    at agent construction time. Any direct call into ``stream_response`` /
+    ``get_response`` raises ``NotImplementedError`` because the placeholder
+    has no connection params.
 
-    Subclassing ``LitellmModel`` (without invoking its ``__init__``) is purely
-    a typing convenience so the placeholder satisfies ``Agent.model: Model``.
+    Subclassing ``LitellmModel`` (without invoking its ``__init__``) is
+    purely a typing convenience so the placeholder satisfies
+    ``Agent.model: Model``.
     """
 
     def __init__(self, **litellm_kwargs: Any) -> None:
@@ -135,19 +123,21 @@ class OsmosisRolloutModel(LitellmModel):
 
 
 class OsmosisLitellmModel(LitellmModel):
-    """Streaming-only LitellmModel pre-wired for the Osmosis completions server.
+    """Streaming-only LitellmModel pre-wired to the active rollout's chat endpoint.
 
-    Stateless across calls: the per-call session name is read from a
-    ContextVar that ``OsmosisMemorySession`` publishes when the runner interacts
-    with it. One instance can be safely shared across agents and runs (within
-    the rollout context that constructed it).
+    The model server identifies the rollout entirely via the URL it was
+    handed (rollout id is baked into the ``chat_completions_url`` path),
+    so this class no longer stamps per-call headers. It does, however,
+    refuse to make a request when no ``OsmosisMemorySession`` has been
+    registered with the active ``RolloutContext`` — that catches the
+    common bug of calling ``Runner.run`` without
+    ``session=OsmosisMemorySession()`` (which would otherwise leave the
+    grader with no conversation to score).
 
-    Caveats this class handles for the user:
-    - The Osmosis completions server is streaming-only, so ``get_response``
-      is implemented by aggregating ``stream_response`` events. This makes
-      ``Runner.run`` and ``Runner.run_sync`` work without forcing the user
-      to switch to ``Runner.run_streamed``.
-    - Per-rollout bookkeeping headers are injected on every model call.
+    The Osmosis completions server is streaming-only, so ``get_response``
+    is implemented by aggregating ``stream_response`` events. This makes
+    ``Runner.run`` and ``Runner.run_sync`` work without forcing the user
+    to switch to ``Runner.run_streamed``.
     """
 
     def __init__(self, **litellm_kwargs: Any) -> None:
@@ -158,7 +148,6 @@ class OsmosisLitellmModel(LitellmModel):
                 "Construct it inside your workflow run, where the execution "
                 "backend has set up the context."
             )
-        self.rollout_id: str = ctx.rollout_id
         super().__init__(
             model="openai/osmosis-rollout",
             base_url=ctx.chat_completions_url,
@@ -167,19 +156,18 @@ class OsmosisLitellmModel(LitellmModel):
         )
 
     def _merge_headers(self, model_settings: ModelSettings) -> dict[str, str]:
-        sample_id = current_sample_id.get()
-        if sample_id is None:
+        # No per-call routing headers anymore — the URL carries rollout
+        # identity. We still gate the call on a registered sample source
+        # so users who forget ``session=OsmosisMemorySession()`` get a
+        # loud error instead of a silently-empty sample at grading time.
+        ctx = get_rollout_context()
+        if ctx is None or ctx.sample_source is None:
             raise RuntimeError(
                 "OsmosisLitellmModel was called without an active OsmosisMemorySession.\n"
                 "Pass `session=OsmosisMemorySession()` to Runner.run() so the "
-                "model can stamp per-rollout headers and the runner can "
-                "persist the conversation for grading."
+                "runner persists the conversation for grading."
             )
-        return {
-            **super()._merge_headers(model_settings),
-            "x-sample-id": sample_id,
-            "x-rollout-id": self.rollout_id,
-        }
+        return super()._merge_headers(model_settings)
 
     async def get_response(self, *args: Any, **kwargs: Any) -> ModelResponse:
         output_items: list[Any] = []

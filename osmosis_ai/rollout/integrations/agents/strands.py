@@ -1,94 +1,57 @@
-import uuid
-from collections.abc import AsyncGenerator
-from typing import Any, TypeVar, cast
+from typing import Any, cast
 
 from strands import Agent as StrandsAgent
 from strands.models.litellm import LiteLLMModel
 from strands.models.model import Model
-from strands.types.content import Messages, SystemContentBlock
-from strands.types.streaming import StreamEvent
-from strands.types.tools import ToolChoice, ToolSpec
+from strands.types.content import Messages
 
 from osmosis_ai.rollout.context import (
-    RolloutContext,
     SampleSource,
     get_rollout_context,
 )
 from osmosis_ai.rollout.types import RolloutSample
 from osmosis_ai.rollout.utils.messages import map_initial_messages_to_content_blocks
 
-T = TypeVar("T")
-
 
 class StrandsAgentSampleSource(SampleSource):
-    """Produces a ``RolloutSample`` from a Strands agent's ``messages`` field.
+    """Produces the rollout sample from a Strands agent's ``messages`` field.
 
-    Strands agents accumulate the conversation history on ``agent.messages``
-    in chat-completion format, so the source just wraps that list.
+    Strands accumulates the conversation on ``agent.messages`` in
+    chat-completion format, so this just wraps that list.
     """
 
     def __init__(self, agent: StrandsAgent) -> None:
         self.agent = agent
 
-    async def get_sample(self, name: str) -> RolloutSample:
-        return RolloutSample(id=name, messages=list(self.agent.messages))
+    async def get_sample(self) -> RolloutSample:
+        return RolloutSample(messages=list(self.agent.messages))
 
 
 class OsmosisRolloutModel(LiteLLMModel):
-    """Placeholder model that carries sampling params.
+    """Placeholder ``Model`` that carries litellm kwargs for workflow configs.
 
-    At runtime, OsmosisStrandsAgent calls for_sample() which reads connection
-    info from the active RolloutContext to create a concrete LiteLLMModel.
+    Not a usable model on its own: ``OsmosisStrandsAgent`` replaces it with
+    a real ``LiteLLMModel`` (wired to the active ``RolloutContext``) at
+    agent construction time. It has no connection params, so any direct
+    call into the ``Model`` API will fail.
+
+    Subclassing ``LiteLLMModel`` (without invoking its ``__init__``) is
+    purely a typing convenience so the placeholder satisfies
+    ``StrandsAgent.model: Model`` -- same pattern as
+    ``integrations.agents.openai_agents.OsmosisRolloutModel``.
     """
 
-    def for_sample(self, sample_id: str, rollout_ctx: RolloutContext) -> LiteLLMModel:
-        headers = {
-            "x-sample-id": sample_id,
-            "x-rollout-id": rollout_ctx.rollout_id,
-        }
-        client_args = {
-            "api_base": rollout_ctx.chat_completions_url,
-            "api_key": rollout_ctx.api_key,
-            "extra_headers": headers,
-        }
-        return LiteLLMModel(
-            client_args=client_args,
-            model_id="openai/osmosis-rollout",
-            **self.config,  # type: ignore
-        )
-
-    def update_config(self, **model_config: Any) -> None:
-        raise NotImplementedError("This should not be called for OsmosisRolloutModel")
-
-    def get_config(self) -> Any:
-        raise NotImplementedError("This should not be called for OsmosisRolloutModel")
-
-    def structured_output(
-        self,
-        output_model: type[T],
-        prompt: Messages,
-        system_prompt: str | None = None,
-        **kwargs: Any,
-    ) -> AsyncGenerator[dict[str, T | Any], None]:
-        raise NotImplementedError("This should not be called for OsmosisRolloutModel")
-
-    def stream(
-        self,
-        messages: Messages,
-        tool_specs: list[ToolSpec] | None = None,
-        system_prompt: str | None = None,
-        *,
-        tool_choice: ToolChoice | None = None,
-        system_prompt_content: list[SystemContentBlock] | None = None,
-        invocation_state: dict[str, Any] | None = None,
-        **kwargs: Any,
-    ) -> AsyncGenerator[StreamEvent, None]:
-        raise NotImplementedError("This should not be called for OsmosisRolloutModel")
+    def __init__(self, **litellm_kwargs: Any) -> None:
+        self.litellm_kwargs: dict[str, Any] = litellm_kwargs
 
 
 class OsmosisStrandsAgent(StrandsAgent):
-    """Drop-in replacement for StrandsAgent that handles rollout model swap and
-    sample registration transparently. The constructor signature matches StrandsAgent.
+    """Drop-in ``StrandsAgent`` that wires itself into the active rollout.
+
+    If ``model`` is an ``OsmosisRolloutModel`` placeholder, this materializes
+    a real ``LiteLLMModel`` against the active ``RolloutContext`` and
+    registers the agent as the rollout's sample source. One
+    ``OsmosisStrandsAgent`` per rollout (matching the single-sample model).
     """
 
     def __init__(
@@ -106,11 +69,19 @@ class OsmosisStrandsAgent(StrandsAgent):
             if rollout_ctx is None:
                 raise RuntimeError(
                     "OsmosisRolloutModel requires an active RolloutContext. "
-                    "Ensure the execution backend sets up the context before running the workflow."
+                    "Ensure the execution backend sets up the context before "
+                    "running the workflow."
                 )
-            name = kwargs.get("name") or kwargs.get("agent_id") or uuid.uuid4().hex
-            model = model.for_sample(name, rollout_ctx)
-            rollout_ctx.register_sample_source(name, StrandsAgentSampleSource(self))
+            litellm_model: Model = LiteLLMModel(
+                client_args={
+                    "api_base": rollout_ctx.chat_completions_url,
+                    "api_key": rollout_ctx.api_key,
+                },
+                model_id="openai/osmosis-rollout",
+                **model.litellm_kwargs,
+            )
+            rollout_ctx.set_sample_source(StrandsAgentSampleSource(self))
+            model = litellm_model
 
         super().__init__(
             *args,

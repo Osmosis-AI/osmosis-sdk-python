@@ -67,16 +67,19 @@ async def run_workflow(
         with rollout_ctx:
             await workflow.run(ctx)
 
-        samples = await rollout_ctx.get_samples()
-        samples_data = {sid: s.model_dump() for sid, s in samples.items()}
+        sample = await rollout_ctx.get_sample()
+        sample_data = sample.model_dump() if sample is not None else None
 
-        (AGENT_LOGS_DIR / "samples.json").write_text(
-            json.dumps(samples_data, default=str)
+        (AGENT_LOGS_DIR / "sample.json").write_text(
+            json.dumps(sample_data, default=str)
         )
 
         meta["status"] = "success"
-        meta["samples"] = samples_data
-        print(f"Agent runner complete: {len(samples)} samples collected")
+        meta["sample"] = sample_data
+        print(
+            "Agent runner complete: "
+            + ("1 sample collected" if sample is not None else "no sample collected")
+        )
 
     except Exception as e:
         traceback.print_exc()

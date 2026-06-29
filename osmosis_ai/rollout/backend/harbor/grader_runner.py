@@ -1,7 +1,7 @@
-"""Grade agent samples inside a Harbor container.
+"""Grade the rollout's single sample inside a Harbor container.
 
 Usage:
-    osmosis-grader-runner --config /workspace/rollout_config.json --samples /logs/agent/samples.json
+    osmosis-grader-runner --config /workspace/rollout_config.json --sample /logs/agent/sample.json
 """
 
 from __future__ import annotations
@@ -21,12 +21,12 @@ VERIFIER_LOGS_DIR = Path("/logs/verifier")
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Grade agent samples")
+    parser = argparse.ArgumentParser(description="Grade the rollout sample")
     parser.add_argument(
         "--config", type=Path, required=True, help="Path to rollout_config.json"
     )
     parser.add_argument(
-        "--samples", type=Path, required=True, help="Path to samples.json"
+        "--sample", type=Path, required=True, help="Path to sample.json"
     )
     return parser.parse_args()
 
@@ -35,14 +35,16 @@ def load_config(path: Path) -> dict[str, Any]:
     return json.loads(path.read_text())
 
 
-def load_samples(path: Path) -> dict[str, RolloutSample]:
-    raw: dict[str, Any] = json.loads(path.read_text())
-    return {sid: RolloutSample.model_validate(data) for sid, data in raw.items()}
+def load_sample(path: Path) -> RolloutSample | None:
+    raw: Any = json.loads(path.read_text())
+    if raw is None:
+        return None
+    return RolloutSample.model_validate(raw)
 
 
-def write_rewards(rewards: dict[str, float | None]) -> None:
+def write_reward(reward: float | None) -> None:
     VERIFIER_LOGS_DIR.mkdir(parents=True, exist_ok=True)
-    (VERIFIER_LOGS_DIR / "reward.json").write_text(json.dumps(rewards))
+    (VERIFIER_LOGS_DIR / "reward.json").write_text(json.dumps({"reward": reward}))
 
 
 def write_artifacts(artifacts: dict[str, Any]) -> None:
@@ -72,36 +74,38 @@ def main() -> None:
 
     if not label and metadata is None:
         print("No label or metadata in config, skipping grading")
-        write_rewards({})
+        write_reward(None)
         return
 
-    if not args.samples.exists():
-        print("No samples found, skipping grading")
-        write_rewards({})
+    if not args.sample.exists():
+        print("No sample found, skipping grading")
+        write_reward(None)
         return
 
     if "grader" not in config:
         print("No grader in config, skipping grading")
-        write_rewards({})
+        write_reward(None)
         return
 
-    samples = load_samples(args.samples)
+    sample = load_sample(args.sample)
+    if sample is None:
+        print("Sample file is empty, skipping grading")
+        write_reward(None)
+        return
+
     grader_cls = resolve_object(config["grader"])
     grader_config = (
         resolve_object(config["grader_config"]) if "grader_config" in config else None
     )
 
-    ctx = GraderContext(label=label, samples=samples, metadata=metadata)
+    ctx = GraderContext(label=label, sample=sample, metadata=metadata)
     grader = grader_cls(grader_config)
     asyncio.run(grader.grade(ctx))
 
-    graded = ctx.get_samples()
-    for sid, sample in graded.items():
-        if sample.reward is None:
-            raise RuntimeError(f"Sample {sid} has no reward after grading")
+    if ctx.sample is None or ctx.sample.reward is None:
+        raise RuntimeError("Sample has no reward after grading")
 
-    rewards = {sid: sample.reward for sid, sample in graded.items()}
-    write_rewards(rewards)
+    write_reward(ctx.sample.reward)
     if ctx.artifacts is not None:
         # Artifacts are best-effort and must never block reward delivery, even
         # if the verifier dir is unwritable after reward.json is persisted.
@@ -109,7 +113,7 @@ def main() -> None:
             write_artifacts(ctx.artifacts)
         except OSError as e:
             print(f"Warning: failed to write grader artifacts: {e}")
-    print(f"Grading complete: {rewards}")
+    print(f"Grading complete: reward={ctx.sample.reward}")
 
 
 if __name__ == "__main__":
