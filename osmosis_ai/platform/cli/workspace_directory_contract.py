@@ -136,13 +136,20 @@ def validate_rollout_backend(
     )
     from osmosis_ai.rollout.validator import validate_backend
 
-    workflow_cls, workflow_config, entrypoint_module, workflow_error = load_workflow(
-        rollout=rollout,
-        entrypoint=entrypoint,
-        quiet=True,
-        console=None,
-        workspace_directory=workspace_directory,
-    )
+    try:
+        workflow_cls, workflow_config, entrypoint_module, workflow_error = (
+            load_workflow(
+                rollout=rollout,
+                entrypoint=entrypoint,
+                quiet=True,
+                console=None,
+                workspace_directory=workspace_directory,
+            )
+        )
+    except ModuleNotFoundError:
+        # Deps aren't installed locally, so we can't import the entrypoint here.
+        # Skip; the server validates after installing from pyproject.toml.
+        return
     if workflow_error or workflow_cls is None or entrypoint_module is None:
         # Native rollouts declare a NativeHarborBackend and have no Python Grader
         # (reward comes from the harbor task's verifier); skip the Grader check.

@@ -1161,3 +1161,96 @@ class TestDevRolloutServer:
         assert mock_request.call_args.kwargs["git_identity"] == "git_test"
         assert "method" not in mock_request.call_args.kwargs
         assert "data" not in mock_request.call_args.kwargs
+
+
+class TestGetDevRolloutServerLogs:
+    """Tests for OsmosisClient.get_dev_rollout_server_logs."""
+
+    @patch("osmosis_ai.platform.api.client.platform_request")
+    def test_returns_parsed_logs_with_default_query(
+        self, mock_request: MagicMock
+    ) -> None:
+        mock_request.return_value = {
+            "logs": [
+                {"timestamp": "2026-06-25T00:00:00Z", "message": "boot"},
+                {"timestamp": "2026-06-25T00:00:01Z", "message": "ready"},
+            ],
+            "next_cursor": "tok-1",
+        }
+
+        result = OsmosisClient().get_dev_rollout_server_logs(
+            "srv-1", git_identity="git_test"
+        )
+
+        assert mock_request.call_args[0][0] == (
+            "/api/cli/dev-rollout-server/srv-1/logs?limit=50&direction=older"
+        )
+        assert mock_request.call_args.kwargs["git_identity"] == "git_test"
+        assert [log.message for log in result.logs] == ["boot", "ready"]
+        assert result.next_cursor == "tok-1"
+
+    @patch("osmosis_ai.platform.api.client.platform_request")
+    def test_includes_cursor_and_direction_when_provided(
+        self, mock_request: MagicMock
+    ) -> None:
+        mock_request.return_value = {"logs": [], "next_cursor": None}
+
+        OsmosisClient().get_dev_rollout_server_logs(
+            "srv-1",
+            limit=10,
+            cursor="abc|def",
+            direction="newer",
+            git_identity="git_test",
+        )
+
+        assert mock_request.call_args[0][0] == (
+            "/api/cli/dev-rollout-server/srv-1/logs"
+            "?limit=10&direction=newer&cursor=abc%7Cdef"
+        )
+
+    @patch("osmosis_ai.platform.api.client.platform_request")
+    def test_encodes_server_id(self, mock_request: MagicMock) -> None:
+        mock_request.return_value = {"logs": [], "next_cursor": None}
+
+        OsmosisClient().get_dev_rollout_server_logs("a/b", git_identity="git_test")
+
+        path = mock_request.call_args[0][0]
+        assert path.startswith("/api/cli/dev-rollout-server/a%2Fb/logs?")
+
+
+class TestStreamDevRolloutServerLogs:
+    """Tests for OsmosisClient.stream_dev_rollout_server_logs."""
+
+    @patch("osmosis_ai.platform.api.client.platform_stream")
+    def test_yields_log_entries_from_stream(self, mock_stream: MagicMock) -> None:
+        mock_stream.return_value = iter(
+            [
+                {"timestamp": "t1", "message": "a"},
+                {"timestamp": "t2", "message": "b"},
+            ]
+        )
+
+        entries = list(
+            OsmosisClient().stream_dev_rollout_server_logs(
+                "srv-1", tail=100, git_identity="git_test"
+            )
+        )
+
+        endpoint = mock_stream.call_args[0][0]
+        assert endpoint == "/api/cli/dev-rollout-server/srv-1/logs/stream?tail=100"
+        assert mock_stream.call_args.kwargs["git_identity"] == "git_test"
+        assert [(e.timestamp, e.message) for e in entries] == [("t1", "a"), ("t2", "b")]
+
+    @patch("osmosis_ai.platform.api.client.platform_stream")
+    def test_encodes_server_id(self, mock_stream: MagicMock) -> None:
+        mock_stream.return_value = iter([])
+
+        list(
+            OsmosisClient().stream_dev_rollout_server_logs(
+                "a/b", git_identity="git_test"
+            )
+        )
+
+        assert mock_stream.call_args[0][0].startswith(
+            "/api/cli/dev-rollout-server/a%2Fb/logs/stream?"
+        )

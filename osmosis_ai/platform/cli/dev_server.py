@@ -1,14 +1,21 @@
 from __future__ import annotations
 
+import json
+import sys
 from pathlib import Path
 from typing import Any
 
+import typer
+
+from osmosis_ai.cli.console import console
 from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.cli.output import get_output_context, serialize_dev_rollout_server
+from osmosis_ai.cli.output.context import OutputFormat
 from osmosis_ai.cli.output.display import format_local_date
 from osmosis_ai.cli.output.result import ListColumn, ListResult, OperationResult
 from osmosis_ai.cli.prompts import require_confirmation
 from osmosis_ai.platform.api.client import OsmosisClient
+from osmosis_ai.platform.api.models import LogEntry
 from osmosis_ai.platform.cli.utils import paginated_fetch, validate_list_options
 from osmosis_ai.platform.cli.workspace_directory_context import (
     resolve_git_workspace_directory_context,
@@ -80,7 +87,7 @@ def down(server_id: str) -> OperationResult:
         operation="dev.server.down",
         status="success",
         resource=result,
-        message=f"Stopped {server_id}",
+        message=f"Stopping rollout server {server_id}",
     )
 
 
@@ -128,3 +135,66 @@ def list_servers(*, limit: int, all_: bool) -> ListResult:
             ListColumn(key="status", label="Status", no_wrap=True, ratio=1),
         ],
     )
+
+
+def _emit_entries(entries: list[LogEntry], fmt: OutputFormat) -> None:
+    if not entries:
+        return
+    if fmt is OutputFormat.json:
+        for entry in entries:
+            sys.stdout.write(
+                json.dumps({"timestamp": entry.timestamp, "message": entry.message})
+                + "\n"
+            )
+        sys.stdout.flush()
+        return
+    if fmt is OutputFormat.plain:
+        for entry in entries:
+            sys.stdout.write(f"{entry.timestamp}\t{entry.message}\n")
+        sys.stdout.flush()
+        return
+
+    for entry in entries:
+        console.print(
+            f"{entry.timestamp}  {entry.message}", markup=False, highlight=False
+        )
+
+
+def logs(server_id: str, *, follow: bool | None, tail: int) -> None:
+    """Show logs for a remote rollout server.
+
+    In rich mode logs stream live (attach); with ``--json``/``--plain`` the last
+    ``tail`` lines are printed and the command exits unless ``follow`` is forced.
+    """
+    ctx = resolve_git_workspace_directory_context()
+    output = get_output_context()
+    fmt = output.format
+    effective_follow = follow if follow is not None else (fmt is OutputFormat.rich)
+
+    client = OsmosisClient()
+
+    if effective_follow:
+        # The stream sends the last `tail` lines first, then pushes new ones.
+        try:
+            for entry in client.stream_dev_rollout_server_logs(
+                server_id,
+                tail=tail,
+                credentials=ctx.credentials,
+                git_identity=ctx.git_identity,
+            ):
+                _emit_entries([entry], fmt)
+        except KeyboardInterrupt:
+            if fmt is OutputFormat.rich:
+                console.print(f"\nDetached from {server_id}.", style="dim")
+    else:
+        page = client.get_dev_rollout_server_logs(
+            server_id,
+            limit=tail,
+            direction="older",
+            credentials=ctx.credentials,
+            git_identity=ctx.git_identity,
+        )
+        _emit_entries(page.logs, fmt)
+
+    output.output_emitted = True
+    raise typer.Exit(0)

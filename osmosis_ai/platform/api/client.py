@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from typing import TYPE_CHECKING, Any
 from urllib.parse import quote, urlencode
 
-from osmosis_ai.platform.auth.platform_client import platform_request
+from osmosis_ai.platform.auth.platform_client import platform_request, platform_stream
 from osmosis_ai.platform.constants import DEFAULT_PAGE_SIZE
 
 from .models import (
@@ -14,6 +15,7 @@ from .models import (
     EnvironmentSecretInfo,
     EvalRunMetrics,
     EvaluationRunDetail,
+    LogEntry,
     LogsPage,
     LoraModelDetail,
     LoraModelSummary,
@@ -712,6 +714,52 @@ class OsmosisClient:
             credentials=credentials,
             git_identity=git_identity,
         )
+
+    def get_dev_rollout_server_logs(
+        self,
+        server_id: str,
+        *,
+        limit: int = DEFAULT_PAGE_SIZE,
+        cursor: str | None = None,
+        direction: str = "older",
+        credentials: Credentials | None = None,
+        git_identity: str,
+    ) -> LogsPage:
+        """Fetch one page of dev rollout server logs.
+
+        Without ``cursor``, ``direction="older"`` returns the most recent page;
+        ``direction="newer"`` pages forward for live follow.
+        """
+        return self._get_logs(
+            f"/api/cli/dev-rollout-server/{_safe_path(server_id)}",
+            limit=limit,
+            cursor=cursor,
+            direction=direction,
+            credentials=credentials,
+            git_identity=git_identity,
+        )
+
+    def stream_dev_rollout_server_logs(
+        self,
+        server_id: str,
+        *,
+        tail: int = DEFAULT_PAGE_SIZE,
+        credentials: Credentials | None = None,
+        git_identity: str,
+    ) -> Iterator[LogEntry]:
+        """Stream a dev rollout server's logs live via Server-Sent Events.
+
+        The server sends the most recent ``tail`` lines first, then pushes new
+        lines as they arrive. The iterator ends when the stream closes (e.g. the
+        server is torn down).
+        """
+        qs = urlencode({"tail": tail})
+        for data in platform_stream(
+            f"/api/cli/dev-rollout-server/{_safe_path(server_id)}/logs/stream?{qs}",
+            credentials=credentials,
+            git_identity=git_identity,
+        ):
+            yield LogEntry.from_dict(data)
 
     def list_dev_rollout_servers(
         self,
