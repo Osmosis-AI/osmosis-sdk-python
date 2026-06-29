@@ -14,6 +14,7 @@ from typing import Any
 
 from osmosis_ai.rollout.context import GraderContext
 from osmosis_ai.rollout.types import RolloutSample
+from osmosis_ai.rollout.utils.artifacts import sanitize_artifacts
 from osmosis_ai.rollout.utils.imports import resolve_object
 
 VERIFIER_LOGS_DIR = Path("/logs/verifier")
@@ -44,13 +45,33 @@ def write_rewards(rewards: dict[str, float | None]) -> None:
     (VERIFIER_LOGS_DIR / "reward.json").write_text(json.dumps(rewards))
 
 
+def write_artifacts(artifacts: dict[str, Any]) -> None:
+    """Write grader artifacts to the verifier dir (sibling of reward.json).
+
+    Sanitized to mirror the server callback path, so a non-serializable or
+    oversized payload becomes an ``_error`` marker rather than crashing the
+    runner after rewards are already written.
+    """
+    sanitized = sanitize_artifacts(artifacts)
+    if sanitized is None:
+        return
+    VERIFIER_LOGS_DIR.mkdir(parents=True, exist_ok=True)
+    # Mirror sanitize_artifacts' compact UTF-8 settings so the on-disk file stays
+    # within the size cap and matches the callback wire format.
+    (VERIFIER_LOGS_DIR / "grader_artifacts.json").write_text(
+        json.dumps(sanitized, ensure_ascii=False, separators=(",", ":")),
+        encoding="utf-8",
+    )
+
+
 def main() -> None:
     args = parse_args()
     config = load_config(args.config)
     label = config.get("label")
+    metadata = config.get("metadata")
 
-    if not label:
-        print("No label in config, skipping grading")
+    if not label and metadata is None:
+        print("No label or metadata in config, skipping grading")
         write_rewards({})
         return
 
@@ -70,7 +91,7 @@ def main() -> None:
         resolve_object(config["grader_config"]) if "grader_config" in config else None
     )
 
-    ctx = GraderContext(label=label, samples=samples)
+    ctx = GraderContext(label=label, samples=samples, metadata=metadata)
     grader = grader_cls(grader_config)
     asyncio.run(grader.grade(ctx))
 
@@ -81,6 +102,13 @@ def main() -> None:
 
     rewards = {sid: sample.reward for sid, sample in graded.items()}
     write_rewards(rewards)
+    if ctx.artifacts is not None:
+        # Artifacts are best-effort and must never block reward delivery, even
+        # if the verifier dir is unwritable after reward.json is persisted.
+        try:
+            write_artifacts(ctx.artifacts)
+        except OSError as e:
+            print(f"Warning: failed to write grader artifacts: {e}")
     print(f"Grading complete: {rewards}")
 
 

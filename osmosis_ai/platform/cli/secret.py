@@ -250,9 +250,9 @@ def list_secrets(*, limit: int, all_: bool, scope: str = "all") -> ListResult:
         display_items=[
             {
                 **serialize_environment_secret(s),
-                "scope": _SCOPE_DISPLAY.get(s.scope, "—"),
+                "scope": _SCOPE_DISPLAY.get(s.scope, "–"),
                 "updated_at": format_local_date(s.updated_at),
-                "updater_name": s.updater_name or "—",
+                "updater_name": s.updater_name or "–",
             }
             for s in secrets
         ],

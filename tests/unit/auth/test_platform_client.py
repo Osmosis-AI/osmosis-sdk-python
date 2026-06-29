@@ -23,6 +23,7 @@ from osmosis_ai.platform.auth.platform_client import (
     SubscriptionRequiredError,
     UpgradeRequiredError,
     platform_request,
+    platform_stream,
     revoke_cli_token,
 )
 
@@ -52,6 +53,23 @@ def _make_http_response(data: dict[str, Any]) -> MagicMock:
     mock_resp.read.return_value = body
     mock_resp.status = 200
     mock_resp.headers = {}  # real dict: .get() returns None, no spurious warning
+    mock_resp.__enter__ = MagicMock(return_value=mock_resp)
+    mock_resp.__exit__ = MagicMock(return_value=False)
+    return mock_resp
+
+
+def _make_stream_response(
+    lines: list[bytes], headers: dict[str, str] | None = None
+) -> MagicMock:
+    """Create a mock urlopen() return value that streams ``lines`` of bytes.
+
+    Behaves like the real response object consumed by ``platform_stream``: it is
+    a context manager, exposes ``.headers``, and iterates over byte-encoded SSE
+    lines.
+    """
+    mock_resp = MagicMock()
+    mock_resp.headers = headers if headers is not None else {}
+    mock_resp.__iter__ = MagicMock(return_value=iter(lines))
     mock_resp.__enter__ = MagicMock(return_value=mock_resp)
     mock_resp.__exit__ = MagicMock(return_value=False)
     return mock_resp
@@ -398,6 +416,24 @@ class TestPlatformRequest:
 
         assert result == {}
         mock_resp.read.assert_not_called()
+
+    @patch("osmosis_ai.platform.auth.platform_client.urlopen")
+    def test_empty_body_returns_empty_dict(self, mock_urlopen: MagicMock) -> None:
+        """Verify a 200 response with an empty body yields an empty dict."""
+        mock_resp = MagicMock()
+        mock_resp.status = 200
+        mock_resp.headers = {}
+        mock_resp.read.return_value = b""
+        mock_resp.__enter__ = MagicMock(return_value=mock_resp)
+        mock_resp.__exit__ = MagicMock(return_value=False)
+        mock_urlopen.return_value = mock_resp
+        creds = _make_credentials()
+
+        result = platform_request(
+            "/api/test", credentials=creds, git_identity="git_test"
+        )
+
+        assert result == {}
 
     @patch("osmosis_ai.platform.auth.platform_client.console")
     @patch("osmosis_ai.platform.auth.platform_client.urlopen")
@@ -1190,3 +1226,130 @@ class TestRevokeCLIToken:
         assert "Failed to revoke CLI token server-side" in message
         assert "HTTP 500" in message
         assert mock_warn.call_args.kwargs.get("code") == "TOKEN_REVOKE_FAILED"
+
+
+# =============================================================================
+# platform_stream Tests
+# =============================================================================
+
+
+class TestPlatformStream:
+    """Tests for the authenticated SSE streaming helper."""
+
+    @patch("osmosis_ai.platform.auth.platform_client.load_credentials")
+    def test_raises_when_no_credentials_found(self, mock_load: MagicMock) -> None:
+        mock_load.return_value = None
+
+        with pytest.raises(CLIError):
+            list(platform_stream("/api/stream", require_git_repo=False))
+
+    @patch("osmosis_ai.platform.auth.platform_client.urlopen")
+    @patch("osmosis_ai.platform.auth.platform_client.load_credentials")
+    def test_uses_loaded_credentials_when_none_provided(
+        self, mock_load: MagicMock, mock_urlopen: MagicMock
+    ) -> None:
+        mock_load.return_value = _make_credentials()
+        mock_urlopen.return_value = _make_stream_response([])
+
+        list(platform_stream("/api/stream", require_git_repo=False))
+
+        mock_load.assert_called_once()
+
+    @patch("osmosis_ai.platform.auth.platform_client.urlopen")
+    def test_yields_parsed_events(self, mock_urlopen: MagicMock) -> None:
+        mock_urlopen.return_value = _make_stream_response(
+            [
+                b'data: {"message": "a"}\n',
+                b"\n",
+                b'data: {"message": "b"}\n',
+                b"\n",
+            ]
+        )
+        creds = _make_credentials()
+
+        events = list(
+            platform_stream("/api/stream", credentials=creds, git_identity="git_1")
+        )
+
+        assert events == [{"message": "a"}, {"message": "b"}]
+
+    @patch("osmosis_ai.platform.auth.platform_client.urlopen")
+    def test_sets_streaming_and_git_headers(self, mock_urlopen: MagicMock) -> None:
+        mock_urlopen.return_value = _make_stream_response([])
+        creds = _make_credentials()
+
+        list(platform_stream("/api/stream", credentials=creds, git_identity="git_abc"))
+
+        request_obj = mock_urlopen.call_args[0][0]
+        assert request_obj.get_header("Accept") == "text/event-stream"
+        assert request_obj.get_header("X-osmosis-git") == "git_abc"
+        assert request_obj.get_method() == "GET"
+
+    def test_require_git_repo_true_requires_explicit_git_identity(self) -> None:
+        creds = _make_credentials()
+
+        with pytest.raises(PlatformAPIError, match="explicit git_identity") as exc_info:
+            list(platform_stream("/api/stream", credentials=creds))
+
+        assert exc_info.value.error_code == "GIT_SCOPE_HEADER_REQUIRED"
+
+    @patch("osmosis_ai.platform.auth.platform_client.urlopen")
+    def test_no_git_header_when_require_git_repo_false(
+        self, mock_urlopen: MagicMock
+    ) -> None:
+        mock_urlopen.return_value = _make_stream_response([])
+        creds = _make_credentials()
+
+        list(platform_stream("/api/stream", credentials=creds, require_git_repo=False))
+
+        request_obj = mock_urlopen.call_args[0][0]
+        header_names = {name.casefold() for name in request_obj.headers}
+        assert "x-osmosis-git" not in header_names
+
+    @patch("osmosis_ai.platform.auth.platform_client.urlopen")
+    def test_http_error_is_translated(self, mock_urlopen: MagicMock) -> None:
+        mock_urlopen.side_effect = _make_http_error(401)
+        creds = _make_credentials()
+
+        with pytest.raises(AuthenticationExpiredError):
+            list(
+                platform_stream(
+                    "/api/stream",
+                    credentials=creds,
+                    git_identity="git_1",
+                )
+            )
+
+    @patch("osmosis_ai.platform.auth.platform_client.urlopen")
+    def test_url_error_becomes_platform_api_error(
+        self, mock_urlopen: MagicMock
+    ) -> None:
+        mock_urlopen.side_effect = URLError("boom")
+        creds = _make_credentials()
+
+        with pytest.raises(PlatformAPIError, match="Connection error"):
+            list(
+                platform_stream(
+                    "/api/stream",
+                    credentials=creds,
+                    git_identity="git_1",
+                )
+            )
+
+    @patch("osmosis_ai.platform.auth.platform_client.surface_version_signal")
+    @patch("osmosis_ai.platform.auth.platform_client.urlopen")
+    def test_surfaces_version_signal_from_response_headers(
+        self, mock_urlopen: MagicMock, mock_surface: MagicMock
+    ) -> None:
+        mock_urlopen.return_value = _make_stream_response(
+            [],
+            headers={
+                "X-Osmosis-Version-Status": "deprecated",
+                "X-Osmosis-Version-Message": "please upgrade",
+            },
+        )
+        creds = _make_credentials()
+
+        list(platform_stream("/api/stream", credentials=creds, git_identity="git_1"))
+
+        mock_surface.assert_called_once_with("deprecated", "please upgrade")

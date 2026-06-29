@@ -15,8 +15,10 @@ from osmosis_ai.cli.output.result import (
     DetailResult,
     ListColumn,
     ListResult,
+    ListSection,
     MessageResult,
     OperationResult,
+    SectionedListResult,
 )
 
 GOLDEN = Path(__file__).resolve().parents[3] / "golden" / "cli_output"
@@ -86,6 +88,85 @@ def test_list_envelope_extra_cannot_override_reserved_keys() -> None:
     assert payload["workspace"] == "ws-a"
 
 
+def _sectioned_list_result(extra: dict[str, Any] | None = None) -> SectionedListResult:
+    return SectionedListResult(
+        sections=[
+            ListSection(
+                key="base_models",
+                title="Base Models",
+                items=[{"id": "m_1"}],
+                total_count=1,
+                has_more=False,
+                next_offset=None,
+                columns=[ListColumn(key="id", label="ID")],
+            ),
+            ListSection(
+                key="lora_models",
+                title="LoRA Models",
+                items=[{"id": "l_1"}],
+                total_count=5,
+                has_more=True,
+                next_offset=1,
+                columns=[ListColumn(key="id", label="ID")],
+            ),
+        ],
+        extra=extra or {},
+    )
+
+
+def test_sectioned_list_envelope_required_keys() -> None:
+    payload, stderr = _render_to_json(_sectioned_list_result())
+    golden = json.loads(
+        (GOLDEN / "sectioned_list_envelope.json").read_text(encoding="utf-8")
+    )
+    assert sorted(payload.keys()) == sorted(golden["keys"])
+    for section_key in ("base_models", "lora_models"):
+        assert sorted(payload[section_key].keys()) == sorted(golden["section_keys"])
+    assert payload["schema_version"] == 1
+    assert stderr == ""
+
+
+def test_sectioned_list_envelope_keys_each_section_with_own_pagination() -> None:
+    payload, stderr = _render_to_json(_sectioned_list_result())
+    assert sorted(payload.keys()) == sorted(
+        ["schema_version", "base_models", "lora_models"]
+    )
+    assert payload["schema_version"] == 1
+    assert payload["base_models"] == {
+        "items": [{"id": "m_1"}],
+        "total_count": 1,
+        "has_more": False,
+        "next_offset": None,
+    }
+    assert payload["lora_models"] == {
+        "items": [{"id": "l_1"}],
+        "total_count": 5,
+        "has_more": True,
+        "next_offset": 1,
+    }
+    assert stderr == ""
+
+
+def test_sectioned_list_envelope_supports_extra_keys() -> None:
+    payload, _ = _render_to_json(_sectioned_list_result({"workspace": "ws-a"}))
+    assert payload["workspace"] == "ws-a"
+
+
+def test_sectioned_list_envelope_extra_cannot_override_reserved_keys() -> None:
+    payload, _ = _render_to_json(
+        _sectioned_list_result(
+            {
+                "schema_version": 999,
+                "base_models": "bogus",
+                "workspace": "ws-a",
+            }
+        )
+    )
+    assert payload["schema_version"] == 1
+    assert payload["base_models"]["items"] == [{"id": "m_1"}]
+    assert payload["workspace"] == "ws-a"
+
+
 def test_detail_envelope_required_keys() -> None:
     result = DetailResult(
         title="Dataset",
@@ -119,14 +200,12 @@ def test_operation_envelope_includes_structured_next_steps_only() -> None:
     result = OperationResult(
         operation="deploy",
         status="success",
-        next_steps_structured=[
-            {"action": "deployment_info", "checkpoint_name": "run-step-40"}
-        ],
-        display_next_steps=["Inspect with: osmosis deployment info run-step-40"],
+        next_steps_structured=[{"action": "model_deploy", "model_name": "run-step-40"}],
+        display_next_steps=["Deploy with: osmosis model deploy run-step-40"],
     )
     payload, _ = _render_to_json(result)
     assert payload["next_steps_structured"] == [
-        {"action": "deployment_info", "checkpoint_name": "run-step-40"}
+        {"action": "model_deploy", "model_name": "run-step-40"}
     ]
     assert "display_next_steps" not in payload
 

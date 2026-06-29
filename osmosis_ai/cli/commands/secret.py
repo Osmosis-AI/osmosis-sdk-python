@@ -24,7 +24,7 @@ from typing import Any
 
 import typer
 
-from osmosis_ai.platform.constants import DEFAULT_PAGE_SIZE
+from osmosis_ai.platform.constants import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
 
 app: typer.Typer = typer.Typer(
     help="Manage secrets (set, list, delete).",
@@ -43,6 +43,8 @@ def list_secrets(
     limit: int = typer.Option(
         DEFAULT_PAGE_SIZE,
         "--limit",
+        min=1,
+        max=MAX_PAGE_SIZE,
         help="Maximum number of secrets to show.",
     ),
     all_: bool = typer.Option(False, "--all", help="Show all secrets."),

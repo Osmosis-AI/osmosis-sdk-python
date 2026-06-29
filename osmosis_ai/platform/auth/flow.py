@@ -49,12 +49,30 @@ class LoginError(Exception):
 
 
 @dataclass
+class VerifiedWorkspace:
+    """Workspace identity resolved server-side from the X-Osmosis-Git header."""
+
+    id: str | None
+    name: str
+    role: str | None
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> VerifiedWorkspace:
+        return cls(
+            id=data.get("id"),
+            name=data.get("name", ""),
+            role=data.get("role"),
+        )
+
+
+@dataclass
 class VerifyResult:
     """Result of token verification against the platform."""
 
     user: UserInfo
     expires_at: datetime
     token_id: str | None
+    workspace: VerifiedWorkspace | None = None
 
 
 @dataclass
@@ -80,6 +98,7 @@ class DeviceCodeResponse:
     verification_uri: str
     expires_in: int
     interval: int
+    verification_uri_complete: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -220,24 +239,28 @@ def _login_error_from_http(
 # ---------------------------------------------------------------------------
 
 
-def verify_token(token: str) -> VerifyResult:
+def verify_token(token: str, *, git_identity: str | None = None) -> VerifyResult:
     """Verify token and get user info from the platform.
 
     Args:
         token: The access token to verify.
+        git_identity: Optional Git repository identity sent as the
+            X-Osmosis-Git header so the platform resolves the linked
+            workspace. When omitted the result's workspace is None.
 
     Returns:
-        VerifyResult with user, expiration, and token_id.
+        VerifyResult with user, expiration, token_id, and workspace.
 
     Raises:
         LoginError: If verification fails.
     """
     verify_url = f"{_platform_url()}/api/cli/verify"
 
-    request = Request(
-        verify_url,
-        headers=cli_request_headers(token=token),
-    )
+    req_headers = cli_request_headers(token=token)
+    if git_identity:
+        req_headers["X-Osmosis-Git"] = git_identity
+
+    request = Request(verify_url, headers=req_headers)
 
     try:
         with urlopen(request, timeout=30) as response:
@@ -258,10 +281,18 @@ def verify_token(token: str) -> VerifyResult:
 
             expires_at = _parse_expires_at(data.get("expires_at"))
 
+            workspace_data = data.get("workspace")
+            workspace = (
+                VerifiedWorkspace.from_dict(workspace_data)
+                if isinstance(workspace_data, dict)
+                else None
+            )
+
             return VerifyResult(
                 user=user_info,
                 expires_at=expires_at,
                 token_id=token_id,
+                workspace=workspace,
             )
 
     except HTTPError as e:
@@ -313,6 +344,7 @@ def request_device_code(device_name: str | None = None) -> DeviceCodeResponse:
                 verification_uri=data["verification_uri"],
                 expires_in=data["expires_in"],
                 interval=data["interval"],
+                verification_uri_complete=data.get("verification_uri_complete"),
             )
     except HTTPError as e:
         raise _login_error_from_http(e, "Failed to request device code") from e
@@ -379,7 +411,7 @@ def poll_device_token(
     raise LoginError("Device authorization timed out. Please try again.")
 
 
-def device_login(timeout: float = 600.0) -> tuple[LoginResult, Credentials]:
+def device_login(timeout: float = 900.0) -> tuple[LoginResult, Credentials]:
     """Execute the device code login flow for headless environments.
 
     Returns:
@@ -401,7 +433,11 @@ def device_login(timeout: float = 600.0) -> tuple[LoginResult, Credentials]:
     console.print(f"Code expires in {expires_minutes} minutes.", style="dim")
     console.print()
 
-    verification_url = device_code_resp.verification_uri
+    # The complete URI carries the device code so the browser lands on a
+    # pre-filled authorize page; older servers may not send it.
+    verification_url = (
+        device_code_resp.verification_uri_complete or device_code_resp.verification_uri
+    )
     console.print_url(
         "Open this URL in your browser: ", verification_url, style="yellow"
     )

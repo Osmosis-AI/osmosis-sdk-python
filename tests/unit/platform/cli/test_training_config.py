@@ -79,6 +79,27 @@ custom_flag = true
     assert cfg.advanced_config == {"optimizer": "adam", "custom_flag": True}
 
 
+def test_load_config_rejects_malformed_commit_sha(tmp_path: Path) -> None:
+    path = tmp_path / "train.toml"
+    path.write_text(
+        """
+[experiment]
+rollout = "r"
+entrypoint = "main.py"
+model_path = "m"
+dataset = "d"
+commit_sha = "not-a-sha"
+""".strip(),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(CLIError) as exc_info:
+        load_train_submit_config(path)
+    message = str(exc_info.value)
+    assert "experiment.commit_sha" in message
+    assert "hexadecimal Git commit SHA" in message
+
+
 def test_load_minimal_config(tmp_path: Path) -> None:
     path = tmp_path / "minimal.toml"
     path.write_text(

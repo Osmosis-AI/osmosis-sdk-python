@@ -69,6 +69,66 @@ required = ["OPENAI_API_KEY", "GITHUB_TOKEN"]
     }
 
 
+def test_load_eval_submit_config_accepts_full_length_commit_sha(
+    tmp_path: Path,
+) -> None:
+    full_sha = "a" * 40
+    path = _write_config(
+        tmp_path / "eval.toml",
+        f"""
+[experiment]
+rollout = "calculator"
+entrypoint = "main.py"
+model_path = "openai/gpt-5-mini"
+dataset = "multiply"
+commit_sha = "{full_sha}"
+
+[secrets]
+required = []
+""",
+    )
+
+    config = load_eval_submit_config(path)
+
+    assert config.experiment_commit_sha == full_sha
+
+
+@pytest.mark.parametrize(
+    "bad_sha",
+    [
+        "main",  # branch name, not a SHA
+        "abc123",  # too short (6 chars)
+        "z" * 12,  # non-hex characters
+        "a" * 41,  # too long
+        "dead beef",  # contains whitespace
+    ],
+)
+def test_load_eval_submit_config_rejects_malformed_commit_sha(
+    tmp_path: Path,
+    bad_sha: str,
+) -> None:
+    path = _write_config(
+        tmp_path / "eval.toml",
+        f"""
+[experiment]
+rollout = "calculator"
+entrypoint = "main.py"
+model_path = "openai/gpt-5-mini"
+dataset = "multiply"
+commit_sha = "{bad_sha}"
+
+[secrets]
+required = []
+""",
+    )
+
+    with pytest.raises(CLIError) as exc_info:
+        load_eval_submit_config(path)
+    message = str(exc_info.value)
+    assert "experiment.commit_sha" in message
+    assert "hexadecimal Git commit SHA" in message
+
+
 def test_load_eval_submit_config_defaults_optional_evaluation_fields(
     tmp_path: Path,
 ) -> None:

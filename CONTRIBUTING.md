@@ -82,7 +82,7 @@ All PR titles **must** follow this format (enforced by CI):
 [mod1][mod2] type: description          # multi-module (up to 3)
 ```
 
-- **Modules**: `reward`, `rollout`, `server`, `cli`, `auth`, `eval`, `misc`, `ci`, `doc`
+- **Modules**: `rollout`, `server`, `cli`, `auth`, `eval`, `misc`, `ci`, `doc`
 - **Types**: `feat`, `fix`, `refactor`, `chore`, `test`, `doc`
 
 For breaking changes, add `[BREAKING]` before the modules:
@@ -98,7 +98,7 @@ For breaking changes, add `[BREAKING]` before the modules:
 [rollout][auth] refactor: extract LifecycleManager
 [server] fix: handle timeout in rollout init
 [cli] chore: update dependency versions
-[BREAKING][reward] refactor: rename decorator parameters
+[BREAKING][rollout] refactor: change Grader.grade signature
 ```
 
 PR titles appear directly in auto-generated GitHub Release Notes, so keep them clear and descriptive.
@@ -115,7 +115,7 @@ Add a label to your PR so it gets categorized correctly in Release Notes:
 | `documentation` | Docs update |
 | `chore` / `ci` / `refactor` / `dependencies` | Maintenance work |
 
-Module-specific labels (`reward`, `rollout`, `server`, `cli`, `auth`, `eval`) can also be added for filtering. Rollout work typically touches `osmosis_ai.rollout` and related CLI commands.
+Module-specific labels (`rollout`, `server`, `cli`, `auth`, `eval`) can also be added for filtering. Rollout work typically touches `osmosis_ai.rollout` and related CLI commands.
 
 ### Workflow
 

@@ -24,7 +24,11 @@ from osmosis_ai.cli.output import (
 from osmosis_ai.cli.output.display import format_local_date
 from osmosis_ai.cli.paths import parse_cli_path
 from osmosis_ai.cli.prompts import require_confirmation
-from osmosis_ai.platform.api.models import STATUSES_IN_PROGRESS, STATUSES_SUCCESS
+from osmosis_ai.platform.api.models import (
+    STATUSES_ERROR,
+    STATUSES_IN_PROGRESS,
+    STATUSES_SUCCESS,
+)
 from osmosis_ai.platform.auth import (
     AuthenticationExpiredError,
     PlatformAPIError,
@@ -40,6 +44,7 @@ from .constants import (
 )
 from .utils import (
     build_dataset_detail_rows,
+    build_logs_result,
     format_dataset_status,
     format_size,
     platform_call,
@@ -413,7 +418,7 @@ def upload(
         (
             f"Processing will continue on the platform. Check status at: {dataset.platform_url}"
             if dataset.platform_url
-            else f"Processing will continue on the platform. Check status with: osmosis dataset info {dataset.id}"
+            else f"Processing will continue on the platform. Check status with: osmosis dataset info {dataset.file_name}"
         )
     ]
     next_steps_structured = (
@@ -480,7 +485,7 @@ def list_datasets(limit: int = DEFAULT_PAGE_SIZE, all_: bool = False) -> Command
                 "status": format_dataset_status(d),
                 "file_size": format_size(d.file_size),
                 "created_at": format_local_date(d.created_at),
-                "creator_name": d.creator_name or "—",
+                "creator_name": d.creator_name or "–",
             }
             for d in datasets
         ],
@@ -506,14 +511,46 @@ def info(
         ),
     )
 
-    rows = build_dataset_detail_rows(ds)
+    rows = build_dataset_detail_rows(ds, include_id=ds.is_internal_user)
     data = serialize_dataset(ds)
     data.update(git_result_context(context))
+    display_hints = [f"View: {ds.platform_url}"] if ds.platform_url else []
+    if ds.status in STATUSES_ERROR:
+        display_hints.append(
+            f"See logs with: osmosis dataset logs {ds.file_name or name}"
+        )
     return DetailResult(
         title="Dataset",
         data=data,
         fields=detail_fields(rows),
-        display_hints=[f"View: {ds.platform_url}"] if ds.platform_url else [],
+        display_hints=display_hints,
+    )
+
+
+def logs(name: str, *, limit: int, cursor: str | None = None) -> ListResult:
+    """Show the most recent logs for a dataset, oldest-first."""
+    context = require_git_workspace_directory_context()
+    credentials = context.credentials
+    git_identity = context.git_identity
+    from osmosis_ai.platform.api.client import OsmosisClient
+
+    client = OsmosisClient()
+    page = platform_call(
+        "Fetching logs...",
+        lambda: client.get_dataset_logs(
+            name,
+            limit=limit,
+            cursor=cursor,
+            credentials=credentials,
+            git_identity=git_identity,
+        ),
+    )
+
+    return build_logs_result(
+        title=f"Dataset Logs: {name}",
+        page=page,
+        context=context,
+        next_step_hint=f"Use osmosis dataset info {name} for dataset details.",
     )
 
 
@@ -743,6 +780,178 @@ def _check_required_columns(columns: Iterable[str]) -> list[str]:
     return []
 
 
+# ── Optional "metadata" column validation ─────────────────────────
+# Datasets may carry an optional per-row "metadata" column. Its
+# canonical form is a JSON object (dict). Users may author it as a
+# native object (JSONL/Parquet) or as a JSON-object string (CSV;
+# tolerated in JSONL). String->object normalization happens only in
+# the platform; the SDK mirrors the platform's user-error rules over
+# the sampled rows for early feedback: a cell must be a JSON object
+# without empty nested objects, per-key value types must agree across
+# rows, and the sampled objects must not all be empty ({}).
+
+METADATA_COLUMN = "metadata"
+
+
+def _metadata_is_absent(value: Any) -> bool:
+    """Return True when a metadata cell should be treated as absent.
+
+    None and empty / whitespace-only strings are all "absent" and skip
+    further shape validation.
+    """
+    if value is None:
+        return True
+    return isinstance(value, str) and not value.strip()
+
+
+def _contains_nested_empty_object(value: Any, *, is_root: bool = True) -> bool:
+    """Return whether a metadata value contains a nested empty object."""
+    if isinstance(value, dict):
+        if not value:
+            return not is_root
+        return any(
+            _contains_nested_empty_object(child, is_root=False)
+            for child in value.values()
+        )
+    if isinstance(value, list):
+        return any(
+            _contains_nested_empty_object(child, is_root=False) for child in value
+        )
+    return False
+
+
+_INT64_MIN = -(2**63)
+_INT64_MAX = 2**63 - 1
+
+
+def _contains_oversized_int(value: Any) -> bool:
+    """Return whether a metadata value contains an int beyond 64 bits.
+
+    Valid JSON, but the platform stores metadata as a parquet struct and
+    Arrow cannot hold an integer outside the int64 range.
+    """
+    if isinstance(value, bool):
+        return False
+    if isinstance(value, int):
+        return not _INT64_MIN <= value <= _INT64_MAX
+    if isinstance(value, dict):
+        return any(_contains_oversized_int(child) for child in value.values())
+    if isinstance(value, list):
+        return any(_contains_oversized_int(child) for child in value)
+    return False
+
+
+def _json_type_name(value: Any) -> str:
+    if isinstance(value, bool):
+        return "bool"
+    # JSON has a single "number" type: int and float for the same key are
+    # consistent (the platform promotes them to double).
+    if isinstance(value, (int, float)):
+        return "number"
+    if isinstance(value, str):
+        return "str"
+    if isinstance(value, dict):
+        return "object"
+    if isinstance(value, list):
+        return "array"
+    return type(value).__name__
+
+
+class _MetadataCrossRowTracker:
+    """Cross-row metadata checks over the sampled rows.
+
+    Mirrors the platform normalizer's user-error rules that cannot be
+    checked per cell: per-key JSON value types must agree across rows, and
+    metadata objects must not all be empty ({}) — an all-empty column has
+    no keys and cannot be stored as a parquet struct.
+    """
+
+    def __init__(self) -> None:
+        self._types: dict[str, str] = {}
+        self._saw_empty_object = False
+        self._saw_keyed_object = False
+
+    def observe(self, value: dict, *, location: str) -> list[str]:
+        """Record one metadata object; return cross-row type errors."""
+        if value:
+            self._saw_keyed_object = True
+        else:
+            self._saw_empty_object = True
+        return self._collect(value, "$", location)
+
+    def _collect(self, value: Any, path: str, location: str) -> list[str]:
+        if value is None:
+            return []
+        current = _json_type_name(value)
+        previous = self._types.setdefault(path, current)
+        if previous != current:
+            return [
+                f"{location}: invalid metadata - value type at {path} is "
+                f"inconsistent across rows ({previous} vs {current})"
+            ]
+        errors: list[str] = []
+        if isinstance(value, dict):
+            for key, child in value.items():
+                errors.extend(self._collect(child, f"{path}.{key}", location))
+        elif isinstance(value, list):
+            for child in value:
+                errors.extend(self._collect(child, f"{path}[]", location))
+        return errors
+
+    def finish(self) -> list[str]:
+        """Return errors only determinable after all sampled rows are seen."""
+        if self._saw_empty_object and not self._saw_keyed_object:
+            return [
+                "Invalid metadata column: all sampled metadata objects are "
+                "empty ({}); they carry no keys and cannot be stored. Remove "
+                "the metadata column or add at least one key."
+            ]
+        return []
+
+
+def _check_metadata_value(
+    value: Any,
+    *,
+    location: str,
+    tracker: _MetadataCrossRowTracker | None = None,
+) -> list[str]:
+    """Validate a single metadata cell, returning errors (empty if valid).
+
+    A cell must be a dict, or a string that JSON-parses to an object (dict),
+    without empty nested objects. When a ``tracker`` is given the object is
+    also recorded for cross-row consistency checks. ``location`` is a
+    human-readable prefix such as ``"Line 3"`` or ``"Near end of file"``.
+    """
+    import json
+
+    if _metadata_is_absent(value):
+        return []
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except json.JSONDecodeError as e:
+            return [f"{location}: invalid metadata - not valid JSON ({e})"]
+    if not isinstance(value, dict):
+        return [
+            f"{location}: invalid metadata - must be a JSON object, "
+            f"got {type(value).__name__}"
+        ]
+    if _contains_nested_empty_object(value):
+        return [
+            f"{location}: invalid metadata - contains an empty nested "
+            "object ({}), which cannot be stored. Remove that key or add "
+            "at least one nested key."
+        ]
+    if _contains_oversized_int(value):
+        return [
+            f"{location}: invalid metadata - contains an integer too large "
+            "to store (must fit in 64 bits)"
+        ]
+    if tracker is not None:
+        return tracker.observe(value, location=location)
+    return []
+
+
 def _read_tail_lines(
     file_path: Path, n: int, chunk_size: int = 1024 * 1024
 ) -> list[str]:
@@ -783,6 +992,50 @@ def _read_tail_lines(
     return lines[-n:]
 
 
+def _check_parquet_metadata_column(pf: Any) -> list[str]:
+    """Validate the optional "metadata" column of a parquet file.
+
+    A struct dtype is accepted as-is: parquet enforces one uniform struct
+    schema per column and cannot store empty structs, so the cross-row
+    user-error rules cannot be violated. A string / large_string dtype is
+    accepted only when every cell in the first batch parses to a JSON
+    object (absent cells are skipped). Any other dtype is rejected.
+    """
+    import pyarrow as pa
+
+    schema = pf.schema_arrow
+    if METADATA_COLUMN not in schema.names:
+        return []
+
+    field_type = schema.field(METADATA_COLUMN).type
+    # A struct column is already an object; an all-null column means every
+    # cell is absent. Both are accepted without per-cell inspection.
+    if pa.types.is_struct(field_type) or pa.types.is_null(field_type):
+        return []
+    if not (pa.types.is_string(field_type) or pa.types.is_large_string(field_type)):
+        return [
+            f"Invalid metadata column: must be a struct or JSON-object string, "
+            f"got dtype {field_type}"
+        ]
+
+    # String dtype: validate parseability on the first batch.
+    errors: list[str] = []
+    tracker = _MetadataCrossRowTracker()
+    for batch in pf.iter_batches(columns=[METADATA_COLUMN]):
+        for value in batch.column(0).to_pylist():
+            errors.extend(
+                _check_metadata_value(
+                    value, location="metadata column", tracker=tracker
+                )
+            )
+            if len(errors) >= 5:
+                errors.append("... (showing first 5 errors)")
+                return errors
+        break
+    errors.extend(tracker.finish())
+    return errors
+
+
 def _validate_parquet(file_path: Path) -> list[str]:
     """Validate parquet file structure and required columns."""
     try:
@@ -808,6 +1061,7 @@ def _validate_parquet(file_path: Path) -> list[str]:
                         f"Dataset too small: {pf.metadata.num_rows} rows. "
                         f"A minimum of {MIN_ROW_COUNT} rows is required."
                     )
+                errors.extend(_check_parquet_metadata_column(pf))
     except Exception as e:
         errors.append(f"Invalid parquet file: {e}")
     return errors
@@ -820,6 +1074,7 @@ def _validate_jsonl(file_path: Path) -> list[str]:
     errors = []
     columns_checked = False
     file_fully_read = False
+    tracker = _MetadataCrossRowTracker()
 
     row_count = 0
     with open(file_path, encoding="utf-8") as f:
@@ -835,6 +1090,17 @@ def _validate_jsonl(file_path: Path) -> list[str]:
                 if not columns_checked and isinstance(obj, dict):
                     errors.extend(_check_required_columns(obj.keys()))
                     columns_checked = True
+                if isinstance(obj, dict) and METADATA_COLUMN in obj:
+                    errors.extend(
+                        _check_metadata_value(
+                            obj[METADATA_COLUMN],
+                            location=f"Line {i}",
+                            tracker=tracker,
+                        )
+                    )
+                    if len(errors) >= 5:
+                        errors.append("... (showing first 5 errors)")
+                        return errors
             except json.JSONDecodeError as e:
                 errors.append(f"Line {i}: invalid JSON - {e}")
                 if len(errors) >= 5:
@@ -845,6 +1111,7 @@ def _validate_jsonl(file_path: Path) -> list[str]:
             file_fully_read = True
 
     if file_fully_read:
+        errors.extend(tracker.finish())
         if row_count < MIN_ROW_COUNT:
             errors.append(
                 f"Dataset too small: {row_count} rows. "
@@ -870,11 +1137,25 @@ def _validate_jsonl(file_path: Path) -> list[str]:
             if not columns_checked and isinstance(obj, dict):
                 errors.extend(_check_required_columns(obj.keys()))
                 columns_checked = True
+            if isinstance(obj, dict) and METADATA_COLUMN in obj:
+                errors.extend(
+                    _check_metadata_value(
+                        obj[METADATA_COLUMN],
+                        location="Near end of file",
+                        tracker=tracker,
+                    )
+                )
+                if len(errors) >= 5:
+                    errors.append("... (showing first 5 errors)")
+                    break
         except json.JSONDecodeError as e:
             errors.append(f"Near end of file: invalid JSON - {e}")
             if len(errors) >= 5:
                 errors.append("... (showing first 5 errors)")
                 break
+
+    if len(errors) < 5:
+        errors.extend(tracker.finish())
 
     if row_count < MIN_ROW_COUNT:
         total = 0
@@ -901,6 +1182,7 @@ def _validate_csv(file_path: Path) -> list[str]:
     num_cols = 0
     row_count = 0
     file_fully_read = False
+    tracker = _MetadataCrossRowTracker()
 
     try:
         with open(file_path, encoding="utf-8", newline="") as f:
@@ -911,6 +1193,9 @@ def _validate_csv(file_path: Path) -> list[str]:
 
             errors.extend(_check_required_columns(header))
             num_cols = len(header)
+            metadata_idx = (
+                header.index(METADATA_COLUMN) if METADATA_COLUMN in header else None
+            )
 
             for i, row in enumerate(reader, 2):
                 if i > 101:
@@ -919,6 +1204,16 @@ def _validate_csv(file_path: Path) -> list[str]:
                 if len(row) != num_cols:
                     errors.append(
                         f"Row {i}: expected {num_cols} columns, got {len(row)}"
+                    )
+                    if len(errors) >= 5:
+                        errors.append("... (showing first 5 errors)")
+                        return errors
+                    continue
+                if metadata_idx is not None:
+                    errors.extend(
+                        _check_metadata_value(
+                            row[metadata_idx], location=f"Row {i}", tracker=tracker
+                        )
                     )
                     if len(errors) >= 5:
                         errors.append("... (showing first 5 errors)")
@@ -933,6 +1228,7 @@ def _validate_csv(file_path: Path) -> list[str]:
         return errors
 
     if file_fully_read:
+        errors.extend(tracker.finish())
         if row_count < MIN_ROW_COUNT:
             errors.append(
                 f"Dataset too small: {row_count} rows. "
@@ -959,7 +1255,22 @@ def _validate_csv(file_path: Path) -> list[str]:
                 if len(errors) >= 5:
                     errors.append("... (showing first 5 errors)")
                     break
+                continue
+            if metadata_idx is not None:
+                errors.extend(
+                    _check_metadata_value(
+                        row[metadata_idx],
+                        location="Near end of file",
+                        tracker=tracker,
+                    )
+                )
+                if len(errors) >= 5:
+                    errors.append("... (showing first 5 errors)")
+                    break
     except csv.Error as e:
         errors.append(f"Near end of file: CSV parse error - {e}")
+
+    if len(errors) < 5:
+        errors.extend(tracker.finish())
 
     return errors

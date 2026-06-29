@@ -13,15 +13,12 @@ from osmosis_ai.consts import PACKAGE_VERSION
 
 _SUPPORTED_TOP_LEVEL_COMMANDS = {
     "doctor",
-    "deploy",
-    "undeploy",
     "upgrade",
 }
 
 _SUPPORTED_COMMAND_GROUPS = {
     "auth",
     "dataset",
-    "deployment",
     "eval",
     "model",
     "rollout",
@@ -31,10 +28,13 @@ _SUPPORTED_COMMAND_GROUPS = {
 }
 
 _REMOVED_TOP_LEVEL_COMMANDS = {
+    "deploy",
+    "deployment",
     "init",
     "link",
     "login",
     "logout",
+    "undeploy",
     "unlink",
     "workspace",
     "whoami",
@@ -42,8 +42,6 @@ _REMOVED_TOP_LEVEL_COMMANDS = {
 
 _REMOVED_TWO_TOKEN_COMMANDS = {
     ("dataset", "delete"),
-    ("deployment", "delete"),
-    ("deployment", "rename"),
     ("model", "delete"),
     ("rollout", "validate"),
     ("train", "delete"),

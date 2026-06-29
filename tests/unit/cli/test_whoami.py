@@ -11,7 +11,7 @@ import pytest
 
 from osmosis_ai.cli import main as cli
 from osmosis_ai.platform.auth.credentials import Credentials, UserInfo
-from osmosis_ai.platform.auth.flow import VerifyResult
+from osmosis_ai.platform.auth.flow import VerifiedWorkspace, VerifyResult
 
 
 @pytest.fixture
@@ -26,18 +26,27 @@ def fake_credentials() -> Credentials:
     )
 
 
-def _patch_auth(monkeypatch, creds: Credentials | None) -> list[str]:
-    verify_calls: list[str] = []
+def _patch_auth(
+    monkeypatch,
+    creds: Credentials | None,
+    *,
+    workspace: VerifiedWorkspace | None = None,
+) -> list[dict[str, str | None]]:
+    verify_calls: list[dict[str, str | None]] = []
     monkeypatch.setattr("osmosis_ai.platform.auth.load_credentials", lambda: creds)
     if creds is not None:
         verified = VerifyResult(
             user=creds.user,
             expires_at=creds.expires_at,
             token_id=creds.token_id,
+            workspace=workspace,
         )
         monkeypatch.setattr(
             "osmosis_ai.platform.auth.verify_token",
-            lambda token: verify_calls.append(token) or verified,
+            lambda token, git_identity=None: (
+                verify_calls.append({"token": token, "git_identity": git_identity})
+                or verified
+            ),
         )
     return verify_calls
 
@@ -73,10 +82,10 @@ def _create_canonical_project(workspace_directory: Path) -> None:
         (workspace_directory / relative).mkdir(parents=True, exist_ok=True)
 
 
-def _assert_deprecated_workspace_directory_context_is_empty(data: dict) -> None:
+def _assert_no_workspace_context(data: dict) -> None:
     assert data["workspace"] is None
-    assert data["linked_project"] is None
-    assert data["local_linked_project"] is None
+    assert "linked_project" not in data
+    assert "local_linked_project" not in data
 
 
 @pytest.fixture
@@ -104,7 +113,7 @@ def test_whoami_json_outside_linked_project_has_no_workspace(
     data = payload["data"]
     assert data["email"] == "brian@example.com"
     assert data["name"] == "Brian"
-    _assert_deprecated_workspace_directory_context_is_empty(data)
+    _assert_no_workspace_context(data)
     assert data["account"]["email"] == "brian@example.com"
     assert data["account"]["source"] == "credentials"
     assert data["source"] == "credentials"
@@ -125,7 +134,7 @@ def test_whoami_json_inside_project_stays_auth_only(
     assert exit_code == 0
     payload = json.loads(captured.out)
     data = payload["data"]
-    _assert_deprecated_workspace_directory_context_is_empty(data)
+    _assert_no_workspace_context(data)
 
 
 def test_whoami_json_with_stored_credentials_verifies_token(
@@ -141,7 +150,7 @@ def test_whoami_json_with_stored_credentials_verifies_token(
     data = json.loads(captured.out)["data"]
     assert data["account"]["source"] == "credentials"
     assert data["account"]["email"] == "brian@example.com"
-    assert verify_calls == ["token"]
+    assert verify_calls == [{"token": "token", "git_identity": None}]
 
 
 def test_whoami_json_with_env_token_uses_verified_identity(
@@ -152,7 +161,9 @@ def test_whoami_json_with_env_token_uses_verified_identity(
     verify_calls = []
     monkeypatch.setattr(
         "osmosis_ai.platform.auth.verify_token",
-        lambda token: verify_calls.append(token) or fake_verify_result,
+        lambda token, git_identity=None: (
+            verify_calls.append(token) or fake_verify_result
+        ),
     )
     monkeypatch.setattr(
         "osmosis_ai.platform.auth.load_credentials",
@@ -173,7 +184,7 @@ def test_whoami_json_with_env_token_uses_verified_identity(
     data = payload["data"]
     assert data["email"] == "env@example.com"
     assert data["name"] == "Env User"
-    _assert_deprecated_workspace_directory_context_is_empty(data)
+    _assert_no_workspace_context(data)
     assert data["account"]["email"] == "env@example.com"
     assert data["account"]["source"] == "environment"
     assert data["source"] == "environment"
@@ -187,7 +198,8 @@ def test_whoami_json_with_env_token_ignores_cached_workspace_resolution(
     monkeypatch.setenv("OSMOSIS_TOKEN", "env-token")
     _write_legacy_active_workspace(monkeypatch, tmp_path / "legacy-config.json")
     monkeypatch.setattr(
-        "osmosis_ai.platform.auth.verify_token", lambda token: fake_verify_result
+        "osmosis_ai.platform.auth.verify_token",
+        lambda token, git_identity=None: fake_verify_result,
     )
     monkeypatch.setattr(
         "osmosis_ai.platform.auth.platform_request",
@@ -207,7 +219,7 @@ def test_whoami_json_with_env_token_ignores_cached_workspace_resolution(
     payload = json.loads(captured.out)
     data = payload["data"]
     assert data["email"] == "env@example.com"
-    _assert_deprecated_workspace_directory_context_is_empty(data)
+    _assert_no_workspace_context(data)
     assert data["source"] == "environment"
 
 
@@ -219,7 +231,8 @@ def test_whoami_json_with_env_token_stays_auth_only_inside_project(
     monkeypatch.chdir(workspace_directory)
     monkeypatch.setenv("OSMOSIS_TOKEN", "env-token")
     monkeypatch.setattr(
-        "osmosis_ai.platform.auth.verify_token", lambda token: fake_verify_result
+        "osmosis_ai.platform.auth.verify_token",
+        lambda token, git_identity=None: fake_verify_result,
     )
     monkeypatch.setattr(
         "osmosis_ai.platform.auth.platform_request",
@@ -238,7 +251,7 @@ def test_whoami_json_with_env_token_stays_auth_only_inside_project(
     assert exit_code == 0
     data = json.loads(captured.out)["data"]
     assert data["account"]["email"] == "env@example.com"
-    _assert_deprecated_workspace_directory_context_is_empty(data)
+    _assert_no_workspace_context(data)
 
 
 def test_whoami_json_with_env_token_ignores_mismatched_local_workspace(
@@ -248,7 +261,8 @@ def test_whoami_json_with_env_token_ignores_mismatched_local_workspace(
     monkeypatch.setenv("OSMOSIS_TOKEN", "env-token")
     _write_legacy_active_workspace(monkeypatch, tmp_path / "legacy-config.json")
     monkeypatch.setattr(
-        "osmosis_ai.platform.auth.verify_token", lambda token: fake_verify_result
+        "osmosis_ai.platform.auth.verify_token",
+        lambda token, git_identity=None: fake_verify_result,
     )
     monkeypatch.setattr(
         "osmosis_ai.platform.auth.platform_request",
@@ -268,7 +282,7 @@ def test_whoami_json_with_env_token_ignores_mismatched_local_workspace(
     payload = json.loads(captured.out)
     data = payload["data"]
     assert data["email"] == "env@example.com"
-    _assert_deprecated_workspace_directory_context_is_empty(data)
+    _assert_no_workspace_context(data)
     assert data["source"] == "environment"
 
 
@@ -280,7 +294,7 @@ def test_whoami_json_with_env_token_verify_failure_emits_auth_required(
     monkeypatch.setenv("OSMOSIS_TOKEN", "env-token")
     monkeypatch.setattr(
         "osmosis_ai.platform.auth.verify_token",
-        lambda token: (_ for _ in ()).throw(
+        lambda token, git_identity=None: (_ for _ in ()).throw(
             LoginError("Authentication failed.", status_code=401)
         ),
     )
@@ -308,7 +322,7 @@ def test_whoami_json_with_env_token_malformed_response_emits_platform_error(
     monkeypatch.setenv("OSMOSIS_TOKEN", "env-token")
     monkeypatch.setattr(
         "osmosis_ai.platform.auth.verify_token",
-        lambda token: (_ for _ in ()).throw(
+        lambda token, git_identity=None: (_ for _ in ()).throw(
             LoginError("Invalid response from platform")
         ),
     )
@@ -372,7 +386,7 @@ def test_whoami_json_with_revoked_stored_credentials_emits_auth_required(
     _patch_auth(monkeypatch, fake_credentials)
     monkeypatch.setattr(
         "osmosis_ai.platform.auth.verify_token",
-        lambda token: (_ for _ in ()).throw(
+        lambda token, git_identity=None: (_ for _ in ()).throw(
             LoginError("Token has been revoked.", code="TOKEN_REVOKED", status_code=401)
         ),
     )
@@ -430,3 +444,198 @@ def test_whoami_rich_still_uses_table(
     assert exit_code == 0
     assert "Email" in captured.out
     assert "brian@example.com" in captured.out
+
+
+def _add_origin_remote(workspace_directory: Path) -> None:
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(workspace_directory),
+            "remote",
+            "add",
+            "origin",
+            "git@github.com:Acme/Rollouts.git",
+        ],
+        check=True,
+        capture_output=True,
+    )
+
+
+def test_whoami_json_inside_workspace_repo_sends_git_identity(
+    monkeypatch, capsys, tmp_path, fake_credentials
+) -> None:
+    workspace_directory = tmp_path / "project"
+    _create_canonical_project(workspace_directory)
+    _add_origin_remote(workspace_directory)
+    monkeypatch.chdir(workspace_directory)
+    verify_calls = _patch_auth(
+        monkeypatch,
+        fake_credentials,
+        workspace=VerifiedWorkspace(id="ws_1", name="Acme Workspace", role="admin"),
+    )
+
+    exit_code = cli.main(["--json", "auth", "whoami"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert verify_calls == [{"token": "token", "git_identity": "acme/rollouts"}]
+    data = json.loads(captured.out)["data"]
+    assert data["workspace"] == {
+        "id": "ws_1",
+        "name": "Acme Workspace",
+        "role": "admin",
+    }
+    assert "linked_project" not in data
+    assert "local_linked_project" not in data
+
+
+def test_whoami_json_inside_workspace_repo_reports_null_when_server_unscoped(
+    monkeypatch, capsys, tmp_path, fake_credentials
+) -> None:
+    workspace_directory = tmp_path / "project"
+    _create_canonical_project(workspace_directory)
+    _add_origin_remote(workspace_directory)
+    monkeypatch.chdir(workspace_directory)
+    _patch_auth(monkeypatch, fake_credentials, workspace=None)
+
+    exit_code = cli.main(["--json", "auth", "whoami"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    data = json.loads(captured.out)["data"]
+    assert data["workspace"] is None
+
+
+def test_whoami_plain_inside_workspace_repo_shows_workspace_line(
+    monkeypatch, capsys, tmp_path, fake_credentials
+) -> None:
+    workspace_directory = tmp_path / "project"
+    _create_canonical_project(workspace_directory)
+    _add_origin_remote(workspace_directory)
+    monkeypatch.chdir(workspace_directory)
+    _patch_auth(
+        monkeypatch,
+        fake_credentials,
+        workspace=VerifiedWorkspace(id="ws_1", name="Acme Workspace", role="member"),
+    )
+
+    exit_code = cli.main(["--plain", "auth", "whoami"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    lines = captured.out.splitlines()
+    assert "Workspace: Acme Workspace" in lines
+    assert "Role: member" in lines
+
+
+def test_whoami_json_falls_back_to_identity_on_workspace_scope_mismatch(
+    monkeypatch, capsys, tmp_path, fake_credentials
+) -> None:
+    from osmosis_ai.platform.auth import LoginError
+
+    workspace_directory = tmp_path / "project"
+    _create_canonical_project(workspace_directory)
+    _add_origin_remote(workspace_directory)
+    monkeypatch.chdir(workspace_directory)
+
+    verified = VerifyResult(
+        user=fake_credentials.user,
+        expires_at=fake_credentials.expires_at,
+        token_id=fake_credentials.token_id,
+        workspace=None,
+    )
+    verify_calls: list[dict[str, str | None]] = []
+
+    def _verify(token, git_identity=None):
+        verify_calls.append({"token": token, "git_identity": git_identity})
+        if git_identity is not None:
+            raise LoginError(
+                "Repository is not linked to your workspace.", status_code=403
+            )
+        return verified
+
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.load_credentials", lambda: fake_credentials
+    )
+    monkeypatch.setattr("osmosis_ai.platform.auth.verify_token", _verify)
+
+    exit_code = cli.main(["--json", "auth", "whoami"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert verify_calls == [
+        {"token": "token", "git_identity": "acme/rollouts"},
+        {"token": "token", "git_identity": None},
+    ]
+    data = json.loads(captured.out)["data"]
+    assert data["email"] == "brian@example.com"
+    assert data["workspace"] is None
+
+
+def test_whoami_json_auth_error_with_git_identity_still_fails(
+    monkeypatch, capsys, tmp_path, fake_credentials
+) -> None:
+    from osmosis_ai.platform.auth import LoginError
+
+    workspace_directory = tmp_path / "project"
+    _create_canonical_project(workspace_directory)
+    _add_origin_remote(workspace_directory)
+    monkeypatch.chdir(workspace_directory)
+
+    verify_calls: list[str | None] = []
+
+    def _verify(token, git_identity=None):
+        verify_calls.append(git_identity)
+        raise LoginError(
+            "Token has been revoked.", code="TOKEN_REVOKED", status_code=401
+        )
+
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.load_credentials", lambda: fake_credentials
+    )
+    monkeypatch.setattr("osmosis_ai.platform.auth.verify_token", _verify)
+
+    exit_code = cli.main(["--json", "auth", "whoami"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert verify_calls == ["acme/rollouts"]
+    envelope = json.loads(captured.err)
+    assert envelope["error"]["code"] == "AUTH_REQUIRED"
+
+
+def test_whoami_json_with_env_token_inside_workspace_repo_reports_workspace(
+    monkeypatch, capsys, tmp_path
+) -> None:
+    workspace_directory = tmp_path / "project"
+    _create_canonical_project(workspace_directory)
+    _add_origin_remote(workspace_directory)
+    monkeypatch.chdir(workspace_directory)
+    monkeypatch.setenv("OSMOSIS_TOKEN", "env-token")
+    verified = VerifyResult(
+        user=UserInfo(id="env_u1", email="env@example.com", name="Env User"),
+        expires_at=datetime.now(UTC) + timedelta(days=30),
+        token_id="env_tok_1",
+        workspace=VerifiedWorkspace(id="ws_1", name="Acme Workspace", role="admin"),
+    )
+    verify_calls: list[dict[str, str | None]] = []
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.verify_token",
+        lambda token, git_identity=None: (
+            verify_calls.append({"token": token, "git_identity": git_identity})
+            or verified
+        ),
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.load_credentials",
+        lambda: pytest.fail("env token whoami should not use stored credentials"),
+    )
+
+    exit_code = cli.main(["--json", "auth", "whoami"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert verify_calls == [{"token": "env-token", "git_identity": "acme/rollouts"}]
+    data = json.loads(captured.out)["data"]
+    assert data["workspace"]["name"] == "Acme Workspace"

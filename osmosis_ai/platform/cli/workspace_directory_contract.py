@@ -30,7 +30,8 @@ def resolve_workspace_directory(start: Path | None = None) -> Path:
     workspace_directory = find_workspace_directory(start or Path.cwd())
     if workspace_directory is None:
         raise CLIError(
-            "Run this command from an Osmosis workspace directory created by Platform."
+            "Run this command from an Osmosis workspace directory created by Platform.",
+            code="WORKSPACE_REQUIRED",
         )
     return workspace_directory.resolve()
 
@@ -131,13 +132,20 @@ def validate_rollout_backend(
     from osmosis_ai.eval.common.cli import _resolve_grader, load_workflow
     from osmosis_ai.rollout.validator import validate_backend
 
-    workflow_cls, workflow_config, entrypoint_module, workflow_error = load_workflow(
-        rollout=rollout,
-        entrypoint=entrypoint,
-        quiet=True,
-        console=None,
-        workspace_directory=workspace_directory,
-    )
+    try:
+        workflow_cls, workflow_config, entrypoint_module, workflow_error = (
+            load_workflow(
+                rollout=rollout,
+                entrypoint=entrypoint,
+                quiet=True,
+                console=None,
+                workspace_directory=workspace_directory,
+            )
+        )
+    except ModuleNotFoundError:
+        # Deps aren't installed locally, so we can't import the entrypoint here.
+        # Skip; the server validates after installing from pyproject.toml.
+        return
     if workflow_error or workflow_cls is None or entrypoint_module is None:
         raise CLIError(
             f"{command_label} preflight failed for `rollouts/{rollout}/{entrypoint}`.\n"
