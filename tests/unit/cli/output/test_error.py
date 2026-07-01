@@ -8,10 +8,12 @@ from contextlib import redirect_stderr
 from pathlib import Path
 from typing import Any
 
-import click
 import pytest
+import typer
+import typer.core
 
 import osmosis_ai.cli.main as cli_main
+from osmosis_ai.cli._click_compat import Context, UsageError
 from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.cli.main import _handle_cli_error, main
 from osmosis_ai.cli.output.error import (
@@ -39,7 +41,7 @@ def _capture_json_usage_error_for_argv(
     capsys: pytest.CaptureFixture[str],
 ) -> dict[str, Any]:
     rc = _handle_cli_error(
-        click.UsageError("No such command."),
+        UsageError("No such command."),
         argv=argv,
         exit_code=2,
     )
@@ -132,13 +134,11 @@ def test_command_path_fallback_excludes_top_level_argument(monkeypatch) -> None:
 
 
 def test_command_path_uses_click_context_when_available() -> None:
-    import click
-
-    parent = click.Context(click.Command("osmosis"))
+    parent = Context(typer.core.TyperCommand(name="osmosis"))
     parent.info_name = "osmosis"
-    middle = click.Context(click.Command("dataset"), parent=parent)
+    middle = Context(typer.core.TyperCommand(name="dataset"), parent=parent)
     middle.info_name = "dataset"
-    nested = click.Context(click.Command("list"), parent=middle)
+    nested = Context(typer.core.TyperCommand(name="list"), parent=middle)
     nested.info_name = "list"
     assert command_path_for_error(nested) == "dataset list"
 
@@ -230,7 +230,7 @@ def test_main_maps_click_abort_to_interrupt_exit_code(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     def raise_abort(*_: Any, **__: Any) -> None:
-        raise click.Abort()
+        raise typer.Abort()
 
     monkeypatch.setattr(cli_main, "_register_commands", lambda: None)
     monkeypatch.setattr(cli_main, "app", raise_abort)

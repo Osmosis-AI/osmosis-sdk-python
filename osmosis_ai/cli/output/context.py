@@ -9,7 +9,7 @@ from contextvars import ContextVar, Token
 from dataclasses import dataclass
 from enum import StrEnum
 
-import click
+from osmosis_ai.cli._click_compat import Context
 
 
 class OutputFormat(StrEnum):
@@ -108,17 +108,12 @@ def hoist_format_selectors(argv: list[str]) -> list[str]:
 
 
 def get_output_context() -> OutputContext:
-    """Resolve the active OutputContext through the fallback stack."""
-    try:
-        ctx = click.get_current_context(silent=True)
-    except RuntimeError:
-        ctx = None
+    """Resolve the active OutputContext through the fallback stack.
 
-    if ctx is not None:
-        root_obj = ctx.find_root().obj
-        if isinstance(root_obj, OutputContext):
-            return root_obj
-
+    The ContextVar is the source of truth: install_output_context() sets it
+    for the lifetime of the root Click context (reset via call_on_close), so
+    it is populated exactly while a CLI invocation is in flight.
+    """
     stored = _output_context_var.get()
     if stored is not None:
         return stored
@@ -130,7 +125,7 @@ def get_output_context() -> OutputContext:
     return default_output_context()
 
 
-def install_output_context(ctx: click.Context, output: OutputContext) -> None:
+def install_output_context(ctx: Context, output: OutputContext) -> None:
     """Mirror `output` to Click.Context.obj and the ContextVar."""
     ctx.obj = output
     token: Token[OutputContext | None] = _output_context_var.set(output)
