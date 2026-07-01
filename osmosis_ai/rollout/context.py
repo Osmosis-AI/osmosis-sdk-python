@@ -97,7 +97,6 @@ class GraderContext:
     samples: dict[str, RolloutSample] = field(default_factory=dict)
     project_path: str | None = None
     metadata: dict[str, Any] | None = None
-    artifacts: dict[str, Any] | None = None
 
     def get_samples(self) -> dict[str, RolloutSample]:
         return self.samples
@@ -106,12 +105,6 @@ class GraderContext:
         if sample_id not in self.samples:
             raise ValueError(f"Sample {sample_id} not found")
         self.samples[sample_id].reward = reward
-
-    def set_artifacts(self, artifacts: dict[str, Any]) -> None:
-        """Set the rollout-level artifacts object (replaces any prior value)."""
-        if not isinstance(artifacts, dict):
-            raise TypeError("artifacts must be a dict")
-        self.artifacts = artifacts
 
 
 @dataclass

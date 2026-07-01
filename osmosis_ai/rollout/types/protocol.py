@@ -67,6 +67,5 @@ class GraderCompleteRequest(BaseModel):
     rollout_id: str
     status: GraderStatus
     samples: dict[str, RolloutSample]
-    artifacts: dict[str, Any] | None = None
     err_message: str | None = None
     err_category: RolloutErrorCategory | None = None

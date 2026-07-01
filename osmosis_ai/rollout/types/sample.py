@@ -50,6 +50,5 @@ class ExecutionRequest(BaseModel):
 class ExecutionResult(BaseModel):
     status: RolloutStatus
     samples: dict[str, RolloutSample] = Field(default_factory=dict)
-    artifacts: dict[str, Any] | None = None
     err_message: str | None = None
     err_category: RolloutErrorCategory | None = None
