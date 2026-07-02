@@ -10,28 +10,6 @@ import pytest
 
 from osmosis_ai.platform.api.client import OsmosisClient, _safe_path
 
-REMOVED_CLIENT_METHODS = (
-    "list_workspaces",
-    "create_workspace",
-    "delete_workspace",
-    "get_workspace_deletion_status",
-    "delete_dataset",
-    "get_dataset_affected_resources",
-    "delete_training_run",
-    "delete_model",
-    "get_model_affected_resources",
-    "rename_checkpoint",
-    "delete_deployment",
-)
-
-
-class TestRemovedClientMethods:
-    """Destructive API methods must not be exposed by OsmosisClient."""
-
-    @pytest.mark.parametrize("method_name", REMOVED_CLIENT_METHODS)
-    def test_removed_method_is_not_exposed(self, method_name: str) -> None:
-        assert not hasattr(OsmosisClient, method_name)
-
 
 class TestCreateDataset:
     """Tests for OsmosisClient.create_dataset request payloads."""

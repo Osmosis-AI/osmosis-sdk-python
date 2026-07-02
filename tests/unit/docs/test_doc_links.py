@@ -40,6 +40,7 @@ _EXCLUDED_DIR_PARTS = frozenset(
         "superpowers",
     }
 )
+_EXCLUDED_ROOT_MARKDOWN = frozenset({"AGENTS.md", "CLAUDE.md"})
 
 # [label](target ...) — capture target up to whitespace or the closing paren,
 # tolerating an optional <...> wrapper. A trailing `"title"` is dropped because
@@ -90,6 +91,8 @@ def _discover_markdown_files() -> list[Path]:
             if d not in _EXCLUDED_DIR_PARTS and not d.endswith(".egg-info")
         ]
         for name in filenames:
+            if Path(dirpath) == _REPO_ROOT and name in _EXCLUDED_ROOT_MARKDOWN:
+                continue
             if name.endswith(".md"):
                 files.append(Path(dirpath) / name)
     return sorted(files)

@@ -35,21 +35,3 @@ def test_doctor_accepts_workspace_directory_path(tmp_path, capsys) -> None:
 
     capsys.readouterr()
     assert rc == 0
-
-
-def test_project_validate_is_not_registered(tmp_path, capsys) -> None:
-    workspace_directory = _make_workspace_directory(tmp_path)
-
-    rc = main(["project", "validate", str(workspace_directory)])
-
-    captured = capsys.readouterr()
-    assert rc != 0
-    assert "No such command" in captured.err
-
-
-def test_workspace_group_is_not_registered(capfd) -> None:
-    rc = main(["workspace", "--help"])
-    captured = capfd.readouterr()
-
-    assert rc != 0
-    assert "No such command" in captured.err

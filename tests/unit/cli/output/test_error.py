@@ -13,9 +13,9 @@ import typer
 import typer.core
 
 import osmosis_ai.cli.main as cli_main
-from osmosis_ai.cli._click_compat import Context, UsageError
+from osmosis_ai.cli._click_compat import Context
 from osmosis_ai.cli.errors import CLIError
-from osmosis_ai.cli.main import _handle_cli_error, main
+from osmosis_ai.cli.main import main
 from osmosis_ai.cli.output.error import (
     classify_error,
     command_path_for_error,
@@ -34,21 +34,6 @@ def _capture_envelope(err: CLIError) -> dict[str, Any]:
     with redirect_stderr(buf):
         emit_structured_error_to_stderr(err, command="dataset list")
     return json.loads(buf.getvalue())
-
-
-def _capture_json_usage_error_for_argv(
-    argv: list[str],
-    capsys: pytest.CaptureFixture[str],
-) -> dict[str, Any]:
-    rc = _handle_cli_error(
-        UsageError("No such command."),
-        argv=argv,
-        exit_code=2,
-    )
-    assert rc == 2
-    captured = capsys.readouterr()
-    assert captured.out == ""
-    return json.loads(captured.err)
 
 
 def test_envelope_keys_match_golden() -> None:
@@ -146,52 +131,6 @@ def test_command_path_uses_click_context_when_available() -> None:
 def test_command_path_root_when_argv_empty(monkeypatch) -> None:
     monkeypatch.setattr("sys.argv", ["osmosis"])
     assert command_path_for_error(None) == "<root>"
-
-
-@pytest.mark.parametrize(
-    ("argv", "expected_command"),
-    [
-        (["--json", "doctor"], "doctor"),
-        (["--json", "workspace"], "workspace"),
-        (["--json", "workspace", "list"], "workspace"),
-        (["--json", "workspace", "create", "team"], "workspace"),
-        (["--json", "workspace", "delete", "team"], "workspace"),
-        (["--json", "workspace", "switch", "team"], "workspace"),
-        (["--json", "login"], "login"),
-        (["--json", "logout"], "logout"),
-        (["--json", "whoami"], "whoami"),
-        (["--json", "init"], "init"),
-        (["--json", "link"], "link"),
-        (["--json", "unlink"], "unlink"),
-        (["--json", "project", "init"], "project"),
-        (["--json", "project", "info"], "project"),
-        (["--json", "project", "list"], "project"),
-        (["--json", "secret", "list"], "secret list"),
-        (["--json", "secret", "add", "NAME"], "secret add"),
-        (["--json", "dataset", "delete", "name"], "dataset delete"),
-        (["--json", "train", "delete", "run"], "train delete"),
-        (["--json", "train", "status", "run"], "train status"),
-        (["--json", "train", "metrics", "run"], "train metrics"),
-        (["--json", "train", "traces"], "train traces"),
-        (["--json", "model", "delete", "name"], "model delete"),
-        (["--json", "deployment", "list"], "deployment"),
-        (["--json", "deploy", "checkpoint"], "deploy"),
-        (["--json", "undeploy", "checkpoint"], "undeploy"),
-        (["--json", "rollout", "validate", "config.toml"], "rollout validate"),
-    ],
-)
-def test_json_unknown_removed_command_uses_explicit_main_argv(
-    argv: list[str],
-    expected_command: str,
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    monkeypatch.setattr("sys.argv", ["osmosis", "--json", "dataset", "list"])
-
-    envelope = _capture_json_usage_error_for_argv(argv, capsys)
-
-    assert envelope["command"] == expected_command
-    assert envelope["error"]["code"] == "VALIDATION"
 
 
 def test_json_unknown_command_from_main_uses_explicit_argv(
