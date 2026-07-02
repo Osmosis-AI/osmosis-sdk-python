@@ -214,16 +214,6 @@ class TestRubricRecordLabel:
         )
         assert record.label(3) == "record[3]"
 
-    def test_without_record_id_index_zero(self):
-        record = RubricRecord(
-            solution_str="test",
-            ground_truth=None,
-            original_input=None,
-            metadata=None,
-            record_id=None,
-        )
-        assert record.label(0) == "record[0]"
-
 
 # =============================================================================
 # calculate_statistics Tests

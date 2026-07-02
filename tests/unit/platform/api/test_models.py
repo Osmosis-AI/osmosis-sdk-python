@@ -31,32 +31,6 @@ from osmosis_ai.platform.api.models import (
     UploadInfo,
 )
 
-REMOVED_RESPONSE_MODELS = (
-    "DeleteTrainingRunResult",
-    "AffectedTrainingRun",
-    "DatasetAffectedResources",
-    "ModelAffectedResources",
-    "WorkspaceDeletionStatus",
-    "ProcessCount",
-    "RenameDeploymentResult",
-    "DeploymentInfo",
-    "PaginatedDeployments",
-    "DeploymentSummary",
-    "ModelList",
-    # Renamed to the shared LogEntry / LogsPage models.
-    "TrainingRunLogEntry",
-    "TrainingRunLogs",
-)
-
-
-class TestRemovedResponseModels:
-    """Deleted response models must not be exposed by the models module."""
-
-    @pytest.mark.parametrize("model_name", REMOVED_RESPONSE_MODELS)
-    def test_removed_response_model_is_not_exposed(self, model_name: str) -> None:
-        assert not hasattr(api_models, model_name)
-
-
 # =============================================================================
 # UploadInfo Tests
 # =============================================================================

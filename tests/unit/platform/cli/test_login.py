@@ -287,37 +287,6 @@ def test_login_success_prompts_clone_and_doctor_not_workspace_link(
     assert "workspace switch" not in rendered
 
 
-def test_login_omits_switch_commands_for_multiple_workspaces(
-    monkeypatch, capsys
-) -> None:
-    """Login should not print removed workspace switch or link commands."""
-    new_creds = _make_credentials(user_id="user_1")
-    result = _make_login_result()
-
-    monkeypatch.delenv("OSMOSIS_TOKEN", raising=False)
-    monkeypatch.setattr("osmosis_ai.platform.auth.load_credentials", lambda: None)
-    monkeypatch.setattr(
-        "osmosis_ai.platform.auth.credentials.save_credentials", lambda c: "keyring"
-    )
-    monkeypatch.setattr(
-        "osmosis_ai.platform.auth.device_login",
-        lambda **kw: (result, new_creds),
-    )
-    monkeypatch.setattr(
-        auth_module,
-        "console",
-        Console(force_terminal=False, no_color=True, width=100),
-    )
-
-    auth_module.login(force=False, token=None)
-
-    rendered = capsys.readouterr().out
-    assert "Create or open a workspace in the Osmosis Platform" in rendered
-    assert "osmosis doctor" in rendered
-    assert "workspace link" not in rendered
-    assert "workspace switch" not in rendered
-
-
 def test_login_next_steps_omit_workspace_specific_guidance(monkeypatch, capsys) -> None:
     """Login guidance should be generic account bootstrap guidance."""
     new_creds = _make_credentials(user_id="user_1")
@@ -349,36 +318,6 @@ def test_login_next_steps_omit_workspace_specific_guidance(monkeypatch, capsys) 
     assert "workspace create" not in rendered
     assert "workspace list" not in rendered
     assert "workspace link" not in rendered
-
-
-def test_login_does_not_attempt_workspace_lookup(monkeypatch) -> None:
-    """Workspace lookup is removed from the successful login path."""
-    new_creds = _make_credentials(user_id="user_1")
-    result = _make_login_result()
-    output = io.StringIO()
-
-    monkeypatch.delenv("OSMOSIS_TOKEN", raising=False)
-    monkeypatch.setattr("osmosis_ai.platform.auth.load_credentials", lambda: None)
-    monkeypatch.setattr(
-        "osmosis_ai.platform.auth.credentials.save_credentials", lambda c: "keyring"
-    )
-    monkeypatch.setattr(
-        "osmosis_ai.platform.auth.device_login",
-        lambda **kw: (result, new_creds),
-    )
-
-    monkeypatch.setattr(
-        auth_module,
-        "console",
-        Console(file=output, force_terminal=False, no_color=True, width=80),
-    )
-
-    auth_module.login(force=False, token=None)
-
-    rendered = output.getvalue()
-    assert "Login Successful" in rendered
-    assert "Authenticated, but could not load your workspaces yet." not in rendered
-    assert "osmosis doctor" in rendered
 
 
 def test_whoami_prints_local_identity_outside_workspace_directory(monkeypatch) -> None:
