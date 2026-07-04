@@ -75,6 +75,27 @@ samples = await rollout_ctx.get_samples()            # async -> {name: RolloutSa
 
 `RolloutSample` ([types/sample.py](../osmosis_ai/rollout/types/sample.py)) fields: `id`, `messages`, `label`, `reward`, `remove_sample`, `metrics`, `extra_fields`.
 
+## Artifacts
+
+[../osmosis_ai/rollout/utils/file_artifacts.py](../osmosis_ai/rollout/utils/file_artifacts.py)
+
+Artifacts are files produced by a rollout — logs, traces, generated outputs, screenshots, or other large/binary data that does not belong in the sample.
+
+There is one rule: write files under `ctx.artifacts_dir` (available on both `AgentWorkflowContext` and `GraderContext`). The directory exists before your code runs. In Harbor-backed rollouts it is the sandbox's `/logs/artifacts/`; `LocalBackend` provides an isolated per-rollout directory. If a file is produced elsewhere, copy it in (`shutil.copy2(path, ctx.artifacts_dir / "name")`).
+
+```python
+import json
+
+async def grade(self, ctx: GraderContext) -> None:
+    (ctx.artifacts_dir / "trace.json").write_text(
+        json.dumps({"score_reason": "matched rubric"})
+    )
+    for sample_id in ctx.get_samples():
+        ctx.set_sample_reward(sample_id, 1.0)
+```
+
+After each rollout the artifacts land on the host under `~/.osmosis/artifacts/<rollout_id>/artifacts/`, mirroring Harbor's collected-trial layout (user files sit at `.../artifacts/logs/artifacts/<file>`). Artifact handling is best-effort and never affects rewards or rollout status.
+
 ## Configs
 
 [../osmosis_ai/rollout/types/config.py](../osmosis_ai/rollout/types/config.py)

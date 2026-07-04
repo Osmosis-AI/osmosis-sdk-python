@@ -1,6 +1,7 @@
 import copy
 import logging
 import traceback
+from pathlib import Path
 from typing import Any
 
 from osmosis_ai.rollout.agent_workflow import AgentWorkflow
@@ -21,6 +22,7 @@ from osmosis_ai.rollout.types import (
     RolloutStatus,
 )
 from osmosis_ai.rollout.utils.concurrency import ConcurrencyLimiter
+from osmosis_ai.rollout.utils.file_artifacts import default_artifact_root
 from osmosis_ai.rollout.utils.imports import resolve_object
 from osmosis_ai.rollout.utils.rewards import validate_samples_have_rewards
 
@@ -56,6 +58,8 @@ class LocalBackend(ExecutionBackend):
             max_concurrent=max_concurrent
         )
 
+        self.artifact_root: Path = default_artifact_root()
+
     @property
     def max_concurrency(self) -> int:
         return self.limiter.max_concurrent or 0
@@ -73,7 +77,9 @@ class LocalBackend(ExecutionBackend):
         on_grader_complete: ResultCallback | None = None,
     ) -> None:
         async with self.limiter.acquire():
-            result = await self.run_workflow(request)
+            artifacts_dir = self._make_artifacts_dir(request.id)
+
+            result = await self.run_workflow(request, artifacts_dir)
             await on_workflow_complete(result)
 
             if not on_grader_complete:
@@ -84,17 +90,36 @@ class LocalBackend(ExecutionBackend):
                 and (request.label is not None or request.metadata is not None)
                 and result.status == RolloutStatus.SUCCESS
             ):
-                graded = await self.run_grader(request, result)
+                graded = await self.run_grader(request, result, artifacts_dir)
                 await on_grader_complete(graded)
             else:
                 await on_grader_complete(ExecutionResult(status=RolloutStatus.FAILURE))
 
-    async def run_workflow(self, request: ExecutionRequest) -> ExecutionResult:
+    def _make_artifacts_dir(self, rollout_id: str) -> Path | None:
+        """Create the rollout's artifacts dir; ``None`` if it can't be created."""
+        artifacts_dir = (
+            self.artifact_root / rollout_id / "artifacts" / "logs" / "artifacts"
+        )
+        try:
+            artifacts_dir.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            logger.warning(
+                "Failed to create artifacts dir for rollout %s (best-effort)",
+                rollout_id,
+                exc_info=True,
+            )
+            return None
+        return artifacts_dir
+
+    async def run_workflow(
+        self, request: ExecutionRequest, artifacts_dir: Path | None = None
+    ) -> ExecutionResult:
         config = copy.deepcopy(self.workflow_config)
         ctx = AgentWorkflowContext(
             prompt=request.prompt,
             config=config,
             metadata=request.metadata,
+            artifacts_dir=artifacts_dir,
         )
 
         rollout_ctx = get_rollout_context()
@@ -119,7 +144,10 @@ class LocalBackend(ExecutionBackend):
         )
 
     async def run_grader(
-        self, request: ExecutionRequest, result: ExecutionResult
+        self,
+        request: ExecutionRequest,
+        result: ExecutionResult,
+        artifacts_dir: Path | None = None,
     ) -> ExecutionResult:
         if not self.grader_cls:
             return result
@@ -128,6 +156,7 @@ class LocalBackend(ExecutionBackend):
             label=request.label,
             samples=result.samples,
             metadata=request.metadata,
+            artifacts_dir=artifacts_dir,
         )
         try:
             grader = self.grader_cls(self.grader_config)

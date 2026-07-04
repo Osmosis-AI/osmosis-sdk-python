@@ -2,6 +2,7 @@ import os
 from abc import ABC, abstractmethod
 from contextvars import ContextVar
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from osmosis_ai.rollout.types import (
@@ -97,6 +98,7 @@ class GraderContext:
     samples: dict[str, RolloutSample] = field(default_factory=dict)
     project_path: str | None = None
     metadata: dict[str, Any] | None = None
+    artifacts_dir: Path | None = None
 
     def get_samples(self) -> dict[str, RolloutSample]:
         return self.samples
@@ -112,16 +114,19 @@ class AgentWorkflowContext[TConfig: AgentWorkflowConfig]:
     prompt: list[dict[str, Any]]
     config: TConfig | None = None
     metadata: dict[str, Any] | None = None
+    artifacts_dir: Path | None = None
 
     def __init__(
         self,
         prompt: list[dict[str, Any]],
         config: TConfig | None = None,
         metadata: dict[str, Any] | None = None,
+        artifacts_dir: Path | None = None,
     ):
         self.prompt = prompt
         self.config = config
         self.metadata = metadata
+        self.artifacts_dir = artifacts_dir
 
 
 @dataclass
@@ -143,6 +148,12 @@ class HarborAgentWorkflowContext[TConfig: AgentWorkflowConfig](
         config: TConfig,
         environment: Any = None,
         metadata: dict[str, Any] | None = None,
+        artifacts_dir: Path | None = None,
     ):
-        super().__init__(prompt=prompt, config=config, metadata=metadata)
+        super().__init__(
+            prompt=prompt,
+            config=config,
+            metadata=metadata,
+            artifacts_dir=artifacts_dir,
+        )
         self.environment = environment

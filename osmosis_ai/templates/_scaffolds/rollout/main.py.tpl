@@ -50,6 +50,10 @@ class MyGrader(Grader):
         # ctx.get_samples() returns {name: RolloutSample} for sources registered
         # by the workflow. Assign a scalar reward per sample with:
         #   ctx.set_sample_reward(name, value)
+        #
+        # Optional: write file artifacts for this rollout:
+        #   import json
+        #   (ctx.artifacts_dir / "debug.json").write_text(json.dumps({...}))
         for sample_id in ctx.get_samples():
             ctx.set_sample_reward(sample_id, 0.0)
 

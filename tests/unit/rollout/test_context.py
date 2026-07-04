@@ -1,5 +1,6 @@
 """Tests for osmosis_ai.rollout.context."""
 
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
@@ -210,3 +211,13 @@ class TestHarborAgentWorkflowContext:
         )
         assert ctx.metadata == metadata
         assert ctx.environment is env
+
+    def test_artifacts_dir_threaded_through_super_init(self, tmp_path: Path):
+        cfg = AgentWorkflowConfig(name="harbor-test")
+        ctx = HarborAgentWorkflowContext(
+            prompt=[{"role": "user", "content": "hi"}],
+            config=cfg,
+            environment=MagicMock(),
+            artifacts_dir=tmp_path,
+        )
+        assert ctx.artifacts_dir == tmp_path

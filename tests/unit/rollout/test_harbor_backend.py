@@ -18,6 +18,7 @@ from osmosis_ai.rollout.types import (
     RolloutSample,
     RolloutStatus,
 )
+from osmosis_ai.rollout.utils.file_artifacts import HARBOR_ARTIFACTS_DIR
 
 # Module-level captures so importlib can resolve the workflow/grader by
 # "<module>:<qualname>" and round-trip them through the runners.
@@ -38,6 +39,7 @@ class MetadataCapturingWorkflow(AgentWorkflow):
         from osmosis_ai.rollout.context import get_rollout_context
 
         _AGENT_CAPTURE["metadata"] = ctx.metadata
+        _AGENT_CAPTURE["artifacts_dir"] = ctx.artifacts_dir
         rollout_ctx = get_rollout_context()
         if rollout_ctx:
             rollout_ctx.register_sample_source(
@@ -50,6 +52,7 @@ class MetadataCapturingGrader(Grader):
     async def grade(self, ctx: GraderContext) -> Any:
         _GRADER_CAPTURE["metadata"] = ctx.metadata
         _GRADER_CAPTURE["label"] = ctx.label
+        _GRADER_CAPTURE["artifacts_dir"] = ctx.artifacts_dir
         for sample_id in ctx.get_samples():
             ctx.set_sample_reward(sample_id, 1.0)
 
@@ -115,6 +118,100 @@ class TestHarborBackend:
         assert result.err_category == RolloutErrorCategory.VALIDATION_ERROR
         assert "Harbor verifier returned empty rewards for rollout r1" in caplog.text
 
+    def _make_trial_end_backend(self, tmp_path, *, cleanup: bool) -> HarborBackend:
+        backend = HarborBackend.__new__(HarborBackend)
+        backend.pending = {}
+        backend.cleanup_successful_trials = cleanup
+        backend.trials_dir = tmp_path / "trials"
+        backend.rollouts_dir = tmp_path / "rollouts"
+        backend.artifact_root = tmp_path / "collected"
+        return backend
+
+    def _seed_trial_artifacts(self, backend: HarborBackend) -> None:
+        trial_artifacts = backend.trials_dir / "trial-r1" / "artifacts"
+        convention = trial_artifacts / "logs" / "artifacts"
+        convention.mkdir(parents=True)
+        (convention / "output.txt").write_text("ok")
+        (trial_artifacts / "manifest.json").write_text("[]")
+
+    @staticmethod
+    def _success_event() -> SimpleNamespace:
+        return SimpleNamespace(
+            config=SimpleNamespace(trial_name="trial-r1"),
+            result=SimpleNamespace(
+                agent_result=SimpleNamespace(
+                    metadata={
+                        "status": "success",
+                        "samples": {
+                            "s1": RolloutSample(id="s1", messages=[]).model_dump()
+                        },
+                    }
+                ),
+                verifier_result=SimpleNamespace(rewards={"s1": 1.0}),
+                exception_info=None,
+            ),
+        )
+
+    async def test_on_trial_end_relocates_artifacts_before_cleanup(self, tmp_path):
+        backend = self._make_trial_end_backend(tmp_path, cleanup=True)
+        self._seed_trial_artifacts(backend)
+
+        on_grader = AsyncMock()
+        pending = PendingTrial(AsyncMock(), on_grader)
+        pending.workflow_complete_called = True
+        backend.pending["r1"] = pending
+
+        await backend.on_trial_end(self._success_event())
+
+        result = on_grader.call_args.args[0]
+        assert result.status == RolloutStatus.SUCCESS
+        relocated = backend.artifact_root / "r1" / "artifacts"
+        assert (relocated / "logs" / "artifacts" / "output.txt").read_text() == "ok"
+        assert (relocated / "manifest.json").exists()
+        assert not (backend.trials_dir / "trial-r1").exists()
+
+    async def test_on_trial_end_copies_artifacts_when_trial_kept(self, tmp_path):
+        backend = self._make_trial_end_backend(tmp_path, cleanup=False)
+        self._seed_trial_artifacts(backend)
+
+        pending = PendingTrial(AsyncMock(), AsyncMock())
+        pending.workflow_complete_called = True
+        backend.pending["r1"] = pending
+
+        await backend.on_trial_end(self._success_event())
+
+        relocated = backend.artifact_root / "r1" / "artifacts"
+        assert (relocated / "logs" / "artifacts" / "output.txt").read_text() == "ok"
+        source = backend.trials_dir / "trial-r1" / "artifacts"
+        assert (source / "logs" / "artifacts" / "output.txt").exists()
+
+    async def test_on_trial_end_keeps_trial_when_relocation_fails(
+        self, tmp_path, monkeypatch, caplog
+    ):
+        backend = self._make_trial_end_backend(tmp_path, cleanup=True)
+        self._seed_trial_artifacts(backend)
+
+        def _boom(*_args, **_kwargs):
+            raise OSError("disk full")
+
+        monkeypatch.setattr(
+            "osmosis_ai.rollout.backend.harbor.backend.shutil.move", _boom
+        )
+
+        pending = PendingTrial(AsyncMock(), AsyncMock())
+        pending.workflow_complete_called = True
+        backend.pending["r1"] = pending
+
+        with caplog.at_level(
+            logging.WARNING, logger="osmosis_ai.rollout.backend.harbor.backend"
+        ):
+            await backend.on_trial_end(self._success_event())
+
+        # Relocation failed: the source artifacts must survive cleanup.
+        source = backend.trials_dir / "trial-r1" / "artifacts"
+        assert (source / "logs" / "artifacts" / "output.txt").read_text() == "ok"
+        assert "Failed to relocate trial artifacts for rollout r1" in caplog.text
+
 
 class TestBuildRolloutConfigMetadata:
     def test_metadata_written_when_present(self):
@@ -162,6 +259,7 @@ class TestAgentRunnerRoundTrip:
 
         assert meta["status"] == "success"
         assert _AGENT_CAPTURE["metadata"] == metadata
+        assert _AGENT_CAPTURE["artifacts_dir"] == HARBOR_ARTIFACTS_DIR
 
 
 class TestGraderRunnerRoundTrip:
@@ -200,6 +298,7 @@ class TestGraderRunnerRoundTrip:
         grader_runner.main()
 
         assert _GRADER_CAPTURE["metadata"] == metadata
+        assert _GRADER_CAPTURE["artifacts_dir"] == HARBOR_ARTIFACTS_DIR
         rewards = json.loads((verifier_dir / "reward.json").read_text())
         assert rewards == {"sample-1": 1.0}
 
