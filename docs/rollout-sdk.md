@@ -81,15 +81,16 @@ samples = await rollout_ctx.get_samples()            # async -> {name: RolloutSa
 
 Artifacts are files produced by a rollout — logs, traces, generated outputs, screenshots, or other large/binary data that does not belong in the sample.
 
-There is one rule: write files under `ctx.artifacts_dir` (available on both `AgentWorkflowContext` and `GraderContext`). The directory exists before your code runs. In Harbor-backed rollouts it is the sandbox's `/logs/artifacts/`; `LocalBackend` provides an isolated per-rollout directory. If a file is produced elsewhere, copy it in (`shutil.copy2(path, ctx.artifacts_dir / "name")`).
+There is one rule: write files under `ctx.artifacts_dir` (available on both `AgentWorkflowContext` and `GraderContext`). It normally exists before your code runs, but is `Path | None` — it can be `None` when the host directory could not be created — so guard before use. In Harbor-backed rollouts it is the sandbox's `/logs/artifacts/`; `LocalBackend` provides an isolated per-rollout directory. If a file is produced elsewhere, copy it in (`shutil.copy2(path, ctx.artifacts_dir / "name")`).
 
 ```python
 import json
 
-async def grade(self, ctx: GraderContext) -> None:
-    (ctx.artifacts_dir / "trace.json").write_text(
-        json.dumps({"score_reason": "matched rubric"})
-    )
+async def grade(self, ctx: GraderContext) -> Any:
+    if ctx.artifacts_dir:
+        (ctx.artifacts_dir / "trace.json").write_text(
+            json.dumps({"score_reason": "matched rubric"})
+        )
     for sample_id in ctx.get_samples():
         ctx.set_sample_reward(sample_id, 1.0)
 ```
