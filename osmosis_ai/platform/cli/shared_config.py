@@ -371,15 +371,13 @@ class CompletionWebhookSection(BaseModel):
         return value
 
     @model_validator(mode="after")
-    def _require_url_when_configured(self) -> CompletionWebhookSection:
-        has_other = bool(
-            self.headers
-            or self.query_params
-            or self.timeout_seconds is not None
-            or self.retries is not None
-        )
-        if has_other and not self.url:
-            raise ValueError("requires 'url' when other fields are set")
+    def _require_url(self) -> CompletionWebhookSection:
+        # The section only exists when the [experiment.completion_webhook] table
+        # is present, so an empty table (no url) is a mistake — not "no webhook".
+        # Requiring url here stops an empty table from serializing to a bodyless
+        # webhook config that the platform would reject.
+        if not self.url:
+            raise ValueError("requires 'url'")
         return self
 
 

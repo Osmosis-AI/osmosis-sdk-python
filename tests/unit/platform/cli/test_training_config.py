@@ -507,6 +507,18 @@ def test_webhook_requires_url_when_other_fields_set(tmp_path: Path) -> None:
     assert "requires 'url'" in str(exc_info.value)
 
 
+def test_webhook_empty_section_requires_url(tmp_path: Path) -> None:
+    path = tmp_path / "webhook_empty.toml"
+    path.write_text(
+        _config_with_webhook("[experiment.completion_webhook]"),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(CLIError) as exc_info:
+        load_train_submit_config(path)
+    assert "requires 'url'" in str(exc_info.value)
+
+
 def test_webhook_rejects_unknown_keys(tmp_path: Path) -> None:
     path = tmp_path / "webhook_extra.toml"
     path.write_text(

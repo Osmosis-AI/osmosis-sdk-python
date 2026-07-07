@@ -15,16 +15,13 @@ model_path = "<your-model-path>"  # Must be a supported model (see above)
 dataset = "<your-dataset-name>"  # Platform dataset name from `osmosis dataset list`
 # commit_sha =                        # Pin to a specific commit (default: latest on default branch)
 
-# Completion webhook (optional). When set, the platform issues a single
-# best-effort GET to `url` once the run reaches a terminal state, appending
-# `?training_run_id=...&status=...` (status is finished / failed / stopped).
-# The URL must be https:// on port 443 and must not point to a private or
-# internal host.
+# Optional webhook: a GET fired when the run finishes, with
+# ?training_run_id=...&status=... appended. Must be an https:// URL.
 #
 # [experiment.completion_webhook]
-# url = "https://example.com/osmosis/training-complete"
-# headers = { "Authorization" = "Bearer <token>" }   # your endpoint's auth
-# query_params = { "source" = "osmosis" }            # extra static params
+# url = "https://example.com/training-complete"
+# headers = { "Authorization" = "Bearer <token>" }
+# query_params = { "source" = "osmosis" }
 
 [training]
 # Optional. Omit values to use platform defaults.
