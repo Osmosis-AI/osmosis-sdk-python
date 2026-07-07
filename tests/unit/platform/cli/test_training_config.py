@@ -404,6 +404,128 @@ dataset = "d"
 
 
 # ---------------------------------------------------------------------------
+# Completion webhook section
+# ---------------------------------------------------------------------------
+
+
+def _config_with_webhook(webhook_block: str) -> str:
+    return f"""
+[experiment]
+rollout = "r"
+entrypoint = "e.py"
+model_path = "m"
+dataset = "d"
+
+{webhook_block}
+""".strip()
+
+
+def test_webhook_absent_yields_none(tmp_path: Path) -> None:
+    path = tmp_path / "no_webhook.toml"
+    path.write_text(
+        """
+[experiment]
+rollout = "r"
+entrypoint = "e.py"
+model_path = "m"
+dataset = "d"
+""".strip(),
+        encoding="utf-8",
+    )
+
+    cfg = load_train_submit_config(path)
+    assert cfg.experiment.completion_webhook is None
+    assert "completion_webhook" not in cfg.experiment_config
+
+
+def test_webhook_full_config(tmp_path: Path) -> None:
+    path = tmp_path / "webhook.toml"
+    path.write_text(
+        _config_with_webhook(
+            "[experiment.completion_webhook]\n"
+            'url = "https://example.com/hook"\n'
+            'headers = { "Authorization" = "Bearer x" }\n'
+            'query_params = { "source" = "osmosis" }\n'
+            "timeout_seconds = 10\n"
+            "retries = 2"
+        ),
+        encoding="utf-8",
+    )
+
+    cfg = load_train_submit_config(path)
+    assert cfg.experiment_config["completion_webhook"] == {
+        "url": "https://example.com/hook",
+        "headers": {"Authorization": "Bearer x"},
+        "query_params": {"source": "osmosis"},
+        "timeout_seconds": 10,
+        "retries": 2,
+    }
+
+
+def test_webhook_url_only(tmp_path: Path) -> None:
+    path = tmp_path / "webhook_url.toml"
+    path.write_text(
+        _config_with_webhook(
+            '[experiment.completion_webhook]\nurl = "https://example.com/hook"'
+        ),
+        encoding="utf-8",
+    )
+
+    cfg = load_train_submit_config(path)
+    assert cfg.experiment_config["completion_webhook"] == {
+        "url": "https://example.com/hook",
+        "headers": {},
+        "query_params": {},
+    }
+
+
+def test_webhook_rejects_non_https(tmp_path: Path) -> None:
+    path = tmp_path / "webhook_http.toml"
+    path.write_text(
+        _config_with_webhook(
+            '[experiment.completion_webhook]\nurl = "http://example.com/hook"'
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(CLIError) as exc_info:
+        load_train_submit_config(path)
+    assert "https://" in str(exc_info.value)
+
+
+def test_webhook_requires_url_when_other_fields_set(tmp_path: Path) -> None:
+    path = tmp_path / "webhook_no_url.toml"
+    path.write_text(
+        _config_with_webhook(
+            '[experiment.completion_webhook]\nheaders = { "X" = "y" }'
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(CLIError) as exc_info:
+        load_train_submit_config(path)
+    assert "requires 'url'" in str(exc_info.value)
+
+
+def test_webhook_rejects_unknown_keys(tmp_path: Path) -> None:
+    path = tmp_path / "webhook_extra.toml"
+    path.write_text(
+        _config_with_webhook(
+            "[experiment.completion_webhook]\n"
+            'url = "https://example.com/hook"\n'
+            'method = "POST"'
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(CLIError) as exc_info:
+        load_train_submit_config(path)
+    assert "experiment.completion_webhook.method: Unrecognized key" in str(
+        exc_info.value
+    )
+
+
+# ---------------------------------------------------------------------------
 # Context path validation
 # ---------------------------------------------------------------------------
 

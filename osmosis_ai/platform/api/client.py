@@ -250,6 +250,8 @@ class OsmosisClient:
         ``env_config`` is a literal env-var-name to value map applied to the
         rollout container. ``secrets`` is a list of ``environment_secret`` names;
         their values are resolved server-side and never travel through the CLI.
+        An optional completion webhook (fired when the run reaches a terminal
+        state) rides inside ``experiment_config`` under ``completion_webhook``.
         """
         data: dict[str, Any] = {
             "experiment_config": experiment_config,

@@ -283,6 +283,16 @@ def run_cloud_submit[ConfigT: BaseSubmitConfig](
         )
         full_summary.extend((f"secret.{name}", scope) for name, scope in secret_rows)
 
+    completion_webhook = config.experiment.completion_webhook
+    if completion_webhook is not None and completion_webhook.url:
+        console.table(
+            [("URL", console.escape(completion_webhook.url))],
+            title="Completion Webhook (GET)",
+        )
+        full_summary.append(
+            ("experiment.completion_webhook.url", completion_webhook.url)
+        )
+
     notes, warnings = print_remote_fetch_notice(
         workspace_directory,
         pinned_commit_sha=config.experiment_commit_sha,

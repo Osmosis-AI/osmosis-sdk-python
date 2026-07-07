@@ -10,17 +10,19 @@ from osmosis_ai.platform.cli.eval_config import EvalSubmitConfig
 from osmosis_ai.platform.cli.training_config import TrainSubmitConfig
 
 
-def _train_config(secrets: list[str]) -> TrainSubmitConfig:
+def _train_config(
+    secrets: list[str], *, webhook: dict | None = None
+) -> TrainSubmitConfig:
+    experiment: dict = {
+        "rollout": "r",
+        "entrypoint": "rollouts/main.py",
+        "model_path": "m",
+        "dataset": "d",
+    }
+    if webhook is not None:
+        experiment["completion_webhook"] = webhook
     return TrainSubmitConfig.model_validate(
-        {
-            "experiment": {
-                "rollout": "r",
-                "entrypoint": "rollouts/main.py",
-                "model_path": "m",
-                "dataset": "d",
-            },
-            "secrets": secrets,
-        }
+        {"experiment": experiment, "secrets": secrets}
     )
 
 
@@ -54,6 +56,31 @@ def test_submit_training_passes_none_when_empty() -> None:
         client, _train_config([]), credentials=None, git_identity="g"
     )
     assert client.submit_training_run.call_args.kwargs["secrets"] is None
+
+
+def test_submit_training_forwards_completion_webhook() -> None:
+    client = MagicMock()
+    train_mod._submit_training(
+        client,
+        _train_config([], webhook={"url": "https://example.com/hook"}),
+        credentials=None,
+        git_identity="g",
+    )
+    experiment_config = client.submit_training_run.call_args.kwargs["experiment_config"]
+    assert experiment_config["completion_webhook"] == {
+        "url": "https://example.com/hook",
+        "headers": {},
+        "query_params": {},
+    }
+
+
+def test_submit_training_passes_none_webhook_when_absent() -> None:
+    client = MagicMock()
+    train_mod._submit_training(
+        client, _train_config([]), credentials=None, git_identity="g"
+    )
+    experiment_config = client.submit_training_run.call_args.kwargs["experiment_config"]
+    assert "completion_webhook" not in experiment_config
 
 
 def test_submit_eval_forwards_secrets_list() -> None:

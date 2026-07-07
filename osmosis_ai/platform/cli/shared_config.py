@@ -7,7 +7,14 @@ import tomllib
 from pathlib import Path
 from typing import Any, ClassVar
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 from pydantic_core import ErrorDetails
 
 from osmosis_ai.cli.errors import CLIError
@@ -337,6 +344,45 @@ def validate_secret_names(
         )
 
 
+class CompletionWebhookSection(BaseModel):
+    """``[experiment.completion_webhook]`` table — optional GET webhook fired
+    when the run reaches a terminal state.
+
+    The whole subtable may be omitted. When present, ``url`` is required and
+    must be an ``https://`` URL. Value-level SSRF checks are authoritative on
+    the backend; the SDK only enforces structure + scheme for fast feedback.
+    """
+
+    model_config: ClassVar[ConfigDict] = ConfigDict(extra="forbid")
+
+    url: str | None = None
+    headers: dict[str, str] = Field(default_factory=dict)
+    query_params: dict[str, str] = Field(default_factory=dict)
+    timeout_seconds: float | None = None
+    retries: int | None = None
+
+    @field_validator("url")
+    @classmethod
+    def _validate_url(cls, value: str | None) -> str | None:
+        if value is None:
+            return value
+        if not value.startswith("https://"):
+            raise ValueError("must be an https:// URL")
+        return value
+
+    @model_validator(mode="after")
+    def _require_url_when_configured(self) -> CompletionWebhookSection:
+        has_other = bool(
+            self.headers
+            or self.query_params
+            or self.timeout_seconds is not None
+            or self.retries is not None
+        )
+        if has_other and not self.url:
+            raise ValueError("requires 'url' when other fields are set")
+        return self
+
+
 class ExperimentSection(BaseModel):
     """``[experiment]`` table — shared between train and eval submit configs."""
 
@@ -347,6 +393,7 @@ class ExperimentSection(BaseModel):
     model_path: str
     dataset: str
     commit_sha: str | None = None
+    completion_webhook: CompletionWebhookSection | None = None
 
     @field_validator("commit_sha")
     @classmethod
@@ -574,6 +621,7 @@ __all__ = [
     "AdvancedPassthroughSection",
     "BackendValidatedParamSection",
     "BaseSubmitConfig",
+    "CompletionWebhookSection",
     "ExperimentSection",
     "build_env_table_rows",
     "build_secret_table_rows",
