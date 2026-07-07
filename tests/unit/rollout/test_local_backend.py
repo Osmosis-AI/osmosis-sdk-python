@@ -119,7 +119,7 @@ class TestLocalBackend:
         assert "concurrency" in h
 
     async def test_rollout_artifacts_land_under_rollout_id(self, tmp_path, monkeypatch):
-        monkeypatch.setenv("HOME", str(tmp_path))  # redirect ~/.osmosis/artifacts
+        monkeypatch.setenv("HOME", str(tmp_path))  # redirect ~/.osmosis
 
         class ArtifactWorkflow(StubWorkflow):
             async def run(self, ctx: AgentWorkflowContext) -> Any:
@@ -144,7 +144,7 @@ class TestLocalBackend:
         )
         await backend.execute(request, AsyncMock(), AsyncMock())
 
-        root = tmp_path / ".osmosis" / "artifacts"
+        root = tmp_path / ".osmosis"
         rollout_dir = root / "r1" / "artifacts" / "logs" / "artifacts"
         assert (rollout_dir / "trace.txt").read_text() == "trace"
         assert (rollout_dir / "grade_debug.json").read_text() == "{}"

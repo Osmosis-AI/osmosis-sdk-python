@@ -95,7 +95,7 @@ async def grade(self, ctx: GraderContext) -> Any:
         ctx.set_sample_reward(sample_id, 1.0)
 ```
 
-After each rollout the artifacts land on the host under `~/.osmosis/artifacts/<rollout_id>/artifacts/`, mirroring Harbor's collected-trial layout (user files sit at `.../artifacts/logs/artifacts/<file>`). Artifact handling is best-effort and never affects rewards or rollout status.
+After each rollout the artifacts land on the host under `~/.osmosis/<rollout_id>/artifacts/`, mirroring Harbor's collected-trial layout (user files sit at `.../artifacts/logs/artifacts/<file>`). Artifact handling is best-effort and never affects rewards or rollout status.
 
 ## Configs
 
