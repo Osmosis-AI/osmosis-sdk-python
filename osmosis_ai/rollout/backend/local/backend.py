@@ -22,7 +22,10 @@ from osmosis_ai.rollout.types import (
     RolloutStatus,
 )
 from osmosis_ai.rollout.utils.concurrency import ConcurrencyLimiter
-from osmosis_ai.rollout.utils.file_artifacts import default_artifact_root
+from osmosis_ai.rollout.utils.file_artifacts import (
+    HARBOR_COLLECTED_ARTIFACTS_SUBPATH,
+    default_artifact_root,
+)
 from osmosis_ai.rollout.utils.imports import resolve_object
 from osmosis_ai.rollout.utils.rewards import validate_samples_have_rewards
 
@@ -98,7 +101,10 @@ class LocalBackend(ExecutionBackend):
     def _make_artifacts_dir(self, rollout_id: str) -> Path | None:
         """Create the rollout's artifacts dir; ``None`` if it can't be created."""
         artifacts_dir = (
-            self.artifact_root / rollout_id / "artifacts" / "logs" / "artifacts"
+            self.artifact_root
+            / rollout_id
+            / "artifacts"
+            / HARBOR_COLLECTED_ARTIFACTS_SUBPATH
         )
         try:
             artifacts_dir.mkdir(parents=True, exist_ok=True)

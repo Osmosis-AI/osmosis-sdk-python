@@ -1,12 +1,14 @@
-"""Rollout file artifacts: user code writes under ``ctx.artifacts_dir``;
-backends land the files at ``<artifact_root>/<rollout_id>/artifacts/``."""
+"""Rollout file artifacts: user code writes under ``ctx.artifacts_dir``."""
 
 from __future__ import annotations
 
 from pathlib import Path
 
-# Harbor's agent publish dir inside the sandbox.
+# Harbor's auto-collected convention directory inside the sandbox.
 HARBOR_ARTIFACTS_DIR = Path("/logs/artifacts")
+
+# Host subpath where Harbor lands it; LocalBackend reuses it to match.
+HARBOR_COLLECTED_ARTIFACTS_SUBPATH = HARBOR_ARTIFACTS_DIR.relative_to("/")
 
 
 def default_artifact_root() -> Path:

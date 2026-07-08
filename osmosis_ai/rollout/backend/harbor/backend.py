@@ -447,10 +447,8 @@ class HarborBackend(ExecutionBackend):
         await pending.on_workflow_complete(result)
 
     def _relocate_trial_artifacts(self, rollout_id: str, *, move: bool) -> bool:
-        """Relocate collected artifacts to ``artifact_root/<rollout_id>/artifacts``
-        before trial cleanup. Best-effort: failures are logged, never raised.
-        Returns ``False`` on failure so callers keep the source trial dir.
-        """
+        """Persist collected artifacts to the artifact root; ``move`` before
+        cleanup, else copy. Best-effort: returns ``False`` to keep the source."""
         source_dir = self.trials_dir / f"{TRIAL_NAME_PREFIX}{rollout_id}" / "artifacts"
         if not source_dir.is_dir():
             return True
@@ -479,7 +477,7 @@ class HarborBackend(ExecutionBackend):
             logger.error("No pending trial found for rollout %s", rollout_id)
             return
 
-        # The relocation and the trial-dir cleanup below must agree on this.
+        # Evacuate artifacts first; delete the source only if it succeeds.
         delete_trial = bool(
             self.cleanup_successful_trials
             and event.result
