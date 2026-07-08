@@ -22,7 +22,7 @@ from harbor.models.trajectories import (
 from pydantic import ValidationError
 
 from osmosis_ai.consts import PACKAGE_VERSION
-from osmosis_ai.rollout._trajectory.report import LlmCall, SampleReport
+from osmosis_ai.rollout.trajectory.report import LlmCall, SampleReport
 from osmosis_ai.rollout.types import RolloutSample
 
 logger: logging.Logger = logging.getLogger(__name__)

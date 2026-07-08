@@ -16,8 +16,8 @@ from typing import Any
 
 from harbor.utils.trajectory_utils import format_trajectory_json
 
-from osmosis_ai.rollout._trajectory.converter import convert_sample_to_trajectory
-from osmosis_ai.rollout._trajectory.report import SampleReport, TrajectoryReport
+from osmosis_ai.rollout.trajectory.converter import convert_sample_to_trajectory
+from osmosis_ai.rollout.trajectory.report import SampleReport, TrajectoryReport
 from osmosis_ai.rollout.types import ExecutionResult
 from osmosis_ai.rollout.utils.file_artifacts import default_artifact_root
 

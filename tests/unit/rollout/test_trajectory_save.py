@@ -1,10 +1,10 @@
-"""Tests for osmosis_ai.rollout._trajectory.save."""
+"""Tests for osmosis_ai.rollout.trajectory.save."""
 
 import json
 from pathlib import Path
 
-from osmosis_ai.rollout._trajectory import save_trajectories
-from osmosis_ai.rollout._trajectory.report import (
+from osmosis_ai.rollout.trajectory import save_trajectories
+from osmosis_ai.rollout.trajectory.report import (
     LlmCall,
     SampleReport,
     TrajectoryReport,

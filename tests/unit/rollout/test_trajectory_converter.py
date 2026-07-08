@@ -1,12 +1,12 @@
-"""Tests for osmosis_ai.rollout._trajectory.converter."""
+"""Tests for osmosis_ai.rollout.trajectory.converter."""
 
 from typing import Any
 
-from osmosis_ai.rollout._trajectory.converter import (
+from osmosis_ai.rollout.trajectory.converter import (
     convert_sample_to_trajectory,
     messages_to_steps,
 )
-from osmosis_ai.rollout._trajectory.report import LlmCall, SampleReport
+from osmosis_ai.rollout.trajectory.report import LlmCall, SampleReport
 from osmosis_ai.rollout.types import RolloutSample
 
 

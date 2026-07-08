@@ -4,14 +4,14 @@ from typing import Any
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException
 
-from osmosis_ai.rollout._trajectory import (
+from osmosis_ai.rollout.backend.base import ExecutionBackend
+from osmosis_ai.rollout.context import RolloutContext
+from osmosis_ai.rollout.server.auth import ControllerAuth
+from osmosis_ai.rollout.trajectory import (
     TrajectoryReport,
     report_from_response,
     save_trajectories,
 )
-from osmosis_ai.rollout.backend.base import ExecutionBackend
-from osmosis_ai.rollout.context import RolloutContext
-from osmosis_ai.rollout.server.auth import ControllerAuth
 from osmosis_ai.rollout.types import (
     ExecutionRequest,
     ExecutionResult,
@@ -66,7 +66,7 @@ async def _handle_rollout(
     # without samples (e.g. a failed grader) never supersedes one that has
     # them.
     recorded: ExecutionResult | None = None
-    # Per-call metrics from callback acks (see _trajectory/report.py);
+    # Per-call metrics from callback acks (see trajectory/report.py);
     # a later ack with a report replaces an earlier one.
     report: TrajectoryReport | None = None
 

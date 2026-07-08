@@ -99,7 +99,7 @@ After each rollout the artifacts land on the host under `~/.osmosis/<rollout_id>
 
 ## Trajectory saving
 
-[../osmosis_ai/rollout/_trajectory/](../osmosis_ai/rollout/_trajectory/)
+[../osmosis_ai/rollout/trajectory/](../osmosis_ai/rollout/trajectory/)
 
 The server saves every finished rollout as an [ATIF](https://www.harborframework.com/docs/agents/trajectory-format) trajectory document (Harbor's Agent Trajectory Interchange Format). Saving is a server-level concern — it observes the `ExecutionResult` at the backend boundary and works identically with any backend. It is always on and needs no configuration: documents are written to the same platform-managed directory as file artifacts (`~/.osmosis/<rollout_id>/`), which the platform persists to durable storage.
 
@@ -119,7 +119,7 @@ Each document carries the full conversation as ATIF steps (tool calls fold into 
 
 ATIF has first-class slots for LLM operational data (`Step.metrics`, `Step.model_name`, `final_metrics`), but the server only sees `RolloutSample.messages` — agent frameworks drop response metadata (usage, model, logprobs) when they append to the conversation. Two opt-in channels feed those slots; both are best-effort and change nothing when unused:
 
-1. **Controller report (callback ack)** — the controller may attach a `trajectory` object to the JSON body of its completion/grader callback response ([report.py](../osmosis_ai/rollout/_trajectory/report.py) defines the shape). Its LLM bridge serves every completion, so it is the party that has per-call usage.
+1. **Controller report (callback ack)** — the controller may attach a `trajectory` object to the JSON body of its completion/grader callback response ([report.py](../osmosis_ai/rollout/trajectory/report.py) defines the shape). Its LLM bridge serves every completion, so it is the party that has per-call usage.
    - **When to report**: snapshot the agent-phase calls into the **completion** ack, before resolving any internal future that triggers controller-side cleanup. Omit `trajectory` from the grader ack — an ack without a report keeps the earlier one, and grader-phase LLM calls (an LLM judge) would skew call counts and totals. A grader ack that does carry a report replaces the completion one entirely (no merge).
    - **Attribution**: `llm_calls` map onto agent steps in dispatch order only when the counts match exactly; on a mismatch they are preserved under `extra.osmosis.llm_calls` instead of being mis-attributed, and totals still aggregate into `final_metrics`.
    - **Sample keys**: use the rollout's sample ids (the SDK integrations send them as the `x-sample-id` header on every completion). A controller that cannot know them may key its only entry arbitrarily — with exactly one sample and one entry they match regardless of key. Other unmatched entries are logged and, for single-sample rollouts, preserved under `extra.osmosis.unmatched_sample_reports`.

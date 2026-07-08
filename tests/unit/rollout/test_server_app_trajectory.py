@@ -87,7 +87,7 @@ def patch_callbacks(
 
 def patch_artifact_root(monkeypatch, root: Path) -> None:
     monkeypatch.setattr(
-        "osmosis_ai.rollout._trajectory.save.default_artifact_root", lambda: root
+        "osmosis_ai.rollout.trajectory.save.default_artifact_root", lambda: root
     )
 
 

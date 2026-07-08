@@ -1,8 +1,8 @@
-"""Tests for osmosis_ai.rollout._trajectory.report."""
+"""Tests for osmosis_ai.rollout.trajectory.report."""
 
 import httpx
 
-from osmosis_ai.rollout._trajectory.report import report_from_response
+from osmosis_ai.rollout.trajectory.report import report_from_response
 
 
 def test_parses_trajectory_object_from_ack_body() -> None:
