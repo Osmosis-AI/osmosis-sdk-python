@@ -8,13 +8,16 @@ and swallowed.
 """
 
 import asyncio
-import json
 import logging
 import re
+from collections.abc import Collection
 from pathlib import Path
 from typing import Any
 
+from harbor.utils.trajectory_utils import format_trajectory_json
+
 from osmosis_ai.rollout._trajectory.converter import convert_sample_to_trajectory
+from osmosis_ai.rollout._trajectory.report import SampleReport, TrajectoryReport
 from osmosis_ai.rollout.types import ExecutionResult
 from osmosis_ai.rollout.utils.file_artifacts import default_artifact_root
 
@@ -33,6 +36,36 @@ def _write_document(dest: Path, payload: bytes) -> None:
     dest.write_bytes(payload)
 
 
+def _resolve_sample_reports(
+    report: TrajectoryReport | None, sample_ids: Collection[str]
+) -> tuple[dict[str, SampleReport], dict[str, SampleReport]]:
+    """Match report entries to samples by id; return ``(matched, unmatched)``.
+
+    A lone entry for a lone sample matches regardless of key, for
+    controllers that cannot know the server-side sample ids.
+    """
+    if report is None or not report.samples:
+        return {}, {}
+    matched = {
+        sample_id: report.samples[sample_id]
+        for sample_id in sample_ids
+        if sample_id in report.samples
+    }
+    unmatched = {
+        key: value for key, value in report.samples.items() if key not in matched
+    }
+    if not matched and len(unmatched) == 1 and len(sample_ids) == 1:
+        (sample_id,) = sample_ids
+        key, value = next(iter(unmatched.items()))
+        logger.debug(
+            "Trajectory report entry %r applied to the rollout's only sample %r",
+            key,
+            sample_id,
+        )
+        return {sample_id: value}, {}
+    return matched, unmatched
+
+
 async def save_trajectories(
     *,
     rollout_id: str,
@@ -40,6 +73,7 @@ async def save_trajectories(
     request_label: str | None = None,
     request_metadata: dict[str, Any] | None = None,
     request_extra_fields: dict[str, Any] | None = None,
+    report: TrajectoryReport | None = None,
     artifact_root: Path | None = None,
 ) -> None:
     """Save one rollout's samples as ATIF documents. Never raises."""
@@ -50,6 +84,7 @@ async def save_trajectories(
             request_label=request_label,
             request_metadata=request_metadata,
             request_extra_fields=request_extra_fields,
+            report=report,
             artifact_root=artifact_root or default_artifact_root(),
         )
     except Exception:
@@ -67,11 +102,26 @@ async def _save(
     request_label: str | None,
     request_metadata: dict[str, Any] | None,
     request_extra_fields: dict[str, Any] | None,
+    report: TrajectoryReport | None,
     artifact_root: Path,
 ) -> None:
     dest_dir = artifact_root / rollout_id
     written = 0
     single = len(result.samples) == 1
+    matched_reports, unmatched_reports = _resolve_sample_reports(
+        report, result.samples.keys()
+    )
+    if unmatched_reports:
+        logger.warning(
+            "Trajectory report for rollout %s has entries for unknown sample "
+            "ids %s (samples: %s); %s",
+            rollout_id,
+            sorted(unmatched_reports),
+            sorted(result.samples),
+            "preserving them under extra.osmosis.unmatched_sample_reports"
+            if single
+            else "dropping them",
+        )
     for sample_id, sample in result.samples.items():
         try:
             trajectory = convert_sample_to_trajectory(
@@ -81,6 +131,9 @@ async def _save(
                 request_label=request_label,
                 request_metadata=request_metadata,
                 request_extra_fields=request_extra_fields,
+                report=matched_reports.get(sample_id),
+                default_model_name=report.model_name if report else None,
+                unmatched_sample_reports=unmatched_reports if single else None,
             )
         except Exception:
             logger.warning(
@@ -95,9 +148,8 @@ async def _save(
             if single
             else f"trajectory-{_safe_segment(sample_id)}.json"
         )
-        data = json.dumps(
-            trajectory.to_json_dict(), ensure_ascii=False, indent=2
-        ).encode()
+        # Harbor's formatter keeps numeric arrays on one line.
+        data = format_trajectory_json(trajectory.to_json_dict()).encode()
         await asyncio.to_thread(_write_document, dest_dir / name, data)
         written += 1
 

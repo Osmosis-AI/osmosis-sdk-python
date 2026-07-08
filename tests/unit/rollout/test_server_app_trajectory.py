@@ -68,14 +68,18 @@ class StubBackend(ExecutionBackend):
             raise self.raises
 
 
-def patch_callbacks(monkeypatch) -> list[tuple[str, dict[str, Any]]]:
+def patch_callbacks(
+    monkeypatch, ack_bodies: dict[str, dict[str, Any]] | None = None
+) -> list[tuple[str, dict[str, Any]]]:
+    """Stub callback posts; ``ack_bodies`` maps URL to the controller's ack body."""
     posted: list[tuple[str, dict[str, Any]]] = []
 
     async def fake_post(
         *, url: str, payload: dict[str, Any], headers: Any = None
     ) -> Any:
         posted.append((url, payload))
-        return SimpleNamespace(status_code=200)
+        body = (ack_bodies or {}).get(url, {"ok": True})
+        return SimpleNamespace(status_code=200, json=lambda: body)
 
     monkeypatch.setattr("osmosis_ai.rollout.server.app.post_json_with_retry", fake_post)
     return posted
@@ -176,3 +180,42 @@ async def test_backend_failure_without_samples_records_nothing(
 
     assert not (tmp_path / "r1").exists()
     assert posted
+
+
+async def test_callback_ack_report_lands_in_document(
+    tmp_path: Path, monkeypatch
+) -> None:
+    # The grader ack carries per-call metrics; the completion ack does not.
+    patch_callbacks(
+        monkeypatch,
+        ack_bodies={
+            "http://controller/v1/grader/completed": {
+                "ok": True,
+                "trajectory": {
+                    "model_name": "openai/gpt-5-mini",
+                    "samples": {
+                        "s1": {
+                            "llm_calls": [{"prompt_tokens": 12, "completion_tokens": 4}]
+                        }
+                    },
+                },
+            }
+        },
+    )
+    patch_artifact_root(monkeypatch, tmp_path)
+    backend = StubBackend(
+        workflow_result=ExecutionResult(
+            status=RolloutStatus.SUCCESS, samples={"s1": make_sample()}
+        ),
+        grader_result=ExecutionResult(
+            status=RolloutStatus.SUCCESS, samples={"s1": make_sample(reward=1.0)}
+        ),
+    )
+
+    await _handle_rollout(backend, make_request())
+
+    doc = json.loads((tmp_path / "r1" / "trajectory.json").read_text())
+    assert doc["agent"]["model_name"] == "openai/gpt-5-mini"
+    agent_steps = [s for s in doc["steps"] if s["source"] == "agent"]
+    assert agent_steps[0]["metrics"]["prompt_tokens"] == 12
+    assert doc["final_metrics"]["total_completion_tokens"] == 4

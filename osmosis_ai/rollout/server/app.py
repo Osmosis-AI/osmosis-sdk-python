@@ -4,7 +4,11 @@ from typing import Any
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException
 
-from osmosis_ai.rollout._trajectory import save_trajectories
+from osmosis_ai.rollout._trajectory import (
+    TrajectoryReport,
+    report_from_response,
+    save_trajectories,
+)
 from osmosis_ai.rollout.backend.base import ExecutionBackend
 from osmosis_ai.rollout.context import RolloutContext
 from osmosis_ai.rollout.server.auth import ControllerAuth
@@ -62,6 +66,9 @@ async def _handle_rollout(
     # without samples (e.g. a failed grader) never supersedes one that has
     # them.
     recorded: ExecutionResult | None = None
+    # Per-call metrics from callback acks (see _trajectory/report.py);
+    # a later ack with a report replaces an earlier one.
+    report: TrajectoryReport | None = None
 
     def record(result: ExecutionResult) -> None:
         nonlocal recorded
@@ -69,8 +76,9 @@ async def _handle_rollout(
             recorded = result
 
     async def on_workflow_complete(result: ExecutionResult) -> None:
+        nonlocal report
         record(result)
-        await post_json_with_retry(
+        resp = await post_json_with_retry(
             url=request.completion_callback_url,
             payload=RolloutCompleteRequest(
                 rollout_id=request.rollout_id,
@@ -80,8 +88,10 @@ async def _handle_rollout(
             ).model_dump(),
             headers=auth.as_bearer_headers(),
         )
+        report = report_from_response(resp) or report
 
     async def on_grader_complete(result: ExecutionResult) -> None:
+        nonlocal report
         record(result)
         if not request.grader_callback_url:
             logger.info(
@@ -109,6 +119,7 @@ async def _handle_rollout(
             ).model_dump(),
             headers=auth.as_bearer_headers(),
         )
+        report = report_from_response(resp) or report
         logger.info(
             "Grader callback for %s completed: status=%d",
             request.rollout_id,
@@ -166,4 +177,5 @@ async def _handle_rollout(
                 request_label=request.label,
                 request_metadata=request.metadata,
                 request_extra_fields=request.extra_fields,
+                report=report,
             )

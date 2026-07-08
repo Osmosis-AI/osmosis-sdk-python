@@ -4,6 +4,11 @@ import json
 from pathlib import Path
 
 from osmosis_ai.rollout._trajectory import save_trajectories
+from osmosis_ai.rollout._trajectory.report import (
+    LlmCall,
+    SampleReport,
+    TrajectoryReport,
+)
 from osmosis_ai.rollout.types import ExecutionResult, RolloutSample, RolloutStatus
 
 
@@ -85,3 +90,93 @@ async def test_sample_id_is_sanitized_for_filenames(tmp_path: Path) -> None:
 
     assert (tmp_path / "r1" / "trajectory-a_b.json").exists()
     assert (tmp_path / "r1" / "trajectory-c.json").exists()
+
+
+async def test_report_is_dispatched_per_sample(tmp_path: Path) -> None:
+    report = TrajectoryReport(
+        model_name="rollout-model",
+        samples={
+            "s1": SampleReport(
+                llm_calls=[LlmCall(prompt_tokens=10, completion_tokens=5)]
+            )
+        },
+    )
+
+    await save_trajectories(
+        rollout_id="r1",
+        result=make_result(s1=make_sample("s1"), s2=make_sample("s2")),
+        report=report,
+        artifact_root=tmp_path,
+    )
+
+    s1 = json.loads((tmp_path / "r1" / "trajectory-s1.json").read_text())
+    s2 = json.loads((tmp_path / "r1" / "trajectory-s2.json").read_text())
+    assert s1["agent"]["model_name"] == "rollout-model"
+    assert s1["final_metrics"]["total_prompt_tokens"] == 10
+    assert s2["agent"]["model_name"] == "rollout-model"
+    assert "final_metrics" not in s2
+
+
+async def test_single_entry_report_matches_single_sample_regardless_of_key(
+    tmp_path: Path,
+) -> None:
+    report = TrajectoryReport(
+        samples={"whatever": SampleReport(llm_calls=[LlmCall(prompt_tokens=10)])}
+    )
+
+    await save_trajectories(
+        rollout_id="r1",
+        result=make_result(s1=make_sample("s1")),
+        report=report,
+        artifact_root=tmp_path,
+    )
+
+    doc = json.loads((tmp_path / "r1" / "trajectory.json").read_text())
+    assert doc["final_metrics"]["total_prompt_tokens"] == 10
+    assert "unmatched_sample_reports" not in doc["extra"]["osmosis"]
+
+
+async def test_unmatched_entries_are_preserved_for_single_sample_rollouts(
+    tmp_path: Path, caplog
+) -> None:
+    report = TrajectoryReport(
+        samples={
+            "s1": SampleReport(llm_calls=[LlmCall(prompt_tokens=10)]),
+            "judge": SampleReport(llm_calls=[LlmCall(prompt_tokens=99)]),
+        }
+    )
+
+    await save_trajectories(
+        rollout_id="r1",
+        result=make_result(s1=make_sample("s1")),
+        report=report,
+        artifact_root=tmp_path,
+    )
+
+    doc = json.loads((tmp_path / "r1" / "trajectory.json").read_text())
+    assert doc["final_metrics"]["total_prompt_tokens"] == 10
+    assert doc["extra"]["osmosis"]["unmatched_sample_reports"] == {
+        "judge": {"llm_calls": [{"prompt_tokens": 99}]}
+    }
+    assert any("unknown sample ids" in r.message for r in caplog.records)
+
+
+async def test_unmatched_entries_are_dropped_for_multi_sample_rollouts(
+    tmp_path: Path, caplog
+) -> None:
+    report = TrajectoryReport(
+        samples={"nope": SampleReport(llm_calls=[LlmCall(prompt_tokens=10)])}
+    )
+
+    await save_trajectories(
+        rollout_id="r1",
+        result=make_result(s1=make_sample("s1"), s2=make_sample("s2")),
+        report=report,
+        artifact_root=tmp_path,
+    )
+
+    for name in ("trajectory-s1.json", "trajectory-s2.json"):
+        doc = json.loads((tmp_path / "r1" / name).read_text())
+        assert "final_metrics" not in doc
+        assert "unmatched_sample_reports" not in doc["extra"]["osmosis"]
+    assert any("unknown sample ids" in r.message for r in caplog.records)
