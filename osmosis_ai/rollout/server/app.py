@@ -61,13 +61,9 @@ async def _handle_rollout(
         rollout_id=request.rollout_id,
     )
 
-    # The result to archive as the rollout's trajectory. The grader result
-    # supersedes the workflow result (it carries rewards), but a result
-    # without samples (e.g. a failed grader) never supersedes one that has
-    # them.
+    # Prefer grader (has rewards) unless it has no samples.
     recorded: ExecutionResult | None = None
-    # Per-call metrics from callback acks (see trajectory/report.py);
-    # a later ack with a report replaces an earlier one.
+    # Latest metrics from callback acks.
     report: TrajectoryReport | None = None
 
     def record(result: ExecutionResult) -> None:
@@ -168,8 +164,7 @@ async def _handle_rollout(
                     traceback.format_exc(),
                 )
     finally:
-        # execute() returns only after callbacks fired and artifacts are
-        # on disk; saving is best-effort and never raises.
+        # Best-effort archive once execute() has finished.
         if recorded is not None:
             await save_trajectories(
                 rollout_id=request.rollout_id,
