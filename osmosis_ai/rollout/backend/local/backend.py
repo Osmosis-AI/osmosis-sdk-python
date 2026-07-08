@@ -1,6 +1,7 @@
 import copy
 import logging
 import traceback
+from pathlib import Path
 from typing import Any
 
 from osmosis_ai.rollout.agent_workflow import AgentWorkflow
@@ -21,6 +22,10 @@ from osmosis_ai.rollout.types import (
     RolloutStatus,
 )
 from osmosis_ai.rollout.utils.concurrency import ConcurrencyLimiter
+from osmosis_ai.rollout.utils.file_artifacts import (
+    HARBOR_COLLECTED_ARTIFACTS_SUBPATH,
+    default_artifact_root,
+)
 from osmosis_ai.rollout.utils.imports import resolve_object
 from osmosis_ai.rollout.utils.rewards import validate_samples_have_rewards
 
@@ -56,6 +61,8 @@ class LocalBackend(ExecutionBackend):
             max_concurrent=max_concurrent
         )
 
+        self.artifact_root: Path = default_artifact_root()
+
     @property
     def max_concurrency(self) -> int:
         return self.limiter.max_concurrent or 0
@@ -89,12 +96,32 @@ class LocalBackend(ExecutionBackend):
             else:
                 await on_grader_complete(ExecutionResult(status=RolloutStatus.FAILURE))
 
+    def _make_artifacts_dir(self, rollout_id: str) -> Path | None:
+        """Idempotently create the rollout's artifacts dir; ``None`` on failure."""
+        artifacts_dir = (
+            self.artifact_root
+            / rollout_id
+            / "artifacts"
+            / HARBOR_COLLECTED_ARTIFACTS_SUBPATH
+        )
+        try:
+            artifacts_dir.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            logger.warning(
+                "Failed to create artifacts dir for rollout %s (best-effort)",
+                rollout_id,
+                exc_info=True,
+            )
+            return None
+        return artifacts_dir
+
     async def run_workflow(self, request: ExecutionRequest) -> ExecutionResult:
         config = copy.deepcopy(self.workflow_config)
         ctx = AgentWorkflowContext(
             prompt=request.prompt,
             config=config,
             metadata=request.metadata,
+            artifacts_dir=self._make_artifacts_dir(request.id),
         )
 
         rollout_ctx = get_rollout_context()
@@ -128,6 +155,7 @@ class LocalBackend(ExecutionBackend):
             label=request.label,
             samples=result.samples,
             metadata=request.metadata,
+            artifacts_dir=self._make_artifacts_dir(request.id),
         )
         try:
             grader = self.grader_cls(self.grader_config)

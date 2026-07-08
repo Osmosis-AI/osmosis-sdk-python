@@ -14,6 +14,7 @@ from typing import Any
 
 from osmosis_ai.rollout.context import GraderContext
 from osmosis_ai.rollout.types import RolloutSample
+from osmosis_ai.rollout.utils.file_artifacts import HARBOR_ARTIFACTS_DIR
 from osmosis_ai.rollout.utils.imports import resolve_object
 
 VERIFIER_LOGS_DIR = Path("/logs/verifier")
@@ -71,7 +72,12 @@ def main() -> None:
         resolve_object(config["grader_config"]) if "grader_config" in config else None
     )
 
-    ctx = GraderContext(label=label, samples=samples, metadata=metadata)
+    ctx = GraderContext(
+        label=label,
+        samples=samples,
+        metadata=metadata,
+        artifacts_dir=HARBOR_ARTIFACTS_DIR,
+    )
     grader = grader_cls(grader_config)
     asyncio.run(grader.grade(ctx))
 

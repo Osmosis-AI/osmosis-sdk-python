@@ -38,6 +38,7 @@ from osmosis_ai.rollout.types import (
     RolloutSample,
     RolloutStatus,
 )
+from osmosis_ai.rollout.utils.file_artifacts import default_artifact_root
 from osmosis_ai.rollout.utils.imports import to_import_path
 from osmosis_ai.rollout.utils.rewards import validate_samples_have_rewards
 
@@ -142,6 +143,7 @@ class HarborBackend(ExecutionBackend):
         self.trials_dir: Path = (
             trials_dir if trials_dir != Path("trials") else self.root_dir / "trials"
         )
+        self.artifact_root: Path = default_artifact_root()
 
         self.pending: dict[str, PendingTrial] = {}
         self.prebuilt_image_tag: str | None = None
@@ -444,12 +446,44 @@ class HarborBackend(ExecutionBackend):
         pending.workflow_complete_called = True
         await pending.on_workflow_complete(result)
 
+    def _relocate_trial_artifacts(self, rollout_id: str, *, move: bool) -> bool:
+        """Persist collected artifacts to the artifact root; ``move`` before
+        cleanup, else copy. Best-effort: returns ``False`` to keep the source."""
+        source_dir = self.trials_dir / f"{TRIAL_NAME_PREFIX}{rollout_id}" / "artifacts"
+        if not source_dir.is_dir():
+            return True
+        dest_dir = self.artifact_root / rollout_id / "artifacts"
+        try:
+            if dest_dir.exists():
+                shutil.rmtree(dest_dir)
+            dest_dir.parent.mkdir(parents=True, exist_ok=True)
+            if move:
+                shutil.move(source_dir, dest_dir)
+            else:
+                shutil.copytree(source_dir, dest_dir, symlinks=False)
+        except OSError:
+            logger.warning(
+                "Failed to relocate trial artifacts for rollout %s (best-effort)",
+                rollout_id,
+                exc_info=True,
+            )
+            return False
+        return True
+
     async def on_trial_end(self, event: TrialHookEvent) -> None:
         rollout_id = parse_rollout_id(event)
         pending = self.pending.pop(rollout_id, None)
         if not pending:
             logger.error("No pending trial found for rollout %s", rollout_id)
             return
+
+        # Evacuate artifacts first; delete the source only if it succeeds.
+        delete_trial = bool(
+            self.cleanup_successful_trials
+            and event.result
+            and not event.result.exception_info
+        )
+        relocated = self._relocate_trial_artifacts(rollout_id, move=delete_trial)
 
         if not pending.workflow_complete_called:
             if event.result and event.result.exception_info:
@@ -518,9 +552,9 @@ class HarborBackend(ExecutionBackend):
             rollout_dir = self.rollouts_dir / rollout_id
             shutil.rmtree(rollout_dir, ignore_errors=True)
 
-            if event.result and not event.result.exception_info:
-                trial_dir = self.trials_dir / f"{TRIAL_NAME_PREFIX}{rollout_id}"
-                shutil.rmtree(trial_dir, ignore_errors=True)
+        if delete_trial and relocated:
+            trial_dir = self.trials_dir / f"{TRIAL_NAME_PREFIX}{rollout_id}"
+            shutil.rmtree(trial_dir, ignore_errors=True)
 
         if not pending.done.done():
             pending.done.set_result(None)
