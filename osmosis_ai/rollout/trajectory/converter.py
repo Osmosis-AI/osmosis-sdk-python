@@ -56,7 +56,7 @@ def convert_sample_to_trajectory(
     ``report.py``); ``unmatched_sample_reports`` are entries keyed by
     no sample, preserved under ``extra``.
     """
-    steps = messages_to_steps(sample.messages)
+    steps = _messages_to_steps(sample.messages)
     unmatched_llm_call_metrics = _apply_report(steps, report)
     model_name = (report.model_name if report else None) or default_model_name
     unmatched_reports: dict[str, Any] | None = None
@@ -86,7 +86,7 @@ def convert_sample_to_trajectory(
     )
 
 
-def messages_to_steps(messages: Sequence[Mapping[str, Any]]) -> list[Step]:
+def _messages_to_steps(messages: Sequence[Mapping[str, Any]]) -> list[Step]:
     steps: list[Step] = []
     for message in messages:
         role = str(message.get("role", ""))

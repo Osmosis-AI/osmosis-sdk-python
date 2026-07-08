@@ -3,8 +3,8 @@
 from typing import Any
 
 from osmosis_ai.rollout.trajectory.converter import (
+    _messages_to_steps,
     convert_sample_to_trajectory,
-    messages_to_steps,
 )
 from osmosis_ai.rollout.trajectory.report import LlmCallMetrics, SampleReport
 from osmosis_ai.rollout.types import RolloutSample
@@ -74,7 +74,7 @@ def test_tool_calls_and_results_fold_into_agent_step() -> None:
 
 
 def test_orphan_tool_result_keeps_original_id_in_extra() -> None:
-    steps = messages_to_steps(
+    steps = _messages_to_steps(
         [
             {
                 "role": "assistant",
@@ -94,7 +94,7 @@ def test_orphan_tool_result_keeps_original_id_in_extra() -> None:
 
 
 def test_tool_result_without_agent_step_becomes_system_observation() -> None:
-    steps = messages_to_steps(
+    steps = _messages_to_steps(
         [{"role": "tool", "tool_call_id": "c1", "content": "orphan output"}]
     )
 
@@ -104,7 +104,7 @@ def test_tool_result_without_agent_step_becomes_system_observation() -> None:
 
 
 def test_unknown_role_is_kept_with_original_role() -> None:
-    steps = messages_to_steps([{"role": "critic", "content": "needs work"}])
+    steps = _messages_to_steps([{"role": "critic", "content": "needs work"}])
 
     assert steps[0].source == "user"
     assert steps[0].extra == {"original_role": "critic"}
@@ -112,7 +112,7 @@ def test_unknown_role_is_kept_with_original_role() -> None:
 
 def test_non_agent_step_demotes_agent_only_fields_to_extra() -> None:
     # ATIF forbids reasoning_content/tool_calls outside agent steps.
-    steps = messages_to_steps(
+    steps = _messages_to_steps(
         [
             {
                 "role": "user",
@@ -133,7 +133,7 @@ def test_non_agent_step_demotes_agent_only_fields_to_extra() -> None:
 
 
 def test_non_string_reasoning_content_is_serialized() -> None:
-    steps = messages_to_steps(
+    steps = _messages_to_steps(
         [
             {
                 "role": "assistant",
@@ -148,7 +148,7 @@ def test_non_string_reasoning_content_is_serialized() -> None:
 
 
 def test_content_part_flattening() -> None:
-    steps = messages_to_steps(
+    steps = _messages_to_steps(
         [
             {
                 "role": "user",
@@ -172,7 +172,7 @@ def test_content_part_flattening() -> None:
 
 
 def test_malformed_tool_call_arguments_are_preserved_raw() -> None:
-    steps = messages_to_steps(
+    steps = _messages_to_steps(
         [
             {
                 "role": "assistant",
@@ -348,7 +348,7 @@ def test_unmatched_sample_reports_are_preserved_in_extra() -> None:
 
 
 def test_inline_usage_top_level_shape() -> None:
-    steps = messages_to_steps(
+    steps = _messages_to_steps(
         [
             {
                 "role": "assistant",
@@ -372,7 +372,7 @@ def test_inline_usage_top_level_shape() -> None:
 
 def test_inline_usage_harbor_extra_response_shape() -> None:
     # Harbor's extra.response convention, with Responses-API field names.
-    steps = messages_to_steps(
+    steps = _messages_to_steps(
         [
             {
                 "role": "assistant",
@@ -394,7 +394,7 @@ def test_inline_usage_harbor_extra_response_shape() -> None:
 
 
 def test_inline_usage_ignored_on_non_agent_and_malformed() -> None:
-    steps = messages_to_steps(
+    steps = _messages_to_steps(
         [
             {"role": "user", "content": "x", "usage": {"prompt_tokens": 1}},
             {"role": "assistant", "content": "y", "usage": {"prompt_tokens": "NaN"}},
@@ -406,7 +406,7 @@ def test_inline_usage_ignored_on_non_agent_and_malformed() -> None:
 
 
 def test_message_timestamps_are_normalized_to_iso() -> None:
-    steps = messages_to_steps(
+    steps = _messages_to_steps(
         [
             {"role": "user", "content": "x", "created_at": 1751000000},
             {"role": "assistant", "content": "y", "timestamp": "2026-07-08T12:00:00Z"},

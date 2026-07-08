@@ -13,7 +13,7 @@ plus timing and sample-key guidance live in docs/rollout-sdk.md.
 
 import logging
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, ClassVar
 
 import httpx
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -29,7 +29,7 @@ class LlmCallMetrics(BaseModel):
     training-grade documents.
     """
 
-    model_config = ConfigDict(extra="ignore")
+    model_config: ClassVar[ConfigDict] = ConfigDict(extra="ignore")
 
     prompt_tokens: int | None = None
     completion_tokens: int | None = None
@@ -43,7 +43,7 @@ class LlmCallMetrics(BaseModel):
 
 
 class SampleReport(BaseModel):
-    model_config = ConfigDict(extra="ignore")
+    model_config: ClassVar[ConfigDict] = ConfigDict(extra="ignore")
 
     model_name: str | None = None
     llm_call_metrics: list[LlmCallMetrics] = Field(default_factory=list)
@@ -51,7 +51,7 @@ class SampleReport(BaseModel):
 
 
 class TrajectoryReport(BaseModel):
-    model_config = ConfigDict(extra="ignore")
+    model_config: ClassVar[ConfigDict] = ConfigDict(extra="ignore")
 
     model_name: str | None = None
     samples: dict[str, SampleReport] = Field(default_factory=dict)
