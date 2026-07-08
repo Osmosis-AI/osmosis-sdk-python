@@ -97,6 +97,24 @@ async def grade(self, ctx: GraderContext) -> Any:
 
 After each rollout the artifacts land on the host under `~/.osmosis/<rollout_id>/artifacts/`, mirroring Harbor's collected-trial layout (user files sit at `.../artifacts/logs/artifacts/<file>`). Artifact handling is best-effort and never affects rewards or rollout status.
 
+## Trajectory saving
+
+[../osmosis_ai/rollout/_trajectory/](../osmosis_ai/rollout/_trajectory/)
+
+The server saves every finished rollout as an [ATIF](https://www.harborframework.com/docs/agents/trajectory-format) trajectory document (Harbor's Agent Trajectory Interchange Format). Saving is a server-level concern — it observes the `ExecutionResult` at the backend boundary and works identically with any backend. It is always on and needs no configuration: documents are written to the same platform-managed directory as file artifacts (`~/.osmosis/<rollout_id>/`), which the platform persists to durable storage.
+
+Layout per rollout, keyed by `rollout_id` (callers that need position semantics — e.g. an eval run's row/run index — keep them in their own index and join on the rollout id, which is also echoed in `extra.osmosis`):
+
+```
+~/.osmosis/<rollout_id>/
+├── trajectory.json          # the rollout's ATIF document
+│                            # (trajectory-<sample_id>.json per sample while the
+│                            # transitional multi-sample protocol is still in use)
+└── artifacts/...            # file artifacts (see above)
+```
+
+Each document carries the full conversation as ATIF steps (tool calls fold into agent-step observations) and namespaces platform context under `extra.osmosis`: `rollout_id`, `sample_id`, `label`, `reward`, sample `metrics`/`extra_fields`, and the request's `metadata`/`extra_fields` (the natural channel for run identity such as an eval run id). Like artifacts, saving is best-effort: failures are logged and never affect rewards, callbacks, or rollout status.
+
 ## Configs
 
 [../osmosis_ai/rollout/types/config.py](../osmosis_ai/rollout/types/config.py)

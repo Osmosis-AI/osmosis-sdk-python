@@ -4,6 +4,7 @@ from typing import Any
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException
 
+from osmosis_ai.rollout._trajectory import save_trajectories
 from osmosis_ai.rollout.backend.base import ExecutionBackend
 from osmosis_ai.rollout.context import RolloutContext
 from osmosis_ai.rollout.server.auth import ControllerAuth
@@ -56,7 +57,19 @@ async def _handle_rollout(
         rollout_id=request.rollout_id,
     )
 
+    # The result to archive as the rollout's trajectory. The grader result
+    # supersedes the workflow result (it carries rewards), but a result
+    # without samples (e.g. a failed grader) never supersedes one that has
+    # them.
+    recorded: ExecutionResult | None = None
+
+    def record(result: ExecutionResult) -> None:
+        nonlocal recorded
+        if recorded is None or result.samples:
+            recorded = result
+
     async def on_workflow_complete(result: ExecutionResult) -> None:
+        record(result)
         await post_json_with_retry(
             url=request.completion_callback_url,
             payload=RolloutCompleteRequest(
@@ -69,6 +82,7 @@ async def _handle_rollout(
         )
 
     async def on_grader_complete(result: ExecutionResult) -> None:
+        record(result)
         if not request.grader_callback_url:
             logger.info(
                 "Skipping grader callback for %s: no grader_callback_url",
@@ -142,3 +156,14 @@ async def _handle_rollout(
                     "Failed to post grader error callback: %s",
                     traceback.format_exc(),
                 )
+    finally:
+        # execute() returns only after callbacks fired and artifacts are
+        # on disk; saving is best-effort and never raises.
+        if recorded is not None:
+            await save_trajectories(
+                rollout_id=request.rollout_id,
+                result=recorded,
+                request_label=request.label,
+                request_metadata=request.metadata,
+                request_extra_fields=request.extra_fields,
+            )
