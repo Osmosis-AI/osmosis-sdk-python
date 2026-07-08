@@ -80,9 +80,7 @@ class LocalBackend(ExecutionBackend):
         on_grader_complete: ResultCallback | None = None,
     ) -> None:
         async with self.limiter.acquire():
-            artifacts_dir = self._make_artifacts_dir(request.id)
-
-            result = await self.run_workflow(request, artifacts_dir)
+            result = await self.run_workflow(request)
             await on_workflow_complete(result)
 
             if not on_grader_complete:
@@ -93,13 +91,13 @@ class LocalBackend(ExecutionBackend):
                 and (request.label is not None or request.metadata is not None)
                 and result.status == RolloutStatus.SUCCESS
             ):
-                graded = await self.run_grader(request, result, artifacts_dir)
+                graded = await self.run_grader(request, result)
                 await on_grader_complete(graded)
             else:
                 await on_grader_complete(ExecutionResult(status=RolloutStatus.FAILURE))
 
     def _make_artifacts_dir(self, rollout_id: str) -> Path | None:
-        """Create the rollout's artifacts dir; ``None`` if it can't be created."""
+        """Idempotently create the rollout's artifacts dir; ``None`` on failure."""
         artifacts_dir = (
             self.artifact_root
             / rollout_id
@@ -117,15 +115,13 @@ class LocalBackend(ExecutionBackend):
             return None
         return artifacts_dir
 
-    async def run_workflow(
-        self, request: ExecutionRequest, artifacts_dir: Path | None = None
-    ) -> ExecutionResult:
+    async def run_workflow(self, request: ExecutionRequest) -> ExecutionResult:
         config = copy.deepcopy(self.workflow_config)
         ctx = AgentWorkflowContext(
             prompt=request.prompt,
             config=config,
             metadata=request.metadata,
-            artifacts_dir=artifacts_dir,
+            artifacts_dir=self._make_artifacts_dir(request.id),
         )
 
         rollout_ctx = get_rollout_context()
@@ -150,10 +146,7 @@ class LocalBackend(ExecutionBackend):
         )
 
     async def run_grader(
-        self,
-        request: ExecutionRequest,
-        result: ExecutionResult,
-        artifacts_dir: Path | None = None,
+        self, request: ExecutionRequest, result: ExecutionResult
     ) -> ExecutionResult:
         if not self.grader_cls:
             return result
@@ -162,7 +155,7 @@ class LocalBackend(ExecutionBackend):
             label=request.label,
             samples=result.samples,
             metadata=request.metadata,
-            artifacts_dir=artifacts_dir,
+            artifacts_dir=self._make_artifacts_dir(request.id),
         )
         try:
             grader = self.grader_cls(self.grader_config)
