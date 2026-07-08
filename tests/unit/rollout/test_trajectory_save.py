@@ -5,7 +5,7 @@ from pathlib import Path
 
 from osmosis_ai.rollout.trajectory import save_trajectories
 from osmosis_ai.rollout.trajectory.report import (
-    LlmCall,
+    LlmCallMetrics,
     SampleReport,
     TrajectoryReport,
 )
@@ -97,7 +97,7 @@ async def test_report_is_dispatched_per_sample(tmp_path: Path) -> None:
         model_name="rollout-model",
         samples={
             "s1": SampleReport(
-                llm_calls=[LlmCall(prompt_tokens=10, completion_tokens=5)]
+                llm_call_metrics=[LlmCallMetrics(prompt_tokens=10, completion_tokens=5)]
             )
         },
     )
@@ -121,7 +121,11 @@ async def test_single_entry_report_matches_single_sample_regardless_of_key(
     tmp_path: Path,
 ) -> None:
     report = TrajectoryReport(
-        samples={"whatever": SampleReport(llm_calls=[LlmCall(prompt_tokens=10)])}
+        samples={
+            "whatever": SampleReport(
+                llm_call_metrics=[LlmCallMetrics(prompt_tokens=10)]
+            )
+        }
     )
 
     await save_trajectories(
@@ -141,8 +145,8 @@ async def test_unmatched_entries_are_preserved_for_single_sample_rollouts(
 ) -> None:
     report = TrajectoryReport(
         samples={
-            "s1": SampleReport(llm_calls=[LlmCall(prompt_tokens=10)]),
-            "judge": SampleReport(llm_calls=[LlmCall(prompt_tokens=99)]),
+            "s1": SampleReport(llm_call_metrics=[LlmCallMetrics(prompt_tokens=10)]),
+            "judge": SampleReport(llm_call_metrics=[LlmCallMetrics(prompt_tokens=99)]),
         }
     )
 
@@ -156,7 +160,7 @@ async def test_unmatched_entries_are_preserved_for_single_sample_rollouts(
     doc = json.loads((tmp_path / "r1" / "trajectory.json").read_text())
     assert doc["final_metrics"]["total_prompt_tokens"] == 10
     assert doc["extra"]["osmosis"]["unmatched_sample_reports"] == {
-        "judge": {"llm_calls": [{"prompt_tokens": 99}]}
+        "judge": {"llm_call_metrics": [{"prompt_tokens": 99}]}
     }
     assert any("unknown sample ids" in r.message for r in caplog.records)
 
@@ -165,7 +169,9 @@ async def test_unmatched_entries_are_dropped_for_multi_sample_rollouts(
     tmp_path: Path, caplog
 ) -> None:
     report = TrajectoryReport(
-        samples={"nope": SampleReport(llm_calls=[LlmCall(prompt_tokens=10)])}
+        samples={
+            "nope": SampleReport(llm_call_metrics=[LlmCallMetrics(prompt_tokens=10)])
+        }
     )
 
     await save_trajectories(

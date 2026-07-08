@@ -21,7 +21,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 logger: logging.Logger = logging.getLogger(__name__)
 
 
-class LlmCall(BaseModel):
+class LlmCallMetrics(BaseModel):
     """Metrics for one LLM inference, in dispatch order.
 
     Fields mirror ATIF's ``Metrics`` slots 1:1 (``model_name`` maps onto
@@ -46,7 +46,7 @@ class SampleReport(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     model_name: str | None = None
-    llm_calls: list[LlmCall] = Field(default_factory=list)
+    llm_call_metrics: list[LlmCallMetrics] = Field(default_factory=list)
     final_metrics: dict[str, Any] | None = None
 
 

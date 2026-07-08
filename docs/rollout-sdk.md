@@ -121,7 +121,7 @@ ATIF has first-class slots for LLM operational data (`Step.metrics`, `Step.model
 
 1. **Controller report (callback ack)** — the controller may attach a `trajectory` object to the JSON body of its completion/grader callback response ([report.py](../osmosis_ai/rollout/trajectory/report.py) defines the shape). Its LLM bridge serves every completion, so it is the party that has per-call usage.
    - **When to report**: snapshot the agent-phase calls into the **completion** ack, before resolving any internal future that triggers controller-side cleanup. Omit `trajectory` from the grader ack — an ack without a report keeps the earlier one, and grader-phase LLM calls (an LLM judge) would skew call counts and totals. A grader ack that does carry a report replaces the completion one entirely (no merge).
-   - **Attribution**: `llm_calls` map onto agent steps in dispatch order only when the counts match exactly; on a mismatch they are preserved under `extra.osmosis.llm_calls` instead of being mis-attributed, and totals still aggregate into `final_metrics`.
+   - **Attribution**: `llm_call_metrics` map onto agent steps in dispatch order only when the counts match exactly; on a mismatch they are preserved under `extra.osmosis.unmatched_llm_call_metrics` instead of being mis-attributed, and totals still aggregate into `final_metrics`.
    - **Sample keys**: use the rollout's sample ids (the SDK integrations send them as the `x-sample-id` header on every completion). A controller that cannot know them may key its only entry arbitrarily — with exactly one sample and one entry they match regardless of key. Other unmatched entries are logged and, for single-sample rollouts, preserved under `extra.osmosis.unmatched_sample_reports`.
 
 ```jsonc
@@ -132,13 +132,13 @@ ATIF has first-class slots for LLM operational data (`Step.metrics`, `Step.model
     "model_name": "openai/gpt-5-mini",
     "samples": {
       "<sample_id>": {
-        "llm_calls": [
+        "llm_call_metrics": [
           {"prompt_tokens": 120, "completion_tokens": 40, "cached_tokens": 0,
            "cost_usd": 0.0003, "logprobs": [-0.1], "model_name": "...",
            // exact engine tokenization (TITO); field names mirror ATIF Metrics
            "prompt_token_ids": [101, 102], "completion_token_ids": [103]}
         ],
-        "final_metrics": {"total_prompt_tokens": 120}   // optional; defaults to summing llm_calls
+        "final_metrics": {"total_prompt_tokens": 120}   // optional; defaults to summing llm_call_metrics
       }
     }
   }

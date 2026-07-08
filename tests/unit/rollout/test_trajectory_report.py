@@ -14,7 +14,7 @@ def test_parses_trajectory_object_from_ack_body() -> None:
                 "model_name": "openai/gpt-5-mini",
                 "samples": {
                     "s1": {
-                        "llm_calls": [
+                        "llm_call_metrics": [
                             {"prompt_tokens": 10, "completion_tokens": 5},
                             {"prompt_tokens": 20, "completion_tokens": 7},
                         ]
@@ -28,8 +28,8 @@ def test_parses_trajectory_object_from_ack_body() -> None:
 
     assert report is not None
     assert report.model_name == "openai/gpt-5-mini"
-    assert len(report.samples["s1"].llm_calls) == 2
-    assert report.samples["s1"].llm_calls[1].completion_tokens == 7
+    assert len(report.samples["s1"].llm_call_metrics) == 2
+    assert report.samples["s1"].llm_call_metrics[1].completion_tokens == 7
 
 
 def test_parses_token_ids_for_training_grade_reports() -> None:
@@ -39,7 +39,7 @@ def test_parses_token_ids_for_training_grade_reports() -> None:
             "trajectory": {
                 "samples": {
                     "s1": {
-                        "llm_calls": [
+                        "llm_call_metrics": [
                             {
                                 "prompt_token_ids": [101, 102],
                                 "completion_token_ids": [103],
@@ -55,10 +55,10 @@ def test_parses_token_ids_for_training_grade_reports() -> None:
     report = report_from_response(response)
 
     assert report is not None
-    call = report.samples["s1"].llm_calls[0]
-    assert call.prompt_token_ids == [101, 102]
-    assert call.completion_token_ids == [103]
-    assert call.logprobs == [-0.5]
+    entry = report.samples["s1"].llm_call_metrics[0]
+    assert entry.prompt_token_ids == [101, 102]
+    assert entry.completion_token_ids == [103]
+    assert entry.logprobs == [-0.5]
 
 
 def test_body_without_trajectory_yields_none() -> None:
@@ -72,7 +72,7 @@ def test_non_json_body_yields_none() -> None:
 
 def test_malformed_trajectory_yields_none() -> None:
     response = httpx.Response(
-        200, json={"trajectory": {"samples": {"s1": {"llm_calls": "oops"}}}}
+        200, json={"trajectory": {"samples": {"s1": {"llm_call_metrics": "oops"}}}}
     )
 
     assert report_from_response(response) is None
@@ -87,7 +87,7 @@ def test_unknown_keys_are_ignored() -> None:
             "trajectory": {
                 "model_name": "m",
                 "future_field": {"x": 1},
-                "samples": {"s1": {"llm_calls": [], "another_new_field": 2}},
+                "samples": {"s1": {"llm_call_metrics": [], "another_new_field": 2}},
             }
         },
     )

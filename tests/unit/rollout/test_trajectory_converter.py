@@ -6,7 +6,7 @@ from osmosis_ai.rollout.trajectory.converter import (
     convert_sample_to_trajectory,
     messages_to_steps,
 )
-from osmosis_ai.rollout.trajectory.report import LlmCall, SampleReport
+from osmosis_ai.rollout.trajectory.report import LlmCallMetrics, SampleReport
 from osmosis_ai.rollout.types import RolloutSample
 
 
@@ -255,15 +255,15 @@ def test_report_maps_calls_onto_agent_steps() -> None:
         rollout_id="r1",
         sample_id="s1",
         report=SampleReport(
-            llm_calls=[
-                LlmCall(
+            llm_call_metrics=[
+                LlmCallMetrics(
                     prompt_tokens=10,
                     completion_tokens=5,
                     logprobs=[-0.1],
                     prompt_token_ids=[101, 102],
                     completion_token_ids=[103],
                 ),
-                LlmCall(prompt_tokens=20, completion_tokens=7, model_name="m2"),
+                LlmCallMetrics(prompt_tokens=20, completion_tokens=7, model_name="m2"),
             ]
         ),
         default_model_name="m1",
@@ -288,12 +288,14 @@ def test_mismatched_call_count_is_preserved_not_guessed() -> None:
         make_sample(two_turn_messages()),
         rollout_id="r1",
         sample_id="s1",
-        report=SampleReport(llm_calls=[LlmCall(prompt_tokens=10)]),
+        report=SampleReport(llm_call_metrics=[LlmCallMetrics(prompt_tokens=10)]),
     )
 
     assert all(s.metrics is None for s in trajectory.steps)
     assert trajectory.extra is not None
-    assert trajectory.extra["osmosis"]["llm_calls"] == [{"prompt_tokens": 10}]
+    assert trajectory.extra["osmosis"]["unmatched_llm_call_metrics"] == [
+        {"prompt_tokens": 10}
+    ]
     # Totals still aggregate even without per-step attribution.
     assert trajectory.final_metrics is not None
     assert trajectory.final_metrics.total_prompt_tokens == 10
@@ -305,7 +307,10 @@ def test_explicit_final_metrics_win_over_summation() -> None:
         rollout_id="r1",
         sample_id="s1",
         report=SampleReport(
-            llm_calls=[LlmCall(prompt_tokens=1), LlmCall(prompt_tokens=2)],
+            llm_call_metrics=[
+                LlmCallMetrics(prompt_tokens=1),
+                LlmCallMetrics(prompt_tokens=2),
+            ],
             final_metrics={"total_prompt_tokens": 99},
         ),
     )
@@ -332,13 +337,13 @@ def test_unmatched_sample_reports_are_preserved_in_extra() -> None:
         rollout_id="r1",
         sample_id="s1",
         unmatched_sample_reports={
-            "judge": SampleReport(llm_calls=[LlmCall(prompt_tokens=3)])
+            "judge": SampleReport(llm_call_metrics=[LlmCallMetrics(prompt_tokens=3)])
         },
     )
 
     assert trajectory.extra is not None
     assert trajectory.extra["osmosis"]["unmatched_sample_reports"] == {
-        "judge": {"llm_calls": [{"prompt_tokens": 3}]}
+        "judge": {"llm_call_metrics": [{"prompt_tokens": 3}]}
     }
 
 

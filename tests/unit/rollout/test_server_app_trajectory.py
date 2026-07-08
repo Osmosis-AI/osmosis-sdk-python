@@ -195,7 +195,9 @@ async def test_callback_ack_report_lands_in_document(
                     "model_name": "openai/gpt-5-mini",
                     "samples": {
                         "s1": {
-                            "llm_calls": [{"prompt_tokens": 12, "completion_tokens": 4}]
+                            "llm_call_metrics": [
+                                {"prompt_tokens": 12, "completion_tokens": 4}
+                            ]
                         }
                     },
                 },

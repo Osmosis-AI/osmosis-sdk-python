@@ -22,7 +22,7 @@ from harbor.models.trajectories import (
 from pydantic import ValidationError
 
 from osmosis_ai.consts import PACKAGE_VERSION
-from osmosis_ai.rollout.trajectory.report import LlmCall, SampleReport
+from osmosis_ai.rollout.trajectory.report import LlmCallMetrics, SampleReport
 from osmosis_ai.rollout.types import RolloutSample
 
 logger: logging.Logger = logging.getLogger(__name__)
@@ -57,7 +57,7 @@ def convert_sample_to_trajectory(
     no sample, preserved under ``extra``.
     """
     steps = messages_to_steps(sample.messages)
-    unmatched_calls = _apply_report(steps, report)
+    unmatched_llm_call_metrics = _apply_report(steps, report)
     model_name = (report.model_name if report else None) or default_model_name
     unmatched_reports: dict[str, Any] | None = None
     if unmatched_sample_reports:
@@ -80,7 +80,7 @@ def convert_sample_to_trajectory(
             request_label=request_label,
             request_metadata=request_metadata,
             request_extra_fields=request_extra_fields,
-            unmatched_llm_calls=unmatched_calls,
+            unmatched_llm_call_metrics=unmatched_llm_call_metrics,
             unmatched_sample_reports=unmatched_reports,
         ),
     )
@@ -226,31 +226,31 @@ def _apply_report(
 ) -> list[dict[str, Any]] | None:
     """Overlay per-call metrics onto agent steps in dispatch order.
 
-    Only when the counts match exactly; otherwise the calls are returned
+    Only when the counts match exactly; otherwise the metrics are returned
     for preservation under ``extra`` rather than mis-attributed.
     """
-    if report is None or not report.llm_calls:
+    if report is None or not report.llm_call_metrics:
         return None
     agent_steps = [step for step in steps if step.source == "agent"]
-    if len(agent_steps) != len(report.llm_calls):
-        return [call.model_dump(exclude_none=True) for call in report.llm_calls]
-    for step, call in zip(agent_steps, report.llm_calls, strict=True):
-        step.metrics = _metrics_from_call(call) or step.metrics
-        step.model_name = call.model_name or step.model_name
+    if len(agent_steps) != len(report.llm_call_metrics):
+        return [e.model_dump(exclude_none=True) for e in report.llm_call_metrics]
+    for step, entry in zip(agent_steps, report.llm_call_metrics, strict=True):
+        step.metrics = _metrics_from_report_entry(entry) or step.metrics
+        step.model_name = entry.model_name or step.model_name
         step.llm_call_count = 1
     return None
 
 
-def _metrics_from_call(call: LlmCall) -> Metrics | None:
+def _metrics_from_report_entry(entry: LlmCallMetrics) -> Metrics | None:
     metrics = Metrics(
-        prompt_tokens=call.prompt_tokens,
-        completion_tokens=call.completion_tokens,
-        cached_tokens=call.cached_tokens,
-        cost_usd=call.cost_usd,
-        prompt_token_ids=call.prompt_token_ids,
-        completion_token_ids=call.completion_token_ids,
-        logprobs=call.logprobs,
-        extra=call.extra,
+        prompt_tokens=entry.prompt_tokens,
+        completion_tokens=entry.completion_tokens,
+        cached_tokens=entry.cached_tokens,
+        cost_usd=entry.cost_usd,
+        prompt_token_ids=entry.prompt_token_ids,
+        completion_token_ids=entry.completion_token_ids,
+        logprobs=entry.logprobs,
+        extra=entry.extra,
     )
     return metrics if metrics.model_dump(exclude_none=True) else None
 
@@ -267,13 +267,15 @@ def _final_metrics_from_report(report: SampleReport | None) -> FinalMetrics | No
                 "Ignoring malformed final_metrics in trajectory report",
                 exc_info=True,
             )
-    if not report.llm_calls:
+    if not report.llm_call_metrics:
         return None
-    calls = report.llm_calls
-    prompt = [c.prompt_tokens for c in calls if c.prompt_tokens is not None]
-    completion = [c.completion_tokens for c in calls if c.completion_tokens is not None]
-    cached = [c.cached_tokens for c in calls if c.cached_tokens is not None]
-    cost = [c.cost_usd for c in calls if c.cost_usd is not None]
+    entries = report.llm_call_metrics
+    prompt = [e.prompt_tokens for e in entries if e.prompt_tokens is not None]
+    completion = [
+        e.completion_tokens for e in entries if e.completion_tokens is not None
+    ]
+    cached = [e.cached_tokens for e in entries if e.cached_tokens is not None]
+    cost = [e.cost_usd for e in entries if e.cost_usd is not None]
     totals = FinalMetrics(
         total_prompt_tokens=sum(prompt) if prompt else None,
         total_completion_tokens=sum(completion) if completion else None,
@@ -374,7 +376,7 @@ def _compose_extra(
     request_label: str | None,
     request_metadata: dict[str, Any] | None,
     request_extra_fields: dict[str, Any] | None,
-    unmatched_llm_calls: list[dict[str, Any]] | None,
+    unmatched_llm_call_metrics: list[dict[str, Any]] | None,
     unmatched_sample_reports: dict[str, Any] | None,
 ) -> dict[str, Any]:
     """Namespace all Osmosis platform context under ``extra["osmosis"]``."""
@@ -387,7 +389,7 @@ def _compose_extra(
         "sample_extra_fields": sample.extra_fields or None,
         "request_metadata": request_metadata,
         "request_extra_fields": request_extra_fields,
-        "llm_calls": unmatched_llm_calls,
+        "unmatched_llm_call_metrics": unmatched_llm_call_metrics,
         "unmatched_sample_reports": unmatched_sample_reports,
     }
     return {"osmosis": {k: v for k, v in osmosis.items() if v is not None}}
