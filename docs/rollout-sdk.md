@@ -81,7 +81,7 @@ samples = await rollout_ctx.get_samples()            # async -> {name: RolloutSa
 
 Artifacts are files produced by a rollout — logs, traces, generated outputs, screenshots, or other large/binary data that does not belong in the sample.
 
-There is one rule: write files under `ctx.artifacts_dir` (available on both `AgentWorkflowContext` and `GraderContext`). It normally exists before your code runs, but is `Path | None` — it can be `None` when the host directory could not be created — so guard before use. In Harbor-backed rollouts it is the sandbox's `/logs/artifacts/`; `LocalBackend` provides an isolated per-rollout directory. If a file is produced elsewhere, copy it in (`shutil.copy2(path, ctx.artifacts_dir / "name")`).
+There is one rule: write files under `ctx.artifacts_dir` (available on both `AgentWorkflowContext` and `GraderContext`). It is `Path | None`, so check `if ctx.artifacts_dir:` before using it. In Harbor-backed rollouts it is the sandbox's `/logs/artifacts/`; `LocalBackend` provides an isolated per-rollout directory. If a file is produced elsewhere, copy it in once you've confirmed the dir exists (`if ctx.artifacts_dir: shutil.copy2(path, ctx.artifacts_dir / "name")`).
 
 ```python
 import json
@@ -95,7 +95,9 @@ async def grade(self, ctx: GraderContext) -> Any:
         ctx.set_sample_reward(sample_id, 1.0)
 ```
 
-After each rollout the artifacts land on the host under `~/.osmosis/<rollout_id>/artifacts/`, mirroring Harbor's collected-trial layout (user files sit at `.../artifacts/logs/artifacts/<file>`). Artifact handling is best-effort and never affects rewards or rollout status.
+After each rollout the artifacts land on the host under `~/.osmosis/<rollout_id>/artifacts/`. `LocalBackend` writes your files at that root. Harbor mirrors its collected-trial layout, so the `/logs/artifacts/` convention dir lands at `.../artifacts/logs/artifacts/<file>`, next to any paths you declare in the task's `artifacts` config.
+
+The backend's directory setup and collection is best-effort and never affects rewards or rollout status. Writes you make in `run` or `grade` run as normal code. An unguarded write that raises will fail that workflow or grader, so always check `if ctx.artifacts_dir:` before writing to it.
 
 ## Trajectory saving
 

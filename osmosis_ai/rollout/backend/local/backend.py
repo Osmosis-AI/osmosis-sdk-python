@@ -23,7 +23,7 @@ from osmosis_ai.rollout.types import (
 )
 from osmosis_ai.rollout.utils.concurrency import ConcurrencyLimiter
 from osmosis_ai.rollout.utils.file_artifacts import (
-    HARBOR_COLLECTED_ARTIFACTS_SUBPATH,
+    create_rollout_artifacts_dir,
     default_artifact_root,
 )
 from osmosis_ai.rollout.utils.imports import resolve_object
@@ -96,32 +96,15 @@ class LocalBackend(ExecutionBackend):
             else:
                 await on_grader_complete(ExecutionResult(status=RolloutStatus.FAILURE))
 
-    def _make_artifacts_dir(self, rollout_id: str) -> Path | None:
-        """Idempotently create the rollout's artifacts dir; ``None`` on failure."""
-        artifacts_dir = (
-            self.artifact_root
-            / rollout_id
-            / "artifacts"
-            / HARBOR_COLLECTED_ARTIFACTS_SUBPATH
-        )
-        try:
-            artifacts_dir.mkdir(parents=True, exist_ok=True)
-        except OSError:
-            logger.warning(
-                "Failed to create artifacts dir for rollout %s (best-effort)",
-                rollout_id,
-                exc_info=True,
-            )
-            return None
-        return artifacts_dir
-
     async def run_workflow(self, request: ExecutionRequest) -> ExecutionResult:
         config = copy.deepcopy(self.workflow_config)
         ctx = AgentWorkflowContext(
             prompt=request.prompt,
             config=config,
             metadata=request.metadata,
-            artifacts_dir=self._make_artifacts_dir(request.id),
+            artifacts_dir=await create_rollout_artifacts_dir(
+                self.artifact_root, request.id
+            ),
         )
 
         rollout_ctx = get_rollout_context()
@@ -155,7 +138,9 @@ class LocalBackend(ExecutionBackend):
             label=request.label,
             samples=result.samples,
             metadata=request.metadata,
-            artifacts_dir=self._make_artifacts_dir(request.id),
+            artifacts_dir=await create_rollout_artifacts_dir(
+                self.artifact_root, request.id
+            ),
         )
         try:
             grader = self.grader_cls(self.grader_config)

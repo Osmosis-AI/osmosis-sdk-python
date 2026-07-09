@@ -145,14 +145,17 @@ class TestLocalBackend:
         await backend.execute(request, AsyncMock(), AsyncMock())
 
         root = tmp_path / ".osmosis"
-        rollout_dir = root / "r1" / "artifacts" / "logs" / "artifacts"
-        assert (rollout_dir / "trace.txt").read_text() == "trace"
-        assert (rollout_dir / "grade_debug.json").read_text() == "{}"
+        artifacts_dir = root / "r1" / "artifacts"
+        assert (artifacts_dir / "trace.txt").read_text() == "trace"
+        assert (artifacts_dir / "grade_debug.json").read_text() == "{}"
 
     async def test_rollout_degrades_when_artifacts_dir_unavailable(
         self, tmp_path, monkeypatch
     ):
         monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setattr(
+            "osmosis_ai.rollout.utils.file_artifacts.CREATE_BACKOFF_SECONDS", 0
+        )
 
         def _boom(self, *_args, **_kwargs):
             raise OSError("read-only filesystem")
