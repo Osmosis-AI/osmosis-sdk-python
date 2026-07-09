@@ -393,6 +393,30 @@ def test_inline_usage_harbor_extra_response_shape() -> None:
     assert steps[0].metrics.completion_tokens == 2
 
 
+def test_inline_usage_zero_token_counts_are_preserved() -> None:
+    # 0 is a legitimate count and must not fall through to the other
+    # API's field name (or to None).
+    steps = _messages_to_steps(
+        [
+            {
+                "role": "assistant",
+                "content": "hello",
+                "usage": {
+                    "prompt_tokens": 0,
+                    "completion_tokens": 0,
+                    "input_tokens": 7,
+                    "output_tokens": 2,
+                    "cost_usd": 0.1,
+                },
+            }
+        ]
+    )
+
+    assert steps[0].metrics is not None
+    assert steps[0].metrics.prompt_tokens == 0
+    assert steps[0].metrics.completion_tokens == 0
+
+
 def test_inline_usage_ignored_on_non_agent_and_malformed() -> None:
     steps = _messages_to_steps(
         [

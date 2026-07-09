@@ -207,11 +207,19 @@ def _metrics_from_message(message: Mapping[str, Any]) -> Metrics | None:
         if isinstance(details, Mapping) and details:
             extra[key] = dict(details)
 
+    # `is None` (not `or`): a genuine 0 must not fall through to the other
+    # API's field name.
+    prompt_tokens = usage.get("prompt_tokens")
+    if prompt_tokens is None:
+        prompt_tokens = usage.get("input_tokens")
+    completion_tokens = usage.get("completion_tokens")
+    if completion_tokens is None:
+        completion_tokens = usage.get("output_tokens")
+
     try:
         metrics = Metrics(
-            prompt_tokens=usage.get("prompt_tokens") or usage.get("input_tokens"),
-            completion_tokens=usage.get("completion_tokens")
-            or usage.get("output_tokens"),
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
             cached_tokens=cached,
             cost_usd=usage.get("cost_usd"),
             extra=extra or None,
