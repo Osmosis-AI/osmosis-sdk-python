@@ -14,6 +14,7 @@ UNSAFE_IDS = [
     r"a\b",
     "/tmp/other",
     r"\tmp\other",
+    "a\x00b",
     "..",
     ".",
     "",
