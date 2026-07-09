@@ -2,7 +2,9 @@ from collections.abc import Mapping, Sequence
 from enum import StrEnum
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+from osmosis_ai.rollout.utils.identifiers import ensure_single_path_segment
 
 MessageDict = dict[str, Any]
 SampleMessage = Mapping[str, Any]
@@ -45,6 +47,12 @@ class ExecutionRequest(BaseModel):
     metadata: dict[str, Any] | None = None
     agent_timeout_sec: float | None = None
     grader_timeout_sec: float | None = None
+
+    @field_validator("id")
+    @classmethod
+    def _validate_id(cls, value: str) -> str:
+        # ``id`` is joined onto host paths by every backend.
+        return ensure_single_path_segment(value, label="rollout_id")
 
 
 class ExecutionResult(BaseModel):

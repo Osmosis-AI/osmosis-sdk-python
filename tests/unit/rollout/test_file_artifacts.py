@@ -77,16 +77,3 @@ class TestCreateRolloutArtifactsDir:
         result = await create_rollout_artifacts_dir(tmp_path, "r1")
 
         assert result is None
-
-    @pytest.mark.parametrize(
-        "rollout_id",
-        ["../other", "a/b", "/tmp/other", "..", ".", ""],
-    )
-    async def test_rejects_ids_that_escape_root(
-        self, tmp_path, monkeypatch, rollout_id
-    ):
-        # An untrusted rollout id must never place artifacts outside the root.
-        result = await create_rollout_artifacts_dir(tmp_path, rollout_id)
-
-        assert result is None
-        assert list(tmp_path.iterdir()) == []

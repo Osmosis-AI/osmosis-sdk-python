@@ -1,7 +1,7 @@
 from enum import StrEnum
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 from osmosis_ai.rollout.types.sample import (
     MessageDict,
@@ -9,6 +9,7 @@ from osmosis_ai.rollout.types.sample import (
     RolloutSample,
     RolloutStatus,
 )
+from osmosis_ai.rollout.utils.identifiers import ensure_single_path_segment
 
 
 class RolloutInitRequest(BaseModel):
@@ -30,6 +31,11 @@ class RolloutInitRequest(BaseModel):
     grader_timeout_sec: float | None = None
 
     extra_fields: dict[str, Any] | None = None
+
+    @field_validator("rollout_id")
+    @classmethod
+    def _validate_rollout_id(cls, value: str) -> str:
+        return ensure_single_path_segment(value, label="rollout_id")
 
 
 class RolloutInitResponse(BaseModel): ...
