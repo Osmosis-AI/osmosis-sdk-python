@@ -129,7 +129,7 @@ ATIF has first-class slots for LLM operational data (`Step.metrics`, `Step.model
 ```jsonc
 // response body of POST <completion_callback_url> or <grader_callback_url>
 {
-  "ok": true,
+  "status": "ok",
   "trajectory": {
     "model_name": "openai/gpt-5-mini",
     "samples": {
@@ -146,6 +146,8 @@ ATIF has first-class slots for LLM operational data (`Step.metrics`, `Step.model
   }
 }
 ```
+
+   The server reads only the `trajectory` key off the ack body; the surrounding ack fields — `status`, `ok`, or anything else the controller returns — are accepted and ignored.
 
 2. **Inline message metadata** — custom workflows that manage their own message list can copy `response.usage` / `response.model` onto the assistant message (top-level `usage`/`model` keys, or the `extra.response` shape harbor's converters read). Both chat-completions (`prompt_tokens`) and Responses API (`input_tokens`) field names are accepted, and `created_at`/`timestamp` fields become `Step.timestamp`. The controller report overrides inline metadata when both are present.
 
