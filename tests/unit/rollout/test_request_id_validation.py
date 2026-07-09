@@ -8,7 +8,16 @@ from pydantic import ValidationError
 
 from osmosis_ai.rollout.types import ExecutionRequest, RolloutInitRequest
 
-UNSAFE_IDS = ["../other", "a/b", "/tmp/other", "..", ".", ""]
+UNSAFE_IDS = [
+    "../other",
+    "a/b",
+    r"a\b",
+    "/tmp/other",
+    r"\tmp\other",
+    "..",
+    ".",
+    "",
+]
 SAFE_IDS = ["r1", "rollout-xyz", "abc_123", "550e8400-e29b-41d4-a716-446655440000"]
 
 

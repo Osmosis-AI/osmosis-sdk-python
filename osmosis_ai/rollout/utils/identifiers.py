@@ -2,15 +2,18 @@
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
+
+# Reject both POSIX and Windows separators so ids stay portable single segments
+# even when validated on Linux (where ``os.altsep`` is None).
+_PATH_SEPARATORS = ("/", "\\")
 
 
 def is_single_path_segment(name: str) -> bool:
     """True when ``name`` is a plain path component, not a traversal or root escape."""
     if not name or name in (".", ".."):
         return False
-    if os.sep in name or (os.altsep and os.altsep in name):
+    if any(sep in name for sep in _PATH_SEPARATORS):
         return False
     return Path(name).name == name
 
