@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from pathlib import Path
 
 logger: logging.Logger = logging.getLogger(__name__)
@@ -25,6 +26,20 @@ def default_artifact_root() -> Path:
     ``trajectory.json`` — which the platform persists to durable storage.
     """
     return Path.home() / ".osmosis"
+
+
+def _is_single_path_segment(name: str) -> bool:
+    """True when ``name`` is a plain path component, not a traversal or root escape.
+
+    ``rollout_id`` comes from the untrusted rollout request, so values like
+    ``../other`` or ``/tmp/other`` must not be joined onto the artifact root or
+    they'd let a rollout write outside its own directory.
+    """
+    if not name or name in (".", ".."):
+        return False
+    if os.sep in name or (os.altsep and os.altsep in name):
+        return False
+    return Path(name).name == name
 
 
 def _ensure_artifacts_dir(rollout_dir: Path) -> Path:
@@ -50,20 +65,28 @@ async def create_rollout_artifacts_dir(
     The check file is written outside ``artifacts/`` so it doesn't appear among
     the rollout's artifacts.
     """
+    if not _is_single_path_segment(rollout_id):
+        logger.warning(
+            "Refusing artifacts dir for rollout %r: id is not a single path "
+            "segment (best-effort)",
+            rollout_id,
+        )
+        return None
     rollout_dir = root / rollout_id
     total = attempts if attempts is not None else CREATE_ATTEMPTS
+    last_error: OSError | None = None
     for attempt in range(total):
         try:
             # Filesystem I/O may block; run it off the event loop.
             return await asyncio.to_thread(_ensure_artifacts_dir, rollout_dir)
-        except OSError:
-            if attempt == total - 1:
-                logger.warning(
-                    "Artifacts dir unusable for rollout %s under %s (best-effort)",
-                    rollout_id,
-                    root,
-                    exc_info=True,
-                )
-                return None
-            await asyncio.sleep(CREATE_BACKOFF_SECONDS * (2**attempt))
+        except OSError as error:
+            last_error = error
+            if attempt < total - 1:
+                await asyncio.sleep(CREATE_BACKOFF_SECONDS * (2**attempt))
+    logger.warning(
+        "Artifacts dir unusable for rollout %s under %s (best-effort)",
+        rollout_id,
+        root,
+        exc_info=last_error,
+    )
     return None
