@@ -417,6 +417,20 @@ def test_inline_usage_zero_token_counts_are_preserved() -> None:
     assert steps[0].metrics.completion_tokens == 0
 
 
+def test_malformed_tool_calls_values_are_ignored() -> None:
+    # Non-sequence / string values must be dropped, not abort conversion.
+    steps = _messages_to_steps(
+        [
+            {"role": "assistant", "content": "a", "tool_calls": 42},
+            {"role": "assistant", "content": "b", "tool_calls": True},
+            {"role": "assistant", "content": "c", "tool_calls": "call_1"},
+            {"role": "assistant", "content": "d", "tool_calls": {"id": "call_1"}},
+        ]
+    )
+
+    assert [step.tool_calls for step in steps] == [None, None, None, None]
+
+
 def test_inline_usage_ignored_on_non_agent_and_malformed() -> None:
     steps = _messages_to_steps(
         [

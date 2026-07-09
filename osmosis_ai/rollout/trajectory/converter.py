@@ -331,7 +331,8 @@ def _attach_tool_result(steps: list[Step], message: Mapping[str, Any]) -> None:
 
 
 def _convert_tool_calls(raw: Any) -> list[ToolCall] | None:
-    if not raw:
+    # Best-effort: a malformed tool_calls value must not fail the document.
+    if not raw or isinstance(raw, str) or not isinstance(raw, Sequence):
         return None
     calls: list[ToolCall] = []
     for index, item in enumerate(raw):
