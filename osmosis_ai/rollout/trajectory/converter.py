@@ -250,17 +250,14 @@ def _apply_report(
 
 
 def _metrics_from_report_entry(entry: LlmCallMetrics) -> Metrics | None:
-    metrics = Metrics(
-        prompt_tokens=entry.prompt_tokens,
-        completion_tokens=entry.completion_tokens,
-        cached_tokens=entry.cached_tokens,
-        cost_usd=entry.cost_usd,
-        prompt_token_ids=entry.prompt_token_ids,
-        completion_token_ids=entry.completion_token_ids,
-        logprobs=entry.logprobs,
-        extra=entry.extra,
-    )
-    return metrics if metrics.model_dump(exclude_none=True) else None
+    # model_name is the one report field that lives on the Step, not in
+    # Metrics. Mechanical dump keeps the schemas in lockstep: a field added
+    # to LlmCallMetrics but missing from Metrics fails loudly (extra=forbid)
+    # instead of being silently dropped.
+    payload = entry.model_dump(exclude={"model_name"}, exclude_none=True)
+    if not payload:
+        return None
+    return Metrics.model_validate(payload)
 
 
 def _final_metrics_from_report(report: SampleReport | None) -> FinalMetrics | None:

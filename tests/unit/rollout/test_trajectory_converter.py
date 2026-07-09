@@ -2,6 +2,8 @@
 
 from typing import Any
 
+from harbor.models.trajectories import Metrics
+
 from osmosis_ai.rollout.trajectory.converter import (
     _messages_to_steps,
     convert_sample_to_trajectory,
@@ -247,6 +249,14 @@ def two_turn_messages() -> list[dict[str, Any]]:
         {"role": "user", "content": "more"},
         {"role": "assistant", "content": "done"},
     ]
+
+
+def test_llm_call_metrics_mirrors_harbor_metrics() -> None:
+    """Guards the wire/storage schema boundary: if a harbor upgrade adds a
+    Metrics field, LlmCallMetrics (and its conversion) must follow suit."""
+    assert set(LlmCallMetrics.model_fields) - {"model_name"} == set(
+        Metrics.model_fields
+    )
 
 
 def test_report_maps_calls_onto_agent_steps() -> None:
