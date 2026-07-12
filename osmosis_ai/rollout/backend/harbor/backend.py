@@ -457,10 +457,16 @@ class HarborBackend(ExecutionBackend):
             if dest_dir.exists():
                 shutil.rmtree(dest_dir)
             dest_dir.parent.mkdir(parents=True, exist_ok=True)
+            # Copy file *contents* only, never metadata. The artifact root is
+            # frequently a mounted object store (e.g. mountpoint-s3) that rejects
+            # the chmod/utime that copystat() performs with EPERM. copytree() and
+            # move() call copystat() on every file *and* the destination dir, so a
+            # single EPERM there previously failed the whole relocation and
+            # silently dropped the trial's artifacts + logs — precisely the data
+            # needed to debug a failed trial. A content-only copy sidesteps that.
+            _copy_tree_contents_only(source_dir, dest_dir)
             if move:
-                shutil.move(source_dir, dest_dir)
-            else:
-                shutil.copytree(source_dir, dest_dir, symlinks=False)
+                shutil.rmtree(source_dir, ignore_errors=True)
         except OSError:
             logger.warning(
                 "Failed to relocate trial artifacts for rollout %s (best-effort)",
@@ -488,6 +494,19 @@ class HarborBackend(ExecutionBackend):
         if not pending.workflow_complete_called:
             if event.result and event.result.exception_info:
                 err = event.result.exception_info
+                # Surface the harbor trial failure (e.g. an environment/sandbox
+                # launch error) to stdout/CloudWatch. Harbor otherwise only
+                # records it in the trial dir, which may be lost if the task is
+                # torn down or artifact relocation fails.
+                logger.error(
+                    "Harbor trial %s failed before the agent completed [%s]: %s\n%s",
+                    rollout_id,
+                    getattr(err, "exception_type", "?"),
+                    err.exception_message,
+                    getattr(err, "exception_traceback", "")
+                    or getattr(err, "traceback", "")
+                    or "",
+                )
                 result = ExecutionResult(
                     status=RolloutStatus.FAILURE,
                     err_message=err.exception_message,
@@ -537,6 +556,15 @@ class HarborBackend(ExecutionBackend):
                     )
             elif event.result and event.result.exception_info:
                 err = event.result.exception_info
+                logger.error(
+                    "Harbor trial %s failed [%s]: %s\n%s",
+                    rollout_id,
+                    getattr(err, "exception_type", "?"),
+                    err.exception_message,
+                    getattr(err, "exception_traceback", "")
+                    or getattr(err, "traceback", "")
+                    or "",
+                )
                 result = ExecutionResult(
                     status=RolloutStatus.FAILURE,
                     samples=samples,
@@ -558,6 +586,24 @@ class HarborBackend(ExecutionBackend):
 
         if not pending.done.done():
             pending.done.set_result(None)
+
+
+def _copy_tree_contents_only(src: Path, dst: Path) -> None:
+    """Recursively copy a directory tree copying only file *contents*.
+
+    Unlike ``shutil.copytree`` / ``shutil.copy2``, this never calls
+    ``copystat`` (chmod/utime), which mounted object stores such as
+    mountpoint-s3 reject with EPERM. Used to persist trial artifacts to an
+    object-store-backed artifact root without the metadata copy that would
+    otherwise fail and drop the artifacts.
+    """
+    dst.mkdir(parents=True, exist_ok=True)
+    for entry in src.iterdir():
+        target = dst / entry.name
+        if entry.is_dir():
+            _copy_tree_contents_only(entry, target)
+        else:
+            shutil.copyfile(entry, target)
 
 
 def ensure_import_path(ref: Any) -> str:
