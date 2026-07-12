@@ -325,6 +325,17 @@ class NativeHarborBackend(ExecutionBackend):
             llm_kwargs: dict[str, Any] = dict(kwargs.get("llm_kwargs") or {})
             if api_key:
                 llm_kwargs["api_key"] = api_key
+            # The controller's LLM bridge requires per-rollout/per-sample
+            # attribution headers on every completion (else 400 "x-rollout-id and
+            # x-sample-id headers are required"). Osmosis's own agents set these via
+            # the SDK LLM client; a harbor agent (terminus-2) reaches the bridge
+            # through litellm directly, so inject them as litellm extra_headers. A
+            # native trial produces exactly one sample, so both ids are the rollout
+            # id -- which is also the key the grader emits the sample under.
+            extra_headers: dict[str, str] = dict(llm_kwargs.get("extra_headers") or {})
+            extra_headers.setdefault("x-rollout-id", request.id)
+            extra_headers.setdefault("x-sample-id", request.id)
+            llm_kwargs["extra_headers"] = extra_headers
             # TODO(temporary): in-process agents need JSON; pin stream=False in extra_body
             # (setdefault, so a user stream wins). REMOVE when controllers send JSON.
             extra_body: dict[str, Any] = dict(llm_kwargs.get("extra_body") or {})
