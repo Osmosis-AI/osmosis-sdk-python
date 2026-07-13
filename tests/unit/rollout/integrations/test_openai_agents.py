@@ -182,6 +182,11 @@ class TestOpenAIAgentsIntegration:
         assert response.usage.input_tokens == 3
         assert response.usage.output_tokens == 5
         assert response.usage.total_tokens == 8
+        assert response.usage.input_tokens_details.cached_tokens == 0
+        assert (
+            getattr(response.usage.input_tokens_details, "cache_write_tokens", 0) == 0
+        )
+        assert response.usage.output_tokens_details.reasoning_tokens == 0
 
     async def test_upstream_runner_run_records_session_sample(
         self, rollout_context, monkeypatch
