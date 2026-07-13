@@ -2,6 +2,9 @@
 
 import json
 from pathlib import Path
+from typing import Any
+
+from harbor.utils.trajectory_utils import format_trajectory_json
 
 from osmosis_ai.rollout.trajectory import save_trajectories
 from osmosis_ai.rollout.trajectory.report import (
@@ -98,6 +101,29 @@ async def test_save_never_raises(tmp_path: Path) -> None:
         result=make_result(s1=make_sample("s1")),
         artifact_root=tmp_path,
     )
+
+
+async def test_one_failed_document_does_not_block_later_samples(
+    tmp_path: Path, monkeypatch, caplog
+) -> None:
+    def failing_format(payload: dict[str, Any]) -> str:
+        if payload["trajectory_id"] == "r1/a":
+            raise ValueError("unserializable sample")
+        return format_trajectory_json(payload)
+
+    monkeypatch.setattr(
+        "osmosis_ai.rollout.trajectory.save.format_trajectory_json", failing_format
+    )
+
+    await save_trajectories(
+        rollout_id="r1",
+        result=make_result(a=make_sample("a"), b=make_sample("b")),
+        artifact_root=tmp_path,
+    )
+
+    assert not (tmp_path / "r1" / "trajectory-a.json").exists()
+    assert (tmp_path / "r1" / "trajectory-b.json").exists()
+    assert any("Failed to write trajectory" in r.message for r in caplog.records)
 
 
 async def test_sample_id_is_sanitized_for_filenames(tmp_path: Path) -> None:

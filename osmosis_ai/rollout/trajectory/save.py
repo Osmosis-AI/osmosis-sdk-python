@@ -156,9 +156,19 @@ async def _save(
             if single
             else f"trajectory-{_safe_segment(sample_id)}.json"
         )
-        # Harbor's formatter keeps numeric arrays on one line.
-        data = format_trajectory_json(trajectory.to_json_dict()).encode()
-        await asyncio.to_thread(_write_document, dest_dir / name, data)
+        try:
+            # Harbor's formatter keeps numeric arrays on one line.
+            data = format_trajectory_json(trajectory.to_json_dict()).encode()
+            await asyncio.to_thread(_write_document, dest_dir / name, data)
+        except Exception:
+            logger.warning(
+                "Failed to write trajectory document for sample %s of rollout %s "
+                "(best-effort)",
+                sample_id,
+                rollout_id,
+                exc_info=True,
+            )
+            continue
         written += 1
 
     if written:

@@ -172,6 +172,41 @@ async def test_records_even_when_backend_raises(tmp_path: Path, monkeypatch) -> 
     assert failure_payloads
 
 
+async def test_failure_completion_ack_report_lands_in_document(
+    tmp_path: Path, monkeypatch
+) -> None:
+    # The backend dies after the workflow completed; only the ack of the
+    # resulting failure completion callback carries the controller's metrics.
+    report_body = {
+        "trajectory": {
+            "model_name": "openai/gpt-5-mini",
+            "samples": {"s1": {"llm_call_metrics": [{"prompt_tokens": 12}]}},
+        }
+    }
+
+    async def fake_post(
+        *, url: str, payload: dict[str, Any], headers: Any = None
+    ) -> Any:
+        body = report_body if payload.get("status") == "failure" else {"ok": True}
+        return SimpleNamespace(status_code=200, json=lambda: body)
+
+    monkeypatch.setattr("osmosis_ai.rollout.server.app.post_json_with_retry", fake_post)
+    patch_artifact_root(monkeypatch, tmp_path)
+    backend = StubBackend(
+        workflow_result=ExecutionResult(
+            status=RolloutStatus.SUCCESS, samples={"s1": make_sample()}
+        ),
+        raises=RuntimeError("boom"),
+    )
+
+    await _handle_rollout(backend, make_request(grader_callback_url=None))
+
+    doc = json.loads((tmp_path / "r1" / "trajectory.json").read_text())
+    assert doc["agent"]["model_name"] == "openai/gpt-5-mini"
+    agent_steps = [s for s in doc["steps"] if s["source"] == "agent"]
+    assert agent_steps[0]["metrics"]["prompt_tokens"] == 12
+
+
 async def test_backend_failure_without_samples_records_nothing(
     tmp_path: Path, monkeypatch
 ) -> None:

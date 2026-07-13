@@ -144,7 +144,7 @@ async def _handle_rollout(
             "Rollout %s failed: %s", request.rollout_id, traceback.format_exc()
         )
         try:
-            await post_json_with_retry(
+            resp = await post_json_with_retry(
                 url=request.completion_callback_url,
                 payload=RolloutCompleteRequest(
                     rollout_id=request.rollout_id,
@@ -153,6 +153,7 @@ async def _handle_rollout(
                 ).model_dump(),
                 headers=auth.as_bearer_headers(),
             )
+            report = report_from_response(resp) or report
         except Exception:
             logger.error("Failed to post error callback: %s", traceback.format_exc())
         if request.grader_callback_url:
