@@ -1,13 +1,15 @@
+import logging
 import uuid
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Mapping, Sequence
 from contextvars import ContextVar
-from typing import Any
+from typing import Any, cast
 
 from agents import Agent
 from agents.extensions.models.litellm_model import LitellmModel
 from agents.items import ModelResponse, TResponseInputItem, TResponseStreamEvent
 from agents.memory.session import SessionABC
 from agents.model_settings import ModelSettings
+from agents.models.chatcmpl_converter import Converter
 from agents.usage import Usage
 from openai.types.responses.response_usage import (
     InputTokensDetails,
@@ -16,6 +18,8 @@ from openai.types.responses.response_usage import (
 
 from osmosis_ai.rollout.context import SampleSource, get_rollout_context
 from osmosis_ai.rollout.types import RolloutSample
+
+logger: logging.Logger = logging.getLogger(__name__)
 
 current_sample_id: ContextVar[str | None] = ContextVar(
     "osmosis_current_sample_id", default=None
@@ -85,21 +89,44 @@ class SessionSampleSource(SampleSource):
 
     Works against any ``SessionABC`` by returning the items the runner
     persisted via ``add_items`` (canonical Responses-API ``TResponseInputItem``
-    shape). We deliberately do not run ``Converter.items_to_messages`` here:
+    shape). We do not replace native ``messages`` with the converter:
     that converter is lossy (collapses reasoning into ``reasoning_content``,
     rewrites ``file_search_call`` into a synthetic function call) and raises
     ``UserError`` for hosted-tool items, ``ItemReference``s, compaction
     items, and any unknown content shape, which would crash sample
     collection on perfectly successful runs. The canonical shape is the
-    SDK's stable persisted format and is what graders should walk.
+    SDK's stable persisted format and is what graders should walk. A
+    best-effort converted copy is stored in ``trajectory_messages``.
     """
 
     def __init__(self, session: SessionABC) -> None:
         self.session = session
 
+    def _to_trajectory_messages(
+        self, messages: Sequence[Mapping[str, Any]]
+    ) -> Sequence[Mapping[str, Any]] | None:
+        try:
+            return [
+                dict(message)
+                for message in Converter.items_to_messages(
+                    cast(Any, list(messages)),
+                    preserve_tool_output_all_content=True,
+                )
+            ]
+        except Exception:
+            logger.warning(
+                "Failed to convert OpenAI Agents messages for trajectory persistence",
+                exc_info=True,
+            )
+            return None
+
     async def get_sample(self, name: str) -> RolloutSample:
         items = await self.session.get_items()
-        return RolloutSample(id=name, messages=items)
+        return RolloutSample(
+            id=name,
+            messages=items,
+            trajectory_messages=self._to_trajectory_messages(items),
+        )
 
 
 class OsmosisRolloutModel(LitellmModel):

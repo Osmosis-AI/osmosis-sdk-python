@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from unittest.mock import patch
 
 import pytest
 from agents import RunConfig, Runner
@@ -37,6 +38,31 @@ class TestOpenAIAgentsIntegration:
         samples = await rollout_context.get_samples()
         assert samples["main"].id == "main"
         assert samples["main"].messages == items
+        assert samples["main"].trajectory_messages == items
+
+    async def test_trajectory_conversion_failure_keeps_native_messages(
+        self, rollout_context, caplog
+    ):
+        from osmosis_ai.rollout.integrations.agents.openai_agents import (
+            OsmosisMemorySession,
+        )
+
+        session = OsmosisMemorySession(name="main")
+        items = [{"role": "user", "content": "hello"}]
+        await session.add_items(items)
+
+        with patch(
+            "osmosis_ai.rollout.integrations.agents.openai_agents."
+            "Converter.items_to_messages",
+            side_effect=RuntimeError("boom"),
+        ):
+            samples = await rollout_context.get_samples()
+
+        assert samples["main"].messages == items
+        assert samples["main"].trajectory_messages is None
+        assert any(
+            "Failed to convert OpenAI Agents" in r.message for r in caplog.records
+        )
 
     async def test_memory_session_raises_when_used_in_rollout_context_after_creation(
         self,

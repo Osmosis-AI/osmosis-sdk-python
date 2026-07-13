@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 from pathlib import Path
 
 logger: logging.Logger = logging.getLogger(__name__)
@@ -28,20 +27,6 @@ def default_artifact_root() -> Path:
     return Path.home() / ".osmosis"
 
 
-def _is_single_path_segment(name: str) -> bool:
-    """True when ``name`` is a plain path component, not a traversal or root escape.
-
-    ``rollout_id`` comes from the untrusted rollout request, so values like
-    ``../other`` or ``/tmp/other`` must not be joined onto the artifact root or
-    they'd let a rollout write outside its own directory.
-    """
-    if not name or name in (".", ".."):
-        return False
-    if os.sep in name or (os.altsep and os.altsep in name):
-        return False
-    return Path(name).name == name
-
-
 def _ensure_artifacts_dir(rollout_dir: Path) -> Path:
     artifacts_dir = rollout_dir / "artifacts"
     artifacts_dir.mkdir(parents=True, exist_ok=True)
@@ -63,15 +48,9 @@ async def create_rollout_artifacts_dir(
     dir. Retries ride out transient errors while the dir becomes available.
 
     The check file is written outside ``artifacts/`` so it doesn't appear among
-    the rollout's artifacts.
+    the rollout's artifacts. ``rollout_id`` must already be validated as a
+    single path segment (see ``osmosis_ai.rollout.utils.identifiers``).
     """
-    if not _is_single_path_segment(rollout_id):
-        logger.warning(
-            "Refusing artifacts dir for rollout %r: id is not a single path "
-            "segment (best-effort)",
-            rollout_id,
-        )
-        return None
     rollout_dir = root / rollout_id
     total = attempts if attempts is not None else CREATE_ATTEMPTS
     last_error: OSError | None = None
