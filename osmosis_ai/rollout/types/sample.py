@@ -1,8 +1,9 @@
+import copy
 from collections.abc import Mapping, Sequence
 from enum import StrEnum
-from typing import Any
+from typing import Any, Self
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from osmosis_ai.rollout.utils.identifiers import ensure_single_path_segment
 
@@ -13,6 +14,7 @@ SampleMessage = Mapping[str, Any]
 class RolloutSample(BaseModel):
     id: str
     messages: Sequence[SampleMessage] = Field(default_factory=list)
+    trajectory_messages: Sequence[SampleMessage] | None = None
     label: str | None = None
     reward: float | None = None
 
@@ -20,6 +22,13 @@ class RolloutSample(BaseModel):
 
     metrics: dict[str, Any] = Field(default_factory=dict)
     extra_fields: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _default_trajectory_messages(self) -> Self:
+        # Explicit None disables trajectory persistence.
+        if "trajectory_messages" not in self.model_fields_set:
+            self.trajectory_messages = copy.deepcopy(list(self.messages))
+        return self
 
 
 class RolloutStatus(StrEnum):

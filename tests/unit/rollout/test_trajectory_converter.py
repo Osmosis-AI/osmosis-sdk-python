@@ -2,6 +2,7 @@
 
 from typing import Any
 
+import pytest
 from harbor.models.trajectories import Metrics
 
 from osmosis_ai.rollout.trajectory.converter import (
@@ -34,6 +35,8 @@ def test_basic_conversation_maps_to_sequential_steps() -> None:
     assert [s.source for s in trajectory.steps] == ["system", "user", "agent"]
     assert [s.step_id for s in trajectory.steps] == [1, 2, 3]
     assert trajectory.steps[2].message == "hello"
+    assert trajectory.final_metrics is not None
+    assert trajectory.final_metrics.total_steps == 3
 
 
 def test_tool_calls_and_results_fold_into_agent_step() -> None:
@@ -73,6 +76,92 @@ def test_tool_calls_and_results_fold_into_agent_step() -> None:
     result = agent_step.observation.results[0]
     assert result.source_call_id == "call_1"
     assert result.content == "2"
+
+
+def test_trajectory_messages_are_used_without_mutating_native_messages() -> None:
+    native_messages = [
+        {"role": "user", "content": "run"},
+        {
+            "type": "function_call",
+            "call_id": "c1",
+            "name": "f",
+            "arguments": "{}",
+        },
+        {
+            "type": "function_call_output",
+            "call_id": "c1",
+            "output": "6",
+        },
+    ]
+    trajectory_messages = [
+        {"role": "user", "content": "run"},
+        {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [
+                {
+                    "id": "c1",
+                    "type": "function",
+                    "function": {"name": "f", "arguments": "{}"},
+                }
+            ],
+        },
+        {"role": "tool", "tool_call_id": "c1", "content": "6"},
+    ]
+    sample = make_sample(
+        native_messages,
+        trajectory_messages=trajectory_messages,
+    )
+    trajectory = convert_sample_to_trajectory(
+        sample,
+        rollout_id="r1",
+        sample_id="s1",
+    )
+
+    assert sample.messages == native_messages
+    assert sample.trajectory_messages == trajectory_messages
+    tool_step = trajectory.steps[1]
+    assert tool_step.tool_calls and tool_step.tool_calls[0].function_name == "f"
+    assert tool_step.observation and tool_step.observation.results[0].content == "6"
+
+
+def test_trajectory_messages_default_to_an_independent_native_copy() -> None:
+    messages = [{"role": "user", "content": [{"text": "run"}]}]
+    sample = make_sample(messages)
+
+    messages[0]["content"][0]["text"] = "changed"
+
+    assert sample.trajectory_messages == [
+        {"role": "user", "content": [{"text": "run"}]}
+    ]
+    assert sample.trajectory_messages is not sample.messages
+
+
+def test_explicitly_unavailable_trajectory_messages_cannot_be_converted() -> None:
+    sample = make_sample([{"role": "user", "content": "run"}], trajectory_messages=None)
+
+    with pytest.raises(ValueError, match="no trajectory-compatible messages"):
+        convert_sample_to_trajectory(sample, rollout_id="r1", sample_id="s1")
+
+
+def test_openai_chat_message_with_type_is_not_misclassified() -> None:
+    trajectory = convert_sample_to_trajectory(
+        make_sample([{"role": "user", "content": "run", "type": "custom"}]),
+        rollout_id="r1",
+        sample_id="s1",
+    )
+
+    assert trajectory.steps[0].message == "run"
+
+
+def test_openai_chat_unknown_content_block_is_not_misclassified() -> None:
+    trajectory = convert_sample_to_trajectory(
+        make_sample([{"role": "user", "content": [{"custom": "value"}]}]),
+        rollout_id="r1",
+        sample_id="s1",
+    )
+
+    assert trajectory.steps[0].message == '[{"custom": "value"}]'
 
 
 def test_orphan_tool_result_keeps_original_id_in_extra() -> None:
@@ -321,12 +410,32 @@ def test_explicit_final_metrics_win_over_summation() -> None:
                 LlmCallMetrics(prompt_tokens=1),
                 LlmCallMetrics(prompt_tokens=2),
             ],
-            final_metrics={"total_prompt_tokens": 99},
+            final_metrics={"total_prompt_tokens": 99, "total_steps": 999},
         ),
     )
 
     assert trajectory.final_metrics is not None
     assert trajectory.final_metrics.total_prompt_tokens == 99
+    assert trajectory.final_metrics.total_steps == 4
+
+
+def test_invalid_report_total_steps_does_not_discard_other_totals() -> None:
+    trajectory = convert_sample_to_trajectory(
+        make_sample(two_turn_messages()),
+        rollout_id="r1",
+        sample_id="s1",
+        report=SampleReport(
+            llm_call_metrics=[
+                LlmCallMetrics(prompt_tokens=1),
+                LlmCallMetrics(prompt_tokens=2),
+            ],
+            final_metrics={"total_prompt_tokens": 99, "total_steps": -1},
+        ),
+    )
+
+    assert trajectory.final_metrics is not None
+    assert trajectory.final_metrics.total_prompt_tokens == 99
+    assert trajectory.final_metrics.total_steps == 4
 
 
 def test_sample_model_name_wins_over_rollout_default() -> None:

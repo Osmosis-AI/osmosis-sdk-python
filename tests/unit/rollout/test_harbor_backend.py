@@ -5,7 +5,11 @@ from typing import Any
 from unittest.mock import AsyncMock
 
 from osmosis_ai.rollout.agent_workflow import AgentWorkflow
-from osmosis_ai.rollout.backend.harbor.backend import HarborBackend, PendingTrial
+from osmosis_ai.rollout.backend.harbor.backend import (
+    HarborBackend,
+    PendingTrial,
+    parse_samples,
+)
 from osmosis_ai.rollout.context import (
     AgentWorkflowContext,
     GraderContext,
@@ -75,6 +79,20 @@ def _make_backend_for_config(*, grader: bool = False) -> HarborBackend:
 
 
 class TestHarborBackend:
+    def test_sample_round_trip_preserves_native_and_trajectory_messages(self):
+        sample = RolloutSample(
+            id="s1",
+            messages=[{"type": "function_call", "name": "f"}],
+            trajectory_messages=[{"role": "assistant", "content": "done"}],
+        )
+
+        parsed = parse_samples(
+            json.loads(json.dumps({"s1": sample.model_dump()}, default=str))
+        )["s1"]
+
+        assert parsed.messages == sample.messages
+        assert parsed.trajectory_messages == sample.trajectory_messages
+
     async def test_empty_verifier_rewards_logs_and_returns_validation_failure(
         self, caplog, tmp_path
     ):

@@ -1,4 +1,4 @@
-"""Convert ``RolloutSample`` conversations (OpenAI chat shape) into ATIF
+"""Convert ``RolloutSample.trajectory_messages`` (OpenAI chat shape) into ATIF
 trajectories, using Harbor's reference models for spec validation. Anything
 that does not fit the spec losslessly is preserved under ``extra``.
 """
@@ -56,8 +56,12 @@ def convert_sample_to_trajectory(
     ``report.py``); ``unmatched_sample_reports`` are entries keyed by
     no sample, preserved under ``extra``.
     """
-    steps = _messages_to_steps(sample.messages)
+    if sample.trajectory_messages is None:
+        raise ValueError("Sample has no trajectory-compatible messages")
+    steps = _messages_to_steps(sample.trajectory_messages)
     unmatched_llm_call_metrics = _apply_report(steps, report)
+    final_metrics = _final_metrics_from_report(report) or FinalMetrics()
+    final_metrics.total_steps = len(steps)
     model_name = (report.model_name if report else None) or default_model_name
     unmatched_reports: dict[str, Any] | None = None
     if unmatched_sample_reports:
@@ -72,7 +76,7 @@ def convert_sample_to_trajectory(
             name=ATIF_PRODUCER_NAME, version=PACKAGE_VERSION, model_name=model_name
         ),
         steps=steps,
-        final_metrics=_final_metrics_from_report(report),
+        final_metrics=final_metrics,
         extra=_compose_extra(
             sample,
             rollout_id=rollout_id,
@@ -265,13 +269,16 @@ def _final_metrics_from_report(report: SampleReport | None) -> FinalMetrics | No
     if report is None:
         return None
     if report.final_metrics:
-        try:
-            return FinalMetrics.model_validate(report.final_metrics)
-        except ValidationError:
-            logger.warning(
-                "Ignoring malformed final_metrics in trajectory report",
-                exc_info=True,
-            )
+        payload = dict(report.final_metrics)
+        payload.pop("total_steps", None)
+        if payload:
+            try:
+                return FinalMetrics.model_validate(payload)
+            except ValidationError:
+                logger.warning(
+                    "Ignoring malformed final_metrics in trajectory report",
+                    exc_info=True,
+                )
     if not report.llm_call_metrics:
         return None
     entries = report.llm_call_metrics

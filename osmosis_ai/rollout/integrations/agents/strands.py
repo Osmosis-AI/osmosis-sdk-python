@@ -1,5 +1,6 @@
+import logging
 import uuid
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Mapping, Sequence
 from typing import Any, TypeVar, cast
 
 from strands import Agent as StrandsAgent
@@ -18,20 +19,38 @@ from osmosis_ai.rollout.types import RolloutSample
 from osmosis_ai.rollout.utils.messages import map_initial_messages_to_content_blocks
 
 T = TypeVar("T")
+logger: logging.Logger = logging.getLogger(__name__)
 
 
 class StrandsAgentSampleSource(SampleSource):
     """Produces a ``RolloutSample`` from a Strands agent's ``messages`` field.
 
-    Strands agents accumulate the conversation history on ``agent.messages``
-    in chat-completion format, so the source just wraps that list.
+    The source keeps the native history for graders and stores a
+    LiteLLM-formatted copy for trajectory persistence.
     """
 
     def __init__(self, agent: StrandsAgent) -> None:
         self.agent = agent
 
+    def _to_trajectory_messages(
+        self, messages: Sequence[Mapping[str, Any]]
+    ) -> Sequence[Mapping[str, Any]] | None:
+        try:
+            return LiteLLMModel.format_request_messages(cast(Any, list(messages)))
+        except Exception:
+            logger.warning(
+                "Failed to convert Strands messages for trajectory persistence",
+                exc_info=True,
+            )
+            return None
+
     async def get_sample(self, name: str) -> RolloutSample:
-        return RolloutSample(id=name, messages=list(self.agent.messages))
+        messages = list(self.agent.messages)
+        return RolloutSample(
+            id=name,
+            messages=messages,
+            trajectory_messages=self._to_trajectory_messages(messages),
+        )
 
 
 class OsmosisRolloutModel(LiteLLMModel):

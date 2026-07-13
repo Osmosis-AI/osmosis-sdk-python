@@ -112,7 +112,7 @@ async def _handle_rollout(
                 samples=result.samples,
                 err_message=result.err_message,
                 err_category=result.err_category,
-            ).model_dump(),
+            ).model_dump(exclude={"samples": {"__all__": {"trajectory_messages"}}}),
             headers=auth.as_bearer_headers(),
         )
         report = report_from_response(resp) or report

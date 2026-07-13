@@ -112,6 +112,12 @@ async def test_records_graded_result(tmp_path: Path, monkeypatch) -> None:
         "http://controller/v1/rollout/completed",
         "http://controller/v1/grader/completed",
     ]
+    grader_payload = posted[1][1]
+    assert grader_payload["samples"]["s1"]["messages"] == [
+        {"role": "user", "content": "hi"},
+        {"role": "assistant", "content": "hello"},
+    ]
+    assert "trajectory_messages" not in grader_payload["samples"]["s1"]
 
 
 async def test_records_workflow_result_without_grader_callback(

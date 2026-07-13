@@ -123,6 +123,14 @@ async def _save(
             else "dropping them",
         )
     for sample_id, sample in result.samples.items():
+        if sample.trajectory_messages is None:
+            logger.warning(
+                "Skipping trajectory for sample %s of rollout %s because message "
+                "conversion was unavailable",
+                sample_id,
+                rollout_id,
+            )
+            continue
         try:
             trajectory = convert_sample_to_trajectory(
                 sample,

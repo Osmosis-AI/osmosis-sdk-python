@@ -70,6 +70,25 @@ async def test_save_without_samples_writes_nothing(tmp_path: Path) -> None:
     assert not (tmp_path / "r1").exists()
 
 
+async def test_save_skips_sample_when_trajectory_conversion_was_unavailable(
+    tmp_path: Path, caplog
+) -> None:
+    sample = RolloutSample(
+        id="s1",
+        messages=[{"role": "user", "content": "hi"}],
+        trajectory_messages=None,
+    )
+
+    await save_trajectories(
+        rollout_id="r1",
+        result=make_result(s1=sample),
+        artifact_root=tmp_path,
+    )
+
+    assert not (tmp_path / "r1" / "trajectory.json").exists()
+    assert any("conversion was unavailable" in r.message for r in caplog.records)
+
+
 async def test_save_never_raises(tmp_path: Path) -> None:
     # A file where the rollout directory should be makes writes fail.
     (tmp_path / "r1").write_text("not a directory")
@@ -114,7 +133,7 @@ async def test_report_is_dispatched_per_sample(tmp_path: Path) -> None:
     assert s1["agent"]["model_name"] == "rollout-model"
     assert s1["final_metrics"]["total_prompt_tokens"] == 10
     assert s2["agent"]["model_name"] == "rollout-model"
-    assert "final_metrics" not in s2
+    assert s2["final_metrics"] == {"total_steps": 2}
 
 
 async def test_single_entry_report_matches_single_sample_regardless_of_key(
@@ -183,6 +202,6 @@ async def test_unmatched_entries_are_dropped_for_multi_sample_rollouts(
 
     for name in ("trajectory-s1.json", "trajectory-s2.json"):
         doc = json.loads((tmp_path / "r1" / name).read_text())
-        assert "final_metrics" not in doc
+        assert doc["final_metrics"] == {"total_steps": 2}
         assert "unmatched_sample_reports" not in doc["extra"]["osmosis"]
     assert any("unknown sample ids" in r.message for r in caplog.records)
