@@ -1,6 +1,7 @@
 """Tests for osmosis_ai.rollout.trajectory.save."""
 
 import json
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -73,9 +74,13 @@ async def test_save_without_samples_writes_nothing(tmp_path: Path) -> None:
     assert not (tmp_path / "r1").exists()
 
 
-async def test_save_skips_sample_when_trajectory_conversion_was_unavailable(
+async def test_save_skips_sample_without_trajectory_messages(
     tmp_path: Path, caplog
 ) -> None:
+    # Explicit None is the documented way to disable persistence, and upstream
+    # conversion failures already warn at their source: skipping must stay
+    # quiet at warning level and only leave a debug trace.
+    caplog.set_level(logging.DEBUG, logger="osmosis_ai.rollout.trajectory.save")
     sample = RolloutSample(
         id="s1",
         messages=[{"role": "user", "content": "hi"}],
@@ -89,7 +94,12 @@ async def test_save_skips_sample_when_trajectory_conversion_was_unavailable(
     )
 
     assert not (tmp_path / "r1" / "trajectory.json").exists()
-    assert any("conversion was unavailable" in r.message for r in caplog.records)
+    assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
+    assert any(
+        "Skipping trajectory for sample s1" in r.getMessage()
+        for r in caplog.records
+        if r.levelno == logging.DEBUG
+    )
 
 
 async def test_save_never_raises(tmp_path: Path) -> None:
