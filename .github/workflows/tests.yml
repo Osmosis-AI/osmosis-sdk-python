@@ -154,7 +154,14 @@ jobs:
         run: |
           uv venv --python 3.12 /tmp/osmosis-wheel-smoke
           uv pip install --python /tmp/osmosis-wheel-smoke/bin/python dist/*.whl
-          /tmp/osmosis-wheel-smoke/bin/python -c "import osmosis_ai; print(osmosis_ai.__version__)"
+          /tmp/osmosis-wheel-smoke/bin/python - <<'PY'
+          import osmosis_ai
+          from agents.usage import Usage
+          from osmosis_ai.rollout.integrations.agents.openai_agents import OsmosisLitellmModel
+
+          assert Usage().input_tokens_details.cached_tokens == 0
+          print(osmosis_ai.__version__, OsmosisLitellmModel.__name__)
+          PY
           /tmp/osmosis-wheel-smoke/bin/osmosis --version
 
       - name: Upload dist artifact

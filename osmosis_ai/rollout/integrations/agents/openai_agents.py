@@ -11,10 +11,6 @@ from agents.memory.session import SessionABC
 from agents.model_settings import ModelSettings
 from agents.models.chatcmpl_converter import Converter
 from agents.usage import Usage
-from openai.types.responses.response_usage import (
-    InputTokensDetails,
-    OutputTokensDetails,
-)
 
 from osmosis_ai.rollout.context import SampleSource, get_rollout_context
 from osmosis_ai.rollout.types import RolloutSample
@@ -221,14 +217,8 @@ class OsmosisLitellmModel(LitellmModel):
                         input_tokens=final.usage.input_tokens,
                         output_tokens=final.usage.output_tokens,
                         total_tokens=final.usage.total_tokens,
-                        input_tokens_details=(
-                            final.usage.input_tokens_details
-                            or InputTokensDetails(cached_tokens=0)
-                        ),
-                        output_tokens_details=(
-                            final.usage.output_tokens_details
-                            or OutputTokensDetails(reasoning_tokens=0)
-                        ),
+                        input_tokens_details=final.usage.input_tokens_details,
+                        output_tokens_details=final.usage.output_tokens_details,
                     )
         return ModelResponse(output=output_items, usage=usage, response_id=None)
 
