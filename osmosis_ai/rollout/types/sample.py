@@ -1,4 +1,5 @@
 import copy
+import logging
 from collections.abc import Mapping, Sequence
 from enum import StrEnum
 from typing import Any, Self
@@ -6,6 +7,8 @@ from typing import Any, Self
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from osmosis_ai.rollout.utils.identifiers import ensure_single_path_segment
+
+logger: logging.Logger = logging.getLogger(__name__)
 
 MessageDict = dict[str, Any]
 SampleMessage = Mapping[str, Any]
@@ -27,7 +30,16 @@ class RolloutSample(BaseModel):
     def _default_trajectory_messages(self) -> Self:
         # Explicit None disables trajectory persistence.
         if "trajectory_messages" not in self.model_fields_set:
-            self.trajectory_messages = copy.deepcopy(list(self.messages))
+            try:
+                self.trajectory_messages = copy.deepcopy(list(self.messages))
+            except Exception:
+                logger.warning(
+                    "Failed to snapshot messages for trajectory persistence for "
+                    "sample %s",
+                    self.id,
+                    exc_info=True,
+                )
+                self.trajectory_messages = None
         return self
 
 

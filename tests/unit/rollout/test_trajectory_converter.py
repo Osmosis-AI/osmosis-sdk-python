@@ -137,6 +137,22 @@ def test_trajectory_messages_default_to_an_independent_native_copy() -> None:
     assert sample.trajectory_messages is not sample.messages
 
 
+def test_trajectory_snapshot_failure_preserves_native_messages(caplog) -> None:
+    class NonCopyableDict(dict[str, Any]):
+        def __deepcopy__(self, _memo: dict[int, Any]) -> dict[str, Any]:
+            raise TypeError("cannot copy")
+
+    content = NonCopyableDict(text="run")
+    messages = [{"role": "user", "content": content}]
+
+    sample = make_sample(messages)
+
+    assert sample.messages == messages
+    assert sample.messages[0]["content"] is content
+    assert sample.trajectory_messages is None
+    assert "Failed to snapshot messages for trajectory persistence" in caplog.text
+
+
 def test_explicitly_unavailable_trajectory_messages_cannot_be_converted() -> None:
     sample = make_sample([{"role": "user", "content": "run"}], trajectory_messages=None)
 
