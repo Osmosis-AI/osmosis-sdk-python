@@ -29,13 +29,13 @@ FILES = {
     "metrics": [RunDownloadFile("metrics.json", 10)],
     "trajectories": [
         RunDownloadFile("summary.jsonl", 20),
-        RunDownloadFile("trajectories/row_3_run_0.json", 30, rollout_id="rollout-3-0"),
+        RunDownloadFile("trajectories/row_3_run_0.json", 30, token="rollout-3-0"),
     ],
     "artifacts": [
         RunDownloadFile(
             "artifacts/row_3_run_0/logs/agent.log",
             40,
-            rollout_id="rollout-3-0",
+            token="rollout-3-0",
         )
     ],
     "logs": [RunDownloadFile("logs.txt", 50)],
@@ -119,7 +119,7 @@ def _make_fake_client(
                 items=[
                     RunDownloadURL(
                         path=item.path,
-                        rollout_id=item.rollout_id,
+                        token=item.token,
                         url=f"https://example.com/{item.path}?size={item.size}",
                     )
                     for item in items
@@ -211,7 +211,7 @@ def test_eval_info_uses_same_run_scoped_metrics_path(monkeypatch, tmp_path):
                     RunDownloadFile(
                         "metrics.json",
                         len(server_metrics),
-                        rollout_id="export-token",
+                        token="export-token",
                     )
                 ],
                 totals={"files": 1, "bytes": len(server_metrics)},
@@ -224,7 +224,7 @@ def test_eval_info_uses_same_run_scoped_metrics_path(monkeypatch, tmp_path):
                 items=[
                     RunDownloadURL(
                         path=items[0].path,
-                        rollout_id=items[0].rollout_id,
+                        token=items[0].token,
                         url="https://example.com/metrics.json",
                     )
                 ],
@@ -444,7 +444,7 @@ def test_invalid_manifest_paths_are_reported_and_reserved_manifest_is_skipped(
 
 def test_nested_artifact_manifest_is_downloadable(monkeypatch, tmp_path, capsys):
     nested = "artifacts/row_3_run_0/logs/manifest.json"
-    files = [RunDownloadFile(nested, 10, rollout_id="rollout-3-0")]
+    files = [RunDownloadFile(nested, 10, token="rollout-3-0")]
     _stub_git_context(monkeypatch, tmp_path)
     monkeypatch.setattr(
         eval_module, "OsmosisClient", _make_fake_client(manifest_files=files)
