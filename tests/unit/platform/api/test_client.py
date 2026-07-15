@@ -717,7 +717,7 @@ class TestEvaluationRuns:
                 {
                     "path": "trajectories/row_3_run_0.json",
                     "size": 12,
-                    "rolloutId": "rollout-1",
+                    "token": "rollout-1",
                 }
             ],
             "totals": {"files": 1, "bytes": 12},
@@ -734,7 +734,7 @@ class TestEvaluationRuns:
             "/api/cli/eval-runs/a%2Fb/samples/manifest?"
             "types=metrics%2Ctrajectories&rows=3%2C7%2C10-20"
         )
-        assert manifest.files[0].rollout_id == "rollout-1"
+        assert manifest.files[0].token == "rollout-1"
         assert manifest.totals == {"files": 1, "bytes": 12}
 
     @patch("osmosis_ai.platform.api.client.platform_request")
@@ -745,11 +745,11 @@ class TestEvaluationRuns:
             "items": [
                 {
                     "path": "trajectories/row_3_run_0.json",
-                    "rolloutId": "rollout-1",
+                    "token": "rollout-1",
                     "url": "https://example.com/signed",
                 }
             ],
-            "expiresIn": 900,
+            "expires_in": 900,
         }
         from osmosis_ai.platform.api.models import RunDownloadFile
 
@@ -759,7 +759,7 @@ class TestEvaluationRuns:
                 RunDownloadFile(
                     "trajectories/row_3_run_0.json",
                     12,
-                    rollout_id="rollout-1",
+                    token="rollout-1",
                 )
             ],
             git_identity="git_test",
@@ -772,13 +772,29 @@ class TestEvaluationRuns:
         assert mock_request.call_args.kwargs["data"] == {
             "items": [
                 {
-                    "rolloutId": "rollout-1",
+                    "token": "rollout-1",
                     "path": "trajectories/row_3_run_0.json",
                 }
             ]
         }
         assert batch.items[0].url == "https://example.com/signed"
         assert batch.expires_in == 900
+
+    @pytest.mark.parametrize("item_count", [0, 501])
+    def test_eval_run_download_urls_rejects_out_of_bounds_batches(
+        self, item_count: int
+    ) -> None:
+        from osmosis_ai.platform.api.models import RunDownloadFile
+
+        items = [
+            RunDownloadFile(f"trajectories/row_{index}_run_0.json", 1)
+            for index in range(item_count)
+        ]
+
+        with pytest.raises(ValueError, match="between 1 and 500 items"):
+            OsmosisClient().get_eval_run_download_urls(
+                "er-1", items=items, git_identity="git_test"
+            )
 
 
 class TestGetTrainingRunMetrics:

@@ -218,6 +218,22 @@ def test_download_file_to_creates_nested_directories(monkeypatch, tmp_path) -> N
     assert destination.read_bytes() == b"hello world"
 
 
+def test_download_file_to_skips_empty_chunks(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(
+        download_module.httpx,
+        "stream",
+        lambda *args, **kwargs: _FakeStreamResponse(chunks=[b"hello", b"", b" world"]),
+    )
+    destination = tmp_path / "trajectory.json"
+
+    written = download_module.download_file_to(
+        "https://example.com/signed", destination, expected_size=11
+    )
+
+    assert written == 11
+    assert destination.read_bytes() == b"hello world"
+
+
 def test_download_file_to_replaces_existing_file(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(
         download_module.httpx,

@@ -1100,36 +1100,37 @@ class RunDownloadFile:
     """One run-scoped file returned by a samples manifest endpoint.
 
     ``path`` is the fixed local path relative to the run output root. The
-    optional ``rollout_id`` is echoed back with ``path`` when requesting a
-    presigned URL; the server remains solely responsible for deriving S3 keys.
+    optional ``token`` is an opaque server handle (a rollout id or an export
+    snapshot token) echoed back with ``path`` when requesting a presigned
+    URL; the server remains solely responsible for deriving S3 keys.
     """
 
     path: str
     size: int
-    rollout_id: str | None = None
+    token: str | None = None
 
     @property
     def identity(self) -> tuple[str | None, str]:
-        return self.rollout_id, self.path
+        return self.token, self.path
 
     def to_request_item(self) -> dict[str, Any]:
         item: dict[str, Any] = {"path": self.path}
-        if self.rollout_id is not None:
-            item["rolloutId"] = self.rollout_id
+        if self.token is not None:
+            item["token"] = self.token
         return item
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> RunDownloadFile:
         path = data.get("path")
         size = data.get("size")
-        rollout_id = data.get("rolloutId", data.get("rollout_id"))
+        token = data.get("token")
         if not isinstance(path, str) or not path:
             raise ValueError("Download manifest file path must be a non-empty string")
         if isinstance(size, bool) or not isinstance(size, int) or size < 0:
             raise ValueError(f"Download manifest size is invalid for {path!r}")
-        if rollout_id is not None and not isinstance(rollout_id, str):
-            raise ValueError(f"Download manifest rolloutId is invalid for {path!r}")
-        return cls(path=path, size=size, rollout_id=rollout_id)
+        if token is not None and not isinstance(token, str):
+            raise ValueError(f"Download manifest token is invalid for {path!r}")
+        return cls(path=path, size=size, token=token)
 
 
 @dataclass(frozen=True)
@@ -1157,24 +1158,24 @@ class RunDownloadURL:
 
     path: str
     url: str
-    rollout_id: str | None = None
+    token: str | None = None
 
     @property
     def identity(self) -> tuple[str | None, str]:
-        return self.rollout_id, self.path
+        return self.token, self.path
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> RunDownloadURL:
         path = data.get("path")
         url = data.get("url") or data.get("presignedUrl") or data.get("presigned_url")
-        rollout_id = data.get("rolloutId", data.get("rollout_id"))
+        token = data.get("token")
         if not isinstance(path, str) or not path:
             raise ValueError("Download URL path must be a non-empty string")
         if not isinstance(url, str) or not url:
             raise ValueError(f"Download URL is missing for {path!r}")
-        if rollout_id is not None and not isinstance(rollout_id, str):
-            raise ValueError(f"Download URL rolloutId is invalid for {path!r}")
-        return cls(path=path, url=url, rollout_id=rollout_id)
+        if token is not None and not isinstance(token, str):
+            raise ValueError(f"Download URL token is invalid for {path!r}")
+        return cls(path=path, url=url, token=token)
 
 
 @dataclass(frozen=True)
@@ -1191,7 +1192,7 @@ class RunDownloadURLBatch:
             raw_items = data.get("files", data.get("urls", []))
         if not isinstance(raw_items, list):
             raise ValueError("Download URL response items must be a list")
-        expires_in = data.get("expires_in", data.get("expiresIn"))
+        expires_in = data.get("expires_in")
         return cls(
             items=[RunDownloadURL.from_dict(item) for item in raw_items],
             expires_in=expires_in if isinstance(expires_in, int) else None,
