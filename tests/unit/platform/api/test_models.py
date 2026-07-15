@@ -24,6 +24,10 @@ from osmosis_ai.platform.api.models import (
     MetricHistory,
     PaginatedEnvironmentSecrets,
     PaginatedEvaluationRuns,
+    RunDownloadFile,
+    RunDownloadManifest,
+    RunDownloadURL,
+    RunDownloadURLBatch,
     SubmitRunResult,
     TrainingRunDetail,
     TrainingRunMetrics,
@@ -834,6 +838,61 @@ class TestEvalRunMetrics:
         assert metrics.pass_at_k == []
         assert metrics.overview.duration_ms is None
         assert metrics.overview.total_samples is None
+
+
+class TestRunDownloadModels:
+    """Tests for the run download manifest and presigned URL models."""
+
+    def test_run_download_file_rejects_missing_path(self) -> None:
+        with pytest.raises(ValueError, match="path must be a non-empty string"):
+            RunDownloadFile.from_dict({"size": 10})
+
+    @pytest.mark.parametrize("size", [None, -1, True, "10"])
+    def test_run_download_file_rejects_invalid_size(self, size: object) -> None:
+        with pytest.raises(ValueError, match="size is invalid"):
+            RunDownloadFile.from_dict({"path": "metrics.json", "size": size})
+
+    def test_run_download_file_rejects_non_string_token(self) -> None:
+        with pytest.raises(ValueError, match="token is invalid"):
+            RunDownloadFile.from_dict(
+                {"path": "metrics.json", "size": 10, "token": 123}
+            )
+
+    def test_run_download_manifest_rejects_non_list_files(self) -> None:
+        with pytest.raises(ValueError, match="files must be a list"):
+            RunDownloadManifest.from_dict({"files": {"path": "metrics.json"}})
+
+    def test_run_download_url_rejects_missing_path(self) -> None:
+        with pytest.raises(ValueError, match="path must be a non-empty string"):
+            RunDownloadURL.from_dict({"url": "https://example.com/signed"})
+
+    def test_run_download_url_rejects_missing_url(self) -> None:
+        with pytest.raises(ValueError, match="URL is missing"):
+            RunDownloadURL.from_dict({"path": "metrics.json"})
+
+    def test_run_download_url_rejects_non_string_token(self) -> None:
+        with pytest.raises(ValueError, match="token is invalid"):
+            RunDownloadURL.from_dict(
+                {
+                    "path": "metrics.json",
+                    "url": "https://example.com/signed",
+                    "token": 123,
+                }
+            )
+
+    def test_run_download_url_batch_accepts_files_and_urls_fallback_keys(self) -> None:
+        item = {"path": "metrics.json", "url": "https://example.com/signed"}
+
+        from_files = RunDownloadURLBatch.from_dict({"files": [item]})
+        from_urls = RunDownloadURLBatch.from_dict({"urls": [item]})
+
+        assert from_files.items[0].path == "metrics.json"
+        assert from_urls.items[0].url == "https://example.com/signed"
+        assert from_files.expires_in is None
+
+    def test_run_download_url_batch_rejects_non_list_items(self) -> None:
+        with pytest.raises(ValueError, match="items must be a list"):
+            RunDownloadURLBatch.from_dict({"items": {"path": "metrics.json"}})
 
 
 class TestIsInternalUserFlag:
