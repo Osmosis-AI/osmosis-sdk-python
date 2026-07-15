@@ -780,6 +780,22 @@ class TestEvaluationRuns:
         assert batch.items[0].url == "https://example.com/signed"
         assert batch.expires_in == 900
 
+    @pytest.mark.parametrize("item_count", [0, 501])
+    def test_eval_run_download_urls_rejects_out_of_bounds_batches(
+        self, item_count: int
+    ) -> None:
+        from osmosis_ai.platform.api.models import RunDownloadFile
+
+        items = [
+            RunDownloadFile(f"trajectories/row_{index}_run_0.json", 1)
+            for index in range(item_count)
+        ]
+
+        with pytest.raises(ValueError, match="between 1 and 500 items"):
+            OsmosisClient().get_eval_run_download_urls(
+                "er-1", items=items, git_identity="git_test"
+            )
+
 
 class TestGetTrainingRunMetrics:
     """Tests for OsmosisClient.get_training_run_metrics."""

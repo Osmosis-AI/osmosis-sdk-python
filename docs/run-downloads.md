@@ -29,10 +29,7 @@ GET  /api/cli/eval-runs/[id]/samples/manifest?types=&rows=
 POST /api/cli/eval-runs/[id]/samples/download-urls
 ```
 
-The manifest returns `{files: [{rolloutId?, path, size}], totals}`. `path` is
-the final path relative to the local run root. URL requests contain at most 500
-`{rolloutId, path}` items. The platform derives full S3 keys server-side and
-returns 15-minute presigned GET URLs; the SDK never accepts raw object keys.
+The manifest returns `{files: [{token?, path, size}], totals}`. `path` is the final path relative to the local run root, and `token` is an opaque server handle (a rollout id or an export snapshot token). URL requests contain at most 500 `{token, path}` items. The platform derives full S3 keys server-side and returns 15-minute presigned GET URLs; the SDK never accepts raw object keys.
 
 ## Fixed local layout
 

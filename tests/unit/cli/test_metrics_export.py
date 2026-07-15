@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import pytest
+
+from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.cli.metrics_export import (
     build_eval_export_dict,
     build_export_dict,
@@ -93,6 +96,31 @@ def test_case_variant_eval_names_do_not_collide_on_case_insensitive_filesystems(
     assert lowercase.name == "run"
     assert uppercase.name == "Run--eval-2"
     assert lowercase.name.casefold() != uppercase.name.casefold()
+
+
+def test_eval_output_dir_rejects_existing_non_directory_path(tmp_path) -> None:
+    occupied = tmp_path / "occupied"
+    occupied.write_text("not a directory", encoding="utf-8")
+
+    with pytest.raises(CLIError, match="Output path is not a directory"):
+        resolve_eval_output_dir(
+            "run",
+            "eval-1",
+            workspace_directory=tmp_path,
+            output=str(occupied),
+        )
+
+
+def test_eval_output_dir_wraps_os_errors_when_creation_fails(tmp_path) -> None:
+    # `.osmosis` existing as a file makes mkdir(parents=True) raise an OSError.
+    (tmp_path / ".osmosis").write_text("blocker", encoding="utf-8")
+
+    with pytest.raises(CLIError, match="Cannot create output directory"):
+        resolve_eval_output_dir(
+            "run",
+            "eval-1",
+            workspace_directory=tmp_path,
+        )
 
 
 class TestBuildExportDict:
