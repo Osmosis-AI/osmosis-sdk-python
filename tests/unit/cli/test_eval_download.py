@@ -327,6 +327,22 @@ def test_invalid_selectors_fail_before_manifest(
     assert fake_client.manifest_calls == []
 
 
+def test_pending_run_fails_before_manifest(monkeypatch, tmp_path, capsys):
+    _stub_git_context(monkeypatch, tmp_path)
+    fake_client = _make_fake_client(status="pending")
+    monkeypatch.setattr(eval_module, "OsmosisClient", fake_client)
+
+    exit_code = cli.main(["--json", "eval", "download", "my-run"])
+    captured = capsys.readouterr()
+
+    assert exit_code == 1
+    assert (
+        "Outputs are not yet available for pending evaluation runs."
+        in json.loads(captured.err)["error"]["message"]
+    )
+    assert fake_client.manifest_calls == []
+
+
 def test_resume_skips_matching_sizes_and_overwrite_forces_download(
     monkeypatch, tmp_path, capsys
 ):

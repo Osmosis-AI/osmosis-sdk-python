@@ -688,6 +688,9 @@ def download(
             git_identity=git_identity,
         )
 
+    if detail.status in EVAL_RUN_STATUSES_PENDING:
+        raise CLIError("Outputs are not yet available for pending evaluation runs.")
+
     try:
         return run_download(
             run_id=detail.id,
