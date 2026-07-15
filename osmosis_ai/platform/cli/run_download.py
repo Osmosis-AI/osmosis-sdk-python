@@ -40,7 +40,7 @@ ManifestLoader = Callable[[Sequence[str]], RunDownloadManifest]
 URLLoader = Callable[[Sequence[RunDownloadFile]], RunDownloadURLBatch]
 
 _ROWS_RE = re.compile(r"\d+(?:-\d+)?(?:,\d+(?:-\d+)?)*")
-_URL_RE = re.compile(r"https?://\S+")
+_URL_RE = re.compile(r"https?://\S+", re.IGNORECASE)
 _RESERVED_ARTIFACT_MANIFEST_RE = re.compile(r"artifacts/row_\d+_run_\d+/manifest\.json")
 
 

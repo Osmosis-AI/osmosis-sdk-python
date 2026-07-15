@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import contextlib
-import os
 import tempfile
 from collections.abc import Iterator
 from email.message import Message
@@ -118,8 +117,8 @@ def download_file_to(
 ) -> int:
     """Download a presigned URL to an exact path and return bytes written.
 
-    Creates missing parent directories, streams through a sibling ``.partial`` file,
-    and atomically replaces ``destination``. Unlike :func:`download_file`
+    Creates missing parent directories, streams through a unique sibling temporary
+    file, and atomically replaces ``destination``. Unlike :func:`download_file`
     there is no per-file progress bar and existing files are replaced —
     callers own skip/overwrite policy and aggregate progress reporting.
     """
@@ -130,17 +129,17 @@ def download_file_to(
             body = response.read().decode("utf-8", errors="replace")[:500]
             raise DownloadHTTPError(response.status_code, body)
 
-        partial_path = destination.with_name(f"{destination.name}.partial")
+        tmp_path: Path | None = None
         bytes_downloaded = 0
         try:
-            if partial_path.is_symlink():
-                raise RuntimeError(
-                    f"Partial download path is a symlink: {partial_path}"
-                )
-            flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
-            flags |= getattr(os, "O_NOFOLLOW", 0)
-            fd = os.open(partial_path, flags, 0o600)
-            with os.fdopen(fd, "wb") as tmp_file:
+            with tempfile.NamedTemporaryFile(
+                "wb",
+                delete=False,
+                dir=destination.parent,
+                prefix=f".{destination.name}.",
+                suffix=".partial",
+            ) as tmp_file:
+                tmp_path = Path(tmp_file.name)
                 for chunk in response.iter_bytes(DOWNLOAD_CHUNK_SIZE):
                     if not chunk:
                         continue
@@ -151,9 +150,10 @@ def download_file_to(
                     f"Downloaded size mismatch: expected {expected_size}, "
                     f"received {bytes_downloaded}"
                 )
-            partial_path.replace(destination)
+            tmp_path.replace(destination)
         except Exception:
-            partial_path.unlink(missing_ok=True)
+            if tmp_path is not None:
+                tmp_path.unlink(missing_ok=True)
             raise
     return bytes_downloaded
 

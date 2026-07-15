@@ -527,6 +527,12 @@ def test_per_file_retries_continue_and_report_only_permanent_failures(
     assert attempts[metrics_url] == 3
 
 
+def test_error_message_redacts_mixed_case_presigned_url() -> None:
+    error = RuntimeError("failed HTTPS://example.com/file?token=secret")
+
+    assert run_download_module._safe_error_message(error) == "failed <redacted URL>"
+
+
 def test_expired_presigned_url_refreshes_by_typed_status(monkeypatch, tmp_path, capsys):
     _stub_git_context(monkeypatch, tmp_path)
     fake_client = _make_fake_client()
