@@ -73,11 +73,14 @@ The result is an `OperationResult` whose next-steps point at `osmosis eval info 
 All operate on the current git workspace directory ([../osmosis_ai/platform/cli/eval.py](../osmosis_ai/platform/cli/eval.py)):
 
 - `osmosis eval list [--all] [--limit N]` — list runs for the workspace.
-- `osmosis eval info <name|id> [-o path]` — run detail, results, and metrics (writes a metrics JSON in rich mode).
+- `osmosis eval info <name|id> [-o root]` — run detail, results, and metrics (writes `<root>/metrics.json` in rich mode; default `.osmosis/evals/<name>/metrics.json`).
 - `osmosis eval logs <name|id> [--cursor …]` — recent run logs, oldest first.
+- `osmosis eval download <name|id> [--type metrics,trajectories|artifacts|logs|all] [--rows 3,7,10-20] [-o root] [--overwrite] [--yes]` — download run outputs into the fixed run-scoped layout. The default is `metrics,trajectories`; `--type` replaces that selection. Matching local sizes resume for free, and transfers over 100 MiB require confirmation unless `--yes` is supplied.
 - `osmosis eval stop <name|id> [--yes]` — stop a run.
 
 See [docs.osmosis.ai/cli/config-files](https://docs.osmosis.ai/cli/config-files) for the full config field reference.
+
+Migration notice: rich-mode metrics exports no longer write new files under `.osmosis/metrics/`. Existing legacy files are left untouched; new eval exports use `.osmosis/evals/<name>/metrics.json`.
 
 ## `osmosis eval rubric` (offline LLM-as-judge)
 

@@ -200,3 +200,111 @@ def test_download_file_reports_http_errors(monkeypatch, tmp_path) -> None:
             default_filename="data.jsonl",
             expected_size=10,
         )
+
+
+def test_download_file_to_creates_nested_directories(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(
+        download_module.httpx,
+        "stream",
+        lambda *args, **kwargs: _FakeStreamResponse(chunks=[b"hello", b" world"]),
+    )
+    destination = tmp_path / "rollout_trials" / "abc" / "trajectory.json"
+
+    written = download_module.download_file_to(
+        "https://example.com/signed", destination
+    )
+
+    assert written == 11
+    assert destination.read_bytes() == b"hello world"
+
+
+def test_download_file_to_replaces_existing_file(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(
+        download_module.httpx,
+        "stream",
+        lambda *args, **kwargs: _FakeStreamResponse(chunks=[b"new"]),
+    )
+    destination = tmp_path / "index.jsonl"
+    destination.write_bytes(b"old-content")
+
+    download_module.download_file_to("https://example.com/signed", destination)
+
+    assert destination.read_bytes() == b"new"
+
+
+def test_download_file_to_rejects_size_mismatch_before_atomic_replace(
+    monkeypatch, tmp_path
+) -> None:
+    monkeypatch.setattr(
+        download_module.httpx,
+        "stream",
+        lambda *args, **kwargs: _FakeStreamResponse(chunks=[b"short"]),
+    )
+    destination = tmp_path / "metrics.json"
+    destination.write_bytes(b"old-content")
+
+    with pytest.raises(RuntimeError, match="Downloaded size mismatch"):
+        download_module.download_file_to(
+            "https://example.com/signed", destination, expected_size=10
+        )
+
+    assert destination.read_bytes() == b"old-content"
+    assert not (tmp_path / "metrics.json.partial").exists()
+
+
+def test_download_file_to_refuses_partial_symlink(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(
+        download_module.httpx,
+        "stream",
+        lambda *args, **kwargs: _FakeStreamResponse(chunks=[b"data"]),
+    )
+    outside = tmp_path / "outside"
+    outside.write_bytes(b"safe")
+    destination = tmp_path / "metrics.json"
+    partial = tmp_path / "metrics.json.partial"
+    partial.symlink_to(outside)
+
+    with pytest.raises(RuntimeError, match="Partial download path is a symlink"):
+        download_module.download_file_to(
+            "https://example.com/signed", destination, expected_size=4
+        )
+
+    assert outside.read_bytes() == b"safe"
+    assert not destination.exists()
+
+
+def test_download_file_to_reports_http_errors(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(
+        download_module.httpx,
+        "stream",
+        lambda *args, **kwargs: _FakeStreamResponse(status_code=403, body=b"expired"),
+    )
+    destination = tmp_path / "index.jsonl"
+
+    with pytest.raises(RuntimeError, match=r"HTTP 403.*expired"):
+        download_module.download_file_to("https://example.com/signed", destination)
+
+    assert not destination.exists()
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_download_file_to_cleans_up_temp_file_on_write_failure(
+    monkeypatch, tmp_path
+) -> None:
+    class _ExplodingResponse(_FakeStreamResponse):
+        def iter_bytes(self, _chunk_size: int):
+            yield b"partial"
+            raise RuntimeError("connection dropped")
+
+    monkeypatch.setattr(
+        download_module.httpx,
+        "stream",
+        lambda *args, **kwargs: _ExplodingResponse(),
+    )
+    destination = tmp_path / "index.jsonl"
+
+    with pytest.raises(RuntimeError, match="connection dropped"):
+        download_module.download_file_to("https://example.com/signed", destination)
+
+    assert not destination.exists()
+    assert list(tmp_path.iterdir()) == []

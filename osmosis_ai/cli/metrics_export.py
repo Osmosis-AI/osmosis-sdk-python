@@ -16,6 +16,21 @@ from osmosis_ai.platform.api.models import (
     TrainingRunMetrics,
 )
 
+METRICS_EXPORT_MIGRATION_NOTICE = (
+    "Eval metrics exports now use run-scoped "
+    ".osmosis/evals/<name>/metrics.json paths; existing .osmosis/metrics files "
+    "are left untouched."
+)
+
+_WINDOWS_RESERVED_FILENAMES = {
+    "aux",
+    "con",
+    "nul",
+    "prn",
+    *(f"com{index}" for index in range(1, 10)),
+    *(f"lpt{index}" for index in range(1, 10)),
+}
+
 
 def safe_name(name: str) -> str:
     """Sanitise a run name for use as a filename component."""
@@ -66,6 +81,69 @@ def resolve_default_metrics_output(
     metrics_dir = workspace_directory / ".osmosis" / "metrics"
     metrics_dir.mkdir(parents=True, exist_ok=True)
     return metrics_dir / default_metrics_filename(run_name, run_id)
+
+
+def resolve_eval_output_dir(
+    run_name: str | None,
+    run_id: str,
+    *,
+    workspace_directory: Path,
+    output: str | None = None,
+    create: bool = True,
+) -> Path:
+    """Resolve the fixed eval-scoped output root used by ``info`` and download.
+
+    ``output`` relocates the run root itself; the layout below it is fixed.
+    Without an explicit root, evals live under ``.osmosis/evals/<name>``.
+    Unnamed runs fall back to their full ID so separate runs never share the
+    unnamed directory.
+    """
+    if output is not None:
+        root = parse_cli_path(output, expand_user=True).path
+    else:
+        safe_run_name = safe_name(run_name).strip("_") if run_name else ""
+        needs_disambiguation = bool(
+            safe_run_name
+            and run_name
+            and (
+                safe_run_name != run_name
+                or safe_run_name != safe_run_name.casefold()
+                or safe_run_name.casefold() in _WINDOWS_RESERVED_FILENAMES
+            )
+        )
+        if needs_disambiguation:
+            safe_run_id = safe_name(run_id).strip("_") or "run"
+            suffix = f"--{safe_run_id}"
+            safe_run_name = f"{safe_run_name[: 255 - len(suffix)]}{suffix}"
+        root = workspace_directory / ".osmosis" / "evals" / (safe_run_name or run_id)
+
+    try:
+        if root.exists() and not root.is_dir():
+            raise CLIError(f"Output path is not a directory: {root}")
+        if create:
+            root.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        raise CLIError(f"Cannot create output directory: {exc}") from exc
+    return root
+
+
+def resolve_eval_metrics_output(
+    run_name: str | None,
+    run_id: str,
+    *,
+    workspace_directory: Path,
+    output: str | None = None,
+) -> Path:
+    """Resolve the canonical ``metrics.json`` path inside a run output root."""
+    return (
+        resolve_eval_output_dir(
+            run_name,
+            run_id,
+            workspace_directory=workspace_directory,
+            output=output,
+        )
+        / "metrics.json"
+    )
 
 
 def _ref_name(ref: dict[str, Any] | None) -> str | None:

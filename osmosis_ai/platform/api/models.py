@@ -1093,3 +1093,106 @@ class PaginatedEvaluationRuns:
             has_more=data.get("has_more", False),
             next_offset=data.get("next_offset"),
         )
+
+
+@dataclass(frozen=True)
+class RunDownloadFile:
+    """One run-scoped file returned by a samples manifest endpoint.
+
+    ``path`` is the fixed local path relative to the run output root. The
+    optional ``rollout_id`` is echoed back with ``path`` when requesting a
+    presigned URL; the server remains solely responsible for deriving S3 keys.
+    """
+
+    path: str
+    size: int
+    rollout_id: str | None = None
+
+    @property
+    def identity(self) -> tuple[str | None, str]:
+        return self.rollout_id, self.path
+
+    def to_request_item(self) -> dict[str, Any]:
+        item: dict[str, Any] = {"path": self.path}
+        if self.rollout_id is not None:
+            item["rolloutId"] = self.rollout_id
+        return item
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> RunDownloadFile:
+        path = data.get("path")
+        size = data.get("size")
+        rollout_id = data.get("rolloutId", data.get("rollout_id"))
+        if not isinstance(path, str) or not path:
+            raise ValueError("Download manifest file path must be a non-empty string")
+        if isinstance(size, bool) or not isinstance(size, int) or size < 0:
+            raise ValueError(f"Download manifest size is invalid for {path!r}")
+        if rollout_id is not None and not isinstance(rollout_id, str):
+            raise ValueError(f"Download manifest rolloutId is invalid for {path!r}")
+        return cls(path=path, size=size, rollout_id=rollout_id)
+
+
+@dataclass(frozen=True)
+class RunDownloadManifest:
+    """Complete file manifest for an evaluation run download."""
+
+    files: list[RunDownloadFile]
+    totals: dict[str, Any]
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> RunDownloadManifest:
+        raw_files = data.get("files", [])
+        if not isinstance(raw_files, list):
+            raise ValueError("Download manifest files must be a list")
+        totals = data.get("totals", {})
+        return cls(
+            files=[RunDownloadFile.from_dict(item) for item in raw_files],
+            totals=totals if isinstance(totals, dict) else {},
+        )
+
+
+@dataclass(frozen=True)
+class RunDownloadURL:
+    """Presigned URL for one manifest item."""
+
+    path: str
+    url: str
+    rollout_id: str | None = None
+
+    @property
+    def identity(self) -> tuple[str | None, str]:
+        return self.rollout_id, self.path
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> RunDownloadURL:
+        path = data.get("path")
+        url = data.get("url") or data.get("presignedUrl") or data.get("presigned_url")
+        rollout_id = data.get("rolloutId", data.get("rollout_id"))
+        if not isinstance(path, str) or not path:
+            raise ValueError("Download URL path must be a non-empty string")
+        if not isinstance(url, str) or not url:
+            raise ValueError(f"Download URL is missing for {path!r}")
+        if rollout_id is not None and not isinstance(rollout_id, str):
+            raise ValueError(f"Download URL rolloutId is invalid for {path!r}")
+        return cls(path=path, url=url, rollout_id=rollout_id)
+
+
+@dataclass(frozen=True)
+class RunDownloadURLBatch:
+    """Presigned URLs returned for one bounded manifest batch."""
+
+    items: list[RunDownloadURL]
+    expires_in: int | None = None
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> RunDownloadURLBatch:
+        raw_items = data.get("items")
+        if raw_items is None:
+            raw_items = data.get("files", data.get("urls", []))
+        if not isinstance(raw_items, list):
+            raise ValueError("Download URL response items must be a list")
+        expires_in = data.get("expires_in", data.get("expiresIn"))
+        return cls(
+            items=[RunDownloadURL.from_dict(item) for item in raw_items],
+            expires_in=expires_in if isinstance(expires_in, int) else None,
+        )
