@@ -42,7 +42,6 @@ def convert_sample_to_trajectory(
     sample: RolloutSample,
     *,
     rollout_id: str,
-    sample_id: str,
     request_label: str | None = None,
     request_metadata: dict[str, Any] | None = None,
     request_extra_fields: dict[str, Any] | None = None,
@@ -50,11 +49,11 @@ def convert_sample_to_trajectory(
     default_model_name: str | None = None,
     unmatched_sample_reports: Mapping[str, SampleReport] | None = None,
 ) -> Trajectory:
-    """Build one ATIF trajectory document for one rollout sample.
+    """Build the ATIF trajectory document for the rollout's single sample.
 
     ``report`` carries controller-reported per-call metrics (see
-    ``report.py``); ``unmatched_sample_reports`` are entries keyed by
-    no sample, preserved under ``extra``.
+    ``report.py``); ``unmatched_sample_reports`` are entries that could
+    not be attributed to the sample, preserved under ``extra``.
     """
     if sample.trajectory_messages is None:
         raise ValueError("Sample has no trajectory-compatible messages")
@@ -71,7 +70,7 @@ def convert_sample_to_trajectory(
         }
     return Trajectory(
         session_id=rollout_id,
-        trajectory_id=f"{rollout_id}/{sample_id}",
+        trajectory_id=rollout_id,
         agent=Agent(
             name=ATIF_PRODUCER_NAME, version=PACKAGE_VERSION, model_name=model_name
         ),
@@ -80,7 +79,6 @@ def convert_sample_to_trajectory(
         extra=_compose_extra(
             sample,
             rollout_id=rollout_id,
-            sample_id=sample_id,
             request_label=request_label,
             request_metadata=request_metadata,
             request_extra_fields=request_extra_fields,
@@ -385,7 +383,6 @@ def _compose_extra(
     sample: RolloutSample,
     *,
     rollout_id: str,
-    sample_id: str,
     request_label: str | None,
     request_metadata: dict[str, Any] | None,
     request_extra_fields: dict[str, Any] | None,
@@ -395,7 +392,6 @@ def _compose_extra(
     """Namespace all Osmosis platform context under ``extra["osmosis"]``."""
     osmosis: dict[str, Any] = {
         "rollout_id": rollout_id,
-        "sample_id": sample_id,
         "label": sample.label if sample.label is not None else request_label,
         "reward": sample.reward,
         "sample_metrics": sample.metrics or None,
