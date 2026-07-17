@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator, Sequence
 from typing import TYPE_CHECKING, Any
 from urllib.parse import quote, urlencode
 
-from osmosis_ai.platform.auth.platform_client import platform_request
+from osmosis_ai.platform.auth.platform_client import platform_request, platform_stream
 from osmosis_ai.platform.constants import DEFAULT_PAGE_SIZE
 
 from .models import (
@@ -14,6 +15,7 @@ from .models import (
     EnvironmentSecretInfo,
     EvalRunMetrics,
     EvaluationRunDetail,
+    LogEntry,
     LogsPage,
     LoraModelDetail,
     LoraModelSummary,
@@ -25,6 +27,9 @@ from .models import (
     PaginatedLoraModels,
     PaginatedRollouts,
     PaginatedTrainingRuns,
+    RunDownloadFile,
+    RunDownloadManifest,
+    RunDownloadURLBatch,
     SubmitRunResult,
     TrainingRunCheckpoints,
     TrainingRunDetail,
@@ -71,6 +76,46 @@ class OsmosisClient:
             git_identity=git_identity,
         )
         return LogsPage.from_dict(data)
+
+    def _get_run_download_manifest(
+        self,
+        resource_path: str,
+        *,
+        types: Sequence[str],
+        rows: str | None = None,
+        credentials: Credentials | None = None,
+        git_identity: str,
+    ) -> RunDownloadManifest:
+        params: dict[str, str] = {"types": ",".join(types)}
+        if rows is not None:
+            params["rows"] = rows
+        data = platform_request(
+            f"{resource_path}/samples/manifest?{urlencode(params)}",
+            credentials=credentials,
+            git_identity=git_identity,
+        )
+        return RunDownloadManifest.from_dict(data)
+
+    def _get_run_download_urls(
+        self,
+        resource_path: str,
+        *,
+        items: Sequence[RunDownloadFile],
+        credentials: Credentials | None = None,
+        git_identity: str,
+    ) -> RunDownloadURLBatch:
+        if not 1 <= len(items) <= 500:
+            raise ValueError(
+                "Download URL batches must contain between 1 and 500 items"
+            )
+        data = platform_request(
+            f"{resource_path}/samples/download-urls",
+            method="POST",
+            data={"items": [item.to_request_item() for item in items]},
+            credentials=credentials,
+            git_identity=git_identity,
+        )
+        return RunDownloadURLBatch.from_dict(data)
 
     # ── Datasets ─────────────────────────────────────────────────────
 
@@ -655,6 +700,38 @@ class OsmosisClient:
             git_identity=git_identity,
         )
 
+    def get_eval_run_download_manifest(
+        self,
+        eval_run_id: str,
+        *,
+        types: Sequence[str],
+        rows: str | None = None,
+        credentials: Credentials | None = None,
+        git_identity: str,
+    ) -> RunDownloadManifest:
+        return self._get_run_download_manifest(
+            f"/api/cli/eval-runs/{_safe_path(eval_run_id)}",
+            types=types,
+            rows=rows,
+            credentials=credentials,
+            git_identity=git_identity,
+        )
+
+    def get_eval_run_download_urls(
+        self,
+        eval_run_id: str,
+        *,
+        items: Sequence[RunDownloadFile],
+        credentials: Credentials | None = None,
+        git_identity: str,
+    ) -> RunDownloadURLBatch:
+        return self._get_run_download_urls(
+            f"/api/cli/eval-runs/{_safe_path(eval_run_id)}",
+            items=items,
+            credentials=credentials,
+            git_identity=git_identity,
+        )
+
     def stop_eval_run(
         self,
         eval_run_id: str,
@@ -712,6 +789,52 @@ class OsmosisClient:
             credentials=credentials,
             git_identity=git_identity,
         )
+
+    def get_dev_rollout_server_logs(
+        self,
+        server_id: str,
+        *,
+        limit: int = DEFAULT_PAGE_SIZE,
+        cursor: str | None = None,
+        direction: str = "older",
+        credentials: Credentials | None = None,
+        git_identity: str,
+    ) -> LogsPage:
+        """Fetch one page of dev rollout server logs.
+
+        Without ``cursor``, ``direction="older"`` returns the most recent page;
+        ``direction="newer"`` pages forward for live follow.
+        """
+        return self._get_logs(
+            f"/api/cli/dev-rollout-server/{_safe_path(server_id)}",
+            limit=limit,
+            cursor=cursor,
+            direction=direction,
+            credentials=credentials,
+            git_identity=git_identity,
+        )
+
+    def stream_dev_rollout_server_logs(
+        self,
+        server_id: str,
+        *,
+        tail: int = DEFAULT_PAGE_SIZE,
+        credentials: Credentials | None = None,
+        git_identity: str,
+    ) -> Iterator[LogEntry]:
+        """Stream a dev rollout server's logs live via Server-Sent Events.
+
+        The server sends the most recent ``tail`` lines first, then pushes new
+        lines as they arrive. The iterator ends when the stream closes (e.g. the
+        server is torn down).
+        """
+        qs = urlencode({"tail": tail})
+        for data in platform_stream(
+            f"/api/cli/dev-rollout-server/{_safe_path(server_id)}/logs/stream?{qs}",
+            credentials=credentials,
+            git_identity=git_identity,
+        ):
+            yield LogEntry.from_dict(data)
 
     def list_dev_rollout_servers(
         self,

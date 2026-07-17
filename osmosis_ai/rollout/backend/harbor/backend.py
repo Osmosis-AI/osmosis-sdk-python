@@ -38,6 +38,7 @@ from osmosis_ai.rollout.types import (
     RolloutSample,
     RolloutStatus,
 )
+from osmosis_ai.rollout.utils.file_artifacts import default_artifact_root
 from osmosis_ai.rollout.utils.imports import to_import_path
 from osmosis_ai.rollout.utils.rewards import validate_sample_has_reward
 
@@ -142,6 +143,7 @@ class HarborBackend(ExecutionBackend):
         self.trials_dir: Path = (
             trials_dir if trials_dir != Path("trials") else self.root_dir / "trials"
         )
+        self.artifact_root: Path = default_artifact_root()
 
         self.pending: dict[str, PendingTrial] = {}
         self.prebuilt_image_tag: str | None = None
@@ -444,25 +446,29 @@ class HarborBackend(ExecutionBackend):
         pending.workflow_complete_called = True
         await pending.on_workflow_complete(result)
 
-    def read_grader_artifacts(self, rollout_id: str) -> dict[str, Any] | None:
-        """Read grader artifacts off the host trial dir (optional)."""
-        path = (
-            self.trials_dir
-            / f"{TRIAL_NAME_PREFIX}{rollout_id}"
-            / "verifier"
-            / "grader_artifacts.json"
-        )
-        if not path.exists():
-            return None
+    def _relocate_trial_artifacts(self, rollout_id: str, *, move: bool) -> bool:
+        """Persist collected artifacts to the artifact root; ``move`` before
+        cleanup, else copy. Best-effort: returns ``False`` to keep the source."""
+        source_dir = self.trials_dir / f"{TRIAL_NAME_PREFIX}{rollout_id}" / "artifacts"
+        if not source_dir.is_dir():
+            return True
+        dest_dir = self.artifact_root / rollout_id / "artifacts"
         try:
-            return json.loads(path.read_text())
-        except (OSError, ValueError) as e:
-            # ValueError covers JSONDecodeError and UnicodeDecodeError (non-UTF-8
-            # bytes), so a corrupt artifacts file is tolerated, not fatal.
+            if dest_dir.exists():
+                shutil.rmtree(dest_dir)
+            dest_dir.parent.mkdir(parents=True, exist_ok=True)
+            if move:
+                shutil.move(source_dir, dest_dir)
+            else:
+                shutil.copytree(source_dir, dest_dir, symlinks=False)
+        except OSError:
             logger.warning(
-                "Failed to read grader artifacts for rollout %s: %s", rollout_id, e
+                "Failed to relocate trial artifacts for rollout %s (best-effort)",
+                rollout_id,
+                exc_info=True,
             )
-            return None
+            return False
+        return True
 
     async def on_trial_end(self, event: TrialHookEvent) -> None:
         rollout_id = parse_rollout_id(event)
@@ -470,6 +476,14 @@ class HarborBackend(ExecutionBackend):
         if not pending:
             logger.error("No pending trial found for rollout %s", rollout_id)
             return
+
+        # Evacuate artifacts first; delete the source only if it succeeds.
+        delete_trial = bool(
+            self.cleanup_successful_trials
+            and event.result
+            and not event.result.exception_info
+        )
+        relocated = self._relocate_trial_artifacts(rollout_id, move=delete_trial)
 
         if not pending.workflow_complete_called:
             if event.result and event.result.exception_info:
@@ -490,17 +504,13 @@ class HarborBackend(ExecutionBackend):
         if pending.on_grader_complete:
             metadata = get_agent_metadata(event)
             sample = parse_sample(metadata.get("sample") if metadata else None)
-            # Read before the trial-dir cleanup further down.
-            artifacts = self.read_grader_artifacts(rollout_id)
 
             if event.result and event.result.verifier_result:
                 # Harbor surfaces verifier output as ``rewards: dict[str, float]``
                 # regardless of what shape the verifier wrote — for the single-sample
                 # contract we take any one value and apply it to our single sample.
                 rewards = event.result.verifier_result.rewards or {}
-                reward_values = [
-                    float(v) for v in rewards.values() if v is not None
-                ]
+                reward_values = [float(v) for v in rewards.values() if v is not None]
                 if sample is not None and reward_values:
                     sample.reward = reward_values[0]
                 try:
@@ -539,16 +549,15 @@ class HarborBackend(ExecutionBackend):
             else:
                 result = ExecutionResult(status=RolloutStatus.FAILURE, sample=sample)
 
-            result.artifacts = artifacts
             await pending.on_grader_complete(result)
 
         if self.cleanup_successful_trials:
             rollout_dir = self.rollouts_dir / rollout_id
             shutil.rmtree(rollout_dir, ignore_errors=True)
 
-            if event.result and not event.result.exception_info:
-                trial_dir = self.trials_dir / f"{TRIAL_NAME_PREFIX}{rollout_id}"
-                shutil.rmtree(trial_dir, ignore_errors=True)
+        if delete_trial and relocated:
+            trial_dir = self.trials_dir / f"{TRIAL_NAME_PREFIX}{rollout_id}"
+            shutil.rmtree(trial_dir, ignore_errors=True)
 
         if not pending.done.done():
             pending.done.set_result(None)

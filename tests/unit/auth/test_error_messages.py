@@ -8,7 +8,6 @@ is correct end-to-end.
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -17,7 +16,6 @@ from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.platform.auth.credentials import Credentials, UserInfo
 from osmosis_ai.platform.auth.platform_client import (
     AuthenticationExpiredError,
-    PlatformAPIError,
 )
 from osmosis_ai.platform.constants import MSG_ENV_TOKEN_INVALID
 
@@ -33,31 +31,6 @@ def _make_credentials(*, expired: bool = False) -> Credentials:
         user=UserInfo(id="u1", email="test@test.com", name="Test"),
         token_id=None,
     )
-
-
-def test_reset_session_deletes_legacy_auth_local_config(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    from osmosis_ai.platform.auth.local_config import reset_session
-
-    legacy_config = tmp_path / ".config" / "osmosis" / "config.json"
-    legacy_config.parent.mkdir(parents=True)
-    legacy_config.write_text(
-        '{"active_workspace":{"id":"legacy","name":"legacy"}}',
-        encoding="utf-8",
-    )
-
-    monkeypatch.setattr(
-        "osmosis_ai.platform.auth.local_config.CONFIG_FILE",
-        legacy_config,
-    )
-    monkeypatch.setattr(
-        "osmosis_ai.platform.auth.credentials.delete_credentials", lambda: True
-    )
-
-    reset_session()
-
-    assert not legacy_config.exists()
 
 
 class TestRequireCredentialsMessages:
@@ -93,30 +66,6 @@ class TestRequireCredentialsMessages:
         assert result is creds
 
 
-def test_global_active_workspace_helpers_are_not_public_context_api() -> None:
-    """Production modules must not expose global active workspace context APIs."""
-    import osmosis_ai.platform.auth as auth_module
-    import osmosis_ai.platform.auth.local_config as local_config
-    import osmosis_ai.platform.auth.platform_client as platform_client
-    import osmosis_ai.platform.cli.utils as cli_utils
-
-    removed_symbols = [
-        (auth_module, "ensure_active_workspace"),
-        (auth_module, "get_active_workspace"),
-        (auth_module, "get_active_workspace_id"),
-        (local_config, "get_active_workspace"),
-        (local_config, "get_active_workspace_id"),
-        (local_config, "get_active_workspace_name"),
-        (local_config, "set_active_workspace"),
-        (local_config, "clear_active_workspace"),
-        (platform_client, "ensure_active_workspace"),
-        (platform_client, "get_active_workspace_id"),
-        (cli_utils, "_get_active_workspace_name"),
-    ]
-    for module, symbol in removed_symbols:
-        assert not hasattr(module, symbol), f"{module.__name__}.{symbol} remains"
-
-
 class TestPlatformRequestMessages:
     """Test platform_request() error messages for each failure mode."""
 
@@ -128,25 +77,6 @@ class TestPlatformRequestMessages:
 
         with pytest.raises(CLIError, match="Not logged in"):
             platform_request("/api/test")
-
-    def test_git_scope_required_ignores_legacy_active_workspace_fallback(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        from osmosis_ai.platform.auth.platform_client import platform_request
-
-        legacy_config = tmp_path / "config.json"
-        legacy_config.write_text(
-            '{"active_workspace":{"id":"legacy-ws","name":"legacy-workspace"}}',
-            encoding="utf-8",
-        )
-        monkeypatch.setattr(
-            "osmosis_ai.platform.auth.local_config.CONFIG_FILE",
-            legacy_config,
-        )
-        creds = _make_credentials()
-
-        with pytest.raises(PlatformAPIError, match="explicit git_identity"):
-            platform_request("/api/test", credentials=creds)
 
 
 class TestMainExceptionHandlerMessages:

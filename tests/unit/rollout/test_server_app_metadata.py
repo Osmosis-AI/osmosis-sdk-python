@@ -9,9 +9,7 @@ from osmosis_ai.rollout.server import app as app_module
 from osmosis_ai.rollout.server.app import _handle_rollout
 from osmosis_ai.rollout.types import (
     ExecutionRequest,
-    ExecutionResult,
     RolloutInitRequest,
-    RolloutStatus,
 )
 
 
@@ -90,9 +88,3 @@ class TestHandleRolloutMetadata:
 
         await _handle_rollout(FailingBackend(), _make_init_request({"k": "v"}))
         assert "http://controller/complete" in posted
-
-
-def test_capturing_backend_smoke():
-    """ExecutionResult import is exercised to keep the contract obvious."""
-    result = ExecutionResult(status=RolloutStatus.SUCCESS)
-    assert result.status == RolloutStatus.SUCCESS

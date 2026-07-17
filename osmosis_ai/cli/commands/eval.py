@@ -14,7 +14,10 @@ from osmosis_ai.platform.constants import (
 )
 
 app: typer.Typer = typer.Typer(
-    help="Manage evaluation runs (submit, list, info, stop) and LLM-as-judge rubric scoring.",
+    help=(
+        "Manage evaluation runs (submit, list, info, download, stop) and"
+        " LLM-as-judge rubric scoring."
+    ),
     no_args_is_help=True,
 )
 
@@ -135,17 +138,60 @@ def eval_info(
         None,
         "--output",
         "-o",
-        help=(
-            "Output path for metrics JSON. Non-.json extensions are replaced with"
-            " .json; a trailing '/' or existing directory generates a default"
-            " filename inside it. (default in rich mode: .osmosis/metrics/)"
-        ),
+        help="Run output root (default in rich mode: .osmosis/evals/<name>/).",
     ),
 ) -> Any:
     """Show evaluation run details, results, and metrics."""
     from osmosis_ai.platform.cli.eval import info as _info
 
     return _info(name_or_id, output=output)
+
+
+@app.command("download")
+def eval_download(
+    name_or_id: str = typer.Argument(..., help="Evaluation run name or ID."),
+    output: str | None = typer.Option(
+        None,
+        "--output",
+        "-o",
+        help="Run output root (default: .osmosis/evals/<name>/).",
+    ),
+    types: str = typer.Option(
+        "metrics,trajectories",
+        "--type",
+        help=(
+            "Comma-separated selector: metrics, trajectories, artifacts, logs, all. "
+            "Replaces the default selection."
+        ),
+    ),
+    rows: str | None = typer.Option(
+        None,
+        "--rows",
+        help='Rows for trajectories/artifacts, for example "3,7,10-20".',
+    ),
+    overwrite: bool = typer.Option(
+        False,
+        "--overwrite",
+        help="Re-download files that already exist locally.",
+    ),
+    yes: bool = typer.Option(
+        False,
+        "--yes",
+        "-y",
+        help="Skip size confirmation.",
+    ),
+) -> Any:
+    """Download evaluation metrics, trajectories, artifacts, or logs."""
+    from osmosis_ai.platform.cli.eval import download as _download
+
+    return _download(
+        name_or_id,
+        output=output,
+        types=types,
+        rows=rows,
+        overwrite=overwrite,
+        yes=yes,
+    )
 
 
 @app.command("stop")

@@ -1,6 +1,7 @@
 import copy
 import logging
 import traceback
+from pathlib import Path
 from typing import Any
 
 from osmosis_ai.rollout.agent_workflow import AgentWorkflow
@@ -21,6 +22,10 @@ from osmosis_ai.rollout.types import (
     RolloutStatus,
 )
 from osmosis_ai.rollout.utils.concurrency import ConcurrencyLimiter
+from osmosis_ai.rollout.utils.file_artifacts import (
+    create_rollout_artifacts_dir,
+    default_artifact_root,
+)
 from osmosis_ai.rollout.utils.imports import resolve_object
 from osmosis_ai.rollout.utils.rewards import validate_sample_has_reward
 
@@ -55,6 +60,8 @@ class LocalBackend(ExecutionBackend):
         self.limiter: ConcurrencyLimiter = ConcurrencyLimiter(
             max_concurrent=max_concurrent
         )
+
+        self.artifact_root: Path = default_artifact_root()
 
     @property
     def max_concurrency(self) -> int:
@@ -95,6 +102,9 @@ class LocalBackend(ExecutionBackend):
             prompt=request.prompt,
             config=config,
             metadata=request.metadata,
+            artifacts_dir=await create_rollout_artifacts_dir(
+                self.artifact_root, request.id
+            ),
         )
 
         rollout_ctx = get_rollout_context()
@@ -128,6 +138,9 @@ class LocalBackend(ExecutionBackend):
             label=request.label,
             sample=result.sample,
             metadata=request.metadata,
+            artifacts_dir=await create_rollout_artifacts_dir(
+                self.artifact_root, request.id
+            ),
         )
         try:
             grader = self.grader_cls(self.grader_config)
@@ -136,14 +149,12 @@ class LocalBackend(ExecutionBackend):
             return ExecutionResult(
                 status=RolloutStatus.SUCCESS,
                 sample=grader_ctx.sample,
-                artifacts=grader_ctx.artifacts,
             )
         except Exception as e:
             logger.error(traceback.format_exc())
             return ExecutionResult(
                 status=RolloutStatus.FAILURE,
                 sample=result.sample,
-                artifacts=grader_ctx.artifacts,
                 err_message=str(e),
                 err_category=_categorize_exception(e),
             )

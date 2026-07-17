@@ -7,8 +7,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from click.testing import CliRunner
-from typer.main import get_command
+from typer.testing import CliRunner
 
 from osmosis_ai.cli import main as cli
 
@@ -127,7 +126,7 @@ def test_zsh_completion_for_template_commands_does_not_require_comp_words(
 ) -> None:
     cli._register_commands()
     result = CliRunner().invoke(
-        get_command(cli.app),
+        cli.app,
         [],
         prog_name="osmosis",
         env={
@@ -266,7 +265,7 @@ def test_template_apply_unknown_template_returns_not_found_in_json(
 def test_zsh_completion_for_template_apply_names(workspace_template) -> None:
     cli._register_commands()
     result = CliRunner().invoke(
-        get_command(cli.app),
+        cli.app,
         [],
         prog_name="osmosis",
         env={

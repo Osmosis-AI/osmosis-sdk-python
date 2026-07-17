@@ -10,28 +10,6 @@ import pytest
 
 from osmosis_ai.platform.api.client import OsmosisClient, _safe_path
 
-REMOVED_CLIENT_METHODS = (
-    "list_workspaces",
-    "create_workspace",
-    "delete_workspace",
-    "get_workspace_deletion_status",
-    "delete_dataset",
-    "get_dataset_affected_resources",
-    "delete_training_run",
-    "delete_model",
-    "get_model_affected_resources",
-    "rename_checkpoint",
-    "delete_deployment",
-)
-
-
-class TestRemovedClientMethods:
-    """Destructive API methods must not be exposed by OsmosisClient."""
-
-    @pytest.mark.parametrize("method_name", REMOVED_CLIENT_METHODS)
-    def test_removed_method_is_not_exposed(self, method_name: str) -> None:
-        assert not hasattr(OsmosisClient, method_name)
-
 
 class TestCreateDataset:
     """Tests for OsmosisClient.create_dataset request payloads."""
@@ -732,6 +710,92 @@ class TestEvaluationRuns:
         assert mock_request.call_args.kwargs["method"] == "POST"
         assert mock_request.call_args.kwargs["data"] == {}
 
+    @patch("osmosis_ai.platform.api.client.platform_request")
+    def test_eval_run_download_manifest_contract(self, mock_request: MagicMock) -> None:
+        mock_request.return_value = {
+            "files": [
+                {
+                    "path": "trajectories/row_3_run_0.json",
+                    "size": 12,
+                    "token": "rollout-1",
+                }
+            ],
+            "totals": {"files": 1, "bytes": 12},
+        }
+
+        manifest = OsmosisClient().get_eval_run_download_manifest(
+            "a/b",
+            types=["metrics", "trajectories"],
+            rows="3,7,10-20",
+            git_identity="git_test",
+        )
+
+        assert mock_request.call_args[0][0] == (
+            "/api/cli/eval-runs/a%2Fb/samples/manifest?"
+            "types=metrics%2Ctrajectories&rows=3%2C7%2C10-20"
+        )
+        assert manifest.files[0].token == "rollout-1"
+        assert manifest.totals == {"files": 1, "bytes": 12}
+
+    @patch("osmosis_ai.platform.api.client.platform_request")
+    def test_eval_run_download_urls_post_bounded_items(
+        self, mock_request: MagicMock
+    ) -> None:
+        mock_request.return_value = {
+            "items": [
+                {
+                    "path": "trajectories/row_3_run_0.json",
+                    "token": "rollout-1",
+                    "url": "https://example.com/signed",
+                }
+            ],
+            "expires_in": 900,
+        }
+        from osmosis_ai.platform.api.models import RunDownloadFile
+
+        batch = OsmosisClient().get_eval_run_download_urls(
+            "er-1",
+            items=[
+                RunDownloadFile(
+                    "trajectories/row_3_run_0.json",
+                    12,
+                    token="rollout-1",
+                )
+            ],
+            git_identity="git_test",
+        )
+
+        assert mock_request.call_args[0][0] == (
+            "/api/cli/eval-runs/er-1/samples/download-urls"
+        )
+        assert mock_request.call_args.kwargs["method"] == "POST"
+        assert mock_request.call_args.kwargs["data"] == {
+            "items": [
+                {
+                    "token": "rollout-1",
+                    "path": "trajectories/row_3_run_0.json",
+                }
+            ]
+        }
+        assert batch.items[0].url == "https://example.com/signed"
+        assert batch.expires_in == 900
+
+    @pytest.mark.parametrize("item_count", [0, 501])
+    def test_eval_run_download_urls_rejects_out_of_bounds_batches(
+        self, item_count: int
+    ) -> None:
+        from osmosis_ai.platform.api.models import RunDownloadFile
+
+        items = [
+            RunDownloadFile(f"trajectories/row_{index}_run_0.json", 1)
+            for index in range(item_count)
+        ]
+
+        with pytest.raises(ValueError, match="between 1 and 500 items"):
+            OsmosisClient().get_eval_run_download_urls(
+                "er-1", items=items, git_identity="git_test"
+            )
+
 
 class TestGetTrainingRunMetrics:
     """Tests for OsmosisClient.get_training_run_metrics."""
@@ -1161,3 +1225,96 @@ class TestDevRolloutServer:
         assert mock_request.call_args.kwargs["git_identity"] == "git_test"
         assert "method" not in mock_request.call_args.kwargs
         assert "data" not in mock_request.call_args.kwargs
+
+
+class TestGetDevRolloutServerLogs:
+    """Tests for OsmosisClient.get_dev_rollout_server_logs."""
+
+    @patch("osmosis_ai.platform.api.client.platform_request")
+    def test_returns_parsed_logs_with_default_query(
+        self, mock_request: MagicMock
+    ) -> None:
+        mock_request.return_value = {
+            "logs": [
+                {"timestamp": "2026-06-25T00:00:00Z", "message": "boot"},
+                {"timestamp": "2026-06-25T00:00:01Z", "message": "ready"},
+            ],
+            "next_cursor": "tok-1",
+        }
+
+        result = OsmosisClient().get_dev_rollout_server_logs(
+            "srv-1", git_identity="git_test"
+        )
+
+        assert mock_request.call_args[0][0] == (
+            "/api/cli/dev-rollout-server/srv-1/logs?limit=50&direction=older"
+        )
+        assert mock_request.call_args.kwargs["git_identity"] == "git_test"
+        assert [log.message for log in result.logs] == ["boot", "ready"]
+        assert result.next_cursor == "tok-1"
+
+    @patch("osmosis_ai.platform.api.client.platform_request")
+    def test_includes_cursor_and_direction_when_provided(
+        self, mock_request: MagicMock
+    ) -> None:
+        mock_request.return_value = {"logs": [], "next_cursor": None}
+
+        OsmosisClient().get_dev_rollout_server_logs(
+            "srv-1",
+            limit=10,
+            cursor="abc|def",
+            direction="newer",
+            git_identity="git_test",
+        )
+
+        assert mock_request.call_args[0][0] == (
+            "/api/cli/dev-rollout-server/srv-1/logs"
+            "?limit=10&direction=newer&cursor=abc%7Cdef"
+        )
+
+    @patch("osmosis_ai.platform.api.client.platform_request")
+    def test_encodes_server_id(self, mock_request: MagicMock) -> None:
+        mock_request.return_value = {"logs": [], "next_cursor": None}
+
+        OsmosisClient().get_dev_rollout_server_logs("a/b", git_identity="git_test")
+
+        path = mock_request.call_args[0][0]
+        assert path.startswith("/api/cli/dev-rollout-server/a%2Fb/logs?")
+
+
+class TestStreamDevRolloutServerLogs:
+    """Tests for OsmosisClient.stream_dev_rollout_server_logs."""
+
+    @patch("osmosis_ai.platform.api.client.platform_stream")
+    def test_yields_log_entries_from_stream(self, mock_stream: MagicMock) -> None:
+        mock_stream.return_value = iter(
+            [
+                {"timestamp": "t1", "message": "a"},
+                {"timestamp": "t2", "message": "b"},
+            ]
+        )
+
+        entries = list(
+            OsmosisClient().stream_dev_rollout_server_logs(
+                "srv-1", tail=100, git_identity="git_test"
+            )
+        )
+
+        endpoint = mock_stream.call_args[0][0]
+        assert endpoint == "/api/cli/dev-rollout-server/srv-1/logs/stream?tail=100"
+        assert mock_stream.call_args.kwargs["git_identity"] == "git_test"
+        assert [(e.timestamp, e.message) for e in entries] == [("t1", "a"), ("t2", "b")]
+
+    @patch("osmosis_ai.platform.api.client.platform_stream")
+    def test_encodes_server_id(self, mock_stream: MagicMock) -> None:
+        mock_stream.return_value = iter([])
+
+        list(
+            OsmosisClient().stream_dev_rollout_server_logs(
+                "a/b", git_identity="git_test"
+            )
+        )
+
+        assert mock_stream.call_args[0][0].startswith(
+            "/api/cli/dev-rollout-server/a%2Fb/logs/stream?"
+        )

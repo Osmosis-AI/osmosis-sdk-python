@@ -1,8 +1,14 @@
+import copy
+import logging
 from collections.abc import Mapping, Sequence
 from enum import StrEnum
-from typing import Any
+from typing import Any, Self
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator, model_validator
+
+from osmosis_ai.rollout.utils.identifiers import ensure_single_path_segment
+
+logger: logging.Logger = logging.getLogger(__name__)
 
 MessageDict = dict[str, Any]
 SampleMessage = Mapping[str, Any]
@@ -19,6 +25,7 @@ class RolloutSample(BaseModel):
     """
 
     messages: Sequence[SampleMessage] = Field(default_factory=list)
+    trajectory_messages: Sequence[SampleMessage] | None = None
     label: str | None = None
     reward: float | None = None
 
@@ -26,6 +33,20 @@ class RolloutSample(BaseModel):
 
     metrics: dict[str, Any] = Field(default_factory=dict)
     extra_fields: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _default_trajectory_messages(self) -> Self:
+        # Explicit None disables trajectory persistence.
+        if "trajectory_messages" not in self.model_fields_set:
+            try:
+                self.trajectory_messages = copy.deepcopy(list(self.messages))
+            except Exception:
+                logger.warning(
+                    "Failed to snapshot messages for trajectory persistence",
+                    exc_info=True,
+                )
+                self.trajectory_messages = None
+        return self
 
 
 class RolloutStatus(StrEnum):
@@ -49,10 +70,15 @@ class ExecutionRequest(BaseModel):
     agent_timeout_sec: float | None = None
     grader_timeout_sec: float | None = None
 
+    @field_validator("id")
+    @classmethod
+    def _validate_id(cls, value: str) -> str:
+        # ``id`` is joined onto host paths by every backend.
+        return ensure_single_path_segment(value, label="rollout_id")
+
 
 class ExecutionResult(BaseModel):
     status: RolloutStatus
     sample: RolloutSample | None = None
-    artifacts: dict[str, Any] | None = None
     err_message: str | None = None
     err_category: RolloutErrorCategory | None = None

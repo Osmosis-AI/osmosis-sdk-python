@@ -64,19 +64,6 @@ class FailingGrader(Grader):
         raise RuntimeError("grading failed")
 
 
-class ArtifactGrader(Grader):
-    async def grade(self, ctx: GraderContext) -> Any:
-        for sample_id in ctx.get_samples():
-            ctx.set_sample_reward(sample_id, 1.0)
-        ctx.set_artifacts({"judge": {"explanation": "looks good"}})
-
-
-class ArtifactFailingGrader(Grader):
-    async def grade(self, ctx: GraderContext) -> Any:
-        ctx.set_artifacts({"judge": {"explanation": "failed because ..."}})
-        raise RuntimeError("grading failed")
-
-
 # ---------------------------------------------------------------------------
 # _categorize_exception
 # ---------------------------------------------------------------------------
@@ -130,6 +117,76 @@ class TestLocalBackend:
         h = backend.health()
         assert h["status"] == "ok"
         assert "concurrency" in h
+
+    async def test_rollout_artifacts_land_under_rollout_id(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("HOME", str(tmp_path))  # redirect ~/.osmosis
+
+        class ArtifactWorkflow(StubWorkflow):
+            async def run(self, ctx: AgentWorkflowContext) -> Any:
+                assert ctx.artifacts_dir is not None and ctx.artifacts_dir.is_dir()
+                (ctx.artifacts_dir / "trace.txt").write_text("trace")
+                await super().run(ctx)
+
+        class WritingGrader(StubGrader):
+            async def grade(self, ctx: GraderContext) -> Any:
+                assert ctx.artifacts_dir is not None
+                (ctx.artifacts_dir / "grade_debug.json").write_text("{}")
+                await super().grade(ctx)
+
+        backend = LocalBackend(
+            workflow=ArtifactWorkflow,
+            workflow_config=AgentWorkflowConfig(name="test"),
+            grader=WritingGrader,
+        )
+
+        request = ExecutionRequest(
+            id="r1", prompt=[{"role": "user", "content": "hi"}], label="x"
+        )
+        await backend.execute(request, AsyncMock(), AsyncMock())
+
+        root = tmp_path / ".osmosis"
+        artifacts_dir = root / "r1" / "artifacts"
+        assert (artifacts_dir / "trace.txt").read_text() == "trace"
+        assert (artifacts_dir / "grade_debug.json").read_text() == "{}"
+
+    async def test_rollout_degrades_when_artifacts_dir_unavailable(
+        self, tmp_path, monkeypatch
+    ):
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setattr(
+            "osmosis_ai.rollout.utils.file_artifacts.CREATE_BACKOFF_SECONDS", 0
+        )
+
+        def _boom(self, *_args, **_kwargs):
+            raise OSError("read-only filesystem")
+
+        monkeypatch.setattr("pathlib.Path.mkdir", _boom)
+
+        class NoArtifactsWorkflow(StubWorkflow):
+            async def run(self, ctx: AgentWorkflowContext) -> Any:
+                assert ctx.artifacts_dir is None
+                await super().run(ctx)
+
+        class NoArtifactsGrader(StubGrader):
+            async def grade(self, ctx: GraderContext) -> Any:
+                assert ctx.artifacts_dir is None
+                await super().grade(ctx)
+
+        backend = LocalBackend(
+            workflow=NoArtifactsWorkflow,
+            workflow_config=AgentWorkflowConfig(name="test"),
+            grader=NoArtifactsGrader,
+        )
+
+        request = ExecutionRequest(
+            id="r1", prompt=[{"role": "user", "content": "hi"}], label="x"
+        )
+        on_complete = AsyncMock()
+        await backend.execute(request, on_complete, AsyncMock())
+
+        # mkdir failure degrades to "artifacts unavailable"; rollout still succeeds.
+        on_complete.assert_awaited_once()
+        assert on_complete.call_args[0][0].status == RolloutStatus.SUCCESS
 
     async def test_execute_success_calls_callback(self):
         backend = self._make_backend()
@@ -337,82 +394,6 @@ class TestLocalBackend:
         grader_result = on_grader.call_args[0][0]
         assert grader_result.status == RolloutStatus.FAILURE
         assert "grading failed" in grader_result.err_message
-
-    async def test_grader_artifacts_round_trip(self):
-        backend = LocalBackend(
-            workflow=StubWorkflow,
-            workflow_config=AgentWorkflowConfig(name="test"),
-            grader=ArtifactGrader,
-            grader_config=GraderConfig(name="test-grader"),
-        )
-        on_complete = AsyncMock()
-        on_grader = AsyncMock()
-
-        request = ExecutionRequest(
-            id="r1",
-            prompt=[{"role": "user", "content": "hi"}],
-            label="test-label",
-        )
-        await backend.execute(
-            request,
-            on_workflow_complete=on_complete,
-            on_grader_complete=on_grader,
-        )
-
-        grader_result = on_grader.call_args[0][0]
-        assert grader_result.status == RolloutStatus.SUCCESS
-        assert grader_result.artifacts == {"judge": {"explanation": "looks good"}}
-
-    async def test_grader_failure_carries_artifacts(self):
-        backend = LocalBackend(
-            workflow=StubWorkflow,
-            workflow_config=AgentWorkflowConfig(name="test"),
-            grader=ArtifactFailingGrader,
-            grader_config=GraderConfig(name="test-grader"),
-        )
-        on_complete = AsyncMock()
-        on_grader = AsyncMock()
-
-        request = ExecutionRequest(
-            id="r1",
-            prompt=[{"role": "user", "content": "hi"}],
-            label="test-label",
-        )
-        await backend.execute(
-            request,
-            on_workflow_complete=on_complete,
-            on_grader_complete=on_grader,
-        )
-
-        grader_result = on_grader.call_args[0][0]
-        assert grader_result.status == RolloutStatus.FAILURE
-        assert grader_result.artifacts == {
-            "judge": {"explanation": "failed because ..."}
-        }
-
-    async def test_no_artifacts_defaults_none(self):
-        backend = LocalBackend(
-            workflow=StubWorkflow,
-            workflow_config=AgentWorkflowConfig(name="test"),
-            grader=StubGrader,
-            grader_config=GraderConfig(name="test-grader"),
-        )
-        on_complete = AsyncMock()
-        on_grader = AsyncMock()
-
-        request = ExecutionRequest(
-            id="r1",
-            prompt=[{"role": "user", "content": "hi"}],
-            label="test-label",
-        )
-        await backend.execute(
-            request,
-            on_workflow_complete=on_complete,
-            on_grader_complete=on_grader,
-        )
-
-        grader_result = on_grader.call_args[0][0]
-        assert grader_result.artifacts is None
 
     def test_init_with_string_reference(self):
         backend = LocalBackend(

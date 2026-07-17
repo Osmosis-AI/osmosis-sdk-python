@@ -263,6 +263,8 @@ def load_workflow(
     """Load an AgentWorkflow class and its config.
 
     Returns (workflow_cls, workflow_config, entrypoint_module_name, error).
+    Raises ModuleNotFoundError when the rollout's dependencies aren't installed
+    in this environment (other load failures are returned as the error string).
     """
     if console and not quiet:
         console.print(f"Loading workflow: {entrypoint}")
@@ -273,6 +275,10 @@ def load_workflow(
             entrypoint=entrypoint,
             workspace_directory=workspace_directory,
         )
+    except ModuleNotFoundError:
+        # Deps aren't importable here; let the submit preflight skip and defer
+        # to the server, which installs from pyproject before validating.
+        raise
     except Exception as e:
         detail = str(e)
         if not isinstance(e, (CLIError, ImportError, ValueError, TypeError)):

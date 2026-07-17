@@ -6,8 +6,7 @@ import json
 import sys
 from typing import Any
 
-import click
-
+from osmosis_ai.cli._click_compat import Context, UsageError, get_current_context
 from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.consts import PACKAGE_VERSION
 
@@ -95,7 +94,7 @@ def classify_error(exc: BaseException) -> CLIError:
             details=details,
         )
 
-    if isinstance(exc, click.UsageError):
+    if isinstance(exc, UsageError):
         return CLIError(str(exc) or "Invalid usage.", code="VALIDATION")
 
     return CLIError(
@@ -139,7 +138,7 @@ def _argv_command_path(argv: list[str]) -> str:
 
 
 def command_path_for_error(
-    ctx: click.Context | None,
+    ctx: Context | None,
     *,
     argv: list[str] | None = None,
 ) -> str:
@@ -164,7 +163,7 @@ def emit_structured_error_to_stderr(
     """Write the JSON-mode error envelope to stderr."""
     if command is None:
         try:
-            ctx = click.get_current_context(silent=True)
+            ctx = get_current_context(silent=True)
         except RuntimeError:
             ctx = None
         command = command_path_for_error(ctx)

@@ -22,7 +22,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - uses: astral-sh/ruff-action@v4.0.0
 
@@ -34,7 +34,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v7
         with:
           python-version: "3.12"
@@ -50,10 +50,13 @@ jobs:
           # Known --verifytypes baselines we intentionally skip:
           #   * agent_adapter: inherits from harbor's BaseInstalledAgent which
           #     has no type stubs ("base class unknown").
+          #   * convert_sample_to_trajectory: returns harbor's Trajectory which
+          #     has no type stubs ("return type is unknown").
           unexpected=$(echo "$output" | awk '
             /^osmosis_ai\./ { sym = $0 }
             /error:/ {
               if (sym ~ /agent_adapter/) next
+              if (sym ~ /convert_sample_to_trajectory/) next
               print $0
             }
           ')
@@ -71,7 +74,7 @@ jobs:
       matrix:
         python-version: ["3.12", "3.13"]
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - uses: astral-sh/setup-uv@v7
         with:
@@ -87,7 +90,7 @@ jobs:
 
       - name: Upload coverage to Codecov
         if: matrix.python-version == '3.12' && !github.event.pull_request.head.repo.fork
-        uses: codecov/codecov-action@v6
+        uses: codecov/codecov-action@v7
         with:
           files: coverage.xml
           token: ${{ secrets.CODECOV_TOKEN }}
@@ -100,7 +103,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - uses: astral-sh/setup-uv@v7
         with:
@@ -151,7 +154,14 @@ jobs:
         run: |
           uv venv --python 3.12 /tmp/osmosis-wheel-smoke
           uv pip install --python /tmp/osmosis-wheel-smoke/bin/python dist/*.whl
-          /tmp/osmosis-wheel-smoke/bin/python -c "import osmosis_ai; print(osmosis_ai.__version__)"
+          /tmp/osmosis-wheel-smoke/bin/python - <<'PY'
+          import osmosis_ai
+          from agents.usage import Usage
+          from osmosis_ai.rollout.integrations.agents.openai_agents import OsmosisLitellmModel
+
+          assert Usage().input_tokens_details.cached_tokens == 0
+          print(osmosis_ai.__version__, OsmosisLitellmModel.__name__)
+          PY
           /tmp/osmosis-wheel-smoke/bin/osmosis --version
 
       - name: Upload dist artifact

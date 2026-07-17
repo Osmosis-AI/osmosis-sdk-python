@@ -19,6 +19,15 @@ MAX_DOWNLOAD_REDIRECTS = 20
 _REDIRECT_STATUS_CODES = {301, 302, 303, 307, 308}
 
 
+class DownloadHTTPError(RuntimeError):
+    """Non-success response while fetching a presigned download URL."""
+
+    def __init__(self, status_code: int, detail: str = "") -> None:
+        self.status_code = status_code
+        suffix = f" {detail}" if detail else ""
+        super().__init__(f"HTTP {status_code}.{suffix}")
+
+
 def _safe_download_filename(filename: str | None) -> str | None:
     if filename is None:
         return None
@@ -100,6 +109,55 @@ def _stream_download_response(
             response.read()
 
 
+def download_file_to(
+    url: str,
+    destination: Path,
+    *,
+    expected_size: int | None = None,
+) -> int:
+    """Download a presigned URL to an exact path and return bytes written.
+
+    Creates missing parent directories, streams through a unique sibling temporary
+    file, and atomically replaces ``destination``. Unlike :func:`download_file`
+    there is no per-file progress bar and existing files are replaced —
+    callers own skip/overwrite policy and aggregate progress reporting.
+    """
+    timeout = httpx.Timeout(DOWNLOAD_TIMEOUT, connect=30.0)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    with _stream_download_response(url, timeout) as response:
+        if not 200 <= response.status_code < 300:
+            body = response.read().decode("utf-8", errors="replace")[:500]
+            raise DownloadHTTPError(response.status_code, body)
+
+        tmp_path: Path | None = None
+        bytes_downloaded = 0
+        try:
+            with tempfile.NamedTemporaryFile(
+                "wb",
+                delete=False,
+                dir=destination.parent,
+                prefix=f".{destination.name}.",
+                suffix=".partial",
+            ) as tmp_file:
+                tmp_path = Path(tmp_file.name)
+                for chunk in response.iter_bytes(DOWNLOAD_CHUNK_SIZE):
+                    if not chunk:
+                        continue
+                    tmp_file.write(chunk)
+                    bytes_downloaded += len(chunk)
+            if expected_size is not None and bytes_downloaded != expected_size:
+                raise RuntimeError(
+                    f"Downloaded size mismatch: expected {expected_size}, "
+                    f"received {bytes_downloaded}"
+                )
+            tmp_path.replace(destination)
+        except Exception:
+            if tmp_path is not None:
+                tmp_path.unlink(missing_ok=True)
+            raise
+    return bytes_downloaded
+
+
 def download_file(
     url: str,
     *,
@@ -115,8 +173,7 @@ def download_file(
     with _stream_download_response(url, timeout) as response:
         if not 200 <= response.status_code < 300:
             body = response.read().decode("utf-8", errors="replace")[:500]
-            detail = f" {body}" if body else ""
-            raise RuntimeError(f"HTTP {response.status_code}.{detail}")
+            raise DownloadHTTPError(response.status_code, body)
 
         header_filename = _filename_from_content_disposition(
             response.headers.get("content-disposition")

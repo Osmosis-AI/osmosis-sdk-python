@@ -29,21 +29,27 @@ dependencies = [
     # >=1.84.0 is the security floor: it patches the proxy auth-bypass /
     # SSTI / SQLi / RCE advisories (GHSA-4xpc-pv4p-pm3w and siblings).
     "litellm>=1.84.0,<2.0.0",
+    # LiteLLM's tool-call path imports orjson at runtime, but only declares it
+    # through its larger proxy extra.
+    "orjson>=3.11.6,<4.0",
     "tqdm>=4.0.0,<5.0.0",
     # Remote rollout SDK dependencies
     "httpx>=0.25.0,<1.0.0",
     "pydantic>=2.0.0,<3.0.0",
     "strands-agents[litellm]>=1.29.0",
-    "openai-agents[litellm]>=0.14,<0.15",
+    # >=0.18.1 supports OpenAI Python 2.45's cache_write_tokens usage field.
+    "openai-agents[litellm]>=0.18.1,<0.19",
     # Secure credential storage (system keychain)
     "keyring>=25.0.0",
     # Interactive CLI prompts
     "questionary>=2.1.0,<3.0.0",
-    # CLI framework. <0.26: Typer 0.26+ vendors its own Click, so the
-    # exceptions it raises bypass our top-level `click` error handling.
-    "typer>=0.16.0,<0.26",
+    # CLI framework. <0.27: cli/_click_compat.py imports typer._click internals.
+    "typer>=0.26,<0.27",
+    # Guard: typer-slim <0.22 ships its own typer/ files (pulled in via
+    # huggingface-hub) and overlay-corrupts the real typer install.
+    "typer-slim>=0.22",
     "rich>=14.2.0",
-    "harbor[daytona]>=0.15.0,<0.16.0",
+    "harbor[daytona]>=0.15.0,<0.17.0",
     # Security floors for load-bearing transitive deps (CVE remediation):
     # aiohttp is exercised via litellm's async transport, and cryptography is
     # loaded via keyring's SecretService backend on Linux. Lower bounds only,
@@ -73,9 +79,9 @@ dev = [
     "pytest>=9.0.3,<10.0.0",
     "pytest-asyncio>=1.4.0,<2.0.0",
     "pytest-cov>=7.1.0",
-    "ruff==0.15.15",  # Keep in sync with pre-commit and CI
+    "ruff==0.15.20",  # Keep in sync with pre-commit and CI
     "pre-commit>=4.6.0,<5.0.0",
-    "pyright[nodejs]==1.1.410",
+    "pyright[nodejs]==1.1.411",
     "types-requests>=2.0",
 ]
 
