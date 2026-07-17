@@ -12,7 +12,7 @@ async def test_sample_source_preserves_native_and_converts_messages() -> None:
     messages = [{"role": "user", "content": [{"text": "hello"}]}]
     sample = await StrandsAgentSampleSource(
         SimpleNamespace(messages=messages)
-    ).get_sample("s1")
+    ).get_sample()
 
     assert sample.messages == messages
     assert sample.trajectory_messages == [
@@ -35,7 +35,7 @@ async def test_sample_source_keeps_native_messages_when_conversion_fails(
     ):
         sample = await StrandsAgentSampleSource(
             SimpleNamespace(messages=messages)
-        ).get_sample("s1")
+        ).get_sample()
 
     assert sample.messages == messages
     assert sample.trajectory_messages is None

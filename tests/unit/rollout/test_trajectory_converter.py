@@ -14,7 +14,7 @@ from osmosis_ai.rollout.types import RolloutSample
 
 
 def make_sample(messages: list[dict[str, Any]], **kwargs: Any) -> RolloutSample:
-    return RolloutSample(id="s1", messages=messages, **kwargs)
+    return RolloutSample(messages=messages, **kwargs)
 
 
 def test_basic_conversation_maps_to_sequential_steps() -> None:
@@ -27,11 +27,10 @@ def test_basic_conversation_maps_to_sequential_steps() -> None:
             ]
         ),
         rollout_id="r1",
-        sample_id="s1",
     )
 
     assert trajectory.session_id == "r1"
-    assert trajectory.trajectory_id == "r1/s1"
+    assert trajectory.trajectory_id == "r1"
     assert [s.source for s in trajectory.steps] == ["system", "user", "agent"]
     assert [s.step_id for s in trajectory.steps] == [1, 2, 3]
     assert trajectory.steps[2].message == "hello"
@@ -63,7 +62,6 @@ def test_tool_calls_and_results_fold_into_agent_step() -> None:
             ]
         ),
         rollout_id="r1",
-        sample_id="s1",
     )
 
     assert len(trajectory.steps) == 3
@@ -115,7 +113,6 @@ def test_trajectory_messages_are_used_without_mutating_native_messages() -> None
     trajectory = convert_sample_to_trajectory(
         sample,
         rollout_id="r1",
-        sample_id="s1",
     )
 
     assert sample.messages == native_messages
@@ -157,14 +154,13 @@ def test_explicitly_unavailable_trajectory_messages_cannot_be_converted() -> Non
     sample = make_sample([{"role": "user", "content": "run"}], trajectory_messages=None)
 
     with pytest.raises(ValueError, match="no trajectory-compatible messages"):
-        convert_sample_to_trajectory(sample, rollout_id="r1", sample_id="s1")
+        convert_sample_to_trajectory(sample, rollout_id="r1")
 
 
 def test_openai_chat_message_with_type_is_not_misclassified() -> None:
     trajectory = convert_sample_to_trajectory(
         make_sample([{"role": "user", "content": "run", "type": "custom"}]),
         rollout_id="r1",
-        sample_id="s1",
     )
 
     assert trajectory.steps[0].message == "run"
@@ -174,7 +170,6 @@ def test_openai_chat_unknown_content_block_is_not_misclassified() -> None:
     trajectory = convert_sample_to_trajectory(
         make_sample([{"role": "user", "content": [{"custom": "value"}]}]),
         rollout_id="r1",
-        sample_id="s1",
     )
 
     assert trajectory.steps[0].message == '[{"custom": "value"}]'
@@ -305,7 +300,6 @@ def test_extra_carries_platform_context() -> None:
     trajectory = convert_sample_to_trajectory(
         sample,
         rollout_id="r1",
-        sample_id="s1",
         request_label="request label",
         request_metadata={"dataset_row": {"q": "x"}},
         request_extra_fields={"eval_run_id": "er-1", "row_index": 3},
@@ -313,7 +307,6 @@ def test_extra_carries_platform_context() -> None:
 
     osmosis = trajectory.extra["osmosis"]
     assert osmosis["rollout_id"] == "r1"
-    assert osmosis["sample_id"] == "s1"
     assert osmosis["label"] == "ground truth"
     assert osmosis["reward"] == 0.5
     assert osmosis["sample_metrics"] == {"turns": 3}
@@ -326,7 +319,6 @@ def test_request_label_used_when_sample_has_none() -> None:
     trajectory = convert_sample_to_trajectory(
         make_sample([{"role": "user", "content": "x"}]),
         rollout_id="r1",
-        sample_id="s1",
         request_label="fallback",
     )
 
@@ -338,7 +330,6 @@ def test_trajectory_serializes_to_valid_atif_json() -> None:
     trajectory = convert_sample_to_trajectory(
         make_sample([{"role": "user", "content": "x"}], reward=1.0),
         rollout_id="r1",
-        sample_id="s1",
     )
     doc = trajectory.to_json_dict()
 
@@ -368,7 +359,6 @@ def test_report_maps_calls_onto_agent_steps() -> None:
     trajectory = convert_sample_to_trajectory(
         make_sample(two_turn_messages()),
         rollout_id="r1",
-        sample_id="s1",
         report=SampleReport(
             llm_call_metrics=[
                 LlmCallMetrics(
@@ -402,7 +392,6 @@ def test_mismatched_call_count_is_preserved_not_guessed() -> None:
     trajectory = convert_sample_to_trajectory(
         make_sample(two_turn_messages()),
         rollout_id="r1",
-        sample_id="s1",
         report=SampleReport(llm_call_metrics=[LlmCallMetrics(prompt_tokens=10)]),
     )
 
@@ -420,7 +409,6 @@ def test_explicit_final_metrics_win_over_summation() -> None:
     trajectory = convert_sample_to_trajectory(
         make_sample(two_turn_messages()),
         rollout_id="r1",
-        sample_id="s1",
         report=SampleReport(
             llm_call_metrics=[
                 LlmCallMetrics(prompt_tokens=1),
@@ -439,7 +427,6 @@ def test_invalid_report_total_steps_does_not_discard_other_totals() -> None:
     trajectory = convert_sample_to_trajectory(
         make_sample(two_turn_messages()),
         rollout_id="r1",
-        sample_id="s1",
         report=SampleReport(
             llm_call_metrics=[
                 LlmCallMetrics(prompt_tokens=1),
@@ -458,7 +445,6 @@ def test_sample_model_name_wins_over_rollout_default() -> None:
     trajectory = convert_sample_to_trajectory(
         make_sample([{"role": "user", "content": "x"}]),
         rollout_id="r1",
-        sample_id="s1",
         report=SampleReport(model_name="sample-model"),
         default_model_name="rollout-model",
     )
@@ -470,7 +456,6 @@ def test_unmatched_sample_reports_are_preserved_in_extra() -> None:
     trajectory = convert_sample_to_trajectory(
         make_sample([{"role": "user", "content": "x"}]),
         rollout_id="r1",
-        sample_id="s1",
         unmatched_sample_reports={
             "judge": SampleReport(llm_call_metrics=[LlmCallMetrics(prompt_tokens=3)])
         },

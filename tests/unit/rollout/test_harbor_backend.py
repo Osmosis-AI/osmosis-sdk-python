@@ -8,7 +8,7 @@ from osmosis_ai.rollout.agent_workflow import AgentWorkflow
 from osmosis_ai.rollout.backend.harbor.backend import (
     HarborBackend,
     PendingTrial,
-    parse_samples,
+    parse_sample,
 )
 from osmosis_ai.rollout.context import (
     AgentWorkflowContext,
@@ -34,8 +34,8 @@ class _StaticSampleSource(SampleSource):
     def __init__(self, messages: list[dict[str, Any]]) -> None:
         self.messages = messages
 
-    async def get_sample(self, name: str) -> RolloutSample:
-        return RolloutSample(id=name, messages=self.messages)
+    async def get_sample(self) -> RolloutSample:
+        return RolloutSample(messages=self.messages)
 
 
 class MetadataCapturingWorkflow(AgentWorkflow):
@@ -46,8 +46,7 @@ class MetadataCapturingWorkflow(AgentWorkflow):
         _AGENT_CAPTURE["artifacts_dir"] = ctx.artifacts_dir
         rollout_ctx = get_rollout_context()
         if rollout_ctx:
-            rollout_ctx.register_sample_source(
-                "sample-1",
+            rollout_ctx.set_sample_source(
                 _StaticSampleSource([{"role": "assistant", "content": "done"}]),
             )
 
@@ -57,8 +56,7 @@ class MetadataCapturingGrader(Grader):
         _GRADER_CAPTURE["metadata"] = ctx.metadata
         _GRADER_CAPTURE["label"] = ctx.label
         _GRADER_CAPTURE["artifacts_dir"] = ctx.artifacts_dir
-        for sample_id in ctx.get_samples():
-            ctx.set_sample_reward(sample_id, 1.0)
+        ctx.set_reward(1.0)
 
 
 def _make_backend_for_config(*, grader: bool = False) -> HarborBackend:
@@ -81,15 +79,13 @@ def _make_backend_for_config(*, grader: bool = False) -> HarborBackend:
 class TestHarborBackend:
     def test_sample_round_trip_preserves_native_and_trajectory_messages(self):
         sample = RolloutSample(
-            id="s1",
             messages=[{"type": "function_call", "name": "f"}],
             trajectory_messages=[{"role": "assistant", "content": "done"}],
         )
 
-        parsed = parse_samples(
-            json.loads(json.dumps({"s1": sample.model_dump()}, default=str))
-        )["s1"]
+        parsed = parse_sample(json.loads(json.dumps(sample.model_dump(), default=str)))
 
+        assert parsed is not None
         assert parsed.messages == sample.messages
         assert parsed.trajectory_messages == sample.trajectory_messages
 
@@ -113,11 +109,7 @@ class TestHarborBackend:
                 agent_result=SimpleNamespace(
                     metadata={
                         "status": "success",
-                        "samples": {
-                            "sample-1": RolloutSample(
-                                id="sample-1", messages=[]
-                            ).model_dump()
-                        },
+                        "sample": RolloutSample(messages=[]).model_dump(),
                     }
                 ),
                 verifier_result=SimpleNamespace(rewards={}),
@@ -160,12 +152,10 @@ class TestHarborBackend:
                 agent_result=SimpleNamespace(
                     metadata={
                         "status": "success",
-                        "samples": {
-                            "s1": RolloutSample(id="s1", messages=[]).model_dump()
-                        },
+                        "sample": RolloutSample(messages=[]).model_dump(),
                     }
                 ),
-                verifier_result=SimpleNamespace(rewards={"s1": 1.0}),
+                verifier_result=SimpleNamespace(rewards={"reward": 1.0}),
                 exception_info=None,
             ),
         )
@@ -281,9 +271,9 @@ class TestAgentRunnerRoundTrip:
 
 
 class TestGraderRunnerRoundTrip:
-    def _write_samples(self, path):
-        sample = RolloutSample(id="sample-1", messages=[])
-        path.write_text(json.dumps({"sample-1": sample.model_dump()}, default=str))
+    def _write_sample(self, path):
+        sample = RolloutSample(messages=[])
+        path.write_text(json.dumps(sample.model_dump(), default=str))
 
     def test_grader_ctx_receives_metadata(self, tmp_path, monkeypatch):
         import osmosis_ai.rollout.backend.harbor.grader_runner as grader_runner
@@ -304,13 +294,13 @@ class TestGraderRunnerRoundTrip:
         config_path.write_text(
             json.dumps(backend.build_rollout_config(request), default=str)
         )
-        samples_path = tmp_path / "samples.json"
-        self._write_samples(samples_path)
+        sample_path = tmp_path / "sample.json"
+        self._write_sample(sample_path)
 
         monkeypatch.setattr(
             grader_runner,
             "parse_args",
-            lambda: SimpleNamespace(config=config_path, samples=samples_path),
+            lambda: SimpleNamespace(config=config_path, sample=sample_path),
         )
 
         grader_runner.main()
@@ -318,7 +308,7 @@ class TestGraderRunnerRoundTrip:
         assert _GRADER_CAPTURE["metadata"] == metadata
         assert _GRADER_CAPTURE["artifacts_dir"] == HARBOR_ARTIFACTS_DIR
         rewards = json.loads((verifier_dir / "reward.json").read_text())
-        assert rewards == {"sample-1": 1.0}
+        assert rewards == {"reward": 1.0}
 
     def test_metadata_only_config_still_grades(self, tmp_path, monkeypatch):
         """A config with metadata but no label still triggers grading."""
@@ -339,13 +329,13 @@ class TestGraderRunnerRoundTrip:
         config_path.write_text(
             json.dumps(backend.build_rollout_config(request), default=str)
         )
-        samples_path = tmp_path / "samples.json"
-        self._write_samples(samples_path)
+        sample_path = tmp_path / "sample.json"
+        self._write_sample(sample_path)
 
         monkeypatch.setattr(
             grader_runner,
             "parse_args",
-            lambda: SimpleNamespace(config=config_path, samples=samples_path),
+            lambda: SimpleNamespace(config=config_path, sample=sample_path),
         )
 
         grader_runner.main()
@@ -353,4 +343,4 @@ class TestGraderRunnerRoundTrip:
         assert _GRADER_CAPTURE["label"] is None
         assert _GRADER_CAPTURE["metadata"] == {"tools": ["search"]}
         rewards = json.loads((verifier_dir / "reward.json").read_text())
-        assert rewards == {"sample-1": 1.0}
+        assert rewards == {"reward": 1.0}

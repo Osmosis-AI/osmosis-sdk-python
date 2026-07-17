@@ -30,15 +30,15 @@ class TestOpenAIAgentsIntegration:
             OsmosisMemorySession,
         )
 
-        session = OsmosisMemorySession(name="main")
+        session = OsmosisMemorySession()
         items = [{"role": "user", "content": "hello"}]
 
         await session.add_items(items)
 
-        samples = await rollout_context.get_samples()
-        assert samples["main"].id == "main"
-        assert samples["main"].messages == items
-        assert samples["main"].trajectory_messages == items
+        sample = await rollout_context.get_sample()
+        assert sample is not None
+        assert sample.messages == items
+        assert sample.trajectory_messages == items
 
     async def test_trajectory_conversion_failure_keeps_native_messages(
         self, rollout_context, caplog
@@ -47,7 +47,7 @@ class TestOpenAIAgentsIntegration:
             OsmosisMemorySession,
         )
 
-        session = OsmosisMemorySession(name="main")
+        session = OsmosisMemorySession()
         items = [{"role": "user", "content": "hello"}]
         await session.add_items(items)
 
@@ -56,10 +56,11 @@ class TestOpenAIAgentsIntegration:
             "Converter.items_to_messages",
             side_effect=RuntimeError("boom"),
         ):
-            samples = await rollout_context.get_samples()
+            sample = await rollout_context.get_sample()
 
-        assert samples["main"].messages == items
-        assert samples["main"].trajectory_messages is None
+        assert sample is not None
+        assert sample.messages == items
+        assert sample.trajectory_messages is None
         assert any(
             "Failed to convert OpenAI Agents" in r.message for r in caplog.records
         )
@@ -71,7 +72,7 @@ class TestOpenAIAgentsIntegration:
             OsmosisMemorySession,
         )
 
-        session = OsmosisMemorySession(name="main")
+        session = OsmosisMemorySession()
         ctx = RolloutContext(
             chat_completions_url="http://controller:9",
             api_key="test-key",
@@ -98,20 +99,24 @@ class TestOpenAIAgentsIntegration:
         assert agent.model.base_url == "http://controller:9"
         assert agent.model.api_key == "test-key"
 
-    async def test_rollout_model_headers_use_session_sample_id(self, rollout_context):
+    async def test_rollout_model_merges_headers_with_registered_session(
+        self, rollout_context
+    ):
+        # The URL carries rollout identity, so no per-call routing headers
+        # are stamped; the call just requires a registered sample source.
         from osmosis_ai.rollout.integrations.agents.openai_agents import (
             OsmosisLitellmModel,
             OsmosisMemorySession,
         )
 
-        session = OsmosisMemorySession(name="main")
+        session = OsmosisMemorySession()
         await session.get_items()
         model = OsmosisLitellmModel()
 
         headers = model._merge_headers(ModelSettings())
 
-        assert headers["x-rollout-id"] == "rollout-xyz"
-        assert headers["x-sample-id"] == "main"
+        assert "x-rollout-id" not in headers
+        assert "x-sample-id" not in headers
 
     def test_rollout_model_requires_session_sample_id(self, rollout_context):
         from osmosis_ai.rollout.integrations.agents.openai_agents import (
@@ -227,7 +232,7 @@ class TestOpenAIAgentsIntegration:
         )
 
         agent = OsmosisAgent(name="main", model=OsmosisRolloutModel())
-        session = OsmosisMemorySession(name="main")
+        session = OsmosisMemorySession()
 
         result = await Runner.run(
             agent,
@@ -236,11 +241,11 @@ class TestOpenAIAgentsIntegration:
             run_config=RunConfig(tracing_disabled=True),
         )
 
-        samples = await rollout_context.get_samples()
+        sample = await rollout_context.get_sample()
         assert result.final_output == "hello from rollout"
-        assert samples["main"].id == "main"
-        assert any(item.get("role") == "user" for item in samples["main"].messages)
-        assert any(item.get("role") == "assistant" for item in samples["main"].messages)
+        assert sample is not None
+        assert any(item.get("role") == "user" for item in sample.messages)
+        assert any(item.get("role") == "assistant" for item in sample.messages)
 
     async def test_placeholder_model_direct_use_raises(self):
         from osmosis_ai.rollout.integrations.agents.openai_agents import (
