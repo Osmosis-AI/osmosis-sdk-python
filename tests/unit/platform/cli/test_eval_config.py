@@ -114,23 +114,26 @@ required = []
     assert config.experiment_config["branch"] == "my-feature"
 
 
-def test_load_eval_submit_config_rejects_empty_branch(tmp_path: Path) -> None:
+@pytest.mark.parametrize("branch", ["", "   "])
+def test_load_eval_submit_config_rejects_blank_branch(
+    tmp_path: Path, branch: str
+) -> None:
     path = _write_config(
         tmp_path / "eval.toml",
-        """
+        f"""
 [experiment]
 rollout = "calculator"
 entrypoint = "main.py"
 model_path = "openai/gpt-5-mini"
 dataset = "multiply"
-branch = ""
+branch = "{branch}"
 
 [secrets]
 required = []
 """,
     )
 
-    with pytest.raises(CLIError, match="must not be empty"):
+    with pytest.raises(CLIError, match="must not be empty or whitespace"):
         load_eval_submit_config(path)
 
 
