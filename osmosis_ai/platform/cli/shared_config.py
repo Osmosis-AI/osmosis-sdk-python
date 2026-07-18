@@ -356,6 +356,13 @@ class ExperimentSection(BaseModel):
     branch: str | None = None
     commit_sha: str | None = None
 
+    @field_validator("branch")
+    @classmethod
+    def _validate_branch(cls, value: str | None) -> str | None:
+        if value == "":
+            raise ValueError("must not be empty")
+        return value
+
     @field_validator("commit_sha")
     @classmethod
     def _validate_commit_sha(cls, value: str | None) -> str | None:

@@ -114,6 +114,26 @@ required = []
     assert config.experiment_config["branch"] == "my-feature"
 
 
+def test_load_eval_submit_config_rejects_empty_branch(tmp_path: Path) -> None:
+    path = _write_config(
+        tmp_path / "eval.toml",
+        """
+[experiment]
+rollout = "calculator"
+entrypoint = "main.py"
+model_path = "openai/gpt-5-mini"
+dataset = "multiply"
+branch = ""
+
+[secrets]
+required = []
+""",
+    )
+
+    with pytest.raises(CLIError, match="must not be empty"):
+        load_eval_submit_config(path)
+
+
 def test_load_eval_submit_config_rejects_branch_and_commit_sha(
     tmp_path: Path,
 ) -> None:
