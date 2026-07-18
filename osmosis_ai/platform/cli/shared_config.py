@@ -359,8 +359,8 @@ class ExperimentSection(BaseModel):
     @field_validator("branch")
     @classmethod
     def _validate_branch(cls, value: str | None) -> str | None:
-        if value is not None and not value.strip():
-            raise ValueError("must not be empty or whitespace")
+        if value is not None and (not value or any(char.isspace() for char in value)):
+            raise ValueError("must not be empty or contain whitespace")
         return value
 
     @field_validator("commit_sha")

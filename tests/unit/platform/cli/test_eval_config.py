@@ -114,8 +114,8 @@ required = []
     assert config.experiment_config["branch"] == "my-feature"
 
 
-@pytest.mark.parametrize("branch", ["", "   "])
-def test_load_eval_submit_config_rejects_blank_branch(
+@pytest.mark.parametrize("branch", ["", "   ", " main", "main ", "feature branch"])
+def test_load_eval_submit_config_rejects_empty_or_whitespace_branch(
     tmp_path: Path, branch: str
 ) -> None:
     path = _write_config(
@@ -133,7 +133,7 @@ required = []
 """,
     )
 
-    with pytest.raises(CLIError, match="must not be empty or whitespace"):
+    with pytest.raises(CLIError, match="must not be empty or contain whitespace"):
         load_eval_submit_config(path)
 
 
