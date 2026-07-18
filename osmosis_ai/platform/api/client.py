@@ -410,10 +410,14 @@ class OsmosisClient:
         limit: int = DEFAULT_PAGE_SIZE,
         offset: int = 0,
         *,
+        branch: str | None = None,
         credentials: Credentials | None = None,
         git_identity: str,
     ) -> PaginatedRollouts:
-        qs = urlencode({"limit": limit, "offset": offset})
+        params: dict[str, str | int] = {"limit": limit, "offset": offset}
+        if branch:
+            params["branch"] = branch
+        qs = urlencode(params)
         data = platform_request(
             f"/api/cli/rollouts?{qs}",
             credentials=credentials,

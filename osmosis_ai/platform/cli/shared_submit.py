@@ -231,6 +231,7 @@ def run_cloud_submit[ConfigT: BaseSubmitConfig](
         entrypoint=config.experiment_entrypoint,
         model=config.experiment_model_path,
         dataset=config.experiment_dataset,
+        branch=config.experiment_branch,
         commit_sha=config.experiment_commit_sha,
     )
 
@@ -285,6 +286,7 @@ def run_cloud_submit[ConfigT: BaseSubmitConfig](
 
     notes, warnings = print_remote_fetch_notice(
         workspace_directory,
+        branch=config.experiment_branch,
         pinned_commit_sha=config.experiment_commit_sha,
         extra_warnings=commit_preflight_warnings,
     )
@@ -329,6 +331,7 @@ def run_cloud_submit[ConfigT: BaseSubmitConfig](
                 "entrypoint": config.experiment_entrypoint,
                 "model": config.experiment_model_path,
                 "dataset": config.experiment_dataset,
+                "branch": config.experiment_branch,
                 "commit_sha": config.experiment_commit_sha,
             },
         },

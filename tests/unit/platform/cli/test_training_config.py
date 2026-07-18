@@ -100,6 +100,44 @@ commit_sha = "not-a-sha"
     assert "hexadecimal Git commit SHA" in message
 
 
+def test_load_config_accepts_branch(tmp_path: Path) -> None:
+    path = tmp_path / "train.toml"
+    path.write_text(
+        """
+[experiment]
+rollout = "r"
+entrypoint = "main.py"
+model_path = "m"
+dataset = "d"
+branch = "my-feature"
+""".strip(),
+        encoding="utf-8",
+    )
+
+    config = load_train_submit_config(path)
+    assert config.experiment_branch == "my-feature"
+    assert config.experiment_config["branch"] == "my-feature"
+
+
+def test_load_config_rejects_branch_and_commit_sha(tmp_path: Path) -> None:
+    path = tmp_path / "train.toml"
+    path.write_text(
+        """
+[experiment]
+rollout = "r"
+entrypoint = "main.py"
+model_path = "m"
+dataset = "d"
+branch = "my-feature"
+commit_sha = "deadbeef"
+""".strip(),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(CLIError, match="Provide either branch or commit_sha, not both"):
+        load_train_submit_config(path)
+
+
 def test_load_minimal_config(tmp_path: Path) -> None:
     path = tmp_path / "minimal.toml"
     path.write_text(

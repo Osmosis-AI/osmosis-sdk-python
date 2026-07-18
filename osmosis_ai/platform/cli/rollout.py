@@ -22,7 +22,7 @@ from osmosis_ai.platform.cli.utils import (
 from osmosis_ai.platform.cli.workspace_directory_context import git_result_context
 
 
-def list_rollouts(*, limit: int, all_: bool) -> ListResult:
+def list_rollouts(*, limit: int, all_: bool, branch: str | None = None) -> ListResult:
     """List rollouts for the current workspace directory."""
     effective_limit, fetch_all = validate_list_options(limit=limit, all_=all_)
 
@@ -32,14 +32,19 @@ def list_rollouts(*, limit: int, all_: bool) -> ListResult:
 
     output = get_output_context()
     client = OsmosisClient()
+
+    def fetch_page(limit_value: int, offset_value: int):
+        return client.list_rollouts(
+            limit=limit_value,
+            offset=offset_value,
+            credentials=credentials,
+            git_identity=git_identity,
+            **({"branch": branch} if branch else {}),
+        )
+
     with output.status("Fetching rollouts..."):
         rollouts, total_count, has_more, next_offset = paginated_fetch(
-            lambda lim, off: client.list_rollouts(
-                limit=lim,
-                offset=off,
-                credentials=credentials,
-                git_identity=git_identity,
-            ),
+            fetch_page,
             items_attr="rollouts",
             limit=effective_limit,
             fetch_all=fetch_all,
@@ -53,7 +58,10 @@ def list_rollouts(*, limit: int, all_: bool) -> ListResult:
         total_count=total_count,
         has_more=has_more,
         next_offset=next_offset,
-        extra=git_result_context(context),
+        extra={
+            **git_result_context(context),
+            **({"branch": branch} if branch else {}),
+        },
         columns=[
             ListColumn(
                 key="name",

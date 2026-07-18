@@ -532,6 +532,8 @@ def info(name_or_id: str, *, output: str | None) -> DetailResult:
     config = _format_eval_config(detail.config)
     if config:
         config_rows.append(("Config", config))
+    if detail.branch:
+        config_rows.append(("Branch", detail.branch))
     if detail.commit_sha:
         config_rows.append(("Commit", detail.commit_sha[:7]))
     secret_scopes = format_secret_scopes(detail.resolved_secret_scopes)
@@ -636,6 +638,7 @@ def info(name_or_id: str, *, output: str | None) -> DetailResult:
             "rollout": detail.rollout,
             "entrypoint": detail.entrypoint,
             "commit_sha": detail.commit_sha,
+            "branch": detail.branch,
             "env_config": detail.env_config,
             "resolved_secret_scopes": detail.resolved_secret_scopes,
             "dataset_df_stats": detail.dataset_df_stats,
