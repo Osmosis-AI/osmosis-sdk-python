@@ -248,6 +248,7 @@ class TrainingRunDetail(TrainingRun):
     notes: str | None = None
     config: dict[str, Any] | None = None
     entrypoint: str | None = None
+    branch: str | None = None
     commit_sha: str | None = None
     env_config: dict[str, Any] | None = None
     resolved_secret_scopes: dict[str, Any] | None = None
@@ -291,6 +292,7 @@ class TrainingRunDetail(TrainingRun):
             entrypoint=data.get("entrypoint")
             if isinstance(data.get("entrypoint"), str)
             else None,
+            branch=data.get("branch") if isinstance(data.get("branch"), str) else None,
             commit_sha=data.get("commit_sha")
             if isinstance(data.get("commit_sha"), str)
             else None,
@@ -1028,6 +1030,7 @@ class EvaluationRunDetail(EvaluationRun):
     config: dict[str, Any] | None = None
     results: dict[str, Any] | None = None
     entrypoint: str | None = None
+    branch: str | None = None
     commit_sha: str | None = None
     env_config: dict[str, Any] | None = None
     resolved_secret_scopes: dict[str, Any] | None = None
@@ -1060,6 +1063,7 @@ class EvaluationRunDetail(EvaluationRun):
             entrypoint=data.get("entrypoint")
             if isinstance(data.get("entrypoint"), str)
             else None,
+            branch=data.get("branch") if isinstance(data.get("branch"), str) else None,
             commit_sha=data.get("commit_sha")
             if isinstance(data.get("commit_sha"), str)
             else None,

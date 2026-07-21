@@ -6,6 +6,7 @@ rollout = "<your-rollout>"            # Rollout name
 entrypoint = "main.py"                # Entrypoint file name
 model_path = "openai/gpt-5-mini"      # LiteLLM-style model name
 dataset = "<your-dataset-name>"       # Platform dataset name
+# branch = "my-feature"              # Pin to a branch (mutually exclusive with commit_sha)
 # commit_sha =                        # Pin to a specific commit
 
 [evaluation]

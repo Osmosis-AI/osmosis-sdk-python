@@ -209,6 +209,7 @@ def test_eval_submit_passes_new_schema_to_evaluation_run_api(
         "entrypoint": "main.py",
         "model": "openai/gpt-5-mini",
         "dataset": "multiply",
+        "branch": None,
         "commit_sha": "deadbeef",
     }
 

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Annotated, Any
 
 import typer
 
@@ -56,8 +56,12 @@ def list_rollouts(
         help="Maximum number of rollouts to show.",
     ),
     all_: bool = typer.Option(False, "--all", help="Show all rollouts."),
+    branch: Annotated[
+        str | None,
+        typer.Option("--branch", help="List rollouts synced from this branch."),
+    ] = None,
 ) -> Any:
     """List rollouts for the current workspace directory."""
     from osmosis_ai.platform.cli.rollout import list_rollouts as _list_rollouts
 
-    return _list_rollouts(limit=limit, all_=all_)
+    return _list_rollouts(limit=limit, all_=all_, branch=branch)

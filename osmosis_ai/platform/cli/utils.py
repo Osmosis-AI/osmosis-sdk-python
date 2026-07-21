@@ -478,6 +478,7 @@ def validate_list_options(
 def print_remote_fetch_notice(
     workspace_directory: Path,
     *,
+    branch: str | None,
     pinned_commit_sha: str | None,
     extra_warnings: list[str] | None = None,
 ) -> tuple[list[str], list[str]]:
@@ -531,6 +532,11 @@ def print_remote_fetch_notice(
             "Platform-connected repository."
         )
         notes.append("Make sure that commit is pushed to origin.")
+    elif branch:
+        notes.append(
+            f"Osmosis will fetch branch {branch} from the Platform-connected repository."
+        )
+        notes.append("Make sure your code changes are committed and pushed.")
     else:
         notes.append("Osmosis will fetch code from the Platform-connected repository.")
         if state is not None and state.branch and state.head_sha:
@@ -553,6 +559,12 @@ def print_remote_fetch_notice(
                 "from the Platform-connected repository."
             )
             body_lines.append("Make sure that commit is pushed to origin.")
+        elif branch:
+            body_lines.append(
+                f"Osmosis will fetch branch [bold]{console.escape(branch)}[/bold] "
+                "from the Platform-connected repository."
+            )
+            body_lines.append("Make sure your code changes are committed and pushed.")
         else:
             body_lines.append(
                 "Osmosis will fetch code from the Platform-connected repository."

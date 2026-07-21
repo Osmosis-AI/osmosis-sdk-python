@@ -189,6 +189,29 @@ class TestListDatasets:
         assert "workspace_id" not in mock_request.call_args.kwargs
 
 
+class TestListRollouts:
+    """Tests for OsmosisClient.list_rollouts query parameters."""
+
+    @patch("osmosis_ai.platform.api.client.platform_request")
+    def test_list_rollouts_includes_urlencoded_branch(
+        self, mock_request: MagicMock
+    ) -> None:
+        mock_request.return_value = {"rollouts": [], "total_count": 0}
+
+        OsmosisClient().list_rollouts(
+            limit=10,
+            offset=20,
+            branch="feature/my-work",
+            git_identity="git_123",
+        )
+
+        mock_request.assert_called_once_with(
+            "/api/cli/rollouts?limit=10&offset=20&branch=feature%2Fmy-work",
+            credentials=None,
+            git_identity="git_123",
+        )
+
+
 class TestGitIdentityPassthrough:
     """Tests representative repo-scoped methods pass git_identity."""
 

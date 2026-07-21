@@ -291,6 +291,7 @@ class TestTrainingRunDetail:
                 "model": {"id": "model_1", "name": "Qwen/Qwen3"},
                 "dataset": {"id": "dataset_1", "name": "train.jsonl"},
                 "rollout": {"id": "rollout_1", "name": "math-rollout"},
+                "branch": "my-feature",
             }
         )
 
@@ -301,6 +302,7 @@ class TestTrainingRunDetail:
         assert run.dataset_name == "train.jsonl"
         assert run.rollout_id == "rollout_1"
         assert run.rollout_name == "math-rollout"
+        assert run.branch == "my-feature"
         assert run.examples_processed_count == 42
 
 
@@ -722,6 +724,7 @@ class TestEvaluationRunModels:
                 "dataset": {"id": "dataset_1"},
                 "rollout": {"id": "rollout_1"},
                 "entrypoint": "main.py",
+                "branch": "my-feature",
                 "commit_sha": "abcdef1234567890",
                 "env_config": {"PROMPT_MODE": "strict"},
                 "resolved_secret_scopes": {"OPENAI_API_KEY": "workspace"},
@@ -740,6 +743,7 @@ class TestEvaluationRunModels:
         assert detail.dataset == {"id": "dataset_1"}
         assert detail.rollout == {"id": "rollout_1"}
         assert detail.entrypoint == "main.py"
+        assert detail.branch == "my-feature"
         assert detail.commit_sha == "abcdef1234567890"
         assert detail.env_config == {"PROMPT_MODE": "strict"}
         assert detail.resolved_secret_scopes == {"OPENAI_API_KEY": "workspace"}

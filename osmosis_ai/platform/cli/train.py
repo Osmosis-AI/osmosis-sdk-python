@@ -297,6 +297,8 @@ def info(name: str, *, output: str | None) -> DetailResult:
     train_config = _format_train_config(run.config)
     if train_config:
         config_rows.append(("Config", train_config))
+    if run.branch:
+        config_rows.append(("Branch", run.branch))
     if run.commit_sha:
         config_rows.append(("Commit", run.commit_sha[:7]))
     secret_scopes = format_secret_scopes(run.resolved_secret_scopes)
