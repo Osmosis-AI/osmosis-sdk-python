@@ -45,9 +45,8 @@ dependencies = [
     "questionary>=2.1.0,<3.0.0",
     # CLI framework. <0.27: cli/_click_compat.py imports typer._click internals.
     "typer>=0.26,<0.27",
-    # Guard: typer-slim <0.22 ships its own typer/ files (pulled in via
-    # huggingface-hub) and overlay-corrupts the real typer install.
-    "typer-slim>=0.22",
+    # Do not directly constrain typer-slim: versions <0.22 shared typer/* with
+    # typer, and upgrading that legacy distribution can delete Typer's files.
     "rich>=14.2.0",
     "harbor[daytona]>=0.15.0,<0.17.0",
     # Security floors for load-bearing transitive deps (CVE remediation):
