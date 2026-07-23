@@ -5,7 +5,11 @@ from pathlib import Path
 import pytest
 
 from osmosis_ai.rollout.utils import file_artifacts
-from osmosis_ai.rollout.utils.file_artifacts import create_rollout_artifacts_dir
+from osmosis_ai.rollout.utils.file_artifacts import (
+    artifact_tree_state,
+    copy_artifact_tree,
+    create_rollout_artifacts_dir,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -77,3 +81,50 @@ class TestCreateRolloutArtifactsDir:
         result = await create_rollout_artifacts_dir(tmp_path, "r1")
 
         assert result is None
+
+
+class TestCopyArtifactTree:
+    def test_merges_nested_files_and_replaces_conflicting_types(self, tmp_path):
+        source = tmp_path / "source"
+        destination = tmp_path / "destination"
+        (source / "nested").mkdir(parents=True)
+        (source / "nested" / "grader.json").write_text("{}")
+        (source / "now-a-file").write_text("final")
+        (destination / "nested").mkdir(parents=True)
+        (destination / "nested" / "workflow.txt").write_text("kept")
+        (destination / "now-a-file").mkdir(parents=True)
+
+        copied = copy_artifact_tree(source, destination)
+
+        assert copied == 2
+        assert (destination / "nested" / "workflow.txt").read_text() == "kept"
+        assert (destination / "nested" / "grader.json").read_text() == "{}"
+        assert (destination / "now-a-file").read_text() == "final"
+
+    def test_skips_symlinks(self, tmp_path):
+        source = tmp_path / "source"
+        destination = tmp_path / "destination"
+        source.mkdir()
+        secret = tmp_path / "secret.txt"
+        secret.write_text("do not copy")
+        (source / "linked.txt").symlink_to(secret)
+
+        copy_artifact_tree(source, destination)
+
+        assert not (destination / "linked.txt").exists()
+
+    def test_baseline_skips_unchanged_files(self, tmp_path):
+        source = tmp_path / "source"
+        destination = tmp_path / "destination"
+        source.mkdir()
+        unchanged = source / "workflow.txt"
+        unchanged.write_text("workflow")
+        baseline = artifact_tree_state(source)
+        changed = source / "grader.txt"
+        changed.write_text("grader")
+
+        copied = copy_artifact_tree(source, destination, baseline=baseline)
+
+        assert copied == 1
+        assert not (destination / "workflow.txt").exists()
+        assert (destination / "grader.txt").read_text() == "grader"

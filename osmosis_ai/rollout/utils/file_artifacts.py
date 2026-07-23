@@ -4,17 +4,107 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import shutil
 from pathlib import Path
 
 logger: logging.Logger = logging.getLogger(__name__)
 
 # Harbor's auto-collected convention directory inside the sandbox.
 HARBOR_ARTIFACTS_DIR = Path("/logs/artifacts")
+# Harbor always returns /logs/verifier after the verifier exits. The grader runner
+# stages its final artifacts tree under this reserved child so the host backend can
+# merge grader-authored files into Harbor's earlier, pre-verifier artifact snapshot.
+GRADER_ARTIFACTS_SNAPSHOT_DIRNAME = ".osmosis-artifacts"
 
 CREATE_ATTEMPTS = 3
 CREATE_BACKOFF_SECONDS = 0.5  # doubled per retry
 
 _HEALTH_CHECK_FILENAME = ".osmosis-health-check"
+
+type ArtifactFileState = dict[str, tuple[int, int, int]]
+
+
+def artifact_tree_state(source: Path) -> ArtifactFileState:
+    """Return cheap change-detection metadata for regular files in a tree."""
+    state: ArtifactFileState = {}
+
+    def _visit(directory: Path, relative_dir: Path) -> None:
+        if directory.is_symlink() or not directory.is_dir():
+            return
+        for entry in sorted(directory.iterdir(), key=lambda path: path.name):
+            if entry.is_symlink():
+                continue
+            relative_path = relative_dir / entry.name
+            if entry.is_dir():
+                _visit(entry, relative_path)
+            elif entry.is_file():
+                stat = entry.stat()
+                state[relative_path.as_posix()] = (
+                    stat.st_size,
+                    stat.st_mtime_ns,
+                    stat.st_ctime_ns,
+                )
+
+    _visit(source, Path())
+    return state
+
+
+def copy_artifact_tree(
+    source: Path,
+    destination: Path,
+    *,
+    baseline: ArtifactFileState | None = None,
+) -> int:
+    """Merge regular files from ``source`` into ``destination``.
+
+    Artifact trees cross trust and filesystem boundaries, so copy file contents
+    only: never follow or recreate symlinks, special files, or metadata. Existing
+    destination entries are replaced when their file/directory type changed. When
+    ``baseline`` is provided, unchanged files are skipped. The merge is additive:
+    files present only in ``destination`` are kept, so deletions in ``source``
+    never propagate. Returns the number of files copied.
+    """
+    if source.is_symlink() or not source.is_dir():
+        return 0
+
+    if destination.is_symlink() or (destination.exists() and not destination.is_dir()):
+        destination.unlink()
+    destination.mkdir(parents=True, exist_ok=True)
+
+    def _copy(directory: Path, target_dir: Path, relative_dir: Path) -> int:
+        copied = 0
+        for entry in sorted(directory.iterdir(), key=lambda path: path.name):
+            target = target_dir / entry.name
+            relative_path = relative_dir / entry.name
+            if entry.is_symlink():
+                logger.warning("Skipping symlink in artifact tree: %s", entry)
+                continue
+            if entry.is_dir():
+                if target.is_symlink() or (target.exists() and not target.is_dir()):
+                    target.unlink()
+                target.mkdir(parents=True, exist_ok=True)
+                copied += _copy(entry, target, relative_path)
+                continue
+            if entry.is_file():
+                stat = entry.stat()
+                current_state = (stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns)
+                if (
+                    baseline is not None
+                    and baseline.get(relative_path.as_posix()) == current_state
+                ):
+                    continue
+                if target.is_symlink():
+                    target.unlink()
+                elif target.is_dir():
+                    shutil.rmtree(target)
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(entry, target)
+                copied += 1
+                continue
+            logger.warning("Skipping special file in artifact tree: %s", entry)
+        return copied
+
+    return _copy(source, destination, Path())
 
 
 def default_artifact_root() -> Path:

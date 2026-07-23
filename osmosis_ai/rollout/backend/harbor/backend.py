@@ -38,7 +38,12 @@ from osmosis_ai.rollout.types import (
     RolloutSample,
     RolloutStatus,
 )
-from osmosis_ai.rollout.utils.file_artifacts import default_artifact_root
+from osmosis_ai.rollout.utils.file_artifacts import (
+    GRADER_ARTIFACTS_SNAPSHOT_DIRNAME,
+    HARBOR_ARTIFACTS_DIR,
+    copy_artifact_tree,
+    default_artifact_root,
+)
 from osmosis_ai.rollout.utils.imports import to_import_path
 from osmosis_ai.rollout.utils.rewards import validate_samples_have_rewards
 
@@ -470,12 +475,38 @@ class HarborBackend(ExecutionBackend):
             return False
         return True
 
+    def _merge_grader_artifacts(self, rollout_id: str) -> None:
+        """Merge the verifier-returned final snapshot into trial artifacts."""
+        trial_dir = self.trials_dir / f"{TRIAL_NAME_PREFIX}{rollout_id}"
+        source_dir = trial_dir / "verifier" / GRADER_ARTIFACTS_SNAPSHOT_DIRNAME
+        if not source_dir.is_dir():
+            return
+
+        # Harbor maps the /logs/artifacts convention directory beneath the trial's
+        # artifacts root as logs/artifacts.
+        destination_dir = (
+            trial_dir / "artifacts" / HARBOR_ARTIFACTS_DIR.relative_to("/")
+        )
+        try:
+            copy_artifact_tree(source_dir, destination_dir)
+        except Exception:
+            logger.warning(
+                "Failed to merge grader artifacts for rollout %s (best-effort)",
+                rollout_id,
+                exc_info=True,
+            )
+
     async def on_trial_end(self, event: TrialHookEvent) -> None:
         rollout_id = parse_rollout_id(event)
         pending = self.pending.pop(rollout_id, None)
         if not pending:
             logger.error("No pending trial found for rollout %s", rollout_id)
             return
+
+        # Harbor collects /logs/artifacts before verification. grader_runner stages
+        # the final tree in /logs/verifier, which Harbor returns after verification;
+        # merge that post-grader snapshot before relocating the trial artifacts.
+        self._merge_grader_artifacts(rollout_id)
 
         # Evacuate artifacts first; delete the source only if it succeeds.
         delete_trial = bool(
