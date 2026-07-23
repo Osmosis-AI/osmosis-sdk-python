@@ -74,7 +74,11 @@ def stage_grader_artifacts(baseline: ArtifactFileState) -> None:
     """
     snapshot_dir = VERIFIER_LOGS_DIR / GRADER_ARTIFACTS_SNAPSHOT_DIRNAME
     try:
-        if snapshot_dir.is_symlink() or snapshot_dir.is_file():
+        if snapshot_dir.is_junction():
+            snapshot_dir.rmdir()
+        elif snapshot_dir.is_symlink() or (
+            snapshot_dir.exists() and not snapshot_dir.is_dir()
+        ):
             snapshot_dir.unlink()
         elif snapshot_dir.is_dir():
             shutil.rmtree(snapshot_dir)
@@ -83,6 +87,7 @@ def stage_grader_artifacts(baseline: ArtifactFileState) -> None:
         copied = copy_artifact_tree(
             HARBOR_ARTIFACTS_DIR,
             snapshot_dir,
+            destination_root=VERIFIER_LOGS_DIR,
             baseline=baseline,
         )
         if not copied:
@@ -114,20 +119,23 @@ def main() -> None:
         return
 
     samples = load_samples(args.samples)
-    grader_cls = resolve_object(config["grader"])
-    grader_config = (
-        resolve_object(config["grader_config"]) if "grader_config" in config else None
-    )
-
-    ctx = GraderContext(
-        label=label,
-        samples=samples,
-        metadata=metadata,
-        artifacts_dir=HARBOR_ARTIFACTS_DIR,
-    )
-    grader = grader_cls(grader_config)
     artifact_baseline = capture_artifact_baseline()
     try:
+        # Resolving user modules and constructing the grader are part of its
+        # lifecycle: either step may write diagnostics before failing.
+        grader_cls = resolve_object(config["grader"])
+        grader_config = (
+            resolve_object(config["grader_config"])
+            if "grader_config" in config
+            else None
+        )
+        ctx = GraderContext(
+            label=label,
+            samples=samples,
+            metadata=metadata,
+            artifacts_dir=HARBOR_ARTIFACTS_DIR,
+        )
+        grader = grader_cls(grader_config)
         asyncio.run(grader.grade(ctx))
     finally:
         # Harbor 0.16 collects /logs/artifacts before running the verifier. Its

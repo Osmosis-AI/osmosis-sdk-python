@@ -28,6 +28,9 @@ from osmosis_ai.rollout.utils.file_artifacts import (
     GRADER_ARTIFACTS_SNAPSHOT_DIRNAME,
     HARBOR_ARTIFACTS_DIR,
 )
+from osmosis_ai.rollout.utils.file_artifacts import (
+    copy_artifact_tree as real_copy_artifact_tree,
+)
 
 # Module-level captures so importlib can resolve the workflow/grader by
 # "<module>:<qualname>" and round-trip them through the runners.
@@ -75,6 +78,20 @@ class ArtifactWritingFailingGrader(Grader):
         ctx.artifacts_dir.mkdir(parents=True, exist_ok=True)
         (ctx.artifacts_dir / "partial.txt").write_text("partial")
         raise RuntimeError("grader exploded")
+
+
+class ArtifactWritingFailingConstructorGrader(Grader):
+    def __init__(self, _config=None):
+        import osmosis_ai.rollout.backend.harbor.grader_runner as grader_runner
+
+        grader_runner.HARBOR_ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
+        (grader_runner.HARBOR_ARTIFACTS_DIR / "constructor.txt").write_text(
+            "constructor"
+        )
+        raise RuntimeError("grader constructor exploded")
+
+    async def grade(self, _ctx: GraderContext) -> Any:
+        raise AssertionError("grade should not run")
 
 
 def _make_backend_for_config(*, grader: bool = False) -> HarborBackend:
@@ -219,6 +236,24 @@ class TestHarborBackend:
         source = backend.trials_dir / "trial-r1" / "artifacts"
         assert (source / "logs" / "artifacts" / "output.txt").exists()
 
+    async def test_on_trial_end_skips_symlinks_when_relocating(self, tmp_path):
+        backend = self._make_trial_end_backend(tmp_path, cleanup=False)
+        self._seed_trial_artifacts(backend)
+        source = backend.trials_dir / "trial-r1" / "artifacts"
+        host_file = tmp_path / "host-secret.txt"
+        host_file.write_text("host secret")
+        (source / "logs" / "artifacts" / "user-link.txt").symlink_to(host_file)
+
+        pending = PendingTrial(AsyncMock(), AsyncMock())
+        pending.workflow_complete_called = True
+        backend.pending["r1"] = pending
+
+        await backend.on_trial_end(self._success_event())
+
+        relocated = backend.artifact_root / "r1" / "artifacts"
+        assert not (relocated / "logs" / "artifacts" / "user-link.txt").exists()
+        assert host_file.read_text() == "host secret"
+
     async def test_on_trial_end_merges_staged_grader_artifacts(self, tmp_path):
         backend = self._make_trial_end_backend(tmp_path, cleanup=True)
         self._seed_trial_artifacts(backend)
@@ -242,6 +277,32 @@ class TestHarborBackend:
         assert (relocated / "output.txt").read_text() == "updated by grader"
         assert (relocated / "grader.json").read_text() == '{"reward": 1}'
 
+    async def test_on_trial_end_rejects_symlinked_grader_merge_parent(
+        self, tmp_path, caplog
+    ):
+        backend = self._make_trial_end_backend(tmp_path, cleanup=False)
+        trial_dir = backend.trials_dir / "trial-r1"
+        trial_artifacts = trial_dir / "artifacts"
+        outside = tmp_path / "outside"
+        trial_artifacts.mkdir(parents=True)
+        outside.mkdir()
+        (trial_artifacts / "logs").symlink_to(outside, target_is_directory=True)
+        staged = trial_dir / "verifier" / GRADER_ARTIFACTS_SNAPSHOT_DIRNAME
+        staged.mkdir(parents=True)
+        (staged / "grader.json").write_text("{}")
+
+        pending = PendingTrial(AsyncMock(), AsyncMock())
+        pending.workflow_complete_called = True
+        backend.pending["r1"] = pending
+
+        with caplog.at_level(
+            logging.WARNING, logger="osmosis_ai.rollout.backend.harbor.backend"
+        ):
+            await backend.on_trial_end(self._success_event())
+
+        assert not (outside / "artifacts" / "grader.json").exists()
+        assert "Failed to merge grader artifacts for rollout r1" in caplog.text
+
     async def test_on_trial_end_keeps_result_when_grader_merge_fails(
         self, tmp_path, monkeypatch, caplog
     ):
@@ -256,11 +317,14 @@ class TestHarborBackend:
         staged.mkdir(parents=True)
         (staged / "grader.json").write_text("{}")
 
-        def _boom(*_args, **_kwargs):
-            raise RuntimeError("bad artifact tree")
+        def _boom_for_staged_snapshot(source, destination, **kwargs):
+            if source == staged:
+                raise RuntimeError("bad artifact tree")
+            return real_copy_artifact_tree(source, destination, **kwargs)
 
         monkeypatch.setattr(
-            "osmosis_ai.rollout.backend.harbor.backend.copy_artifact_tree", _boom
+            "osmosis_ai.rollout.backend.harbor.backend.copy_artifact_tree",
+            _boom_for_staged_snapshot,
         )
         on_grader = AsyncMock()
         pending = PendingTrial(AsyncMock(), on_grader)
@@ -287,7 +351,7 @@ class TestHarborBackend:
             raise OSError("disk full")
 
         monkeypatch.setattr(
-            "osmosis_ai.rollout.backend.harbor.backend.shutil.move", _boom
+            "osmosis_ai.rollout.backend.harbor.backend.copy_artifact_tree", _boom
         )
 
         pending = PendingTrial(AsyncMock(), AsyncMock())
@@ -477,6 +541,47 @@ class TestGraderRunnerRoundTrip:
 
         snapshot = verifier_dir / GRADER_ARTIFACTS_SNAPSHOT_DIRNAME
         assert (snapshot / "partial.txt").read_text() == "partial"
+        assert not (verifier_dir / "reward.json").exists()
+
+    def test_grader_constructor_failure_still_stages_artifacts(
+        self, tmp_path, monkeypatch
+    ):
+        import osmosis_ai.rollout.backend.harbor.grader_runner as grader_runner
+
+        verifier_dir = tmp_path / "verifier"
+        artifacts_dir = tmp_path / "artifacts"
+        artifacts_dir.mkdir()
+        monkeypatch.setattr(grader_runner, "VERIFIER_LOGS_DIR", verifier_dir)
+        monkeypatch.setattr(grader_runner, "HARBOR_ARTIFACTS_DIR", artifacts_dir)
+
+        backend = _make_backend_for_config(grader=True)
+        backend.grader_path = (
+            f"{ArtifactWritingFailingConstructorGrader.__module__}:"
+            f"{ArtifactWritingFailingConstructorGrader.__qualname__}"
+        )
+        request = ExecutionRequest(
+            id="r1",
+            prompt=[{"role": "user", "content": "hi"}],
+            label="test-label",
+        )
+        config_path = tmp_path / "rollout_config.json"
+        config_path.write_text(
+            json.dumps(backend.build_rollout_config(request), default=str)
+        )
+        samples_path = tmp_path / "samples.json"
+        self._write_samples(samples_path)
+
+        monkeypatch.setattr(
+            grader_runner,
+            "parse_args",
+            lambda: SimpleNamespace(config=config_path, samples=samples_path),
+        )
+
+        with pytest.raises(RuntimeError, match="grader constructor exploded"):
+            grader_runner.main()
+
+        snapshot = verifier_dir / GRADER_ARTIFACTS_SNAPSHOT_DIRNAME
+        assert (snapshot / "constructor.txt").read_text() == "constructor"
         assert not (verifier_dir / "reward.json").exists()
 
 

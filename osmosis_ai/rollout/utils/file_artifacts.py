@@ -24,15 +24,28 @@ _HEALTH_CHECK_FILENAME = ".osmosis-health-check"
 type ArtifactFileState = dict[str, tuple[int, int, int]]
 
 
+def _is_link(path: Path) -> bool:
+    """Return whether a path can redirect traversal to another location."""
+    return path.is_symlink() or path.is_junction()
+
+
+def _remove_link(path: Path) -> None:
+    """Remove a symbolic link or Windows junction without touching its target."""
+    if path.is_junction():
+        path.rmdir()
+    else:
+        path.unlink()
+
+
 def artifact_tree_state(source: Path) -> ArtifactFileState:
     """Return cheap change-detection metadata for regular files in a tree."""
     state: ArtifactFileState = {}
 
     def _visit(directory: Path, relative_dir: Path) -> None:
-        if directory.is_symlink() or not directory.is_dir():
+        if _is_link(directory) or not directory.is_dir():
             return
         for entry in sorted(directory.iterdir(), key=lambda path: path.name):
-            if entry.is_symlink():
+            if _is_link(entry):
                 continue
             relative_path = relative_dir / entry.name
             if entry.is_dir():
@@ -53,7 +66,9 @@ def copy_artifact_tree(
     source: Path,
     destination: Path,
     *,
+    destination_root: Path,
     baseline: ArtifactFileState | None = None,
+    replace_destination: bool = False,
 ) -> int:
     """Merge regular files from ``source`` into ``destination``.
 
@@ -62,25 +77,66 @@ def copy_artifact_tree(
     destination entries are replaced when their file/directory type changed. When
     ``baseline`` is provided, unchanged files are skipped. The merge is additive:
     files present only in ``destination`` are kept, so deletions in ``source``
-    never propagate. Returns the number of files copied.
+    never propagate. Set ``replace_destination`` to clear the destination first.
+
+    ``destination_root`` is the trusted ancestor beneath which the destination
+    must live. Every descendant component leading to the destination is checked
+    without resolving symlinks, so an untrusted intermediate link cannot redirect
+    writes outside the intended tree. Returns the number of files copied.
     """
-    if source.is_symlink() or not source.is_dir():
+    if _is_link(source) or not source.is_dir():
         return 0
 
-    if destination.is_symlink() or (destination.exists() and not destination.is_dir()):
-        destination.unlink()
-    destination.mkdir(parents=True, exist_ok=True)
+    trusted_root = destination_root.absolute()
+    destination = destination.absolute()
+    try:
+        relative_destination = destination.relative_to(trusted_root)
+    except ValueError as exc:
+        raise ValueError(
+            f"Artifact destination {destination} is outside trusted root {trusted_root}"
+        ) from exc
+    if not relative_destination.parts or ".." in relative_destination.parts:
+        raise ValueError("Artifact destination must be strictly below its trusted root")
+
+    # The root itself is supplied as trusted and may intentionally be a mount or
+    # symlink. Descendants are untrusted: create/walk them one component at a time
+    # and reject intermediate links before any destructive operation.
+    trusted_root.mkdir(parents=True, exist_ok=True)
+    current = trusted_root
+    for index, part in enumerate(relative_destination.parts):
+        current /= part
+        is_destination = index == len(relative_destination.parts) - 1
+        if _is_link(current):
+            if not is_destination:
+                raise OSError(
+                    f"Refusing symlink in artifact destination path: {current}"
+                )
+            _remove_link(current)
+        elif current.exists():
+            if not current.is_dir():
+                if not is_destination:
+                    raise NotADirectoryError(
+                        f"Artifact destination component is not a directory: {current}"
+                    )
+                current.unlink()
+            elif is_destination and replace_destination:
+                shutil.rmtree(current)
+            else:
+                continue
+        current.mkdir()
 
     def _copy(directory: Path, target_dir: Path, relative_dir: Path) -> int:
         copied = 0
         for entry in sorted(directory.iterdir(), key=lambda path: path.name):
             target = target_dir / entry.name
             relative_path = relative_dir / entry.name
-            if entry.is_symlink():
-                logger.warning("Skipping symlink in artifact tree: %s", entry)
+            if _is_link(entry):
+                logger.warning("Skipping link in artifact tree: %s", entry)
                 continue
             if entry.is_dir():
-                if target.is_symlink() or (target.exists() and not target.is_dir()):
+                if _is_link(target):
+                    _remove_link(target)
+                elif target.exists() and not target.is_dir():
                     target.unlink()
                 target.mkdir(parents=True, exist_ok=True)
                 copied += _copy(entry, target, relative_path)
@@ -93,10 +149,12 @@ def copy_artifact_tree(
                     and baseline.get(relative_path.as_posix()) == current_state
                 ):
                     continue
-                if target.is_symlink():
-                    target.unlink()
+                if _is_link(target):
+                    _remove_link(target)
                 elif target.is_dir():
                     shutil.rmtree(target)
+                elif target.exists():
+                    target.unlink()
                 target.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copyfile(entry, target)
                 copied += 1

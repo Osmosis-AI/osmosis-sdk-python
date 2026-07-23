@@ -1,5 +1,6 @@
 """Tests for osmosis_ai.rollout.utils.file_artifacts."""
 
+import os
 from pathlib import Path
 
 import pytest
@@ -94,7 +95,11 @@ class TestCopyArtifactTree:
         (destination / "nested" / "workflow.txt").write_text("kept")
         (destination / "now-a-file").mkdir(parents=True)
 
-        copied = copy_artifact_tree(source, destination)
+        copied = copy_artifact_tree(
+            source,
+            destination,
+            destination_root=tmp_path,
+        )
 
         assert copied == 2
         assert (destination / "nested" / "workflow.txt").read_text() == "kept"
@@ -109,9 +114,79 @@ class TestCopyArtifactTree:
         secret.write_text("do not copy")
         (source / "linked.txt").symlink_to(secret)
 
-        copy_artifact_tree(source, destination)
+        copy_artifact_tree(
+            source,
+            destination,
+            destination_root=tmp_path,
+        )
 
         assert not (destination / "linked.txt").exists()
+
+    def test_skips_special_files(self, tmp_path):
+        if not hasattr(os, "mkfifo"):
+            pytest.skip("FIFO files are unavailable on this platform")
+
+        source = tmp_path / "source"
+        destination = tmp_path / "destination"
+        source.mkdir()
+        os.mkfifo(source / "pipe")
+
+        copied = copy_artifact_tree(
+            source,
+            destination,
+            destination_root=tmp_path,
+        )
+
+        assert copied == 0
+        assert not (destination / "pipe").exists()
+
+    def test_rejects_intermediate_destination_symlink(self, tmp_path):
+        source = tmp_path / "source"
+        trusted_root = tmp_path / "trusted"
+        outside = tmp_path / "outside"
+        source.mkdir()
+        trusted_root.mkdir()
+        outside.mkdir()
+        (source / "grader.txt").write_text("grader")
+        (trusted_root / "logs").symlink_to(outside, target_is_directory=True)
+
+        with pytest.raises(OSError, match="symlink in artifact destination path"):
+            copy_artifact_tree(
+                source,
+                trusted_root / "logs" / "artifacts",
+                destination_root=trusted_root,
+            )
+
+        assert not (outside / "artifacts" / "grader.txt").exists()
+
+    def test_rejects_destination_outside_trusted_root(self, tmp_path):
+        source = tmp_path / "source"
+        source.mkdir()
+
+        with pytest.raises(ValueError, match="outside trusted root"):
+            copy_artifact_tree(
+                source,
+                tmp_path / "destination",
+                destination_root=tmp_path / "trusted",
+            )
+
+    def test_replace_destination_removes_stale_entries(self, tmp_path):
+        source = tmp_path / "source"
+        destination = tmp_path / "destination"
+        source.mkdir()
+        destination.mkdir()
+        (source / "fresh.txt").write_text("fresh")
+        (destination / "stale.txt").write_text("stale")
+
+        copy_artifact_tree(
+            source,
+            destination,
+            destination_root=tmp_path,
+            replace_destination=True,
+        )
+
+        assert (destination / "fresh.txt").read_text() == "fresh"
+        assert not (destination / "stale.txt").exists()
 
     def test_baseline_skips_unchanged_files(self, tmp_path):
         source = tmp_path / "source"
@@ -123,7 +198,12 @@ class TestCopyArtifactTree:
         changed = source / "grader.txt"
         changed.write_text("grader")
 
-        copied = copy_artifact_tree(source, destination, baseline=baseline)
+        copied = copy_artifact_tree(
+            source,
+            destination,
+            destination_root=tmp_path,
+            baseline=baseline,
+        )
 
         assert copied == 1
         assert not (destination / "workflow.txt").exists()

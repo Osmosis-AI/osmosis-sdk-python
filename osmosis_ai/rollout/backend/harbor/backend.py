@@ -452,21 +452,25 @@ class HarborBackend(ExecutionBackend):
         await pending.on_workflow_complete(result)
 
     def _relocate_trial_artifacts(self, rollout_id: str, *, move: bool) -> bool:
-        """Persist collected artifacts to the artifact root; ``move`` before
-        cleanup, else copy. Best-effort: returns ``False`` to keep the source."""
+        """Safely persist regular files to the artifact root.
+
+        When ``move`` is true, remove the source only after the copy succeeds.
+        Best-effort: returns ``False`` to keep the source on any failure.
+        """
         source_dir = self.trials_dir / f"{TRIAL_NAME_PREFIX}{rollout_id}" / "artifacts"
         if not source_dir.is_dir():
             return True
         dest_dir = self.artifact_root / rollout_id / "artifacts"
         try:
-            if dest_dir.exists():
-                shutil.rmtree(dest_dir)
-            dest_dir.parent.mkdir(parents=True, exist_ok=True)
+            copy_artifact_tree(
+                source_dir,
+                dest_dir,
+                destination_root=self.artifact_root,
+                replace_destination=True,
+            )
             if move:
-                shutil.move(source_dir, dest_dir)
-            else:
-                shutil.copytree(source_dir, dest_dir, symlinks=False)
-        except OSError:
+                shutil.rmtree(source_dir)
+        except Exception:
             logger.warning(
                 "Failed to relocate trial artifacts for rollout %s (best-effort)",
                 rollout_id,
@@ -488,7 +492,11 @@ class HarborBackend(ExecutionBackend):
             trial_dir / "artifacts" / HARBOR_ARTIFACTS_DIR.relative_to("/")
         )
         try:
-            copy_artifact_tree(source_dir, destination_dir)
+            copy_artifact_tree(
+                source_dir,
+                destination_dir,
+                destination_root=self.trials_dir,
+            )
         except Exception:
             logger.warning(
                 "Failed to merge grader artifacts for rollout %s (best-effort)",
