@@ -48,7 +48,11 @@ dependencies = [
     # Do not directly constrain typer-slim: versions <0.22 shared typer/* with
     # typer, and upgrading that legacy distribution can delete Typer's files.
     "rich>=14.2.0",
-    "harbor[daytona]>=0.15.0,<0.17.0",
+    # The platform owns this version so a rollout never declares one: the CLI's
+    # preflight and the rollout server both resolve harbor through this pin and
+    # therefore agree. EnvironmentType.SKYPILOT requires >=0.20.0. Capped so a
+    # harbor release cannot change what a rollout runs without an SDK release.
+    "harbor[daytona]>=0.20.0,<0.21",
     # Security floors for load-bearing transitive deps (CVE remediation):
     # aiohttp is exercised via litellm's async transport, and cryptography is
     # loaded via keyring's SecretService backend on Linux. Lower bounds only,

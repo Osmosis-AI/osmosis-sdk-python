@@ -527,6 +527,19 @@ class HarborBackend(ExecutionBackend):
         if not pending.workflow_complete_called:
             if event.result and event.result.exception_info:
                 err = event.result.exception_info
+                # Surface the harbor trial failure (e.g. an environment/sandbox
+                # launch error) to stdout/CloudWatch. Harbor otherwise only
+                # records it in the trial dir, which may be lost if the task is
+                # torn down or artifact relocation fails.
+                logger.error(
+                    "Harbor trial %s failed before the agent completed [%s]: %s\n%s",
+                    rollout_id,
+                    getattr(err, "exception_type", "?"),
+                    err.exception_message,
+                    getattr(err, "exception_traceback", "")
+                    or getattr(err, "traceback", "")
+                    or "",
+                )
                 result = ExecutionResult(
                     status=RolloutStatus.FAILURE,
                     err_message=err.exception_message,
@@ -576,6 +589,15 @@ class HarborBackend(ExecutionBackend):
                     )
             elif event.result and event.result.exception_info:
                 err = event.result.exception_info
+                logger.error(
+                    "Harbor trial %s failed [%s]: %s\n%s",
+                    rollout_id,
+                    getattr(err, "exception_type", "?"),
+                    err.exception_message,
+                    getattr(err, "exception_traceback", "")
+                    or getattr(err, "traceback", "")
+                    or "",
+                )
                 result = ExecutionResult(
                     status=RolloutStatus.FAILURE,
                     samples=samples,
