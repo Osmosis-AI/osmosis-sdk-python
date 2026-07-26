@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import platform
 import shutil
 import subprocess
@@ -68,6 +69,31 @@ def uses_local_docker_runtime(environment_config: HarborEnvironmentConfig) -> bo
     return environment_config.type == EnvironmentType.DOCKER
 
 
+SKYPILOT_CONTEXT_ENV = "HARBOR_SKYPILOT_CONTEXT"
+
+
+def apply_managed_skypilot_placement(
+    environment_config: HarborEnvironmentConfig,
+) -> HarborEnvironmentConfig:
+    """Resolve the SkyPilot cluster context from the run environment.
+
+    Harbor reads its registry from ``HARBOR_SKYPILOT_REGISTRY`` itself but
+    accepts the context only as a constructor kwarg, so something has to bridge
+    the two. Doing it here keeps placement out of every rollout entrypoint: a
+    rollout selects ``EnvironmentType.SKYPILOT`` and names no infrastructure,
+    and the same code runs wherever it is submitted. An explicit
+    ``context_name`` still wins.
+    """
+    if environment_config.type != EnvironmentType.SKYPILOT:
+        return environment_config
+    if environment_config.kwargs.get("context_name"):
+        return environment_config
+    context_name = os.environ.get(SKYPILOT_CONTEXT_ENV)
+    if context_name:
+        environment_config.kwargs["context_name"] = context_name
+    return environment_config
+
+
 class PendingTrial:
     def __init__(
         self,
@@ -122,7 +148,9 @@ class HarborBackend(ExecutionBackend):
         self.grading: bool = self.grader_path is not None
         self.custom_tests_dir: Path | None = custom_tests_dir
         self.environment_config: HarborEnvironmentConfig = (
-            environment_config or HarborEnvironmentConfig()
+            apply_managed_skypilot_placement(
+                environment_config or HarborEnvironmentConfig()
+            )
         )
         self._sdk_source_dir = _sdk_source_dir
         uses_local_docker = uses_local_docker_runtime(self.environment_config)
