@@ -375,19 +375,34 @@ class TestInstalledAgentConfig:
 
 
 class TestTrialConfig:
-    def test_grader_timeout_is_forwarded_to_the_verifier(self):
-        backend = NativeHarborBackend(trials_dir="native_trials")
-        request = _request(grader_timeout_sec=12.0)
-
-        cfg = backend._build_trial_config(
+    @staticmethod
+    def _build(backend: NativeHarborBackend, request: ExecutionRequest):
+        return backend._build_trial_config(
             request,
             resolve_task(request),
             backend._build_agent_config(request, _context()),
             "native-rollout-1",
         )
 
+    def test_grader_timeout_is_forwarded_to_the_verifier(self):
+        cfg = self._build(NativeHarborBackend(), _request(grader_timeout_sec=12.0))
+
         assert cfg.verifier.override_timeout_sec == 12.0
         assert cfg.verifier.disable is False
+
+    def test_verifier_runs_untimed_by_default(self):
+        cfg = self._build(NativeHarborBackend(), _request())
+
+        assert cfg.verifier.override_timeout_sec is None
+        assert cfg.verifier.disable is False
+
+    def test_paths_and_identity_are_threaded_through(self):
+        backend = NativeHarborBackend(trials_dir="native_trials")
+
+        cfg = self._build(backend, _request())
+
+        assert cfg.trials_dir == Path("native_trials")
+        assert cfg.task.name == "osmosis/demo"
         assert cfg.trial_name == "native-rollout-1"
         assert cfg.environment is backend.environment_config
 
