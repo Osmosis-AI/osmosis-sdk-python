@@ -2,6 +2,8 @@
 its verifier reward onto the rollout's single sample. The agent is fixed per
 backend; only the task and model vary per rollout via metadata."""
 
+from __future__ import annotations
+
 import importlib
 import logging
 import shutil
@@ -28,6 +30,11 @@ from harbor.models.trial.result import TrialResult
 from harbor.trial.queue import TrialQueue
 
 from osmosis_ai.rollout.backend.base import ExecutionBackend, ResultCallback
+from osmosis_ai.rollout.backend.harbor.backend import (
+    apply_managed_skypilot_placement,
+    rewrite_url_for_docker,
+    uses_local_docker_runtime,
+)
 from osmosis_ai.rollout.context import (
     RolloutContext,
     get_rollout_context,
@@ -161,9 +168,13 @@ class NativeHarborBackend(ExecutionBackend):
         self.agent_env = agent_env
         self.model_name = model_name
         self.reward_key = reward_key
-        self.trials_dir = Path(trials_dir)
+        self.trials_dir: Path = Path(trials_dir)
         self.task_resolver: TaskResolver = task_resolver or resolve_task
-        self.environment_config = environment_config or HarborEnvironmentConfig()
+        self.environment_config: HarborEnvironmentConfig = (
+            apply_managed_skypilot_placement(
+                environment_config or HarborEnvironmentConfig()
+            )
+        )
         self.cleanup_successful_trials = cleanup_successful_trials
         self._max_concurrency = max_concurrent
         self._queue = TrialQueue(n_concurrent=max_concurrent, retry_config=retry_config)
@@ -313,7 +324,14 @@ class NativeHarborBackend(ExecutionBackend):
 
         if _is_installed_agent(agent_cls):
             # Env-wired; SDK endpoint/key overwrite agent_env so identity can't be redirected.
-            env["OPENAI_BASE_URL"] = endpoint
+            # An installed agent runs inside the environment container, so on a local
+            # Docker runtime a host loopback endpoint has to be rewritten to reach the
+            # bridge. In-process agents below run on the host, where loopback is correct.
+            env["OPENAI_BASE_URL"] = (
+                rewrite_url_for_docker(endpoint)
+                if uses_local_docker_runtime(self.environment_config)
+                else endpoint
+            )
             if api_key:
                 env["OPENAI_API_KEY"] = api_key
         else:
@@ -331,10 +349,12 @@ class NativeHarborBackend(ExecutionBackend):
             # the SDK LLM client; a harbor agent (terminus-2) reaches the bridge
             # through litellm directly, so inject them as litellm extra_headers. A
             # native trial produces exactly one sample, so both ids are the rollout
-            # id -- which is also the key the grader emits the sample under.
+            # id -- which is also the key the grader emits the sample under. They
+            # overwrite passthrough values, like api_base/api_key above: a caller-set
+            # id would attribute completions to another rollout.
             extra_headers: dict[str, str] = dict(llm_kwargs.get("extra_headers") or {})
-            extra_headers.setdefault("x-rollout-id", request.id)
-            extra_headers.setdefault("x-sample-id", request.id)
+            extra_headers["x-rollout-id"] = request.id
+            extra_headers["x-sample-id"] = request.id
             llm_kwargs["extra_headers"] = extra_headers
             # TODO(temporary): in-process agents need JSON; pin stream=False in extra_body
             # (setdefault, so a user stream wins). REMOVE when controllers send JSON.
@@ -361,7 +381,9 @@ class NativeHarborBackend(ExecutionBackend):
         trial_result: TrialResult | None,
     ) -> ExecutionResult:
         """Grade the rollout's single sample from the harbor verifier's in-memory
-        result. On setup failure (no trial result) the workflow error is propagated.
+        result. When the trial failed, the workflow error is propagated: a failed
+        trial has no verifier reward, and reporting the resulting "missing rewards"
+        would bury the agent failure that actually caused it.
 
         A native harbor trial produces exactly one sample (one task -> one verifier
         reward), so we emit a single-entry ``samples`` dict keyed by the rollout id.
@@ -372,7 +394,7 @@ class NativeHarborBackend(ExecutionBackend):
         """
         sample = RolloutSample(id=request.id, label=request.label)
         samples = {request.id: sample}
-        if trial_result is None:
+        if workflow_result.status is not RolloutStatus.SUCCESS or trial_result is None:
             return ExecutionResult(
                 status=RolloutStatus.FAILURE,
                 samples=samples,

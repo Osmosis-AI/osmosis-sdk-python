@@ -194,7 +194,19 @@ def validate_rollout_backend(
     only when the rollout is genuinely invalid.
     """
     from osmosis_ai.eval.common.cli import _resolve_grader, load_workflow
+    from osmosis_ai.platform.cli.shared_config import validate_workspace_rollout_paths
     from osmosis_ai.rollout.validator import validate_backend
+
+    # Submit commands validate these while loading the config; repeating it here
+    # holds direct callers to the same contract. Without it a multi-segment name
+    # such as `demo/..` resolves back onto `rollouts/` itself, which still passes
+    # the containment check below and reads the wrong pyproject.toml.
+    validate_workspace_rollout_paths(
+        rollout=rollout,
+        entrypoint=entrypoint,
+        workspace_directory=workspace_directory,
+        command_label=command_label,
+    )
 
     # Validate only where the environment represents the rollout, and report the
     # skip otherwise. Silently proceeding would both reject valid rollouts this

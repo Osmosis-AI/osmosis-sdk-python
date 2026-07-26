@@ -383,3 +383,34 @@ def test_validate_rollout_backend_still_fails_when_environment_matches(
             entrypoint="main.py",
             command_label="eval submit",
         )
+
+
+@pytest.mark.parametrize("rollout", ["demo/..", "../rollouts/demo", "demo/nested"])
+def test_validate_rollout_backend_rejects_multi_segment_rollout_names(
+    tmp_path: Path, rollout: str
+) -> None:
+    """`demo/..` resolves back onto `rollouts/` itself, which would still pass the
+    containment check and read the wrong pyproject.toml."""
+    project = _make_workspace_directory(tmp_path / "project")
+    _make_rollout(project, "demo", dependencies=_SATISFIED, entrypoint="")
+
+    with pytest.raises(CLIError, match="single-segment name"):
+        workspace_directory_contract.validate_rollout_backend(
+            workspace_directory=project,
+            rollout=rollout,
+            entrypoint="main.py",
+            command_label="eval submit",
+        )
+
+
+def test_validate_rollout_backend_rejects_escaping_entrypoints(tmp_path: Path) -> None:
+    project = _make_workspace_directory(tmp_path / "project")
+    _make_rollout(project, "demo", dependencies=_SATISFIED, entrypoint="")
+
+    with pytest.raises(CLIError, match="entrypoint must resolve under"):
+        workspace_directory_contract.validate_rollout_backend(
+            workspace_directory=project,
+            rollout="demo",
+            entrypoint="../../main.py",
+            command_label="eval submit",
+        )
