@@ -124,9 +124,10 @@ async def _save(
         )
     for sample_id, sample in result.samples.items():
         if sample.trajectory_messages is None:
-            # Explicit opt-out, or an upstream conversion/snapshot failure
-            # that already warned with a traceback -- not worth a warning here.
-            logger.debug(
+            # Not a warning: an explicit opt-out lands here, and an upstream
+            # conversion or snapshot failure already warned with a traceback.
+            # Still worth a line — the sample silently loses its transcript.
+            logger.info(
                 "Skipping trajectory for sample %s of rollout %s: no trajectory "
                 "messages (persistence disabled or conversion failed upstream)",
                 sample_id,

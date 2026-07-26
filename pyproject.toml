@@ -56,6 +56,8 @@ dependencies = [
     # preflight and the rollout server both resolve harbor through this pin and
     # therefore agree. EnvironmentType.SKYPILOT requires >=0.20.0. Capped so a
     # harbor release cannot change what a rollout runs without an SDK release.
+    # Never the [skypilot] extra: it pulls skypilot-nightly, which claims the
+    # same `sky` namespace as the sandbox SDK the rollout runtime provides.
     "harbor[daytona]>=0.20.0,<0.21",
     # Security floors for load-bearing transitive deps (CVE remediation):
     # aiohttp is exercised via litellm's async transport, and cryptography is

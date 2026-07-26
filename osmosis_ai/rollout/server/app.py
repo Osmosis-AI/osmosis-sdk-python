@@ -27,9 +27,32 @@ from osmosis_ai.rollout.utils.http import post_json_with_retry
 logger: logging.Logger = logging.getLogger(__name__)
 
 
+def _configure_default_logging() -> None:
+    if logging.getLogger().handlers:
+        return
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
+
+
 def create_rollout_server(
-    *, backend: ExecutionBackend, lifespan: Any = None
+    *,
+    backend: ExecutionBackend,
+    lifespan: Any = None,
+    configure_logging: bool = True,
 ) -> FastAPI:
+    """Build the FastAPI app a rollout entrypoint serves.
+
+    Uvicorn only sets up handlers for its own loggers, so a process that
+    configures nothing leaves the root logger at WARNING and drops every INFO
+    record this SDK emits — including the one that reports a sample whose
+    transcript was not persisted. `configure_logging` installs a default stdout
+    handler at INFO when the process has none; pass False to keep your own
+    logging setup authoritative.
+    """
+    if configure_logging:
+        _configure_default_logging()
     app = FastAPI(lifespan=lifespan)
 
     @app.get("/health")
