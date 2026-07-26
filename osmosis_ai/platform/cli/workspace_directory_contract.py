@@ -134,10 +134,10 @@ def _unsatisfied_rollout_requirements(rollout_dir: Path) -> list[str]:
     ``EnvironmentType.SKYPILOT`` against a harbor too old to have it raises the
     same ``AttributeError`` a typo would.
 
-    Comparing declared requirements against installed versions answers the
-    question the import cannot — is this environment representative? Extras are
-    not expanded and the dependency graph is not resolved; this only has to be
-    good enough to notice skew, since the server resolves for real.
+    Comparing declared requirements against installed versions answers what the
+    import cannot: whether this environment represents the rollout. Extras are
+    not expanded and the dependency graph is not resolved, since the goal is to
+    detect version skew rather than to reproduce the server's resolution.
     """
     pyproject = rollout_dir / "pyproject.toml"
     if not pyproject.is_file():
@@ -196,9 +196,9 @@ def validate_rollout_backend(
     from osmosis_ai.eval.common.cli import _resolve_grader, load_workflow
     from osmosis_ai.rollout.validator import validate_backend
 
-    # Only judge the rollout in an environment that can represent it. Skipping
-    # loudly beats both halves of the alternative: failing valid code that this
-    # environment is too stale to import, and passing code that breaks remotely.
+    # Validate only where the environment represents the rollout, and report the
+    # skip otherwise. Silently proceeding would both reject valid rollouts this
+    # environment cannot import and accept ones that fail on the server.
     rollouts_root = (workspace_directory / "rollouts").resolve()
     rollout_dir = (rollouts_root / rollout).resolve()
     if rollout_dir.is_relative_to(rollouts_root):

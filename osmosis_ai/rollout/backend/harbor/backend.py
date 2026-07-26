@@ -24,6 +24,7 @@ from harbor.models.trial.config import (
     TrialConfig,
     VerifierConfig,
 )
+from harbor.models.trial.result import ExceptionInfo
 from harbor.trial.hooks import TrialEvent, TrialHookEvent
 from harbor.trial.queue import TrialQueue
 
@@ -69,6 +70,24 @@ def uses_local_docker_runtime(environment_config: HarborEnvironmentConfig) -> bo
     return environment_config.type == EnvironmentType.DOCKER
 
 
+def log_trial_exception(rollout_id: str, err: ExceptionInfo, *, phase: str) -> None:
+    """Log a harbor trial exception in full.
+
+    ``ExecutionResult`` carries only the message, and Harbor's own copy lives in
+    the trial directory, which is removed on cleanup. Logging here preserves the
+    exception type and traceback, which are the diagnosis when a trial fails to
+    start rather than to run.
+    """
+    logger.error(
+        "Harbor trial %s failed %s [%s]: %s\n%s",
+        rollout_id,
+        phase,
+        err.exception_type,
+        err.exception_message,
+        err.exception_traceback,
+    )
+
+
 SKYPILOT_CONTEXT_ENV = "HARBOR_SKYPILOT_CONTEXT"
 
 
@@ -77,12 +96,10 @@ def apply_managed_skypilot_placement(
 ) -> HarborEnvironmentConfig:
     """Resolve the SkyPilot cluster context from the run environment.
 
-    Harbor reads its registry from ``HARBOR_SKYPILOT_REGISTRY`` itself but
-    accepts the context only as a constructor kwarg, so something has to bridge
-    the two. Doing it here keeps placement out of every rollout entrypoint: a
-    rollout selects ``EnvironmentType.SKYPILOT`` and names no infrastructure,
-    and the same code runs wherever it is submitted. An explicit
-    ``context_name`` still wins.
+    Harbor reads its registry from ``HARBOR_SKYPILOT_REGISTRY`` but accepts the
+    cluster context only as a constructor argument. Bridging the two here lets a
+    rollout select ``EnvironmentType.SKYPILOT`` without naming a cluster. An
+    explicit ``context_name`` takes precedence.
     """
     if environment_config.type != EnvironmentType.SKYPILOT:
         return environment_config
@@ -555,19 +572,7 @@ class HarborBackend(ExecutionBackend):
         if not pending.workflow_complete_called:
             if event.result and event.result.exception_info:
                 err = event.result.exception_info
-                # Surface the harbor trial failure (e.g. an environment/sandbox
-                # launch error) to stdout/CloudWatch. Harbor otherwise only
-                # records it in the trial dir, which may be lost if the task is
-                # torn down or artifact relocation fails.
-                logger.error(
-                    "Harbor trial %s failed before the agent completed [%s]: %s\n%s",
-                    rollout_id,
-                    getattr(err, "exception_type", "?"),
-                    err.exception_message,
-                    getattr(err, "exception_traceback", "")
-                    or getattr(err, "traceback", "")
-                    or "",
-                )
+                log_trial_exception(rollout_id, err, phase="before the agent completed")
                 result = ExecutionResult(
                     status=RolloutStatus.FAILURE,
                     err_message=err.exception_message,
@@ -617,15 +622,7 @@ class HarborBackend(ExecutionBackend):
                     )
             elif event.result and event.result.exception_info:
                 err = event.result.exception_info
-                logger.error(
-                    "Harbor trial %s failed [%s]: %s\n%s",
-                    rollout_id,
-                    getattr(err, "exception_type", "?"),
-                    err.exception_message,
-                    getattr(err, "exception_traceback", "")
-                    or getattr(err, "traceback", "")
-                    or "",
-                )
+                log_trial_exception(rollout_id, err, phase="during grading")
                 result = ExecutionResult(
                     status=RolloutStatus.FAILURE,
                     samples=samples,
