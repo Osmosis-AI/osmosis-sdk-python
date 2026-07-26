@@ -43,6 +43,10 @@ dependencies = [
     "keyring>=25.0.0",
     # Interactive CLI prompts
     "questionary>=2.1.0,<3.0.0",
+    # Requirement/specifier parsing for the submit preflight's dependency gate.
+    # Arrives transitively via setuptools and litellm, but the CLI imports it
+    # directly, so it is declared here rather than relied on by accident.
+    "packaging>=24.0",
     # CLI framework. <0.27: cli/_click_compat.py imports typer._click internals.
     "typer>=0.26,<0.27",
     # Do not directly constrain typer-slim: versions <0.22 shared typer/* with

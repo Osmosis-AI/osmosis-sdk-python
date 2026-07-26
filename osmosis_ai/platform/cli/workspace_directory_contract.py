@@ -6,8 +6,13 @@ workspace, distinct from the remote tenant managed by the platform.
 
 from __future__ import annotations
 
+import tomllib
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as installed_version
 from pathlib import Path
 from typing import Any
+
+from packaging.requirements import InvalidRequirement, Requirement
 
 from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.templates.catalog import required_workspace_paths
@@ -119,6 +124,61 @@ def _format_backend_validation_errors(errors: list[Any]) -> str:
     return "\n".join(f"  - [{error.code}] {error.message}" for error in errors)
 
 
+def _unsatisfied_rollout_requirements(rollout_dir: Path) -> list[str]:
+    """Describe requirements the rollout declares that this environment does not meet.
+
+    The backend preflight imports the rollout entrypoint into the workspace-root
+    environment rather than the rollout's own, so the two can diverge. When they
+    do, the import proves nothing: a stale transitive dependency fails in ways
+    indistinguishable from a genuine bug. A rollout naming
+    ``EnvironmentType.SKYPILOT`` against a harbor too old to have it raises the
+    same ``AttributeError`` a typo would.
+
+    Comparing declared requirements against installed versions answers the
+    question the import cannot — is this environment representative? Extras are
+    not expanded and the dependency graph is not resolved; this only has to be
+    good enough to notice skew, since the server resolves for real.
+    """
+    pyproject = rollout_dir / "pyproject.toml"
+    if not pyproject.is_file():
+        return []
+    try:
+        with open(pyproject, "rb") as f:
+            declared = tomllib.load(f).get("project", {}).get("dependencies")
+    except (OSError, tomllib.TOMLDecodeError, AttributeError):
+        # A malformed rollout pyproject.toml is the resolver's error to report,
+        # with far better context than this preflight could offer.
+        return []
+    if not isinstance(declared, list):
+        return []
+
+    unsatisfied: list[str] = []
+    for raw in declared:
+        if not isinstance(raw, str):
+            continue
+        try:
+            requirement = Requirement(raw)
+        except InvalidRequirement:
+            continue
+        if requirement.marker is not None and not requirement.marker.evaluate():
+            continue
+        if requirement.url:
+            # A direct URL or VCS pin carries no version to compare against.
+            continue
+        try:
+            have = installed_version(requirement.name)
+        except PackageNotFoundError:
+            unsatisfied.append(f"{requirement.name} is not installed")
+            continue
+        if requirement.specifier and not requirement.specifier.contains(
+            have, prereleases=True
+        ):
+            unsatisfied.append(
+                f"{requirement.name} {have} does not satisfy {requirement.specifier}"
+            )
+    return unsatisfied
+
+
 def validate_rollout_backend(
     *,
     workspace_directory: Path,
@@ -127,10 +187,28 @@ def validate_rollout_backend(
     command_label: str,
     grader_module: str | None = None,
     grader_config_ref: str | None = None,
-) -> None:
-    """Load and validate a rollout backend against the workspace directory contract."""
+) -> list[str]:
+    """Load and validate a rollout backend against the workspace directory contract.
+
+    Returns warnings for checks that could not run. Raises :class:`CLIError`
+    only when the rollout is genuinely invalid.
+    """
     from osmosis_ai.eval.common.cli import _resolve_grader, load_workflow
     from osmosis_ai.rollout.validator import validate_backend
+
+    # Only judge the rollout in an environment that can represent it. Skipping
+    # loudly beats both halves of the alternative: failing valid code that this
+    # environment is too stale to import, and passing code that breaks remotely.
+    rollouts_root = (workspace_directory / "rollouts").resolve()
+    rollout_dir = (rollouts_root / rollout).resolve()
+    if rollout_dir.is_relative_to(rollouts_root):
+        unsatisfied = _unsatisfied_rollout_requirements(rollout_dir)
+        if unsatisfied:
+            return [
+                f"Skipped the `rollouts/{rollout}` backend preflight: this environment "
+                f"does not satisfy the rollout's declared dependencies "
+                f"({'; '.join(unsatisfied)}). The server validates it after installing them."
+            ]
 
     try:
         workflow_cls, workflow_config, entrypoint_module, workflow_error = (
@@ -142,10 +220,13 @@ def validate_rollout_backend(
                 workspace_directory=workspace_directory,
             )
         )
-    except ModuleNotFoundError:
-        # Deps aren't installed locally, so we can't import the entrypoint here.
-        # Skip; the server validates after installing from pyproject.toml.
-        return
+    except ModuleNotFoundError as exc:
+        # A dependency the rollout never declared — the gate above cannot see
+        # these. Skip; the server validates after installing from pyproject.toml.
+        return [
+            f"Skipped the `rollouts/{rollout}` backend preflight: {exc}. "
+            "The server validates it after installing the rollout's dependencies."
+        ]
     if workflow_error or workflow_cls is None or entrypoint_module is None:
         raise CLIError(
             f"{command_label} preflight failed for `rollouts/{rollout}/{entrypoint}`.\n"
@@ -176,7 +257,7 @@ def validate_rollout_backend(
         grader_config=grader_config,
     )
     if validation_result.valid:
-        return
+        return []
 
     raise CLIError(
         f"{command_label} preflight failed for `rollouts/{rollout}/{entrypoint}`.\n"

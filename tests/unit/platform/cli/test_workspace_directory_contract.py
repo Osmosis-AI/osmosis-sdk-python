@@ -232,3 +232,154 @@ def test_ensure_context_path_rejects_invalid_required_dir(
             required_dir=required_dir,
             label="eval config",
         )
+
+
+def _make_rollout(
+    workspace_directory: Path, name: str, *, dependencies: str, entrypoint: str
+) -> None:
+    rollout_dir = workspace_directory / "rollouts" / name
+    rollout_dir.mkdir(parents=True, exist_ok=True)
+    (rollout_dir / "pyproject.toml").write_text(
+        f'[project]\nname = "{name}"\nversion = "0.1.0"\n'
+        f"dependencies = [{dependencies}]\n",
+        encoding="utf-8",
+    )
+    (rollout_dir / "main.py").write_text(entrypoint, encoding="utf-8")
+
+
+# `osmosis-ai` is installed whenever these tests run, so it is a dependency the
+# gate can reason about concretely in both directions.
+_SATISFIED = '"osmosis-ai"'
+_UNSATISFIED = '"osmosis-ai>=999.0.0"'
+
+# Mimics the failure that motivated the gate: a rollout naming an enum member
+# that only exists in a newer version of a dependency. Indistinguishable from a
+# typo by the import alone.
+_VERSION_SKEW_ENTRYPOINT = (
+    "import enum\n\n\nclass E(enum.Enum):\n    A = 'a'\n\n\nE.MISSING_MEMBER\n"
+)
+
+
+def test_unsatisfied_requirements_empty_when_environment_matches(
+    tmp_path: Path,
+) -> None:
+    project = _make_workspace_directory(tmp_path / "project")
+    _make_rollout(project, "demo", dependencies=_SATISFIED, entrypoint="")
+
+    assert (
+        workspace_directory_contract._unsatisfied_rollout_requirements(
+            project / "rollouts" / "demo"
+        )
+        == []
+    )
+
+
+def test_unsatisfied_requirements_reports_version_skew(tmp_path: Path) -> None:
+    project = _make_workspace_directory(tmp_path / "project")
+    _make_rollout(project, "demo", dependencies=_UNSATISFIED, entrypoint="")
+
+    unsatisfied = workspace_directory_contract._unsatisfied_rollout_requirements(
+        project / "rollouts" / "demo"
+    )
+
+    assert len(unsatisfied) == 1
+    assert "osmosis-ai" in unsatisfied[0]
+    assert ">=999.0.0" in unsatisfied[0]
+
+
+def test_unsatisfied_requirements_reports_missing_distribution(
+    tmp_path: Path,
+) -> None:
+    project = _make_workspace_directory(tmp_path / "project")
+    _make_rollout(
+        project, "demo", dependencies='"definitely-not-installed-xyz"', entrypoint=""
+    )
+
+    unsatisfied = workspace_directory_contract._unsatisfied_rollout_requirements(
+        project / "rollouts" / "demo"
+    )
+
+    assert len(unsatisfied) == 1
+    assert "not installed" in unsatisfied[0]
+
+
+@pytest.mark.parametrize(
+    "dependency",
+    [
+        # A direct URL pin carries no version to compare against.
+        '"osmosis-ai @ git+https://github.com/Osmosis-AI/osmosis-sdk-python.git@main"',
+        # A marker that cannot apply says nothing about this environment.
+        "\"definitely-not-installed-xyz; python_version < '3.0'\"",
+        # Unparseable requirements are the resolver's problem to report.
+        '"!!!not a requirement!!!"',
+    ],
+)
+def test_unsatisfied_requirements_ignores_uncomparable_dependencies(
+    tmp_path: Path, dependency: str
+) -> None:
+    project = _make_workspace_directory(tmp_path / "project")
+    _make_rollout(project, "demo", dependencies=dependency, entrypoint="")
+
+    assert (
+        workspace_directory_contract._unsatisfied_rollout_requirements(
+            project / "rollouts" / "demo"
+        )
+        == []
+    )
+
+
+def test_unsatisfied_requirements_empty_without_pyproject(tmp_path: Path) -> None:
+    project = _make_workspace_directory(tmp_path / "project")
+    (project / "rollouts" / "demo").mkdir(parents=True, exist_ok=True)
+
+    assert (
+        workspace_directory_contract._unsatisfied_rollout_requirements(
+            project / "rollouts" / "demo"
+        )
+        == []
+    )
+
+
+def test_validate_rollout_backend_skips_and_warns_on_version_skew(
+    tmp_path: Path,
+) -> None:
+    """An unrepresentative environment must not fail a rollout it cannot judge."""
+    project = _make_workspace_directory(tmp_path / "project")
+    _make_rollout(
+        project,
+        "demo",
+        dependencies=_UNSATISFIED,
+        entrypoint=_VERSION_SKEW_ENTRYPOINT,
+    )
+
+    warnings = workspace_directory_contract.validate_rollout_backend(
+        workspace_directory=project,
+        rollout="demo",
+        entrypoint="main.py",
+        command_label="eval submit",
+    )
+
+    assert len(warnings) == 1
+    assert "rollouts/demo" in warnings[0]
+    assert "osmosis-ai" in warnings[0]
+
+
+def test_validate_rollout_backend_still_fails_when_environment_matches(
+    tmp_path: Path,
+) -> None:
+    """A representative environment means an import failure is the rollout's bug."""
+    project = _make_workspace_directory(tmp_path / "project")
+    _make_rollout(
+        project,
+        "demo",
+        dependencies=_SATISFIED,
+        entrypoint=_VERSION_SKEW_ENTRYPOINT,
+    )
+
+    with pytest.raises(CLIError, match="preflight failed"):
+        workspace_directory_contract.validate_rollout_backend(
+            workspace_directory=project,
+            rollout="demo",
+            entrypoint="main.py",
+            command_label="eval submit",
+        )
