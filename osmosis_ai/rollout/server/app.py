@@ -44,12 +44,9 @@ def create_rollout_server(
 ) -> FastAPI:
     """Build the FastAPI app a rollout entrypoint serves.
 
-    Uvicorn only sets up handlers for its own loggers, so a process that
-    configures nothing leaves the root logger at WARNING and drops every INFO
-    record this SDK emits — including the one that reports a sample whose
-    transcript was not persisted. `configure_logging` installs a default stdout
-    handler at INFO when the process has none; pass False to keep your own
-    logging setup authoritative.
+    Uvicorn configures only its own loggers, so ``configure_logging`` installs a
+    default INFO handler when the process has none. Pass ``False`` to keep your
+    own logging setup.
     """
     if configure_logging:
         _configure_default_logging()

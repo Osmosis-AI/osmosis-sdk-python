@@ -43,21 +43,18 @@ dependencies = [
     "keyring>=25.0.0",
     # Interactive CLI prompts
     "questionary>=2.1.0,<3.0.0",
-    # Requirement/specifier parsing for the submit preflight's dependency gate.
-    # Arrives transitively via setuptools and litellm, but the CLI imports it
-    # directly, so it is declared here rather than relied on by accident.
+    # Requirement parsing for the submit preflight. Transitive via setuptools and
+    # litellm, but declared because the CLI imports it directly.
     "packaging>=24.0",
     # CLI framework. <0.27: cli/_click_compat.py imports typer._click internals.
     "typer>=0.26,<0.27",
     # Do not directly constrain typer-slim: versions <0.22 shared typer/* with
     # typer, and upgrading that legacy distribution can delete Typer's files.
     "rich>=14.2.0",
-    # The platform owns this version so a rollout never declares one: the CLI's
-    # preflight and the rollout server both resolve harbor through this pin and
-    # therefore agree. EnvironmentType.SKYPILOT requires >=0.20.0. Capped so a
-    # harbor release cannot change what a rollout runs without an SDK release.
-    # Never the [skypilot] extra: it pulls skypilot-nightly, which claims the
-    # same `sky` namespace as the sandbox SDK the rollout runtime provides.
+    # Pinned so the CLI preflight and the rollout server resolve the same harbor;
+    # a harbor release cannot change what a rollout runs without an SDK release.
+    # EnvironmentType.SKYPILOT needs >=0.20.0. Never the [skypilot] extra: its
+    # skypilot-nightly claims the `sky` namespace the rollout runtime provides.
     "harbor[daytona]>=0.20.0,<0.21",
     # Security floors for load-bearing transitive deps (CVE remediation):
     # aiohttp is exercised via litellm's async transport, and cryptography is

@@ -252,9 +252,8 @@ def _make_rollout(
 _SATISFIED = '"osmosis-ai"'
 _UNSATISFIED = '"osmosis-ai>=999.0.0"'
 
-# Mimics the failure that motivated the gate: a rollout naming an enum member
-# that only exists in a newer version of a dependency. Indistinguishable from a
-# typo by the import alone.
+# A rollout naming an enum member that only exists in a newer dependency. The
+# import alone cannot tell this from a typo.
 _VERSION_SKEW_ENTRYPOINT = (
     "import enum\n\n\nclass E(enum.Enum):\n    A = 'a'\n\n\nE.MISSING_MEMBER\n"
 )

@@ -74,9 +74,7 @@ def log_trial_exception(rollout_id: str, err: ExceptionInfo, *, phase: str) -> N
     """Log a harbor trial exception in full.
 
     ``ExecutionResult`` carries only the message, and Harbor's own copy lives in
-    the trial directory, which is removed on cleanup. Logging here preserves the
-    exception type and traceback, which are the diagnosis when a trial fails to
-    start rather than to run.
+    the trial directory, which cleanup removes.
     """
     logger.error(
         "Harbor trial %s failed %s [%s]: %s\n%s",

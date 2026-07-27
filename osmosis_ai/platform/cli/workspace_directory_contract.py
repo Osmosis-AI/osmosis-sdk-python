@@ -125,19 +125,12 @@ def _format_backend_validation_errors(errors: list[Any]) -> str:
 
 
 def _unsatisfied_rollout_requirements(rollout_dir: Path) -> list[str]:
-    """Describe requirements the rollout declares that this environment does not meet.
+    """Declared requirements this environment does not satisfy.
 
-    The backend preflight imports the rollout entrypoint into the workspace-root
-    environment rather than the rollout's own, so the two can diverge. When they
-    do, the import proves nothing: a stale transitive dependency fails in ways
-    indistinguishable from a genuine bug. A rollout naming
-    ``EnvironmentType.SKYPILOT`` against a harbor too old to have it raises the
-    same ``AttributeError`` a typo would.
-
-    Comparing declared requirements against installed versions answers what the
-    import cannot: whether this environment represents the rollout. Extras are
-    not expanded and the dependency graph is not resolved, since the goal is to
-    detect version skew rather than to reproduce the server's resolution.
+    Preflight imports the rollout into the workspace-root environment, not the
+    rollout's own, so the two can diverge. Only declared specifiers are checked
+    against installed versions; extras and transitive resolution are left to the
+    resolver.
     """
     pyproject = rollout_dir / "pyproject.toml"
     if not pyproject.is_file():
@@ -146,8 +139,7 @@ def _unsatisfied_rollout_requirements(rollout_dir: Path) -> list[str]:
         with open(pyproject, "rb") as f:
             declared = tomllib.load(f).get("project", {}).get("dependencies")
     except (OSError, tomllib.TOMLDecodeError, AttributeError):
-        # A malformed rollout pyproject.toml is the resolver's error to report,
-        # with far better context than this preflight could offer.
+        # A malformed pyproject.toml is the resolver's error to report.
         return []
     if not isinstance(declared, list):
         return []
@@ -197,10 +189,8 @@ def validate_rollout_backend(
     from osmosis_ai.platform.cli.shared_config import validate_workspace_rollout_paths
     from osmosis_ai.rollout.validator import validate_backend
 
-    # Submit commands validate these while loading the config; repeating it here
-    # holds direct callers to the same contract. Without it a multi-segment name
-    # such as `demo/..` resolves back onto `rollouts/` itself, which still passes
-    # the containment check below and reads the wrong pyproject.toml.
+    # The path check below allows `<name>/..`, which points at `rollouts/`
+    # itself and loads the wrong pyproject.toml.
     validate_workspace_rollout_paths(
         rollout=rollout,
         entrypoint=entrypoint,
@@ -208,9 +198,6 @@ def validate_rollout_backend(
         command_label=command_label,
     )
 
-    # Validate only where the environment represents the rollout, and report the
-    # skip otherwise. Silently proceeding would both reject valid rollouts this
-    # environment cannot import and accept ones that fail on the server.
     rollouts_root = (workspace_directory / "rollouts").resolve()
     rollout_dir = (rollouts_root / rollout).resolve()
     if rollout_dir.is_relative_to(rollouts_root):
@@ -233,8 +220,7 @@ def validate_rollout_backend(
             )
         )
     except ModuleNotFoundError as exc:
-        # A dependency the rollout never declared — the gate above cannot see
-        # these. Skip; the server validates after installing from pyproject.toml.
+        # An undeclared dependency, which the gate above cannot see.
         return [
             f"Skipped the `rollouts/{rollout}` backend preflight: {exc}. "
             "The server validates it after installing the rollout's dependencies."
