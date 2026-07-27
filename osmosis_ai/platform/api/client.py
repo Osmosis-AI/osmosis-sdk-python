@@ -30,6 +30,7 @@ from .models import (
     RunDownloadFile,
     RunDownloadManifest,
     RunDownloadURLBatch,
+    SubmitBenchmarkRunResult,
     SubmitRunResult,
     TrainingRunCheckpoints,
     TrainingRunDetail,
@@ -634,6 +635,37 @@ class OsmosisClient:
             git_identity=git_identity,
         )
         return SubmitRunResult.from_dict(result)
+
+    def submit_benchmark_run(
+        self,
+        *,
+        experiment_config: dict[str, Any],
+        agents: list[dict[str, Any]],
+        tasks_config: dict[str, Any] | None = None,
+        execution_config: dict[str, Any] | None = None,
+        env_config: dict[str, str] | None = None,
+        credentials: Credentials | None = None,
+        git_identity: str,
+    ) -> SubmitBenchmarkRunResult:
+        """Submit a new benchmark run."""
+        data: dict[str, Any] = {
+            "experiment_config": experiment_config,
+            "agents": agents,
+        }
+        if tasks_config:
+            data["tasks_config"] = tasks_config
+        if execution_config:
+            data["execution_config"] = execution_config
+        if env_config:
+            data["env_config"] = env_config
+        result = platform_request(
+            "/api/cli/benchmark-runs",
+            method="POST",
+            data=data,
+            credentials=credentials,
+            git_identity=git_identity,
+        )
+        return SubmitBenchmarkRunResult.from_dict(result)
 
     def list_eval_runs(
         self,

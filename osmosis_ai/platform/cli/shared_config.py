@@ -193,7 +193,11 @@ def validation_issue_to_config_issue(
     loc = tuple(error.get("loc") or ())
     field_path = format_field_path(loc)
     error_type = str(error.get("type"))
-    issue_key = f"{section_name}.{field_path}" if field_path else section_name
+    issue_key = (
+        f"{section_name}.{field_path}"
+        if section_name and field_path
+        else field_path or section_name
+    )
 
     if error_type == "extra_forbidden":
         return {"key": issue_key, "message": "Unrecognized key"}

@@ -352,6 +352,31 @@ class SubmitRunResult:
         )
 
 
+@dataclass
+class SubmitBenchmarkRunResult:
+    """Result of submitting a benchmark run."""
+
+    id: str
+    name: str
+    status: str
+    created_at: str
+    workflow_id: str = ""
+    task_count: int = 0
+    platform_url: str | None = None
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> SubmitBenchmarkRunResult:
+        return cls(
+            id=data["id"],
+            name=data["name"],
+            status=data["status"],
+            created_at=data["created_at"],
+            workflow_id=data.get("workflow_id", ""),
+            task_count=data.get("task_count", 0),
+            platform_url=data.get("platform_url"),
+        )
+
+
 # ── Training run metrics ─────────────────────────────────────────
 
 
