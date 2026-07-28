@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import platform
 import shutil
 import subprocess
@@ -23,6 +24,7 @@ from harbor.models.trial.config import (
     TrialConfig,
     VerifierConfig,
 )
+from harbor.models.trial.result import ExceptionInfo
 from harbor.trial.hooks import TrialEvent, TrialHookEvent
 from harbor.trial.queue import TrialQueue
 
@@ -66,6 +68,45 @@ PYTHONPATH=/workspace python -m osmosis_ai.rollout.backend.harbor.grader_runner 
 def uses_local_docker_runtime(environment_config: HarborEnvironmentConfig) -> bool:
     """Return whether Harbor will run the trial on the host Docker runtime."""
     return environment_config.type == EnvironmentType.DOCKER
+
+
+def log_trial_exception(rollout_id: str, err: ExceptionInfo, *, phase: str) -> None:
+    """Log a harbor trial exception in full.
+
+    ``ExecutionResult`` carries only the message, and Harbor's own copy lives in
+    the trial directory, which cleanup removes.
+    """
+    logger.error(
+        "Harbor trial %s failed %s [%s]: %s\n%s",
+        rollout_id,
+        phase,
+        err.exception_type,
+        err.exception_message,
+        err.exception_traceback,
+    )
+
+
+SKYPILOT_CONTEXT_ENV = "HARBOR_SKYPILOT_CONTEXT"
+
+
+def apply_managed_skypilot_placement(
+    environment_config: HarborEnvironmentConfig,
+) -> HarborEnvironmentConfig:
+    """Resolve the SkyPilot cluster context from the run environment.
+
+    Harbor reads its registry from ``HARBOR_SKYPILOT_REGISTRY`` but accepts the
+    cluster context only as a constructor argument. Bridging the two here lets a
+    rollout select ``EnvironmentType.SKYPILOT`` without naming a cluster. An
+    explicit ``context_name`` takes precedence.
+    """
+    if environment_config.type != EnvironmentType.SKYPILOT:
+        return environment_config
+    if environment_config.kwargs.get("context_name"):
+        return environment_config
+    context_name = os.environ.get(SKYPILOT_CONTEXT_ENV)
+    if context_name:
+        environment_config.kwargs["context_name"] = context_name
+    return environment_config
 
 
 class PendingTrial:
@@ -122,7 +163,9 @@ class HarborBackend(ExecutionBackend):
         self.grading: bool = self.grader_path is not None
         self.custom_tests_dir: Path | None = custom_tests_dir
         self.environment_config: HarborEnvironmentConfig = (
-            environment_config or HarborEnvironmentConfig()
+            apply_managed_skypilot_placement(
+                environment_config or HarborEnvironmentConfig()
+            )
         )
         self._sdk_source_dir = _sdk_source_dir
         uses_local_docker = uses_local_docker_runtime(self.environment_config)
@@ -527,6 +570,7 @@ class HarborBackend(ExecutionBackend):
         if not pending.workflow_complete_called:
             if event.result and event.result.exception_info:
                 err = event.result.exception_info
+                log_trial_exception(rollout_id, err, phase="before the agent completed")
                 result = ExecutionResult(
                     status=RolloutStatus.FAILURE,
                     err_message=err.exception_message,
@@ -576,6 +620,7 @@ class HarborBackend(ExecutionBackend):
                     )
             elif event.result and event.result.exception_info:
                 err = event.result.exception_info
+                log_trial_exception(rollout_id, err, phase="during grading")
                 result = ExecutionResult(
                     status=RolloutStatus.FAILURE,
                     samples=samples,
