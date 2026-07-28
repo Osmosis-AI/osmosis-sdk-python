@@ -178,7 +178,9 @@ class TestHarborBackend:
         (trial_artifacts / "manifest.json").write_text("[]")
 
     @staticmethod
-    def _success_event() -> SimpleNamespace:
+    def _success_event(
+        rewards: dict[str, float] | None = None,
+    ) -> SimpleNamespace:
         return SimpleNamespace(
             config=SimpleNamespace(trial_name="trial-r1"),
             result=SimpleNamespace(
@@ -188,10 +190,43 @@ class TestHarborBackend:
                         "sample": RolloutSample(messages=[]).model_dump(),
                     }
                 ),
-                verifier_result=SimpleNamespace(rewards={"reward": 1.0}),
+                verifier_result=SimpleNamespace(
+                    rewards={"reward": 1.0} if rewards is None else rewards
+                ),
                 exception_info=None,
             ),
         )
+
+    async def test_on_trial_end_uses_named_reward_dimension(self, tmp_path):
+        backend = self._make_trial_end_backend(tmp_path, cleanup=False)
+        on_grader = AsyncMock()
+        pending = PendingTrial(AsyncMock(), on_grader)
+        pending.workflow_complete_called = True
+        backend.pending["r1"] = pending
+
+        await backend.on_trial_end(
+            self._success_event(rewards={"aux_score": 0.1, "reward": 0.9})
+        )
+
+        result = on_grader.call_args.args[0]
+        assert result.status == RolloutStatus.SUCCESS
+        assert result.sample is not None
+        assert result.sample.reward == 0.9
+
+    async def test_on_trial_end_rejects_rewards_without_named_dimension(self, tmp_path):
+        backend = self._make_trial_end_backend(tmp_path, cleanup=False)
+        on_grader = AsyncMock()
+        pending = PendingTrial(AsyncMock(), on_grader)
+        pending.workflow_complete_called = True
+        backend.pending["r1"] = pending
+
+        await backend.on_trial_end(self._success_event(rewards={"aux_score": 0.1}))
+
+        result = on_grader.call_args.args[0]
+        assert result.status == RolloutStatus.FAILURE
+        assert result.err_category == RolloutErrorCategory.VALIDATION_ERROR
+        assert result.sample is not None
+        assert result.sample.reward is None
 
     async def test_on_trial_end_relocates_artifacts_before_cleanup(self, tmp_path):
         backend = self._make_trial_end_backend(tmp_path, cleanup=True)

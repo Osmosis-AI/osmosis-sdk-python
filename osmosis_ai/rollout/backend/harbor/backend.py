@@ -590,12 +590,13 @@ class HarborBackend(ExecutionBackend):
 
             if event.result and event.result.verifier_result:
                 # Harbor surfaces verifier output as ``rewards: dict[str, float]``
-                # regardless of what shape the verifier wrote — for the single-sample
-                # contract we take any one value and apply it to our single sample.
+                # regardless of what shape the verifier wrote. The single-sample
+                # contract names its sole score ``reward``; do not silently use an
+                # unrelated custom verifier dimension.
                 rewards = event.result.verifier_result.rewards or {}
-                reward_values = [float(v) for v in rewards.values() if v is not None]
-                if sample is not None and reward_values:
-                    sample.reward = reward_values[0]
+                reward = rewards.get("reward")
+                if sample is not None and reward is not None:
+                    sample.reward = float(reward)
                 try:
                     validate_sample_has_reward(sample)
                 except ValueError as e:
