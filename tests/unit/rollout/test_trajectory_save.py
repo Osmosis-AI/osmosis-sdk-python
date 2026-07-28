@@ -60,9 +60,9 @@ async def test_save_skips_sample_without_trajectory_messages(
     tmp_path: Path, caplog
 ) -> None:
     # Explicit None is the documented way to disable persistence, and upstream
-    # conversion failures already warn at their source: skipping must stay
-    # quiet at warning level and only leave a debug trace.
-    caplog.set_level(logging.DEBUG, logger="osmosis_ai.rollout.trajectory.save")
+    # conversion failures already warn at their source: skipping must stay quiet
+    # at warning level while still recording that the transcript was dropped.
+    caplog.set_level(logging.INFO, logger="osmosis_ai.rollout.trajectory.save")
     sample = RolloutSample(
         messages=[{"role": "user", "content": "hi"}],
         trajectory_messages=None,
@@ -79,7 +79,7 @@ async def test_save_skips_sample_without_trajectory_messages(
     assert any(
         "Skipping trajectory for rollout r1" in r.getMessage()
         for r in caplog.records
-        if r.levelno == logging.DEBUG
+        if r.levelno == logging.INFO
     )
 
 

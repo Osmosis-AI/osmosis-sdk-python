@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import platform
 import shutil
 import subprocess
@@ -23,6 +24,7 @@ from harbor.models.trial.config import (
     TrialConfig,
     VerifierConfig,
 )
+from harbor.models.trial.result import ExceptionInfo
 from harbor.trial.hooks import TrialEvent, TrialHookEvent
 from harbor.trial.queue import TrialQueue
 
@@ -38,7 +40,12 @@ from osmosis_ai.rollout.types import (
     RolloutSample,
     RolloutStatus,
 )
-from osmosis_ai.rollout.utils.file_artifacts import default_artifact_root
+from osmosis_ai.rollout.utils.file_artifacts import (
+    GRADER_ARTIFACTS_SNAPSHOT_DIRNAME,
+    HARBOR_ARTIFACTS_DIR,
+    copy_artifact_tree,
+    default_artifact_root,
+)
 from osmosis_ai.rollout.utils.imports import to_import_path
 from osmosis_ai.rollout.utils.rewards import validate_sample_has_reward
 
@@ -61,6 +68,45 @@ PYTHONPATH=/workspace python -m osmosis_ai.rollout.backend.harbor.grader_runner 
 def uses_local_docker_runtime(environment_config: HarborEnvironmentConfig) -> bool:
     """Return whether Harbor will run the trial on the host Docker runtime."""
     return environment_config.type == EnvironmentType.DOCKER
+
+
+def log_trial_exception(rollout_id: str, err: ExceptionInfo, *, phase: str) -> None:
+    """Log a harbor trial exception in full.
+
+    ``ExecutionResult`` carries only the message, and Harbor's own copy lives in
+    the trial directory, which cleanup removes.
+    """
+    logger.error(
+        "Harbor trial %s failed %s [%s]: %s\n%s",
+        rollout_id,
+        phase,
+        err.exception_type,
+        err.exception_message,
+        err.exception_traceback,
+    )
+
+
+SKYPILOT_CONTEXT_ENV = "HARBOR_SKYPILOT_CONTEXT"
+
+
+def apply_managed_skypilot_placement(
+    environment_config: HarborEnvironmentConfig,
+) -> HarborEnvironmentConfig:
+    """Resolve the SkyPilot cluster context from the run environment.
+
+    Harbor reads its registry from ``HARBOR_SKYPILOT_REGISTRY`` but accepts the
+    cluster context only as a constructor argument. Bridging the two here lets a
+    rollout select ``EnvironmentType.SKYPILOT`` without naming a cluster. An
+    explicit ``context_name`` takes precedence.
+    """
+    if environment_config.type != EnvironmentType.SKYPILOT:
+        return environment_config
+    if environment_config.kwargs.get("context_name"):
+        return environment_config
+    context_name = os.environ.get(SKYPILOT_CONTEXT_ENV)
+    if context_name:
+        environment_config.kwargs["context_name"] = context_name
+    return environment_config
 
 
 class PendingTrial:
@@ -117,7 +163,9 @@ class HarborBackend(ExecutionBackend):
         self.grading: bool = self.grader_path is not None
         self.custom_tests_dir: Path | None = custom_tests_dir
         self.environment_config: HarborEnvironmentConfig = (
-            environment_config or HarborEnvironmentConfig()
+            apply_managed_skypilot_placement(
+                environment_config or HarborEnvironmentConfig()
+            )
         )
         self._sdk_source_dir = _sdk_source_dir
         uses_local_docker = uses_local_docker_runtime(self.environment_config)
@@ -447,21 +495,25 @@ class HarborBackend(ExecutionBackend):
         await pending.on_workflow_complete(result)
 
     def _relocate_trial_artifacts(self, rollout_id: str, *, move: bool) -> bool:
-        """Persist collected artifacts to the artifact root; ``move`` before
-        cleanup, else copy. Best-effort: returns ``False`` to keep the source."""
+        """Safely persist regular files to the artifact root.
+
+        When ``move`` is true, remove the source only after the copy succeeds.
+        Best-effort: returns ``False`` to keep the source on any failure.
+        """
         source_dir = self.trials_dir / f"{TRIAL_NAME_PREFIX}{rollout_id}" / "artifacts"
         if not source_dir.is_dir():
             return True
         dest_dir = self.artifact_root / rollout_id / "artifacts"
         try:
-            if dest_dir.exists():
-                shutil.rmtree(dest_dir)
-            dest_dir.parent.mkdir(parents=True, exist_ok=True)
+            copy_artifact_tree(
+                source_dir,
+                dest_dir,
+                destination_root=self.artifact_root,
+                replace_destination=True,
+            )
             if move:
-                shutil.move(source_dir, dest_dir)
-            else:
-                shutil.copytree(source_dir, dest_dir, symlinks=False)
-        except OSError:
+                shutil.rmtree(source_dir)
+        except Exception:
             logger.warning(
                 "Failed to relocate trial artifacts for rollout %s (best-effort)",
                 rollout_id,
@@ -470,12 +522,42 @@ class HarborBackend(ExecutionBackend):
             return False
         return True
 
+    def _merge_grader_artifacts(self, rollout_id: str) -> None:
+        """Merge the verifier-returned final snapshot into trial artifacts."""
+        trial_dir = self.trials_dir / f"{TRIAL_NAME_PREFIX}{rollout_id}"
+        source_dir = trial_dir / "verifier" / GRADER_ARTIFACTS_SNAPSHOT_DIRNAME
+        if not source_dir.is_dir():
+            return
+
+        # Harbor maps the /logs/artifacts convention directory beneath the trial's
+        # artifacts root as logs/artifacts.
+        destination_dir = (
+            trial_dir / "artifacts" / HARBOR_ARTIFACTS_DIR.relative_to("/")
+        )
+        try:
+            copy_artifact_tree(
+                source_dir,
+                destination_dir,
+                destination_root=self.trials_dir,
+            )
+        except Exception:
+            logger.warning(
+                "Failed to merge grader artifacts for rollout %s (best-effort)",
+                rollout_id,
+                exc_info=True,
+            )
+
     async def on_trial_end(self, event: TrialHookEvent) -> None:
         rollout_id = parse_rollout_id(event)
         pending = self.pending.pop(rollout_id, None)
         if not pending:
             logger.error("No pending trial found for rollout %s", rollout_id)
             return
+
+        # Harbor collects /logs/artifacts before verification. grader_runner stages
+        # the final tree in /logs/verifier, which Harbor returns after verification;
+        # merge that post-grader snapshot before relocating the trial artifacts.
+        self._merge_grader_artifacts(rollout_id)
 
         # Evacuate artifacts first; delete the source only if it succeeds.
         delete_trial = bool(
@@ -488,6 +570,7 @@ class HarborBackend(ExecutionBackend):
         if not pending.workflow_complete_called:
             if event.result and event.result.exception_info:
                 err = event.result.exception_info
+                log_trial_exception(rollout_id, err, phase="before the agent completed")
                 result = ExecutionResult(
                     status=RolloutStatus.FAILURE,
                     err_message=err.exception_message,
@@ -540,6 +623,7 @@ class HarborBackend(ExecutionBackend):
                     )
             elif event.result and event.result.exception_info:
                 err = event.result.exception_info
+                log_trial_exception(rollout_id, err, phase="during grading")
                 result = ExecutionResult(
                     status=RolloutStatus.FAILURE,
                     sample=sample,

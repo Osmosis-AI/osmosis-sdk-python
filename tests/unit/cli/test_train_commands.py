@@ -1181,6 +1181,7 @@ rollout_batch_size = 64
             "entrypoint": "main.py",
             "model": "Qwen/Qwen3.6-35B-A3B",
             "dataset": "abc-123",
+            "branch": None,
             "commit_sha": None,
         }
 

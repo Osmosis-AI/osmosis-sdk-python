@@ -204,7 +204,7 @@ def run_cloud_submit[ConfigT: BaseSubmitConfig](
 
     config = spec.load_config(resolved_config_path)
     spec.validate_context(config, workspace_directory)
-    validate_rollout_backend(
+    backend_preflight_warnings = validate_rollout_backend(
         workspace_directory=workspace_directory,
         rollout=config.experiment_rollout,
         entrypoint=config.experiment_entrypoint,
@@ -231,6 +231,7 @@ def run_cloud_submit[ConfigT: BaseSubmitConfig](
         entrypoint=config.experiment_entrypoint,
         model=config.experiment_model_path,
         dataset=config.experiment_dataset,
+        branch=config.experiment_branch,
         commit_sha=config.experiment_commit_sha,
     )
 
@@ -285,8 +286,9 @@ def run_cloud_submit[ConfigT: BaseSubmitConfig](
 
     notes, warnings = print_remote_fetch_notice(
         workspace_directory,
+        branch=config.experiment_branch,
         pinned_commit_sha=config.experiment_commit_sha,
-        extra_warnings=commit_preflight_warnings,
+        extra_warnings=[*backend_preflight_warnings, *commit_preflight_warnings],
     )
 
     require_confirmation(
@@ -329,6 +331,7 @@ def run_cloud_submit[ConfigT: BaseSubmitConfig](
                 "entrypoint": config.experiment_entrypoint,
                 "model": config.experiment_model_path,
                 "dataset": config.experiment_dataset,
+                "branch": config.experiment_branch,
                 "commit_sha": config.experiment_commit_sha,
             },
         },

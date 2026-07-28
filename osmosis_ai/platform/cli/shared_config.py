@@ -5,9 +5,16 @@ from __future__ import annotations
 import re
 import tomllib
 from pathlib import Path
-from typing import Any, ClassVar
+from typing import Any, ClassVar, Self
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 from pydantic_core import ErrorDetails
 
 from osmosis_ai.cli.errors import CLIError
@@ -346,7 +353,15 @@ class ExperimentSection(BaseModel):
     entrypoint: str
     model_path: str
     dataset: str
+    branch: str | None = None
     commit_sha: str | None = None
+
+    @field_validator("branch")
+    @classmethod
+    def _validate_branch(cls, value: str | None) -> str | None:
+        if value is not None and (not value or any(char.isspace() for char in value)):
+            raise ValueError("must not be empty or contain whitespace")
+        return value
 
     @field_validator("commit_sha")
     @classmethod
@@ -359,6 +374,12 @@ class ExperimentSection(BaseModel):
                 f"e.g. a full 40-character SHA; got {value!r}"
             )
         return value
+
+    @model_validator(mode="after")
+    def _validate_source_reference(self) -> Self:
+        if self.branch is not None and self.commit_sha is not None:
+            raise ValueError("Provide either branch or commit_sha, not both")
+        return self
 
 
 _EXPERIMENT_REQUIRED_KEYS: tuple[str, ...] = (
@@ -406,6 +427,10 @@ class BaseSubmitConfig(BaseModel):
     @property
     def experiment_commit_sha(self) -> str | None:
         return self.experiment.commit_sha
+
+    @property
+    def experiment_branch(self) -> str | None:
+        return self.experiment.branch
 
     @property
     def experiment_config(self) -> dict[str, Any]:
@@ -506,6 +531,7 @@ def build_submit_summary_rows(
     entrypoint: str,
     model: str,
     dataset: str,
+    branch: str | None,
     commit_sha: str | None,
 ) -> list[tuple[str, str]]:
     """Build the confirmation-table rows shared by ``train`` and ``eval`` submit."""
@@ -515,6 +541,8 @@ def build_submit_summary_rows(
         ("Model", model),
         ("Dataset", dataset),
     ]
+    if branch:
+        rows.append(("Branch", branch))
     if commit_sha:
         rows.append(("Commit", commit_sha))
     return rows

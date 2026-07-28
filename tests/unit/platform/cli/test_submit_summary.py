@@ -15,6 +15,7 @@ def _rows(**kwargs) -> dict[str, str]:
         "entrypoint": "e.py",
         "model": "m",
         "dataset": "d",
+        "branch": None,
         "commit_sha": None,
     }
     defaults.update(kwargs)
@@ -32,6 +33,18 @@ def test_summary_rows_includes_core_fields() -> None:
 def test_summary_rows_includes_commit_sha() -> None:
     rows = _rows(commit_sha="abc123")
     assert rows["Commit"] == "abc123"
+
+
+def test_summary_rows_includes_branch_before_commit() -> None:
+    rows = build_submit_summary_rows(
+        rollout="r",
+        entrypoint="e.py",
+        model="m",
+        dataset="d",
+        branch="my-feature",
+        commit_sha="abc123",
+    )
+    assert rows[-2:] == [("Branch", "my-feature"), ("Commit", "abc123")]
 
 
 # --- build_env_table_rows ---

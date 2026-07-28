@@ -93,6 +93,73 @@ required = []
     assert config.experiment_commit_sha == full_sha
 
 
+def test_load_eval_submit_config_accepts_branch(tmp_path: Path) -> None:
+    path = _write_config(
+        tmp_path / "eval.toml",
+        """
+[experiment]
+rollout = "calculator"
+entrypoint = "main.py"
+model_path = "openai/gpt-5-mini"
+dataset = "multiply"
+branch = "my-feature"
+
+[secrets]
+required = []
+""",
+    )
+
+    config = load_eval_submit_config(path)
+    assert config.experiment_branch == "my-feature"
+    assert config.experiment_config["branch"] == "my-feature"
+
+
+@pytest.mark.parametrize("branch", ["", "   ", " main", "main ", "feature branch"])
+def test_load_eval_submit_config_rejects_empty_or_whitespace_branch(
+    tmp_path: Path, branch: str
+) -> None:
+    path = _write_config(
+        tmp_path / "eval.toml",
+        f"""
+[experiment]
+rollout = "calculator"
+entrypoint = "main.py"
+model_path = "openai/gpt-5-mini"
+dataset = "multiply"
+branch = "{branch}"
+
+[secrets]
+required = []
+""",
+    )
+
+    with pytest.raises(CLIError, match="must not be empty or contain whitespace"):
+        load_eval_submit_config(path)
+
+
+def test_load_eval_submit_config_rejects_branch_and_commit_sha(
+    tmp_path: Path,
+) -> None:
+    path = _write_config(
+        tmp_path / "eval.toml",
+        """
+[experiment]
+rollout = "calculator"
+entrypoint = "main.py"
+model_path = "openai/gpt-5-mini"
+dataset = "multiply"
+branch = "my-feature"
+commit_sha = "deadbeef"
+
+[secrets]
+required = []
+""",
+    )
+
+    with pytest.raises(CLIError, match="Provide either branch or commit_sha, not both"):
+        load_eval_submit_config(path)
+
+
 @pytest.mark.parametrize(
     "bad_sha",
     [
