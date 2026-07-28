@@ -1,5 +1,6 @@
 """Tests for osmosis_ai.rollout.context."""
 
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
@@ -88,11 +89,11 @@ class TestRolloutContext:
         assert isinstance(sample, RolloutSample)
         assert sample.messages == messages
 
-    async def test_get_sample_returns_none_without_source(self):
+    async def test_get_sample_without_source_returns_none(self):
         ctx = RolloutContext(chat_completions_url="http://llm", rollout_id="r1")
         assert await ctx.get_sample() is None
 
-    def test_set_sample_source_raises_on_duplicate(self):
+    def test_set_sample_source_raises_on_second_registration(self):
         ctx = RolloutContext(chat_completions_url="http://llm", rollout_id="r1")
         ctx.set_sample_source(StaticSampleSource([]))
         with pytest.raises(ValueError, match="already has a sample source"):
@@ -105,7 +106,7 @@ class TestRolloutContext:
 
 
 class TestGraderContext:
-    def test_sample_carried(self):
+    def test_carries_sample(self):
         sample = RolloutSample(messages=[])
         ctx = GraderContext(sample=sample)
         assert ctx.sample is sample
@@ -117,7 +118,7 @@ class TestGraderContext:
         assert ctx.sample.reward == 0.8
 
     def test_set_reward_missing_sample_raises(self):
-        ctx = GraderContext(sample=None)
+        ctx = GraderContext()
         with pytest.raises(ValueError, match="no sample to reward"):
             ctx.set_reward(1.0)
 
@@ -129,38 +130,6 @@ class TestGraderContext:
         metadata = {"tools": ["search"], "difficulty": 3}
         ctx = GraderContext(metadata=metadata)
         assert ctx.metadata == metadata
-
-    def test_artifacts_default_none(self):
-        ctx = GraderContext()
-        assert ctx.artifacts is None
-
-    def test_set_artifacts_stores_object(self):
-        ctx = GraderContext()
-        artifacts = {"judge": {"explanation": "ok"}}
-        ctx.set_artifacts(artifacts)
-        assert ctx.artifacts is artifacts
-
-    def test_set_artifacts_replaces(self):
-        ctx = GraderContext()
-        ctx.set_artifacts({"a": 1})
-        ctx.set_artifacts({"b": 2})
-        assert ctx.artifacts == {"b": 2}
-
-    def test_set_artifacts_rejects_non_dict(self):
-        ctx = GraderContext()
-        with pytest.raises(TypeError, match="artifacts must be a dict"):
-            ctx.set_artifacts(["not", "a", "dict"])  # type: ignore[arg-type]
-
-    def test_input_metadata_and_output_artifacts_are_independent(self):
-        """Reading input metadata and writing output artifacts cannot collide."""
-        metadata = {"difficulty": 3}
-        ctx = GraderContext(metadata=metadata)
-        ctx.set_artifacts({"judge": {"explanation": "why"}})
-
-        assert ctx.metadata == {"difficulty": 3}
-        assert ctx.artifacts == {"judge": {"explanation": "why"}}
-        # The write channel never mutates the read-only input metadata.
-        assert "judge" not in ctx.metadata
 
 
 # ---------------------------------------------------------------------------
@@ -231,3 +200,13 @@ class TestHarborAgentWorkflowContext:
         )
         assert ctx.metadata == metadata
         assert ctx.environment is env
+
+    def test_artifacts_dir_threaded_through_super_init(self, tmp_path: Path):
+        cfg = AgentWorkflowConfig(name="harbor-test")
+        ctx = HarborAgentWorkflowContext(
+            prompt=[{"role": "user", "content": "hi"}],
+            config=cfg,
+            environment=MagicMock(),
+            artifacts_dir=tmp_path,
+        )
+        assert ctx.artifacts_dir == tmp_path

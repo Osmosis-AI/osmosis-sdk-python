@@ -4,7 +4,7 @@
 
 `NativeHarborBackend` turns each rollout into one native Harbor `Trial`: it resolves a Harbor task from the dataset row, runs the task's own agent against the controller-provided model endpoint, and maps the task's own verifier reward onto the rollout's single sample. You do **not** write an `AgentWorkflow`, a `Grader`, or a `SampleSource` — the Harbor task supplies the instruction, the environment, and the reward.
 
-It requires the external `harbor` dependency (`>=0.15`) and is **not** re-exported from `osmosis_ai.rollout`; import it from its subpackage:
+It uses the SDK-pinned Harbor line (`harbor[daytona]>=0.20.0,<0.21`) and is **not** re-exported from `osmosis_ai.rollout`; import it from its subpackage:
 
 ```python
 from osmosis_ai.rollout.backend.native_harbor import NativeHarborBackend
@@ -54,7 +54,7 @@ if __name__ == "__main__":
 
 The model endpoint and key are **not** configured here — they arrive per rollout from the ambient `RolloutContext` (see [Model endpoint injection](#model-endpoint-injection)). To exercise the server locally, set the same env vars a training controller would: `OSMOSIS_CHAT_COMPLETIONS_URL`, `OSMOSIS_API_KEY`, `OSMOSIS_ROLLOUT_ID` ([context.py](../osmosis_ai/rollout/context.py)).
 
-### Selecting the environment (Docker / Daytona)
+### Selecting the environment (Docker / Daytona / SkyPilot)
 
 The Quickstart leaves `environment_config` at its default. Harbor decides where each Trial runs — local Docker, a remote Daytona sandbox, etc. — through `EnvironmentConfig`; pass it explicitly to pick one:
 
@@ -69,7 +69,7 @@ backend = NativeHarborBackend(
 )
 ```
 
-Each Trial is one environment instance, so keep `max_concurrent` aligned with the host/remote capacity (see [Concurrency and trial directories](#concurrency-and-trial-directories)).
+Each Trial is one environment instance, so keep `max_concurrent` aligned with the host/remote capacity (see [Concurrency and trial directories](#concurrency-and-trial-directories)). For managed SkyPilot runs, an explicit `environment_config.kwargs["context_name"]` wins; otherwise the backend reads `HARBOR_SKYPILOT_CONTEXT`. On macOS local Docker, controller URLs using `localhost` or `127.0.0.1` are rewritten to `host.docker.internal` so the agent container can reach them.
 
 ## Dataset contract
 
@@ -108,10 +108,10 @@ All arguments are keyword-only ([backend.py](../osmosis_ai/rollout/backend/nativ
 | `reward_key` | `"reward"` | Which named verifier channel becomes the scalar reward (see [Reward mapping](#reward-mapping)). |
 | `trials_dir` | `Path("native_trials")` | Where Harbor writes trial directories. |
 | `task_resolver` | `resolve_task` | Override `ExecutionRequest -> TaskConfig` resolution. |
-| `environment_config` | Harbor `EnvironmentConfig()` | Harbor environment selector (Docker/Daytona). |
+| `environment_config` | Harbor `EnvironmentConfig()` | Harbor environment selector (Docker/Daytona/SkyPilot). |
 | `max_concurrent` | `8` | In-flight Trial cap (`>= 1`). Each Trial is often a container, so this bounds host load. |
 | `retry_config` | `None` | Harbor `RetryConfig` passed to the `TrialQueue`. |
-| `cleanup_successful_trials` | `True` | Delete a successful trial's directory after reading its reward. |
+| `cleanup_successful_trials` | `True` | Delete a successful trial only after its ATIF has been validated and Harbor-collected artifacts have been copied out. |
 
 ## Agents
 
@@ -146,9 +146,21 @@ Harbor verifiers emit a **named-channel** dict (`dict[str, float]`, e.g. `{"rewa
 
 The dataset row's `ground_truth` is **not** required for native tasks — the Harbor task's verifier is self-contained.
 
+## Native ATIF trajectories
+
+When the Harbor agent writes `agent/trajectory.json`, the backend treats that ATIF document as authoritative. It validates the document with Harbor's trajectory schema and passes its native steps, reasoning, tool calls, observations, subagent references, and metadata directly to trajectory persistence; it does not reconstruct them through `RolloutSample.messages`. The persistence layer only normalizes the root `session_id` / `trajectory_id` to the rollout id, records the original ids under `extra.osmosis`, attaches rollout metadata and reward, and overlays exact per-call metrics reported by the controller.
+
+`agent.extra` is preserved. Before the document leaves the backend, credential-shaped leaves such as `api_key`, `authorization`, `password`, `secret`, and `token` are recursively replaced with `[REDACTED]`; other agent configuration remains intact.
+
+ATIF availability is still an agent capability: an agent that emits no `trajectory.json` can run and be graded, but there is no native document to persist. A malformed document, or multiple independent multi-step documents that cannot be represented as one trajectory without inventing structure, causes the successful trial directory to be retained for inspection instead of being deleted.
+
+## Artifacts
+
+The SDK does not scan the sandbox or decide which task files are artifacts. User or task code publishes selected files to Harbor's conventional `/logs/artifacts` directory (or declares additional artifacts in the Harbor task configuration), and Harbor downloads those files into the host trial directory. The backend only copies that already-collected tree to `~/.osmosis/<rollout_id>/artifacts`, alongside `trajectory.json`, before cleanup. Multi-step Harbor artifacts are retained beneath `artifacts/steps/<step-name>/`.
+
 ## Concurrency and trial directories
 
-`max_concurrent` bounds in-flight Trials through a `TrialQueue` semaphore; because each Trial is typically a container, leaving this unbounded would exhaust the host (so `max_concurrent < 1` is rejected). Successful trials have their directory under `trials_dir` removed (`cleanup_successful_trials=True`); failed trials are kept for inspection. Harbor reports in-trial failures via `result.exception_info` rather than by raising, and the backend always fires the grader callback even on failure so the trainer never hangs waiting on a missing reward.
+`max_concurrent` bounds in-flight Trials through a `TrialQueue` semaphore; because each Trial is typically a container, leaving this unbounded would exhaust the host (so `max_concurrent < 1` is rejected). With no retries, a single-step trial fires the workflow callback when verification starts and the grader callback when the trial finishes. Multi-step verification is interleaved with agent execution, and a retried attempt may not be the final attempt, so those configurations fire the workflow callback from the final result instead. Successful trials are removed only after artifact relocation and ATIF validation; failed trials and successful trials whose outputs could not be safely preserved are kept for inspection. Harbor reports in-trial failures via `result.exception_info` rather than by raising, and the backend always fires the grader callback even on failure so the trainer never hangs waiting on a missing reward.
 
 ## Submit preflight
 

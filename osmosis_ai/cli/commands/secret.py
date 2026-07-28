@@ -32,8 +32,8 @@ app: typer.Typer = typer.Typer(
 )
 
 _SCOPE_HELP = (
-    "'personal' (default) or 'workspace'. Personal secrets apply only to "
-    "your runs and override workspace secrets with the same name. "
+    "'personal' (default) or 'workspace'. Personal secrets are private to "
+    "you and override workspace secrets with the same name. "
     "Workspace secrets are shared across the workspace."
 )
 

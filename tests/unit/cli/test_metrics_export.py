@@ -2,7 +2,15 @@
 
 from __future__ import annotations
 
-from osmosis_ai.cli.metrics_export import build_eval_export_dict, build_export_dict
+import pytest
+
+from osmosis_ai.cli.errors import CLIError
+from osmosis_ai.cli.metrics_export import (
+    build_eval_export_dict,
+    build_export_dict,
+    resolve_eval_metrics_output,
+    resolve_eval_output_dir,
+)
 from osmosis_ai.platform.api.models import (
     EvalPassAtKPoint,
     EvalRewardStats,
@@ -16,6 +24,103 @@ from osmosis_ai.platform.api.models import (
     TrainingRunMetrics,
     TrainingRunMetricsOverview,
 )
+
+
+def test_eval_scoped_metrics_path_is_fixed(tmp_path) -> None:
+    eval_path = resolve_eval_metrics_output(
+        "math/eval",
+        "eval-1",
+        workspace_directory=tmp_path,
+    )
+
+    assert eval_path == tmp_path / ".osmosis/evals/math_eval--eval-1/metrics.json"
+
+
+def test_output_relocates_run_root_without_changing_internal_layout(tmp_path) -> None:
+    output = tmp_path / "custom-root"
+
+    root = resolve_eval_output_dir(
+        "ignored-name",
+        "eval-1",
+        workspace_directory=tmp_path,
+        output=str(output),
+    )
+    metrics = resolve_eval_metrics_output(
+        "ignored-name",
+        "eval-1",
+        workspace_directory=tmp_path,
+        output=str(output),
+    )
+
+    assert root == output
+    assert metrics == output / "metrics.json"
+
+
+def test_sanitized_eval_names_use_run_id_to_avoid_directory_collisions(
+    tmp_path,
+) -> None:
+    first = resolve_eval_output_dir(
+        "a/b",
+        "eval-1",
+        workspace_directory=tmp_path,
+        create=False,
+    )
+    second = resolve_eval_output_dir(
+        "a?b",
+        "eval-2",
+        workspace_directory=tmp_path,
+        create=False,
+    )
+
+    assert first.name == "a_b--eval-1"
+    assert second.name == "a_b--eval-2"
+    assert first != second
+
+
+def test_case_variant_eval_names_do_not_collide_on_case_insensitive_filesystems(
+    tmp_path,
+) -> None:
+    lowercase = resolve_eval_output_dir(
+        "run",
+        "eval-1",
+        workspace_directory=tmp_path,
+        create=False,
+    )
+    uppercase = resolve_eval_output_dir(
+        "Run",
+        "eval-2",
+        workspace_directory=tmp_path,
+        create=False,
+    )
+
+    assert lowercase.name == "run"
+    assert uppercase.name == "Run--eval-2"
+    assert lowercase.name.casefold() != uppercase.name.casefold()
+
+
+def test_eval_output_dir_rejects_existing_non_directory_path(tmp_path) -> None:
+    occupied = tmp_path / "occupied"
+    occupied.write_text("not a directory", encoding="utf-8")
+
+    with pytest.raises(CLIError, match="Output path is not a directory"):
+        resolve_eval_output_dir(
+            "run",
+            "eval-1",
+            workspace_directory=tmp_path,
+            output=str(occupied),
+        )
+
+
+def test_eval_output_dir_wraps_os_errors_when_creation_fails(tmp_path) -> None:
+    # `.osmosis` existing as a file makes mkdir(parents=True) raise an OSError.
+    (tmp_path / ".osmosis").write_text("blocker", encoding="utf-8")
+
+    with pytest.raises(CLIError, match="Cannot create output directory"):
+        resolve_eval_output_dir(
+            "run",
+            "eval-1",
+            workspace_directory=tmp_path,
+        )
 
 
 class TestBuildExportDict:

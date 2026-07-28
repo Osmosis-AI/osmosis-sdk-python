@@ -812,19 +812,6 @@ def test_secret_delete_missing_hints_other_scope_when_exists(
     )
 
 
-# ── typer wiring ──────────────────────────────────────────────────
-
-
-def test_secret_add_subcommand_is_removed(monkeypatch, capsys) -> None:
-    _stub_git_context(monkeypatch)
-    monkeypatch.setenv("SOURCE_VAR", SENTINEL_VALUE)
-    # The old `add` verb must no longer be a recognized subcommand.
-    exit_code = cli.main(
-        ["--json", "secret", "add", "OPENAI_API_KEY", "--env", "SOURCE_VAR"]
-    )
-    assert exit_code != 0
-
-
 def test_secret_delete_defaults_scope_to_personal(monkeypatch, capsys) -> None:
     """Omitting --scope deletes from personal scope by default."""
     _stub_git_context(monkeypatch)

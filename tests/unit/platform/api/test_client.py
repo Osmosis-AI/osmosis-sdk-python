@@ -10,28 +10,6 @@ import pytest
 
 from osmosis_ai.platform.api.client import OsmosisClient, _safe_path
 
-REMOVED_CLIENT_METHODS = (
-    "list_workspaces",
-    "create_workspace",
-    "delete_workspace",
-    "get_workspace_deletion_status",
-    "delete_dataset",
-    "get_dataset_affected_resources",
-    "delete_training_run",
-    "delete_model",
-    "get_model_affected_resources",
-    "rename_checkpoint",
-    "delete_deployment",
-)
-
-
-class TestRemovedClientMethods:
-    """Destructive API methods must not be exposed by OsmosisClient."""
-
-    @pytest.mark.parametrize("method_name", REMOVED_CLIENT_METHODS)
-    def test_removed_method_is_not_exposed(self, method_name: str) -> None:
-        assert not hasattr(OsmosisClient, method_name)
-
 
 class TestCreateDataset:
     """Tests for OsmosisClient.create_dataset request payloads."""
@@ -209,6 +187,29 @@ class TestListDatasets:
 
         assert mock_request.call_args.kwargs["git_identity"] == "git_123"
         assert "workspace_id" not in mock_request.call_args.kwargs
+
+
+class TestListRollouts:
+    """Tests for OsmosisClient.list_rollouts query parameters."""
+
+    @patch("osmosis_ai.platform.api.client.platform_request")
+    def test_list_rollouts_includes_urlencoded_branch(
+        self, mock_request: MagicMock
+    ) -> None:
+        mock_request.return_value = {"rollouts": [], "total_count": 0}
+
+        OsmosisClient().list_rollouts(
+            limit=10,
+            offset=20,
+            branch="feature/my-work",
+            git_identity="git_123",
+        )
+
+        mock_request.assert_called_once_with(
+            "/api/cli/rollouts?limit=10&offset=20&branch=feature%2Fmy-work",
+            credentials=None,
+            git_identity="git_123",
+        )
 
 
 class TestGitIdentityPassthrough:
@@ -731,6 +732,92 @@ class TestEvaluationRuns:
         assert mock_request.call_args[0][0] == "/api/cli/eval-runs/a%2Fb/stop"
         assert mock_request.call_args.kwargs["method"] == "POST"
         assert mock_request.call_args.kwargs["data"] == {}
+
+    @patch("osmosis_ai.platform.api.client.platform_request")
+    def test_eval_run_download_manifest_contract(self, mock_request: MagicMock) -> None:
+        mock_request.return_value = {
+            "files": [
+                {
+                    "path": "trajectories/row_3_run_0.json",
+                    "size": 12,
+                    "token": "rollout-1",
+                }
+            ],
+            "totals": {"files": 1, "bytes": 12},
+        }
+
+        manifest = OsmosisClient().get_eval_run_download_manifest(
+            "a/b",
+            types=["metrics", "trajectories"],
+            rows="3,7,10-20",
+            git_identity="git_test",
+        )
+
+        assert mock_request.call_args[0][0] == (
+            "/api/cli/eval-runs/a%2Fb/samples/manifest?"
+            "types=metrics%2Ctrajectories&rows=3%2C7%2C10-20"
+        )
+        assert manifest.files[0].token == "rollout-1"
+        assert manifest.totals == {"files": 1, "bytes": 12}
+
+    @patch("osmosis_ai.platform.api.client.platform_request")
+    def test_eval_run_download_urls_post_bounded_items(
+        self, mock_request: MagicMock
+    ) -> None:
+        mock_request.return_value = {
+            "items": [
+                {
+                    "path": "trajectories/row_3_run_0.json",
+                    "token": "rollout-1",
+                    "url": "https://example.com/signed",
+                }
+            ],
+            "expires_in": 900,
+        }
+        from osmosis_ai.platform.api.models import RunDownloadFile
+
+        batch = OsmosisClient().get_eval_run_download_urls(
+            "er-1",
+            items=[
+                RunDownloadFile(
+                    "trajectories/row_3_run_0.json",
+                    12,
+                    token="rollout-1",
+                )
+            ],
+            git_identity="git_test",
+        )
+
+        assert mock_request.call_args[0][0] == (
+            "/api/cli/eval-runs/er-1/samples/download-urls"
+        )
+        assert mock_request.call_args.kwargs["method"] == "POST"
+        assert mock_request.call_args.kwargs["data"] == {
+            "items": [
+                {
+                    "token": "rollout-1",
+                    "path": "trajectories/row_3_run_0.json",
+                }
+            ]
+        }
+        assert batch.items[0].url == "https://example.com/signed"
+        assert batch.expires_in == 900
+
+    @pytest.mark.parametrize("item_count", [0, 501])
+    def test_eval_run_download_urls_rejects_out_of_bounds_batches(
+        self, item_count: int
+    ) -> None:
+        from osmosis_ai.platform.api.models import RunDownloadFile
+
+        items = [
+            RunDownloadFile(f"trajectories/row_{index}_run_0.json", 1)
+            for index in range(item_count)
+        ]
+
+        with pytest.raises(ValueError, match="between 1 and 500 items"):
+            OsmosisClient().get_eval_run_download_urls(
+                "er-1", items=items, git_identity="git_test"
+            )
 
 
 class TestGetTrainingRunMetrics:

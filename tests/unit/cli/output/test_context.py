@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from io import StringIO
 
-import click
 import pytest
+import typer.core
 
+from osmosis_ai.cli._click_compat import Context, UsageError
 from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.cli.output.context import (
     OutputContext,
@@ -37,15 +38,31 @@ def test_default_output_context_is_rich_and_uses_stdin_isatty(monkeypatch) -> No
     assert output.output_emitted is False
 
 
-def test_get_output_context_layer_1_uses_active_click_context() -> None:
+def test_get_output_context_reads_contextvar_installed_via_context() -> None:
+    """install_output_context() + ContextVar is the supported resolution path.
+
+    A bare Click context obj that was never installed is not consulted:
+    the ContextVar is the source of truth.
+    """
     output = OutputContext(format=OutputFormat.plain, interactive=False)
-    cmd = click.Command("dummy", callback=lambda: None)
-    with click.Context(cmd) as ctx:
-        ctx.obj = output
+    cmd = typer.core.TyperCommand(name="dummy", callback=lambda: None)
+    with Context(cmd) as ctx:
+        install_output_context(ctx, output)
         assert get_output_context() is output
 
 
-def test_get_output_context_layer_3_falls_back_to_contextvar() -> None:
+def test_get_output_context_ignores_uninstalled_click_context_obj(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr("sys.argv", ["osmosis"])
+    output = OutputContext(format=OutputFormat.plain, interactive=False)
+    cmd = typer.core.TyperCommand(name="dummy", callback=lambda: None)
+    with Context(cmd) as ctx:
+        ctx.obj = output
+        assert get_output_context().format is OutputFormat.rich
+
+
+def test_get_output_context_falls_back_to_contextvar() -> None:
     forced = OutputContext(format=OutputFormat.json, interactive=False)
     token = _output_context_var.set(forced)
     try:
@@ -54,14 +71,14 @@ def test_get_output_context_layer_3_falls_back_to_contextvar() -> None:
         _output_context_var.reset(token)
 
 
-def test_get_output_context_layer_4_uses_argv_prescan(monkeypatch) -> None:
+def test_get_output_context_falls_back_to_argv_prescan(monkeypatch) -> None:
     monkeypatch.setattr("sys.argv", ["osmosis", "--json", "dataset", "list"])
     output = get_output_context()
     assert output.format is OutputFormat.json
     assert output.interactive is False
 
 
-def test_get_output_context_layer_5_default_when_unset(monkeypatch) -> None:
+def test_get_output_context_default_when_unset(monkeypatch) -> None:
     monkeypatch.setattr("sys.argv", ["osmosis"])
     output = get_output_context()
     assert output.format is OutputFormat.rich
@@ -69,8 +86,8 @@ def test_get_output_context_layer_5_default_when_unset(monkeypatch) -> None:
 
 def test_install_output_context_sets_obj_and_contextvar() -> None:
     output = OutputContext(format=OutputFormat.plain, interactive=False)
-    cmd = click.Command("dummy", callback=lambda: None)
-    with click.Context(cmd) as ctx:
+    cmd = typer.core.TyperCommand(name="dummy", callback=lambda: None)
+    with Context(cmd) as ctx:
         install_output_context(ctx, output)
         assert ctx.obj is output
         assert _output_context_var.get() is output
@@ -143,12 +160,13 @@ def test_hoist_format_selectors_hoists_conflicting_flags_together() -> None:
     ]
 
 
-def test_get_output_context_layer_2_uses_usage_error_ctx() -> None:
+def test_usage_error_ctx_carries_output_context() -> None:
+    """main._output_context_for_error reads exc.ctx.find_root().obj."""
     output = OutputContext(format=OutputFormat.json, interactive=False)
-    root_cmd = click.Command("root", callback=lambda: None)
-    with click.Context(root_cmd) as ctx:
+    root_cmd = typer.core.TyperCommand(name="root", callback=lambda: None)
+    with Context(root_cmd) as ctx:
         ctx.obj = output
-        exc = click.UsageError("Bad subcommand", ctx=ctx)
+        exc = UsageError("Bad subcommand", ctx=ctx)
         assert exc.ctx is not None
         assert exc.ctx.find_root().obj is output
 

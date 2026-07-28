@@ -2,6 +2,7 @@ import os
 from abc import ABC, abstractmethod
 from contextvars import ContextVar
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from osmosis_ai.rollout.types import (
@@ -103,18 +104,12 @@ class GraderContext:
     sample: RolloutSample | None = None
     project_path: str | None = None
     metadata: dict[str, Any] | None = None
-    artifacts: dict[str, Any] | None = None
+    artifacts_dir: Path | None = None
 
     def set_reward(self, reward: float) -> None:
         if self.sample is None:
             raise ValueError("GraderContext has no sample to reward")
         self.sample.reward = reward
-
-    def set_artifacts(self, artifacts: dict[str, Any]) -> None:
-        """Set the rollout-level artifacts object (replaces any prior value)."""
-        if not isinstance(artifacts, dict):
-            raise TypeError("artifacts must be a dict")
-        self.artifacts = artifacts
 
 
 @dataclass
@@ -122,16 +117,19 @@ class AgentWorkflowContext[TConfig: AgentWorkflowConfig]:
     prompt: list[dict[str, Any]]
     config: TConfig | None = None
     metadata: dict[str, Any] | None = None
+    artifacts_dir: Path | None = None
 
     def __init__(
         self,
         prompt: list[dict[str, Any]],
         config: TConfig | None = None,
         metadata: dict[str, Any] | None = None,
+        artifacts_dir: Path | None = None,
     ):
         self.prompt = prompt
         self.config = config
         self.metadata = metadata
+        self.artifacts_dir = artifacts_dir
 
 
 @dataclass
@@ -153,6 +151,12 @@ class HarborAgentWorkflowContext[TConfig: AgentWorkflowConfig](
         config: TConfig,
         environment: Any = None,
         metadata: dict[str, Any] | None = None,
+        artifacts_dir: Path | None = None,
     ):
-        super().__init__(prompt=prompt, config=config, metadata=metadata)
+        super().__init__(
+            prompt=prompt,
+            config=config,
+            metadata=metadata,
+            artifacts_dir=artifacts_dir,
+        )
         self.environment = environment

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from unittest.mock import patch
 
 import pytest
 from agents import RunConfig, Runner
@@ -37,6 +38,32 @@ class TestOpenAIAgentsIntegration:
         sample = await rollout_context.get_sample()
         assert sample is not None
         assert sample.messages == items
+        assert sample.trajectory_messages == items
+
+    async def test_trajectory_conversion_failure_keeps_native_messages(
+        self, rollout_context, caplog
+    ):
+        from osmosis_ai.rollout.integrations.agents.openai_agents import (
+            OsmosisMemorySession,
+        )
+
+        session = OsmosisMemorySession()
+        items = [{"role": "user", "content": "hello"}]
+        await session.add_items(items)
+
+        with patch(
+            "osmosis_ai.rollout.integrations.agents.openai_agents."
+            "Converter.items_to_messages",
+            side_effect=RuntimeError("boom"),
+        ):
+            sample = await rollout_context.get_sample()
+
+        assert sample is not None
+        assert sample.messages == items
+        assert sample.trajectory_messages is None
+        assert any(
+            "Failed to convert OpenAI Agents" in r.message for r in caplog.records
+        )
 
     async def test_memory_session_raises_when_used_in_rollout_context_after_creation(
         self,
@@ -72,9 +99,11 @@ class TestOpenAIAgentsIntegration:
         assert agent.model.base_url == "http://controller:9"
         assert agent.model.api_key == "test-key"
 
-    async def test_rollout_model_merge_headers_succeeds_with_session(
+    async def test_rollout_model_merges_headers_with_registered_session(
         self, rollout_context
     ):
+        # The URL carries rollout identity, so no per-call routing headers
+        # are stamped; the call just requires a registered sample source.
         from osmosis_ai.rollout.integrations.agents.openai_agents import (
             OsmosisLitellmModel,
             OsmosisMemorySession,
@@ -89,7 +118,6 @@ class TestOpenAIAgentsIntegration:
         # once a session (sample source) is registered with the context.
         headers = model._merge_headers(ModelSettings())
 
-        assert isinstance(headers, dict)
         assert "x-rollout-id" not in headers
         assert "x-sample-id" not in headers
 
@@ -162,6 +190,11 @@ class TestOpenAIAgentsIntegration:
         assert response.usage.input_tokens == 3
         assert response.usage.output_tokens == 5
         assert response.usage.total_tokens == 8
+        assert response.usage.input_tokens_details.cached_tokens == 0
+        assert (
+            getattr(response.usage.input_tokens_details, "cache_write_tokens", 0) == 0
+        )
+        assert response.usage.output_tokens_details.reasoning_tokens == 0
 
     async def test_upstream_runner_run_records_session_sample(
         self, rollout_context, monkeypatch

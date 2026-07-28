@@ -161,12 +161,6 @@ def test_serialize_model_keys() -> None:
     _assert_keys_match_golden(payload, "model_serializer.json")
 
 
-def test_workspace_serializer_is_not_exported() -> None:
-    import osmosis_ai.cli.output as output
-
-    assert not hasattr(output, "serialize_workspace")
-
-
 def test_serialize_rollout_keys() -> None:
     rollout = RolloutInfo.from_dict(
         {

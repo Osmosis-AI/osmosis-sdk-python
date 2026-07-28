@@ -1,8 +1,7 @@
-"""Handler for `osmosis eval` remote subcommands (submit/list/info/stop)."""
+"""Handler for `osmosis eval` remote subcommands (submit/list/info/download/stop)."""
 
 from __future__ import annotations
 
-import json
 import math
 from datetime import UTC, datetime
 from pathlib import Path
@@ -11,9 +10,9 @@ from typing import Any
 from osmosis_ai.cli.console import console
 from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.cli.metrics_export import (
+    METRICS_EXPORT_MIGRATION_NOTICE,
     build_eval_export_dict,
-    resolve_default_metrics_output,
-    resolve_metrics_output_path,
+    resolve_eval_metrics_output,
 )
 from osmosis_ai.cli.output import (
     DetailResult,
@@ -533,6 +532,8 @@ def info(name_or_id: str, *, output: str | None) -> DetailResult:
     config = _format_eval_config(detail.config)
     if config:
         config_rows.append(("Config", config))
+    if detail.branch:
+        config_rows.append(("Branch", detail.branch))
     if detail.commit_sha:
         config_rows.append(("Commit", detail.commit_sha[:7]))
     secret_scopes = format_secret_scopes(detail.resolved_secret_scopes)
@@ -591,21 +592,35 @@ def info(name_or_id: str, *, output: str | None) -> DetailResult:
         should_write_file = output is not None or output_ctx.format is OutputFormat.rich
         if should_write_file:
             try:
-                out_path = (
-                    resolve_metrics_output_path(output, detail.name, detail.id)
-                    if output
-                    else resolve_default_metrics_output(
-                        detail.name,
-                        detail.id,
-                        workspace_directory=context.workspace_directory,
-                    )
+                from osmosis_ai.platform.cli.run_download import download_manifest_file
+
+                out_path = resolve_eval_metrics_output(
+                    detail.name,
+                    detail.id,
+                    workspace_directory=context.workspace_directory,
+                    output=output,
                 )
-                out_path.write_text(
-                    json.dumps(export, indent=2, ensure_ascii=False) + "\n"
+                manifest = client.get_eval_run_download_manifest(
+                    detail.id,
+                    types=["metrics"],
+                    credentials=credentials,
+                    git_identity=context.git_identity,
+                )
+                download_manifest_file(
+                    manifest=manifest,
+                    path="metrics.json",
+                    destination=out_path,
+                    url_loader=lambda items: client.get_eval_run_download_urls(
+                        detail.id,
+                        items=items,
+                        credentials=credentials,
+                        git_identity=context.git_identity,
+                    ),
                 )
                 output_path = str(out_path)
                 display_hints.append(f"Saved metrics to {output_path}")
-            except (CLIError, OSError) as exc:
+                display_hints.append(METRICS_EXPORT_MIGRATION_NOTICE)
+            except (CLIError, OSError, PlatformAPIError) as exc:
                 save_warning = f"Could not save metrics: {exc}"
                 display_hints.append(save_warning)
     elif metrics_error is not None:
@@ -623,6 +638,7 @@ def info(name_or_id: str, *, output: str | None) -> DetailResult:
             "rollout": detail.rollout,
             "entrypoint": detail.entrypoint,
             "commit_sha": detail.commit_sha,
+            "branch": detail.branch,
             "env_config": detail.env_config,
             "resolved_secret_scopes": detail.resolved_secret_scopes,
             "dataset_df_stats": detail.dataset_df_stats,
@@ -637,6 +653,82 @@ def info(name_or_id: str, *, output: str | None) -> DetailResult:
         sections=sections,
         display_hints=display_hints,
     )
+
+
+# ── eval download ───────────────────────────────────────────────────
+
+
+def download(
+    name_or_id: str,
+    *,
+    output: str | None,
+    types: str = "metrics,trajectories",
+    rows: str | None = None,
+    overwrite: bool = False,
+    yes: bool = False,
+) -> OperationResult:
+    """Download selected eval run outputs through the manifest contract."""
+    from osmosis_ai.platform.cli.run_download import (
+        EVAL_DOWNLOAD_TYPES,
+        parse_download_types,
+        run_download,
+        validate_rows,
+    )
+
+    selected_types = parse_download_types(types, allowed=EVAL_DOWNLOAD_TYPES)
+    selected_rows = validate_rows(rows)
+
+    context = require_git_workspace_directory_context()
+    credentials = context.credentials
+    git_identity = context.git_identity
+
+    client = OsmosisClient()
+    output_ctx = get_output_context()
+    with output_ctx.status("Fetching evaluation run..."):
+        detail = client.get_eval_run(
+            name_or_id,
+            credentials=credentials,
+            git_identity=git_identity,
+        )
+
+    if detail.status in EVAL_RUN_STATUSES_PENDING:
+        raise CLIError("Outputs are not yet available for pending evaluation runs.")
+
+    try:
+        return run_download(
+            run_id=detail.id,
+            run_name=detail.name,
+            run_status=detail.status,
+            selected_types=selected_types,
+            output=output,
+            overwrite=overwrite,
+            yes=yes,
+            workspace_directory=context.workspace_directory,
+            result_context=git_result_context(context),
+            manifest_loader=lambda requested_types: (
+                client.get_eval_run_download_manifest(
+                    detail.id,
+                    types=requested_types,
+                    rows=selected_rows,
+                    credentials=credentials,
+                    git_identity=git_identity,
+                )
+            ),
+            url_loader=lambda items: client.get_eval_run_download_urls(
+                detail.id,
+                items=items,
+                credentials=credentials,
+                git_identity=git_identity,
+            ),
+            selection={"rows": selected_rows},
+        )
+    except PlatformAPIError as exc:
+        if exc.status_code == 404:
+            raise CLIError(
+                "Eval run download route was not found. The run may have been deleted "
+                "or the platform may not support run downloads yet."
+            ) from exc
+        raise
 
 
 def stop(name_or_id: str, *, yes: bool) -> OperationResult:

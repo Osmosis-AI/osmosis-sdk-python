@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from osmosis_ai.rollout.context import AgentWorkflowContext, RolloutContext
+from osmosis_ai.rollout.utils.file_artifacts import HARBOR_ARTIFACTS_DIR
 from osmosis_ai.rollout.utils.imports import resolve_object
 
 AGENT_LOGS_DIR = Path("/logs/agent")
@@ -58,6 +59,7 @@ async def run_workflow(
         prompt=prompt,
         config=workflow_config,
         metadata=config.get("metadata"),
+        artifacts_dir=HARBOR_ARTIFACTS_DIR,
     )
 
     meta: dict[str, Any] = {"id": config.get("id", "")}

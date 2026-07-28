@@ -397,9 +397,9 @@ def render_command_result(result: Any, **_: Any) -> None:
         render(result, get_output_context())
         exit_code = getattr(result, "exit_code", 0)
         if exit_code:
-            import click
+            import typer
 
-            raise click.exceptions.Exit(exit_code)
+            raise typer.Exit(exit_code)
         return
 
     output = get_output_context()
@@ -434,7 +434,7 @@ def verify_output_emitted() -> None:
     if sys.exc_info()[0] is not None:
         return
 
-    import click
+    import typer
 
     from osmosis_ai.cli.errors import CLIError
 
@@ -444,4 +444,4 @@ def verify_output_emitted() -> None:
             code="INTERNAL",
         )
     )
-    raise click.exceptions.Exit(1)
+    raise typer.Exit(1)

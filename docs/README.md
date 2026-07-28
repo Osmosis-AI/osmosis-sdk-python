@@ -32,6 +32,7 @@ The package (`osmosis_ai/`) is organized into top-level domains. See [architectu
 - [datasets.md](./datasets.md) — the dataset row contract enforced by the SDK validator.
 - [troubleshooting.md](./troubleshooting.md) — engineering issues (rollout timeouts, event-loop blocking, concurrency tuning).
 - [cli.md](./cli.md) — CLI internals for contributors (command shells, lazy imports, JSON envelopes).
+- [run-downloads.md](./run-downloads.md) — eval download command, platform route contract, fixed local layout, resume, confirmation, and retry behavior.
 
 ## See also
 

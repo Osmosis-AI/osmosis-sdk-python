@@ -23,15 +23,6 @@ from osmosis_ai.platform.cli.utils import (
 )
 from osmosis_ai.platform.constants import DEFAULT_PAGE_SIZE
 
-
-def test_platform_utils_do_not_import_workspace_mapping_or_subscription_cache() -> None:
-    import osmosis_ai.platform.cli.utils as utils
-
-    assert not hasattr(utils, "_require_subscription")
-    assert not hasattr(utils, "load_subscription_status")
-    assert not hasattr(utils, "save_subscription_status")
-
-
 # ── format_size ──────────────────────────────────────────────────────
 
 

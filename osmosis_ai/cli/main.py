@@ -4,11 +4,17 @@ import difflib
 import sys
 import warnings
 
-import click
 import typer
 import typer.core
 from dotenv import find_dotenv, load_dotenv
 
+from osmosis_ai.cli._click_compat import (
+    ClickException,
+    Command,
+    Context,
+    NoArgsIsHelpError,
+    UsageError,
+)
 from osmosis_ai.cli.output.context import (
     OutputContext,
     OutputFormat,
@@ -32,15 +38,15 @@ class OsmosisGroup(typer.core.TyperGroup):
     """Typer group with fuzzy command suggestion."""
 
     def resolve_command(
-        self, ctx: click.Context, args: list[str]
-    ) -> tuple[str | None, click.Command | None, list[str]]:
+        self, ctx: Context, args: list[str]
+    ) -> tuple[str | None, Command | None, list[str]]:
         try:
             return super().resolve_command(ctx, args)
-        except click.UsageError:
+        except UsageError:
             if args:
                 cmd_name = args[0]
                 if cmd_name == "help":
-                    raise click.UsageError(
+                    raise UsageError(
                         "No such command 'help'. Use 'osmosis --help', "
                         "or 'osmosis <command> --help' for a specific command."
                     ) from None
@@ -54,7 +60,7 @@ class OsmosisGroup(typer.core.TyperGroup):
                     cmd_name, candidates, n=1, cutoff=0.5
                 )
                 if matches:
-                    raise click.UsageError(
+                    raise UsageError(
                         f"No such command '{cmd_name}'. Did you mean '{matches[0]}'?"
                     ) from None
             raise
@@ -67,6 +73,10 @@ app: typer.Typer = typer.Typer(
     add_completion=False,
     context_settings={"help_option_names": ["-h", "--help"]},
     result_callback=render_command_result,
+    # OsmosisGroup owns suggestions: single candidate, hidden commands
+    # filtered, and the 'help' nudge. Typer's built-in suggester would
+    # append its own (unfiltered, multi-candidate) line on top.
+    suggest_commands=False,
 )
 
 
@@ -127,7 +137,7 @@ def _output_context_for_error(
     argv: list[str] | None,
 ) -> OutputContext:
     ctx = getattr(exc, "ctx", None)
-    if isinstance(exc, click.ClickException) and isinstance(ctx, click.Context):
+    if isinstance(exc, ClickException) and isinstance(ctx, Context):
         root_obj = ctx.find_root().obj
         if isinstance(root_obj, OutputContext):
             return root_obj
@@ -151,7 +161,7 @@ def _handle_cli_error(
     output = _output_context_for_error(exc, argv)
     if output.format is OutputFormat.json:
         raw_ctx = getattr(exc, "ctx", None)
-        ctx = raw_ctx if isinstance(raw_ctx, click.Context) else None
+        ctx = raw_ctx if isinstance(raw_ctx, Context) else None
         command_argv = argv if argv is not None else sys.argv[1:]
         emit_structured_error_to_stderr(
             classify_error(exc),
@@ -217,22 +227,23 @@ def main(argv: list[str] | None = None) -> int:
     argv = hoist_format_selectors(argv if argv is not None else sys.argv[1:])
     try:
         result = app(argv, standalone_mode=False)
-        # standalone_mode=False returns None on normal completion;
-        # typer.Exit() still raises SystemExit, caught by the except block below.
+        # standalone_mode=False returns the command result on success, or the
+        # exit code when the run ended via typer.Exit (Typer also converts
+        # Ctrl-C into Exit(130) internally).
         if isinstance(result, int) and result != 0:
             return result
         return 0
-    except click.exceptions.Exit as e:
+    except NoArgsIsHelpError:
+        # no_args_is_help=True: instantiating this exception already rendered
+        # rich help to stdout (via ctx.get_help), so just exit cleanly.
+        return 0
+    except typer.Exit as e:
         return e.exit_code
     except SystemExit as e:
         return int(e.code) if e.code is not None else 0
-    except click.UsageError as exc:
-        # NoArgsIsHelpError (from no_args_is_help=True) has an empty message
-        # after help is already printed — just exit cleanly.
-        if not str(exc):
-            return 0
+    except UsageError as exc:
         return _handle_cli_error(exc, argv=argv, exit_code=exc.exit_code)
-    except (KeyboardInterrupt, click.Abort):
+    except (KeyboardInterrupt, typer.Abort):
         return 130
     except Exception as exc:
         # CLIError, PlatformAPIError, AuthenticationExpiredError and anything

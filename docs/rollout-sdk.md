@@ -48,20 +48,7 @@ class Grader(ABC):
 - `ctx.get_samples()` returns the collected `dict[str, RolloutSample]` (**sync**).
 - Attach rewards with `ctx.set_sample_reward(sample_id, reward)` — it raises `ValueError` for an unknown `sample_id` ([context.py](../osmosis_ai/rollout/context.py)).
 - `ctx.label` carries the dataset row's label (the ground-truth string).
-- `ctx.metadata` is the read-only input-side dataset row metadata; attach optional output via `ctx.set_artifacts(dict)` — see [Artifacts](#artifacts).
-
-## Artifacts
-
-Optional output-side JSON the grader returns for the frontend (judge explanations, ids, or pointers to larger traces), sent back on the grader callback as `GraderCompleteRequest.artifacts`. Skip `set_artifacts` and nothing changes on the wire.
-
-```python
-ctx.set_artifacts({
-    "judge": {"explanation": "Missed the final constraint."},
-    "trace_ref": {"path": "rollout_traces/run_123/sample_456.jsonl", "size_bytes": 38291},
-})
-```
-
-JSON-serializable object only, capped at 64 KiB ([utils/artifacts.py](../osmosis_ai/rollout/utils/artifacts.py)); oversized/non-serializable payloads become a small `{"_error": {...}}` marker but still ship, so reward delivery is never blocked. Don't ship logs/traces/binaries here — store them elsewhere and reference with `{path|url, content_type, size_bytes}`.
+- `ctx.metadata` is the read-only input-side dataset row metadata.
 
 ## Contexts
 
@@ -69,7 +56,7 @@ JSON-serializable object only, capped at 64 KiB ([utils/artifacts.py](../osmosis
 
 - `AgentWorkflowContext` — `prompt: list[dict]`, `config`.
 - `HarborAgentWorkflowContext` — adds `environment` (Harbor `BaseEnvironment`) for `environment.exec()`, `environment.upload_file()`, etc. under `HarborBackend`.
-- `GraderContext` — `label`, `samples`, `metadata` (input-side, read-only), plus `get_samples()` / `set_sample_reward()` / `set_artifacts()` (output-side, see [Artifacts](#artifacts)).
+- `GraderContext` — `label`, `samples`, `metadata` (input-side, read-only), plus `get_samples()` / `set_sample_reward()` (output-side).
 - `RolloutContext` — ambient per-rollout context (chat completions URL, API key, rollout id). It is a context manager; the server enters it around execution. Local backends pass connection info directly; container runners read it from `OSMOSIS_CHAT_COMPLETIONS_URL` / `OSMOSIS_API_KEY` / `OSMOSIS_ROLLOUT_ID`. Fetch the current one with `get_rollout_context()`.
 
 ### Samples
@@ -87,6 +74,84 @@ samples = await rollout_ctx.get_samples()            # async -> {name: RolloutSa
 `OsmosisStrandsAgent` registers a source automatically (keyed by the agent `name`/`agent_id`), so most workflows never call `register_sample_source` directly.
 
 `RolloutSample` ([types/sample.py](../osmosis_ai/rollout/types/sample.py)) fields: `id`, `messages`, `label`, `reward`, `remove_sample`, `metrics`, `extra_fields`.
+
+## Artifacts
+
+[../osmosis_ai/rollout/utils/file_artifacts.py](../osmosis_ai/rollout/utils/file_artifacts.py)
+
+Artifacts are files produced by a rollout — logs, traces, generated outputs, screenshots, or other large/binary data that does not belong in the sample.
+
+There is one rule: write files under `ctx.artifacts_dir` (available on both `AgentWorkflowContext` and `GraderContext`). It is `Path | None`, so check `if ctx.artifacts_dir:` before using it. In Harbor-backed rollouts it is the sandbox's `/logs/artifacts/`; `LocalBackend` provides an isolated per-rollout directory. If a file is produced elsewhere, copy it in once you've confirmed the dir exists (`if ctx.artifacts_dir: shutil.copy2(path, ctx.artifacts_dir / "name")`).
+
+```python
+import json
+
+async def grade(self, ctx: GraderContext) -> Any:
+    if ctx.artifacts_dir:
+        (ctx.artifacts_dir / "trace.json").write_text(
+            json.dumps({"score_reason": "matched rubric"})
+        )
+    for sample_id in ctx.get_samples():
+        ctx.set_sample_reward(sample_id, 1.0)
+```
+
+After each rollout the artifacts land on the host under `~/.osmosis/<rollout_id>/artifacts/`. `LocalBackend` writes your files at that root. Harbor mirrors its collected-trial layout, so the `/logs/artifacts/` convention dir lands at `.../artifacts/logs/artifacts/<file>`, next to any paths you declare in the task's `artifacts` config.
+
+The backend's directory setup and collection is best-effort and never affects rewards or rollout status. Writes you make in `run` or `grade` run as normal code. An unguarded write that raises will fail that workflow or grader, so always check `if ctx.artifacts_dir:` before writing to it.
+
+## Trajectory saving
+
+[../osmosis_ai/rollout/trajectory/](../osmosis_ai/rollout/trajectory/)
+
+The server saves every finished rollout as an [ATIF](https://www.harborframework.com/docs/agents/trajectory-format) trajectory document (Harbor's Agent Trajectory Interchange Format). Saving is a server-level concern — it observes the `ExecutionResult` at the backend boundary and works identically with any backend. It is always on and needs no configuration: documents are written to the same platform-managed directory as file artifacts (`~/.osmosis/<rollout_id>/`), which the platform persists to durable storage.
+
+Layout per rollout, keyed by `rollout_id` (callers that need position semantics — e.g. an eval run's row/run index — keep them in their own index and join on the rollout id, which is also echoed in `extra.osmosis`):
+
+```
+~/.osmosis/<rollout_id>/
+├── trajectory.json          # the rollout's ATIF document
+│                            # (trajectory-<sample_id>.json per sample while the
+│                            # transitional multi-sample protocol is still in use)
+└── artifacts/...            # file artifacts (see above)
+```
+
+Each document carries a normalized, controller-compatible transcript as ATIF steps (tool calls fold into agent-step observations) and namespaces platform context under `extra.osmosis`: `rollout_id`, `sample_id`, `label`, `reward`, sample `metrics`/`extra_fields`, and the request's `metadata`/`extra_fields` (the natural channel for run identity such as an eval run id).
+
+Built-in sample sources keep their framework-native `RolloutSample.messages` for graders and callbacks and prepare a separate `trajectory_messages` copy through the framework converter used for OpenAI-compatible `/chat/completions` traffic. `trajectory_messages` is SDK-internal: it crosses backend boundaries for persistence but is omitted from grader callbacks. This is not an exact wire replay because call-specific conversion arguments and separately supplied system instructions are not retained. Framework-native items omitted by the framework converter are outside the persisted transcript contract. Custom sample sources whose native history is already OpenAI chat-completions-shaped get the same behavior by default. A source with another native shape sets `RolloutSample.trajectory_messages` itself from `get_sample` (an explicit `None` marks conversion as unavailable and skips trajectory persistence for that sample). Like artifacts, conversion and saving are best-effort: failures are logged and never affect rewards, callbacks, or rollout status.
+
+### Per-call metrics (model, tokens, cost, logprobs)
+
+ATIF has first-class slots for LLM operational data (`Step.metrics`, `Step.model_name`, `final_metrics`), but agent frameworks drop response metadata (usage, model, logprobs) when they append to the conversation. Neither the native `messages` nor the normalized `trajectory_messages` can recover that data. Two opt-in channels feed those slots; both are best-effort and change nothing when unused:
+
+1. **Controller report (callback ack)** — the controller may attach a `trajectory` object to the JSON body of its completion/grader callback response ([report.py](../osmosis_ai/rollout/trajectory/report.py) defines the shape). Its LLM bridge serves every completion, so it is the party that has per-call usage.
+   - **When to report**: snapshot the agent-phase calls into the **completion** ack, before resolving any internal future that triggers controller-side cleanup. Omit `trajectory` from the grader ack — an ack without a report keeps the earlier one, and grader-phase LLM calls (an LLM judge) would skew call counts and totals. A grader ack that does carry a report replaces the completion one entirely (no merge).
+   - **Attribution**: `llm_call_metrics` map onto agent steps in dispatch order only when the counts match exactly; on a mismatch they are preserved under `extra.osmosis.unmatched_llm_call_metrics` instead of being mis-attributed, and totals still aggregate into `final_metrics`. The SDK always fills `final_metrics.total_steps` from the emitted ATIF steps.
+   - **Sample keys**: use the rollout's sample ids (the SDK integrations send them as the `x-sample-id` header on every completion). A controller that cannot know them may key its only entry arbitrarily — with exactly one sample and one entry they match regardless of key. Other unmatched entries are logged and, for single-sample rollouts, preserved under `extra.osmosis.unmatched_sample_reports`.
+
+```jsonc
+// response body of POST <completion_callback_url> or <grader_callback_url>
+{
+  "status": "ok",
+  "trajectory": {
+    "model_name": "openai/gpt-5-mini",
+    "samples": {
+      "<sample_id>": {
+        "llm_call_metrics": [
+          {"prompt_tokens": 120, "completion_tokens": 40, "cached_tokens": 0,
+           "cost_usd": 0.0003, "logprobs": [-0.1], "model_name": "...",
+           // exact engine tokenization (TITO); field names mirror ATIF Metrics
+           "prompt_token_ids": [101, 102], "completion_token_ids": [103]}
+        ],
+        "final_metrics": {"total_prompt_tokens": 120}   // optional token/cost overrides; total_steps is SDK-owned
+      }
+    }
+  }
+}
+```
+
+   The server reads only the `trajectory` key off the ack body; the surrounding ack fields — `status`, `ok`, or anything else the controller returns — are accepted and ignored.
+
+2. **Inline message metadata** — custom workflows that manage their own message list can copy `response.usage` / `response.model` onto the assistant message (top-level `usage`/`model` keys, or the `extra.response` shape harbor's converters read). Both chat-completions (`prompt_tokens`) and Responses API (`input_tokens`) field names are accepted, and `created_at`/`timestamp` fields become `Step.timestamp`. The controller report overrides inline metadata when both are present.
 
 ## Configs
 

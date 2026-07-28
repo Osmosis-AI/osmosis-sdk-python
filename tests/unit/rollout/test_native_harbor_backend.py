@@ -7,6 +7,7 @@ stamps per-call ``x-rollout-id``/``x-sample-id`` headers, and the verifier
 reward lands on the one ``ExecutionResult.sample``.
 """
 
+import json
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -85,6 +86,35 @@ def _ctx() -> RolloutContext:
     return RolloutContext(
         chat_completions_url="http://ctrl:8080", api_key="sk-test", rollout_id="ROLL"
     )
+
+
+def _native_trajectory(*, api_key: str = "sk-test") -> dict[str, Any]:
+    return {
+        "schema_version": "ATIF-v1.7",
+        "session_id": "native-session",
+        "trajectory_id": "native-trajectory",
+        "agent": {
+            "name": "terminus-2",
+            "version": "0.20.0",
+            "model_name": "model",
+            "extra": {
+                "llm_kwargs": {
+                    "api_key": api_key,
+                    "temperature": 0,
+                },
+                "command": ["agent", "--token", api_key],
+                "safe": "kept",
+            },
+        },
+        "steps": [
+            {
+                "step_id": 1,
+                "source": "agent",
+                "message": "done",
+                "llm_call_count": 1,
+            }
+        ],
+    }
 
 
 class TestResolveTask:
@@ -425,6 +455,68 @@ class TestExecute:
         on_wf.assert_awaited_once()
         on_gr.assert_awaited_once()
 
+    async def test_single_step_workflow_callback_precedes_verifier_completion(
+        self, monkeypatch
+    ):
+        events: list[str] = []
+        result = _trial_result(rewards={"reward": 1.0})
+
+        async def _submit(queue: Any, trial_config: Any) -> Any:
+            hook = next(
+                callback
+                for event, callbacks in queue._hooks.items()
+                if event.value == "verification-start"
+                for callback in callbacks
+            )
+            await hook(
+                SimpleNamespace(trial_name=trial_config.trial_name, result=result)
+            )
+            events.append("verifier-finished")
+            return result
+
+        async def _workflow_callback(result: Any) -> None:
+            events.append("workflow")
+
+        async def _grader_callback(result: Any) -> None:
+            events.append("grader")
+
+        monkeypatch.setattr(bmod.TrialQueue, "submit", _submit)
+        with _ctx():
+            await NativeHarborBackend().execute(
+                _request(), _workflow_callback, _grader_callback
+            )
+
+        assert events == ["workflow", "verifier-finished", "grader"]
+
+    async def test_retry_config_defers_workflow_callback_to_final_attempt(
+        self, monkeypatch
+    ):
+        events: list[str] = []
+        result = _trial_result(rewards={"reward": 1.0})
+
+        async def _submit(queue: Any, trial_config: Any) -> Any:
+            hook = next(
+                callback
+                for event, callbacks in queue._hooks.items()
+                if event.value == "verification-start"
+                for callback in callbacks
+            )
+            await hook(
+                SimpleNamespace(trial_name=trial_config.trial_name, result=result)
+            )
+            events.append("attempt-hook")
+            return result
+
+        async def _workflow_callback(result: Any) -> None:
+            events.append("workflow")
+
+        monkeypatch.setattr(bmod.TrialQueue, "submit", _submit)
+        backend = NativeHarborBackend(retry_config=bmod.RetryConfig(max_retries=1))
+        with _ctx():
+            await backend.execute(_request(), _workflow_callback)
+
+        assert events == ["attempt-hook", "workflow"]
+
 
 class TestConcurrencyAndLifecycle:
     def test_unbounded_concurrency_rejected(self):
@@ -457,6 +549,91 @@ class TestConcurrencyAndLifecycle:
         with _ctx():
             await backend.execute(_request(), AsyncMock(), AsyncMock())
         assert trial_dir.exists()
+
+    async def test_native_atif_preserved_with_agent_extra_redacted(
+        self, monkeypatch, tmp_path
+    ):
+        _patch_trial(monkeypatch, result=_trial_result(rewards={"reward": 1.0}))
+        backend = NativeHarborBackend(trials_dir=tmp_path)
+        trajectory_path = tmp_path / "native-ROLL" / "agent" / "trajectory.json"
+        trajectory_path.parent.mkdir(parents=True)
+        trajectory_path.write_text(json.dumps(_native_trajectory()))
+        on_wf, on_gr = AsyncMock(), AsyncMock()
+
+        with _ctx():
+            await backend.execute(_request(), on_wf, on_gr)
+
+        workflow_document = on_wf.call_args.args[0].trajectory_document
+        grader_document = on_gr.call_args.args[0].trajectory_document
+        assert grader_document == workflow_document
+        assert workflow_document["steps"] == _native_trajectory()["steps"]
+        extra = workflow_document["agent"]["extra"]
+        assert extra["llm_kwargs"] == {
+            "api_key": "[REDACTED]",
+            "temperature": 0,
+        }
+        assert extra["command"] == ["agent", "--token", "[REDACTED]"]
+        assert extra["safe"] == "kept"
+
+    async def test_invalid_native_atif_preserves_successful_trial(
+        self, monkeypatch, tmp_path
+    ):
+        _patch_trial(monkeypatch, result=_trial_result(rewards={"reward": 1.0}))
+        backend = NativeHarborBackend(trials_dir=tmp_path)
+        trajectory_path = tmp_path / "native-ROLL" / "agent" / "trajectory.json"
+        trajectory_path.parent.mkdir(parents=True)
+        trajectory_path.write_text('{"not": "atif"}')
+
+        with _ctx():
+            await backend.execute(_request(), AsyncMock(), AsyncMock())
+
+        assert trajectory_path.exists()
+
+    async def test_harbor_collected_artifacts_relocated_before_cleanup(
+        self, monkeypatch, tmp_path
+    ):
+        _patch_trial(monkeypatch, result=_trial_result(rewards={"reward": 1.0}))
+        trials_dir = tmp_path / "trials"
+        artifact_root = tmp_path / "saved"
+        backend = NativeHarborBackend(trials_dir=trials_dir)
+        backend.artifact_root = artifact_root
+        artifact = (
+            trials_dir
+            / "native-ROLL"
+            / "artifacts"
+            / "logs"
+            / "artifacts"
+            / "result.txt"
+        )
+        artifact.parent.mkdir(parents=True)
+        artifact.write_text("user-selected output")
+
+        with _ctx():
+            await backend.execute(_request(), AsyncMock(), AsyncMock())
+
+        relocated = (
+            artifact_root / "ROLL" / "artifacts" / "logs" / "artifacts" / "result.txt"
+        )
+        assert relocated.read_text() == "user-selected output"
+        assert not (trials_dir / "native-ROLL").exists()
+
+    async def test_artifact_copy_failure_preserves_successful_trial(
+        self, monkeypatch, tmp_path
+    ):
+        _patch_trial(monkeypatch, result=_trial_result(rewards={"reward": 1.0}))
+        backend = NativeHarborBackend(trials_dir=tmp_path)
+        source = tmp_path / "native-ROLL" / "artifacts" / "out.txt"
+        source.parent.mkdir(parents=True)
+        source.write_text("keep me")
+
+        def _fail_copy(*args: Any, **kwargs: Any) -> int:
+            raise OSError("destination unavailable")
+
+        monkeypatch.setattr(bmod, "copy_artifact_tree", _fail_copy)
+        with _ctx():
+            await backend.execute(_request(), AsyncMock(), AsyncMock())
+
+        assert source.exists()
 
     async def test_environment_config_threaded_into_trial(self, monkeypatch):
         # The sandbox type is trial-layer, so a caller-supplied EnvironmentConfig

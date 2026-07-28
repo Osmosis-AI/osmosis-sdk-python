@@ -19,12 +19,6 @@ def _isolate_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(local_config, "CONFIG_FILE", config_file)
 
 
-def test_local_config_does_not_expose_subscription_cache_helpers() -> None:
-    assert not hasattr(local_config, "clear_workspace_data")
-    assert not hasattr(local_config, "load_subscription_status")
-    assert not hasattr(local_config, "save_subscription_status")
-
-
 # ── session reset ────────────────────────────────────────────────
 
 

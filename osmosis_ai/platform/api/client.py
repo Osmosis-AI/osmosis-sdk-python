@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from typing import TYPE_CHECKING, Any
 from urllib.parse import quote, urlencode
 
@@ -27,6 +27,9 @@ from .models import (
     PaginatedLoraModels,
     PaginatedRollouts,
     PaginatedTrainingRuns,
+    RunDownloadFile,
+    RunDownloadManifest,
+    RunDownloadURLBatch,
     SubmitRunResult,
     TrainingRunCheckpoints,
     TrainingRunDetail,
@@ -73,6 +76,46 @@ class OsmosisClient:
             git_identity=git_identity,
         )
         return LogsPage.from_dict(data)
+
+    def _get_run_download_manifest(
+        self,
+        resource_path: str,
+        *,
+        types: Sequence[str],
+        rows: str | None = None,
+        credentials: Credentials | None = None,
+        git_identity: str,
+    ) -> RunDownloadManifest:
+        params: dict[str, str] = {"types": ",".join(types)}
+        if rows is not None:
+            params["rows"] = rows
+        data = platform_request(
+            f"{resource_path}/samples/manifest?{urlencode(params)}",
+            credentials=credentials,
+            git_identity=git_identity,
+        )
+        return RunDownloadManifest.from_dict(data)
+
+    def _get_run_download_urls(
+        self,
+        resource_path: str,
+        *,
+        items: Sequence[RunDownloadFile],
+        credentials: Credentials | None = None,
+        git_identity: str,
+    ) -> RunDownloadURLBatch:
+        if not 1 <= len(items) <= 500:
+            raise ValueError(
+                "Download URL batches must contain between 1 and 500 items"
+            )
+        data = platform_request(
+            f"{resource_path}/samples/download-urls",
+            method="POST",
+            data={"items": [item.to_request_item() for item in items]},
+            credentials=credentials,
+            git_identity=git_identity,
+        )
+        return RunDownloadURLBatch.from_dict(data)
 
     # ── Datasets ─────────────────────────────────────────────────────
 
@@ -367,10 +410,14 @@ class OsmosisClient:
         limit: int = DEFAULT_PAGE_SIZE,
         offset: int = 0,
         *,
+        branch: str | None = None,
         credentials: Credentials | None = None,
         git_identity: str,
     ) -> PaginatedRollouts:
-        qs = urlencode({"limit": limit, "offset": offset})
+        params: dict[str, str | int] = {"limit": limit, "offset": offset}
+        if branch:
+            params["branch"] = branch
+        qs = urlencode(params)
         data = platform_request(
             f"/api/cli/rollouts?{qs}",
             credentials=credentials,
@@ -653,6 +700,38 @@ class OsmosisClient:
             limit=limit,
             cursor=cursor,
             direction=direction,
+            credentials=credentials,
+            git_identity=git_identity,
+        )
+
+    def get_eval_run_download_manifest(
+        self,
+        eval_run_id: str,
+        *,
+        types: Sequence[str],
+        rows: str | None = None,
+        credentials: Credentials | None = None,
+        git_identity: str,
+    ) -> RunDownloadManifest:
+        return self._get_run_download_manifest(
+            f"/api/cli/eval-runs/{_safe_path(eval_run_id)}",
+            types=types,
+            rows=rows,
+            credentials=credentials,
+            git_identity=git_identity,
+        )
+
+    def get_eval_run_download_urls(
+        self,
+        eval_run_id: str,
+        *,
+        items: Sequence[RunDownloadFile],
+        credentials: Credentials | None = None,
+        git_identity: str,
+    ) -> RunDownloadURLBatch:
+        return self._get_run_download_urls(
+            f"/api/cli/eval-runs/{_safe_path(eval_run_id)}",
+            items=items,
             credentials=credentials,
             git_identity=git_identity,
         )
