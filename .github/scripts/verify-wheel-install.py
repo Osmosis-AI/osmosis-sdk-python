@@ -69,10 +69,19 @@ EXTRA_REQUIREMENTS: dict[str, set[str]] = {
     "full": {"osmosis-ai"},
 }
 
+_ANSI_ESCAPE_PATTERN = re.compile(
+    r"\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x1b\x07]*(?:\x07|\x1b\\)|[@-Z\\-_])"
+)
+
 
 def _normalize_distribution(name: str) -> str:
     """Return the normalized project name used for metadata comparisons."""
     return re.sub(r"[-_.]+", "-", name).lower()
+
+
+def _strip_terminal_escapes(value: str) -> str:
+    """Remove ANSI styling and hyperlinks before semantic CLI assertions."""
+    return _ANSI_ESCAPE_PATTERN.sub("", value)
 
 
 def _installed_distributions() -> set[str]:
@@ -417,11 +426,17 @@ def _assert_cli_aliases(version: str) -> None:
         [str(Path(sys.executable).parent / "osmosis"), "--help"],
         check=True,
         capture_output=True,
+        env={**os.environ, "FORCE_COLOR": "1"},
         text=True,
         timeout=30,
     )
-    assert "Usage: osmosis" in help_result.stdout
-    assert "Osmosis AI CLI." in help_result.stdout
+    help_stdout = _strip_terminal_escapes(help_result.stdout)
+    assert "Usage: osmosis" in help_stdout, (
+        f"Unexpected `osmosis --help` stdout: {help_result.stdout!r}"
+    )
+    assert "Osmosis AI CLI." in help_stdout, (
+        f"Unexpected `osmosis --help` stdout: {help_result.stdout!r}"
+    )
     assert not help_result.stderr, (
         f"Unexpected `osmosis --help` stderr: {help_result.stderr!r}"
     )
