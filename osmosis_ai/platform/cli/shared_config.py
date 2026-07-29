@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 import tomllib
 from pathlib import Path
-from typing import Any, ClassVar, Self
+from typing import TYPE_CHECKING, Any, ClassVar, Self
 
 from pydantic import (
     BaseModel,
@@ -15,9 +15,11 @@ from pydantic import (
     field_validator,
     model_validator,
 )
-from pydantic_core import ErrorDetails
 
 from osmosis_ai.cli.errors import CLIError
+
+if TYPE_CHECKING:
+    from pydantic_core import ErrorDetails
 
 ENV_VAR_NAME_RE = re.compile(r"^[A-Z_][A-Z0-9_]*$")
 SECRET_NAME_RE = re.compile(r"^[A-Z][A-Z0-9_]*$")

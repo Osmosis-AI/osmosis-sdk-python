@@ -3,13 +3,23 @@ import uuid
 from collections.abc import AsyncIterator, Mapping, Sequence
 from typing import Any, cast
 
-from agents import Agent
-from agents.extensions.models.litellm_model import LitellmModel
-from agents.items import ModelResponse, TResponseInputItem, TResponseStreamEvent
-from agents.memory.session import SessionABC
-from agents.model_settings import ModelSettings
-from agents.models.chatcmpl_converter import Converter
-from agents.usage import Usage
+from osmosis_ai._imports import raise_optional_dependency_error
+
+try:
+    from agents import Agent
+    from agents.extensions.models.litellm_model import LitellmModel
+    from agents.items import ModelResponse, TResponseInputItem, TResponseStreamEvent
+    from agents.memory.session import SessionABC
+    from agents.model_settings import ModelSettings
+    from agents.models.chatcmpl_converter import Converter
+    from agents.usage import Usage
+except ModuleNotFoundError as _exc:
+    raise_optional_dependency_error(
+        _exc,
+        extra="openai-agents",
+        expected_modules=frozenset({"agents", "litellm"}),
+        feature="The OpenAI Agents integration",
+    )
 
 from osmosis_ai.rollout.context import SampleSource, get_rollout_context
 from osmosis_ai.rollout.types import RolloutSample

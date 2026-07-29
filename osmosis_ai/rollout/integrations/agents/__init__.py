@@ -1,9 +1,6 @@
-from osmosis_ai.rollout.integrations.agents.strands import (
-    OsmosisRolloutModel,
-    OsmosisStrandsAgent,
-)
+"""Legacy namespace for framework-specific agent integrations.
 
-__all__ = [
-    "OsmosisRolloutModel",
-    "OsmosisStrandsAgent",
-]
+Prefer the shorter modules under :mod:`osmosis_ai.rollout.integrations`.
+"""
+
+__all__: list[str] = []

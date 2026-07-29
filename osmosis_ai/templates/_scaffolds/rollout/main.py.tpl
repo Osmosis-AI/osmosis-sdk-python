@@ -3,8 +3,8 @@
 Fill in two methods, then run `python main.py` to start a FastAPI rollout
 server on $_OSMOSIS_ROLLOUT_PORT (default 8000):
 
-  - MyAgentWorkflow.run():  drive the LLM and register sample sources.
-  - MyGrader.grade():       turn samples into scalar rewards.
+  - MyAgentWorkflow.run():  drive the LLM and register a sample source.
+  - MyGrader.grade():       turn the sample into a scalar reward.
 
 Compare the multiply-* rollouts in the workspace-template repo for fully
 worked examples (Strands, OpenAI Agents, Harbor-backed).
@@ -29,8 +29,8 @@ class MyAgentWorkflow(AgentWorkflow):
         #
         # ctx.prompt is the list[dict] of input messages for this rollout.
         # Drive the LLM with one of:
-        #   * osmosis_ai.rollout.integrations.agents.strands (Strands)
-        #   * osmosis_ai.rollout.integrations.agents.openai_agents (OpenAI Agents SDK)
+        #   * osmosis_ai.rollout.integrations.strands (Strands; install [strands])
+        #   * osmosis_ai.rollout.integrations.openai_agents (OpenAI Agents; install [openai-agents])
         #   * raw HTTP against get_rollout_context().chat_completions_url
         #
         # Register a SampleSource so the grader can read the conversation:

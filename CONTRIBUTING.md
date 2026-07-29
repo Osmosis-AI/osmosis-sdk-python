@@ -7,7 +7,7 @@
 ```bash
 git clone https://github.com/Osmosis-AI/osmosis-sdk-python
 cd osmosis-sdk-python
-uv sync --extra dev
+uv sync --all-extras --group dev
 pre-commit install
 uv run pytest
 ```
@@ -18,7 +18,8 @@ uv run pytest
 git clone https://github.com/Osmosis-AI/osmosis-sdk-python
 cd osmosis-sdk-python
 python -m venv .venv && source .venv/bin/activate
-pip install -e ".[dev]"
+python -m pip install --upgrade pip
+python -m pip install -e ".[full]" --group dev
 pre-commit install
 pytest
 ```
@@ -52,9 +53,11 @@ Ruff is pinned to one version across `pyproject.toml`, `.pre-commit-config.yaml`
 
 ## Type Checking
 
-[Pyright](https://microsoft.github.io/pyright/) is the type checker, included in the `dev` extras.
+[Pyright](https://microsoft.github.io/pyright/) is the type checker, included in
+the `dev` dependency group.
 
-- **Pyright** — must pass. All errors must be resolved before merging.
+- **Pyright** — must pass. All errors must be resolved before merging. It is
+  installed from the `dev` dependency group.
 - **Pyright `--verifytypes`** — must pass. Ensures all public API symbols have complete type annotations.
 
 Configuration lives in `pyproject.toml` under `[tool.pyright]`.

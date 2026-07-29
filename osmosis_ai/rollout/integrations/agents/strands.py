@@ -2,10 +2,20 @@ import logging
 from collections.abc import Mapping, Sequence
 from typing import Any, cast
 
-from strands import Agent as StrandsAgent
-from strands.models.litellm import LiteLLMModel
-from strands.models.model import Model
-from strands.types.content import Messages
+from osmosis_ai._imports import raise_optional_dependency_error
+
+try:
+    from strands import Agent as StrandsAgent
+    from strands.models.litellm import LiteLLMModel
+    from strands.models.model import Model
+    from strands.types.content import Messages
+except ModuleNotFoundError as _exc:
+    raise_optional_dependency_error(
+        _exc,
+        extra="strands",
+        expected_modules=frozenset({"litellm", "strands"}),
+        feature="The Strands integration",
+    )
 
 from osmosis_ai.rollout.context import (
     SampleSource,
@@ -15,6 +25,11 @@ from osmosis_ai.rollout.types import RolloutSample
 from osmosis_ai.rollout.utils.messages import map_initial_messages_to_content_blocks
 
 logger: logging.Logger = logging.getLogger(__name__)
+
+__all__ = [
+    "OsmosisRolloutModel",
+    "OsmosisStrandsAgent",
+]
 
 
 class StrandsAgentSampleSource(SampleSource):

@@ -22,8 +22,8 @@ osmosis_ai/
 │   ├── context.py         # RolloutContext / AgentWorkflowContext / GraderContext
 │   ├── driver.py          # RolloutDriver — eval-facing execution contract
 │   ├── validator.py       # Static backend validation
-│   ├── server/            # create_rollout_server (FastAPI) + ControllerAuth
-│   ├── backend/           # ExecutionBackend ABC + Local / Harbor backends
+│   ├── server/            # optional generic FastAPI server (`[server]`)
+│   ├── backend/           # ExecutionBackend ABC + Local / optional Harbor backend
 │   ├── types/             # protocol.py, config.py, sample.py
 │   └── integrations/      # Strands / OpenAI Agents adapters
 ├── eval/              # Eval helpers
@@ -39,7 +39,7 @@ osmosis_ai/
 
 - `cli/` — the CLI framework layer plus every command group. Files in [../osmosis_ai/cli/commands/](../osmosis_ai/cli/commands/) are thin shells that delegate to business logic; see [cli.md](./cli.md).
 - `platform/` — anything that calls the Osmosis Platform API. Business-logic helpers (no Typer registration) live in [../osmosis_ai/platform/cli/](../osmosis_ai/platform/cli/).
-- `rollout/` — the remote rollout protocol SDK: the `AgentWorkflow` + `Grader` abstraction, execution backends, and the FastAPI server. See [rollout-sdk.md](./rollout-sdk.md).
+- `rollout/` — the remote rollout protocol SDK: the `AgentWorkflow` + `Grader` abstraction and framework-neutral execution core. The generic FastAPI server and framework/back-end adapters are explicit optional modules; see [rollout-sdk.md](./rollout-sdk.md).
 - `eval/` — `rubric/` powers `osmosis eval rubric` (see [eval.md](./eval.md)); `common/cli.py` exposes the workflow + grader loader that cloud `eval submit` / `train submit` preflight uses.
 
 ## Key import paths
@@ -49,10 +49,14 @@ from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.cli.console import Console
 from osmosis_ai.platform.auth import load_credentials
 from osmosis_ai.eval.rubric import evaluate_rubric, RubricResult
-from osmosis_ai.rollout import AgentWorkflow, Grader, create_rollout_server
+from osmosis_ai.rollout import AgentWorkflow, Grader, LocalBackend, SampleSource
+from osmosis_ai.rollout.server import create_rollout_server
+from osmosis_ai.rollout.backend.harbor import HarborBackend
+from osmosis_ai.rollout.integrations.strands import OsmosisStrandsAgent
+from osmosis_ai.rollout.integrations.openai_agents import OsmosisAgent
 ```
 
-`osmosis_ai.rollout` is **not** re-exported at the package top level — import it directly.
+`osmosis_ai.rollout` is **not** re-exported at the package top level — import it directly. Its public surface is framework-neutral core only; it does not export the server or Strands integration. `server`, `harbor`, `strands`, and `openai-agents` each require their matching installation extra. The generic server has no Harbor dependency.
 
 ## Lazy loading
 

@@ -9,8 +9,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from harbor.utils.trajectory_utils import format_trajectory_json
-
+from osmosis_ai.rollout.trajectory._atif import format_trajectory_json
 from osmosis_ai.rollout.trajectory.converter import convert_sample_to_trajectory
 from osmosis_ai.rollout.trajectory.report import SampleReport, TrajectoryReport
 from osmosis_ai.rollout.types import ExecutionResult
@@ -112,7 +111,7 @@ async def _save(
         unmatched_sample_reports=unmatched_reports or None,
     )
     dest = artifact_root / rollout_id / "trajectory.json"
-    # Harbor's formatter keeps numeric arrays on one line.
+    # Keep large token-id/logprob arrays compact inside the pretty document.
     data = format_trajectory_json(trajectory.to_json_dict()).encode()
     await asyncio.to_thread(_write_document, dest, data)
     logger.info("Saved trajectory document for rollout %s -> %s", rollout_id, dest)

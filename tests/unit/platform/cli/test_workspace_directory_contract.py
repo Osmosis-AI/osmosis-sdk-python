@@ -302,6 +302,76 @@ def test_unsatisfied_requirements_reports_missing_distribution(
     assert "not installed" in unsatisfied[0]
 
 
+def test_unsatisfied_requirements_reports_missing_extra_dependency(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project = _make_workspace_directory(tmp_path / "project")
+    _make_rollout(
+        project,
+        "demo",
+        dependencies='"osmosis-ai[strands]"',
+        entrypoint="",
+    )
+    real_version = workspace_directory_contract.installed_version
+
+    def fake_version(name: str) -> str:
+        if name == "strands-agents":
+            raise workspace_directory_contract.PackageNotFoundError(name)
+        return real_version(name)
+
+    monkeypatch.setattr(workspace_directory_contract, "installed_version", fake_version)
+    monkeypatch.setattr(
+        workspace_directory_contract,
+        "installed_requirements",
+        lambda name: (
+            [
+                'strands-agents[litellm]>=1.29.0; extra == "strands"',
+                'fastapi>=0.100.0; extra == "server"',
+            ]
+            if name == "osmosis-ai"
+            else []
+        ),
+    )
+
+    unsatisfied = workspace_directory_contract._unsatisfied_rollout_requirements(
+        project / "rollouts" / "demo"
+    )
+
+    assert unsatisfied == [
+        "osmosis-ai[strands] requires strands-agents, which is not installed"
+    ]
+
+
+def test_unsatisfied_requirements_ignores_unrequested_extra_dependency(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project = _make_workspace_directory(tmp_path / "project")
+    _make_rollout(
+        project,
+        "demo",
+        dependencies='"osmosis-ai[server]"',
+        entrypoint="",
+    )
+    monkeypatch.setattr(
+        workspace_directory_contract,
+        "installed_requirements",
+        lambda name: (
+            [
+                'strands-agents[litellm]>=1.29.0; extra == "strands"',
+            ]
+            if name == "osmosis-ai"
+            else []
+        ),
+    )
+
+    assert (
+        workspace_directory_contract._unsatisfied_rollout_requirements(
+            project / "rollouts" / "demo"
+        )
+        == []
+    )
+
+
 @pytest.mark.parametrize(
     "dependency",
     [

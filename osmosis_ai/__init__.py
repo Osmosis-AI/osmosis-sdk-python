@@ -11,6 +11,7 @@ top level.
 
 from typing import TYPE_CHECKING
 
+from ._imports import public_module_dir, resolve_lazy_export
 from .consts import PACKAGE_VERSION as __version__
 
 if TYPE_CHECKING:
@@ -19,7 +20,9 @@ if TYPE_CHECKING:
         ModelNotFoundError,
         ProviderRequestError,
         RubricResult,
-        evaluate_rubric,
+    )
+    from .eval.rubric import (
+        evaluate_rubric as evaluate_rubric,
     )
 
 # ---------------------------------------------------------------------------
@@ -28,25 +31,26 @@ if TYPE_CHECKING:
 # openai, …) unless actually needed.
 # ---------------------------------------------------------------------------
 
-_RUBRIC_EXPORTS: frozenset[str] = frozenset(
-    {
-        "MissingAPIKeyError",
-        "ModelNotFoundError",
-        "ProviderRequestError",
-        "RubricResult",
-        "evaluate_rubric",
-    }
-)
+_EXPORTS: dict[str, tuple[str, str]] = {
+    "MissingAPIKeyError": ("osmosis_ai.eval.rubric.types", "MissingAPIKeyError"),
+    "ModelNotFoundError": ("osmosis_ai.eval.rubric.types", "ModelNotFoundError"),
+    "ProviderRequestError": ("osmosis_ai.eval.rubric.types", "ProviderRequestError"),
+    "RubricResult": ("osmosis_ai.eval.rubric.types", "RubricResult"),
+    "evaluate_rubric": ("osmosis_ai.eval.rubric", "evaluate_rubric"),
+}
 
 
 def __getattr__(name: str) -> object:
-    if name in _RUBRIC_EXPORTS:
-        from .eval import rubric
+    return resolve_lazy_export(
+        name,
+        module_name=__name__,
+        namespace=globals(),
+        exports=_EXPORTS,
+    )
 
-        value = getattr(rubric, name)
-        globals()[name] = value  # cache so future access skips __getattr__
-        return value
-    raise AttributeError(f"module 'osmosis_ai' has no attribute {name!r}")
+
+def __dir__() -> list[str]:
+    return public_module_dir(globals(), _EXPORTS)
 
 
 __all__ = [
@@ -55,5 +59,4 @@ __all__ = [
     "ProviderRequestError",
     "RubricResult",
     "__version__",
-    "evaluate_rubric",
 ]

@@ -1,6 +1,6 @@
 # Troubleshooting (engineering)
 
-> Engineering-level failure modes when building rollouts and running evals. Install, login, and workspace-setup basics live at [docs.osmosis.ai](https://docs.osmosis.ai). One entry fact: the SDK requires **Python 3.12+** and the server extra (`pip install osmosis-ai[server]`) to run a rollout server (scaffold one with `osmosis rollout init`, then `python main.py`).
+> Engineering-level failure modes when building rollouts and running evals. Install, login, and workspace-setup basics live at [docs.osmosis.ai](https://docs.osmosis.ai). One entry fact: the SDK requires **Python 3.12+** and the server extra (`pip install "osmosis-ai[server]"`) to run a rollout server (scaffold one with `osmosis rollout init <name>`, then run `python rollouts/<name>/main.py`).
 
 ## Rollout timeouts
 
