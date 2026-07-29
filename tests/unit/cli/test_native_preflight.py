@@ -37,6 +37,47 @@ def main():
     return make_server(backend=Native())
 """
 
+HELPER_NATIVE_ENTRYPOINT = """\
+from osmosis_ai.rollout.backend.native_harbor.backend import NativeHarborBackend
+from osmosis_ai.rollout.server import create_rollout_server
+
+
+def build_app():
+    backend = NativeHarborBackend()
+    return create_rollout_server(backend=backend)
+
+
+def main():
+    return build_app()
+"""
+
+HELPER_ARGUMENT_ENTRYPOINT = """\
+from osmosis_ai.rollout.backend.native_harbor.backend import NativeHarborBackend
+from osmosis_ai.rollout.server import create_rollout_server
+
+
+def build_app(backend):
+    return create_rollout_server(backend=backend)
+
+
+def main():
+    backend = NativeHarborBackend()
+    return build_app(backend)
+"""
+
+DEAD_HELPER_ENTRYPOINT = """\
+from osmosis_ai.rollout.backend.native_harbor.backend import NativeHarborBackend
+from osmosis_ai.rollout.server import create_rollout_server
+
+
+def unused_build_app():
+    return create_rollout_server(backend=NativeHarborBackend())
+
+
+def main():
+    return None
+"""
+
 IMPORT_ONLY_ENTRYPOINT = """\
 from osmosis_ai.rollout.backend.native_harbor.backend import NativeHarborBackend
 """
@@ -84,8 +125,27 @@ class TestDiscoverNativeBackend:
 
     @pytest.mark.parametrize(
         "source",
-        [IMPORT_ONLY_ENTRYPOINT, UNWIRED_NATIVE_ENTRYPOINT],
-        ids=["import-only", "constructed-but-not-wired"],
+        [HELPER_NATIVE_ENTRYPOINT, HELPER_ARGUMENT_ENTRYPOINT],
+        ids=["helper-constructs-backend", "main-passes-backend"],
+    )
+    def test_follows_wired_helper_from_main(self, tmp_path, source):
+        _make_rollout(tmp_path, "native-rollout", source)
+        cls = discover_native_backend(
+            rollout="native-rollout",
+            entrypoint="main.py",
+            workspace_directory=tmp_path,
+        )
+        assert cls is not None
+        assert cls.__name__ == "NativeHarborBackend"
+
+    @pytest.mark.parametrize(
+        "source",
+        [
+            IMPORT_ONLY_ENTRYPOINT,
+            UNWIRED_NATIVE_ENTRYPOINT,
+            DEAD_HELPER_ENTRYPOINT,
+        ],
+        ids=["import-only", "constructed-but-not-wired", "unreachable-helper"],
     )
     def test_none_when_native_backend_is_not_wired(self, tmp_path, source):
         _make_rollout(tmp_path, "native-rollout", source)

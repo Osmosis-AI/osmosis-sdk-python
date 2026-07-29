@@ -307,12 +307,15 @@ class _NativeBackendWiringVisitor(ast.NodeVisitor):
         self,
         backend_classes: dict[str, type],
         server_factories: set[str],
+        function_parameters: dict[str, list[str]],
         inherited_bindings: dict[str, type] | None = None,
     ) -> None:
         self.backend_classes = backend_classes
         self.server_factories = server_factories
+        self.function_parameters = function_parameters
         self.bindings = dict(inherited_bindings or {})
         self.found: type | None = None
+        self.called_functions: list[tuple[str, dict[str, type]]] = []
 
     def _backend_class(self, expression: ast.expr) -> type | None:
         if isinstance(expression, ast.Name):
@@ -345,6 +348,21 @@ class _NativeBackendWiringVisitor(ast.NodeVisitor):
         self._record_assignment([node.target], node.value)
 
     def visit_Call(self, node: ast.Call) -> None:
+        if isinstance(node.func, ast.Name):
+            parameter_names = self.function_parameters.get(node.func.id, [])
+            call_bindings: dict[str, type] = {}
+            for parameter_name, argument in zip(
+                parameter_names, node.args, strict=False
+            ):
+                backend_class = self._backend_class(argument)
+                if backend_class is not None:
+                    call_bindings[parameter_name] = backend_class
+            for keyword in node.keywords:
+                if keyword.arg in parameter_names:
+                    backend_class = self._backend_class(keyword.value)
+                    if backend_class is not None:
+                        call_bindings[keyword.arg] = backend_class
+            self.called_functions.append((node.func.id, call_bindings))
         if isinstance(node.func, ast.Name) and node.func.id in self.server_factories:
             backend_value = next(
                 (
@@ -360,8 +378,8 @@ class _NativeBackendWiringVisitor(ast.NodeVisitor):
                     self.found = backend_class
         self.generic_visit(node)
 
-    # Nested definitions are different execution scopes. ``discover_native_backend``
-    # explicitly inspects the module scope and the entrypoint's ``main`` function.
+    # Nested definitions are different execution scopes. The caller follows only
+    # top-level helpers reachable from module execution or ``main``.
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
         return
 
@@ -390,7 +408,25 @@ def _find_wired_native_backend(
         return None
 
     tree = ast.parse(entrypoint_path.read_text(encoding="utf-8"), entrypoint_path)
-    module_visitor = _NativeBackendWiringVisitor(backend_classes, server_factories)
+    function_definitions = {
+        statement.name: statement
+        for statement in tree.body
+        if isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef))
+    }
+    function_parameters = {
+        name: [
+            argument.arg
+            for argument in (
+                *definition.args.posonlyargs,
+                *definition.args.args,
+                *definition.args.kwonlyargs,
+            )
+        ]
+        for name, definition in function_definitions.items()
+    }
+    module_visitor = _NativeBackendWiringVisitor(
+        backend_classes, server_factories, function_parameters
+    )
     for statement in tree.body:
         if not isinstance(
             statement, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
@@ -399,19 +435,38 @@ def _find_wired_native_backend(
     if module_visitor.found is not None:
         return module_visitor.found
 
-    for statement in tree.body:
-        if isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef)) and (
-            statement.name == "main"
-        ):
-            main_visitor = _NativeBackendWiringVisitor(
-                backend_classes,
-                server_factories,
-                inherited_bindings=module_visitor.bindings,
-            )
-            for child in statement.body:
-                main_visitor.visit(child)
-            if main_visitor.found is not None:
-                return main_visitor.found
+    pending_functions = [
+        (name, bindings)
+        for name, bindings in module_visitor.called_functions
+        if name in function_definitions
+    ]
+    if "main" in function_definitions:
+        pending_functions.append(("main", {}))
+    visited_functions: set[tuple[str, tuple[tuple[str, int], ...]]] = set()
+    while pending_functions:
+        function_name, call_bindings = pending_functions.pop()
+        visit_key = (
+            function_name,
+            tuple(sorted((name, id(value)) for name, value in call_bindings.items())),
+        )
+        if visit_key in visited_functions:
+            continue
+        visited_functions.add(visit_key)
+        function_visitor = _NativeBackendWiringVisitor(
+            backend_classes,
+            server_factories,
+            function_parameters,
+            inherited_bindings={**module_visitor.bindings, **call_bindings},
+        )
+        for child in function_definitions[function_name].body:
+            function_visitor.visit(child)
+        if function_visitor.found is not None:
+            return function_visitor.found
+        pending_functions.extend(
+            (name, bindings)
+            for name, bindings in function_visitor.called_functions
+            if name in function_definitions
+        )
     return None
 
 
