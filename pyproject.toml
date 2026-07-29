@@ -110,6 +110,7 @@ full = [
 [project.urls]
 Homepage = "https://github.com/Osmosis-AI/osmosis-sdk-python"
 Issues = "https://github.com/Osmosis-AI/osmosis-sdk-python/issues"
+Changelog = "https://github.com/Osmosis-AI/osmosis-sdk-python/blob/main/CHANGELOG.md"
 
 [project.scripts]
 osmosis = "osmosis_ai.cli.main:main"
