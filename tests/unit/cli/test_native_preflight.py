@@ -1,9 +1,8 @@
-"""Submit-preflight support for native rollouts.
+"""Submit-preflight support for module-level native rollout apps.
 
-A native rollout entrypoint declares a ``NativeHarborBackend`` (no AgentWorkflow)
-and derives its reward from the harbor task's own verifier, so it carries no
-Python Grader. ``validate_rollout_backend`` must therefore detect it and skip the
-Grader requirement instead of failing with "No AgentWorkflow subclass found".
+Native rollouts have no Python ``AgentWorkflow`` or ``Grader``. Their entrypoint
+therefore exposes an ``app`` built by ``create_rollout_server`` so preflight can
+inspect the backend actually bound to that ASGI app without interpreting source.
 """
 
 from __future__ import annotations
@@ -19,209 +18,77 @@ from osmosis_ai.platform.cli.workspace_directory_contract import (
 )
 
 NATIVE_ENTRYPOINT = """\
-from osmosis_ai.rollout.backend.native_harbor.backend import NativeHarborBackend
+from osmosis_ai.rollout.backend.native_harbor import NativeHarborBackend
+from osmosis_ai.rollout.server import create_rollout_server
+
+
+backend = NativeHarborBackend()
+app = create_rollout_server(backend=backend)
+"""
+
+NATIVE_SUBCLASS_ENTRYPOINT = """\
+from osmosis_ai.rollout.backend.native_harbor import NativeHarborBackend
+from osmosis_ai.rollout.server import create_rollout_server
+
+
+class CustomNativeBackend(NativeHarborBackend):
+    pass
+
+
+app = create_rollout_server(backend=CustomNativeBackend())
+"""
+
+MAIN_ONLY_ENTRYPOINT = """\
+from osmosis_ai.rollout.backend.native_harbor import NativeHarborBackend
 from osmosis_ai.rollout.server import create_rollout_server
 
 
 def main():
-    backend = NativeHarborBackend()
-    return create_rollout_server(backend=backend)
-"""
-
-INLINE_NATIVE_ENTRYPOINT = """\
-from osmosis_ai.rollout.backend.native_harbor.backend import NativeHarborBackend as Native
-from osmosis_ai.rollout.server import create_rollout_server as make_server
-
-
-def main():
-    return make_server(backend=Native())
-"""
-
-QUALIFIED_NATIVE_ENTRYPOINT = """\
-import osmosis_ai.rollout.backend.native_harbor as native_harbor
-import osmosis_ai.rollout.server as server
-
-
-def main():
-    backend = native_harbor.NativeHarborBackend()
-    return server.create_rollout_server(backend=backend)
-"""
-
-HELPER_NATIVE_ENTRYPOINT = """\
-from osmosis_ai.rollout.backend.native_harbor.backend import NativeHarborBackend
-from osmosis_ai.rollout.server import create_rollout_server
-
-
-def build_app():
-    backend = NativeHarborBackend()
-    return create_rollout_server(backend=backend)
-
-
-def main():
-    return build_app()
-"""
-
-HELPER_ARGUMENT_ENTRYPOINT = """\
-from osmosis_ai.rollout.backend.native_harbor.backend import NativeHarborBackend
-from osmosis_ai.rollout.server import create_rollout_server
-
-
-def build_app(backend):
-    return create_rollout_server(backend=backend)
-
-
-def main():
-    backend = NativeHarborBackend()
-    return build_app(backend)
-"""
-
-DESTRUCTURED_NATIVE_ENTRYPOINT = """\
-from osmosis_ai.rollout.backend.native_harbor.backend import NativeHarborBackend
-from osmosis_ai.rollout.server import create_rollout_server
-
-
-def main():
-    ignored, backend = [object(), NativeHarborBackend()]
-    return create_rollout_server(backend=backend)
-"""
-
-CALLED_LAMBDA_ENTRYPOINT = """\
-from osmosis_ai.rollout.backend.native_harbor.backend import NativeHarborBackend
-from osmosis_ai.rollout.server import create_rollout_server
-
-
-build_app = lambda backend: create_rollout_server(backend=backend)
-
-
-def main():
-    return build_app(NativeHarborBackend())
-"""
-
-UNCALLED_LAMBDA_ENTRYPOINT = """\
-from osmosis_ai.rollout.backend.native_harbor.backend import NativeHarborBackend
-from osmosis_ai.rollout.server import create_rollout_server
-
-
-unused_build_app = lambda: create_rollout_server(backend=NativeHarborBackend())
-
-
-def main():
-    return None
-"""
-
-VAR_POSITIONAL_HELPER_ENTRYPOINT = """\
-from osmosis_ai.rollout.backend.native_harbor.backend import NativeHarborBackend
-from osmosis_ai.rollout.server import create_rollout_server
-
-
-def forward_positional(*args):
-    return create_rollout_server(backend=args[0])
-
-
-def main():
-    arguments = (NativeHarborBackend(),)
-    return forward_positional(*arguments)
-"""
-
-NEGATIVE_VAR_POSITIONAL_HELPER_ENTRYPOINT = """\
-from osmosis_ai.rollout.backend.native_harbor.backend import NativeHarborBackend
-from osmosis_ai.rollout.server import create_rollout_server
-
-
-def forward_positional(*args):
-    return create_rollout_server(backend=args[-1])
-
-
-def main():
-    arguments = (object(), NativeHarborBackend())
-    return forward_positional(*arguments)
-"""
-
-VAR_KEYWORD_HELPER_ENTRYPOINT = """\
-from osmosis_ai.rollout.backend.native_harbor.backend import NativeHarborBackend
-from osmosis_ai.rollout.server import create_rollout_server
-
-
-def forward_keywords(**kwargs):
-    return create_rollout_server(**kwargs)
-
-
-def main():
-    options = {"backend": NativeHarborBackend()}
-    return forward_keywords(**options)
-"""
-
-DEFAULT_ARGUMENT_ENTRYPOINT = """\
-from osmosis_ai.rollout.backend.native_harbor.backend import NativeHarborBackend
-from osmosis_ai.rollout.server import create_rollout_server
-
-
-def build_app(backend=NativeHarborBackend()):
-    return create_rollout_server(backend=backend)
-
-
-def main():
-    return build_app()
-"""
-
-OVERRIDDEN_DEFAULT_ENTRYPOINT = """\
-from osmosis_ai.rollout.backend.native_harbor.backend import NativeHarborBackend
-from osmosis_ai.rollout.server import create_rollout_server
-
-
-def build_app(backend=NativeHarborBackend()):
-    return create_rollout_server(backend=backend)
-
-
-def main():
-    return build_app(object())
-"""
-
-DYNAMIC_KEYWORDS_ENTRYPOINT = """\
-from osmosis_ai.rollout.backend.native_harbor.backend import NativeHarborBackend
-from osmosis_ai.rollout.server import create_rollout_server
-
-
-def build_app(**kwargs):
-    return create_rollout_server(**kwargs)
-
-
-def options():
-    return {"backend": NativeHarborBackend()}
-
-
-def main():
-    return build_app(**options())
-"""
-
-DEAD_HELPER_ENTRYPOINT = """\
-from osmosis_ai.rollout.backend.native_harbor.backend import NativeHarborBackend
-from osmosis_ai.rollout.server import create_rollout_server
-
-
-def unused_build_app():
-    return create_rollout_server(backend=NativeHarborBackend())
-
-
-def main():
-    return None
+    app = create_rollout_server(backend=NativeHarborBackend())
+    return app
 """
 
 IMPORT_ONLY_ENTRYPOINT = """\
-from osmosis_ai.rollout.backend.native_harbor.backend import NativeHarborBackend
+from osmosis_ai.rollout.backend.native_harbor import NativeHarborBackend
 """
 
-UNWIRED_NATIVE_ENTRYPOINT = """\
-from osmosis_ai.rollout.backend.native_harbor.backend import NativeHarborBackend
+UNREACHABLE_NATIVE_APP_ENTRYPOINT = """\
+from osmosis_ai.rollout.backend.native_harbor import NativeHarborBackend
 from osmosis_ai.rollout.server import create_rollout_server
 
 
-def main():
-    unused = NativeHarborBackend()
-    return create_rollout_server(backend=object())
+if False:
+    app = create_rollout_server(backend=NativeHarborBackend())
 """
 
-# No AgentWorkflow and no NativeHarborBackend -> a genuinely broken entrypoint.
+NON_NATIVE_APP_ENTRYPOINT = """\
+from osmosis_ai.rollout.backend.base import ExecutionBackend
+from osmosis_ai.rollout.server import create_rollout_server
+
+
+class OtherBackend(ExecutionBackend):
+    async def execute(self, request, on_workflow_complete, on_grader_complete=None):
+        return None
+
+
+app = create_rollout_server(backend=OtherBackend())
+"""
+
+UNWIRED_NATIVE_ENTRYPOINT = """\
+from osmosis_ai.rollout.backend.base import ExecutionBackend
+from osmosis_ai.rollout.backend.native_harbor import NativeHarborBackend
+from osmosis_ai.rollout.server import create_rollout_server
+
+
+class OtherBackend(ExecutionBackend):
+    async def execute(self, request, on_workflow_complete, on_grader_complete=None):
+        return None
+
+
+unused_native_backend = NativeHarborBackend()
+app = create_rollout_server(backend=OtherBackend())
+"""
+
 EMPTY_ENTRYPOINT = "VALUE = 1\n"
 
 
@@ -232,90 +99,52 @@ def _make_rollout(workspace: Path, name: str, source: str) -> None:
 
 
 class TestDiscoverNativeBackend:
-    def test_finds_native_backend(self, tmp_path):
-        _make_rollout(tmp_path, "native-rollout", NATIVE_ENTRYPOINT)
-        cls = discover_native_backend(
-            rollout="native-rollout",
-            entrypoint="main.py",
-            workspace_directory=tmp_path,
-        )
-        assert cls is not None
-        assert cls.__name__ == "NativeHarborBackend"
-
-    def test_finds_inline_aliased_native_backend(self, tmp_path):
-        _make_rollout(tmp_path, "native-rollout", INLINE_NATIVE_ENTRYPOINT)
-        cls = discover_native_backend(
-            rollout="native-rollout",
-            entrypoint="main.py",
-            workspace_directory=tmp_path,
-        )
-        assert cls is not None
-        assert cls.__name__ == "NativeHarborBackend"
-
-    def test_finds_qualified_native_backend(self, tmp_path):
-        _make_rollout(tmp_path, "native-rollout", QUALIFIED_NATIVE_ENTRYPOINT)
-        cls = discover_native_backend(
-            rollout="native-rollout",
-            entrypoint="main.py",
-            workspace_directory=tmp_path,
-        )
-        assert cls is not None
-        assert cls.__name__ == "NativeHarborBackend"
-
     @pytest.mark.parametrize(
-        "source",
+        "source, expected_name",
         [
-            HELPER_NATIVE_ENTRYPOINT,
-            HELPER_ARGUMENT_ENTRYPOINT,
-            DESTRUCTURED_NATIVE_ENTRYPOINT,
-            CALLED_LAMBDA_ENTRYPOINT,
-            VAR_POSITIONAL_HELPER_ENTRYPOINT,
-            NEGATIVE_VAR_POSITIONAL_HELPER_ENTRYPOINT,
-            VAR_KEYWORD_HELPER_ENTRYPOINT,
-            DEFAULT_ARGUMENT_ENTRYPOINT,
+            (NATIVE_ENTRYPOINT, "NativeHarborBackend"),
+            (NATIVE_SUBCLASS_ENTRYPOINT, "CustomNativeBackend"),
         ],
-        ids=[
-            "helper-constructs-backend",
-            "main-passes-backend",
-            "destructured-backend",
-            "called-lambda",
-            "var-positional-forwarding",
-            "negative-var-positional-forwarding",
-            "var-keyword-forwarding",
-            "default-argument",
-        ],
+        ids=["native", "native-subclass"],
     )
-    def test_follows_wired_helper_from_main(self, tmp_path, source):
+    def test_finds_backend_bound_to_module_app(
+        self, tmp_path: Path, source: str, expected_name: str
+    ) -> None:
         _make_rollout(tmp_path, "native-rollout", source)
+
         cls = discover_native_backend(
             rollout="native-rollout",
             entrypoint="main.py",
             workspace_directory=tmp_path,
         )
+
         assert cls is not None
-        assert cls.__name__ == "NativeHarborBackend"
+        assert cls.__name__ == expected_name
 
     @pytest.mark.parametrize(
         "source",
         [
+            MAIN_ONLY_ENTRYPOINT,
             IMPORT_ONLY_ENTRYPOINT,
+            UNREACHABLE_NATIVE_APP_ENTRYPOINT,
+            NON_NATIVE_APP_ENTRYPOINT,
             UNWIRED_NATIVE_ENTRYPOINT,
-            DEAD_HELPER_ENTRYPOINT,
-            UNCALLED_LAMBDA_ENTRYPOINT,
-            OVERRIDDEN_DEFAULT_ENTRYPOINT,
-            DYNAMIC_KEYWORDS_ENTRYPOINT,
+            EMPTY_ENTRYPOINT,
         ],
         ids=[
+            "main-only",
             "import-only",
-            "constructed-but-not-wired",
-            "unreachable-helper",
-            "uncalled-lambda",
-            "overridden-default",
-            "dynamic-keywords",
+            "unreachable-native-app",
+            "non-native-app",
+            "unwired-native",
+            "empty",
         ],
     )
-    def test_none_when_native_backend_is_not_wired(self, tmp_path, source):
+    def test_none_without_module_level_native_app(
+        self, tmp_path: Path, source: str
+    ) -> None:
         _make_rollout(tmp_path, "native-rollout", source)
+
         assert (
             discover_native_backend(
                 rollout="native-rollout",
@@ -325,21 +154,9 @@ class TestDiscoverNativeBackend:
             is None
         )
 
-    def test_none_for_non_native(self, tmp_path):
-        _make_rollout(tmp_path, "empty-rollout", EMPTY_ENTRYPOINT)
-        assert (
-            discover_native_backend(
-                rollout="empty-rollout",
-                entrypoint="main.py",
-                workspace_directory=tmp_path,
-            )
-            is None
-        )
-
-    def test_none_on_missing_entrypoint(self, tmp_path):
+    def test_none_on_missing_entrypoint(self, tmp_path: Path) -> None:
         _make_rollout(tmp_path, "native-rollout", NATIVE_ENTRYPOINT)
-        # A load failure (wrong filename) is swallowed to None; the workflow path
-        # surfaces the real error.
+
         assert (
             discover_native_backend(
                 rollout="native-rollout",
@@ -351,9 +168,9 @@ class TestDiscoverNativeBackend:
 
 
 class TestValidateRolloutBackendNative:
-    def test_native_passes_without_grader(self, tmp_path):
+    def test_native_app_passes_without_grader(self, tmp_path: Path) -> None:
         _make_rollout(tmp_path, "native-rollout", NATIVE_ENTRYPOINT)
-        # Should NOT raise: native rollouts need no Python Grader.
+
         validate_rollout_backend(
             workspace_directory=tmp_path,
             rollout="native-rollout",
@@ -361,22 +178,20 @@ class TestValidateRolloutBackendNative:
             command_label="Test",
         )
 
-    def test_import_only_native_backend_fails_preflight(self, tmp_path):
-        _make_rollout(tmp_path, "native-rollout", IMPORT_ONLY_ENTRYPOINT)
+    @pytest.mark.parametrize(
+        "source",
+        [IMPORT_ONLY_ENTRYPOINT, MAIN_ONLY_ENTRYPOINT, NON_NATIVE_APP_ENTRYPOINT],
+        ids=["import-only", "main-only", "non-native-app"],
+    )
+    def test_non_native_contract_fails_preflight(
+        self, tmp_path: Path, source: str
+    ) -> None:
+        _make_rollout(tmp_path, "native-rollout", source)
+
         with pytest.raises(CLIError, match="preflight failed"):
             validate_rollout_backend(
                 workspace_directory=tmp_path,
                 rollout="native-rollout",
-                entrypoint="main.py",
-                command_label="Test",
-            )
-
-    def test_neither_workflow_nor_native_raises(self, tmp_path):
-        _make_rollout(tmp_path, "empty-rollout", EMPTY_ENTRYPOINT)
-        with pytest.raises(CLIError, match="preflight failed"):
-            validate_rollout_backend(
-                workspace_directory=tmp_path,
-                rollout="empty-rollout",
                 entrypoint="main.py",
                 command_label="Test",
             )

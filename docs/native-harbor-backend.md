@@ -28,7 +28,7 @@ The dataset row's `system_prompt` / `user_prompt` (the wire `prompt` / `initial_
 
 ## Quickstart
 
-A native rollout server is the standard `create_rollout_server(backend=...)` wiring with a `NativeHarborBackend` instance — mirror the scaffold from `osmosis rollout init`, swapping `LocalBackend` for this backend:
+A native rollout server is the standard `create_rollout_server(backend=...)` wiring with a `NativeHarborBackend` instance. The resulting FastAPI app must be exposed as the module-level name `app`; `osmosis submit` imports that app to verify the actual backend binding without executing `main()`:
 
 ```python
 import os
@@ -39,12 +39,14 @@ from osmosis_ai.rollout.backend.native_harbor import NativeHarborBackend
 from osmosis_ai.rollout.server import create_rollout_server
 
 
+backend = NativeHarborBackend(
+    agent_name="terminus-2",   # the default; in-process, training-safe
+    max_concurrent=4,          # one Harbor Trial (often a container) per rollout
+)
+app = create_rollout_server(backend=backend)   # required module-level ASGI app
+
+
 def main() -> None:
-    backend = NativeHarborBackend(
-        agent_name="terminus-2",   # the default; in-process, training-safe
-        max_concurrent=4,          # one Harbor Trial (often a container) per rollout
-    )
-    app = create_rollout_server(backend=backend)   # FastAPI: POST /rollout, GET /health
     uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("_OSMOSIS_ROLLOUT_PORT", "8000")))
 
 
@@ -102,7 +104,7 @@ All arguments are keyword-only ([backend.py](../osmosis_ai/rollout/backend/nativ
 |----------|---------|---------|
 | `agent_name` | `"terminus-2"` (when neither agent arg is set) | Built-in Harbor agent by name (e.g. `terminus-2`, `codex`, `claude-code`). |
 | `agent_import_path` | `None` | `"module:Class"` for a user-implemented `BaseAgent`. **Mutually exclusive** with `agent_name`. |
-| `agent_kwargs` | `None` | Extra constructor kwargs for an in-process agent (base layer; SDK wiring overlays — see below). |
+| `agent_kwargs` | `None` | Harbor agent constructor kwargs. In-process SDK wiring overlays identity fields; installed agents consume their declared CLI/ENV options. |
 | `agent_env` | `None` | Extra env for an installed/CLI agent (base layer; SDK `OPENAI_*` overlays). |
 | `model_name` | `"openai/osmosis-rollout"` | Model id passed to Harbor. Overridable per row via `metadata["harbor_model"]`. |
 | `reward_key` | `"reward"` | Which named verifier channel becomes the scalar reward (see [Reward mapping](#reward-mapping)). |
@@ -123,6 +125,8 @@ Two agent kinds are wired differently, both **at the config layer** — the agen
 | Installed / CLI (e.g. `codex`, `claude-code`) | built-in name | `AgentConfig.env["OPENAI_BASE_URL"]` + `env["OPENAI_API_KEY"]` |
 
 Any agent addressed by `agent_import_path` (a **custom agent**) is passed through untouched — only the SDK identity wiring is overlaid on top of your `agent_kwargs` / `agent_env`. The terminus-2 summarize defaults ([Append-only trajectories](#append-only-trajectories-training-caveat)) apply to the built-in default agent only.
+
+Installed agents also receive `agent_kwargs`, matching Harbor's `AgentConfig` contract. Harbor consumes agent-specific options declared by those agents (for example Cursor's `pricing` / `reasoning_effort`); endpoint and credential identity still come from the SDK-overlaid `agent_env` values below.
 
 ### Model endpoint injection
 
@@ -164,9 +168,7 @@ The SDK does not scan the sandbox or decide which task files are artifacts. User
 
 ## Submit preflight
 
-`osmosis submit` normally requires a Python `AgentWorkflow` + `Grader` and rejects a rollout that has neither. Native rollouts have neither (reward comes from the Harbor verifier), so the contract check special-cases them: when the workflow fails to load, `discover_native_backend` ([eval/common/cli.py](../osmosis_ai/eval/common/cli.py)) verifies that the entrypoint constructs a `NativeHarborBackend` (or subclass) and passes it as `create_rollout_server(backend=...)`; only then does preflight skip the Grader requirement ([workspace_directory_contract.py](../osmosis_ai/platform/cli/workspace_directory_contract.py)). The deeper checks (task resolves, agent exists, verifier present) cannot run statically at submit time — they are left to runtime inside `Trial.create().run()`. A self-deployed native server that never goes through `osmosis submit` is unaffected.
-
-The scanner follows module execution, `main()`, and reachable top-level helpers (including invoked lambda helpers). It understands direct/default arguments, destructuring, qualified module imports, and statically resolvable `*args` / `**kwargs` forwarding. Wiring assembled dynamically through reflection, runtime container mutation, or an opaque function call cannot be proven during submit preflight; keep the final backend path explicit in the entrypoint when using those techniques.
+`osmosis submit` normally requires a Python `AgentWorkflow` + `Grader` and rejects a rollout that has neither. Native rollouts have neither (reward comes from the Harbor verifier), so the contract check special-cases them: when the workflow fails to load, `discover_native_backend` ([eval/common/cli.py](../osmosis_ai/eval/common/cli.py)) imports the entrypoint, reads its module-level `app`, and verifies the backend marker recorded by `create_rollout_server`; only an app actually bound to a `NativeHarborBackend` (or subclass) skips the Grader requirement ([workspace_directory_contract.py](../osmosis_ai/platform/cli/workspace_directory_contract.py)). Merely importing or constructing the backend is insufficient, and constructing the app only inside `main()` is intentionally not part of the submit contract. The deeper checks (task resolves, agent exists, verifier present) remain runtime responsibilities inside `Trial.create().run()`. A self-deployed native server that never goes through `osmosis submit` is unaffected.
 
 ## See also
 

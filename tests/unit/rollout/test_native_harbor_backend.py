@@ -260,7 +260,20 @@ class TestAgentConfig:
             "OPENAI_BASE_URL": "http://ctrl:8080",
             "OPENAI_API_KEY": "sk-test",
         }
-        assert ac.kwargs == {}  # no in-process knobs for installed agents
+        assert ac.kwargs == {}  # no user-supplied constructor options
+
+    def test_agent_kwargs_passthrough_for_installed(
+        self, monkeypatch: pytest.MonkeyPatch
+    ):
+        monkeypatch.setattr(bmod, "_is_installed_agent", lambda cls: True)
+        backend = NativeHarborBackend(
+            agent_name="codex",
+            agent_kwargs={"reasoning_effort": "high"},
+        )
+
+        ac = backend._build_agent_config(_request(), _ctx())
+
+        assert ac.kwargs == {"reasoning_effort": "high"}
 
     def test_missing_endpoint_raises(self, monkeypatch: pytest.MonkeyPatch):
         # No endpoint -> fail closed instead of silently hitting api.openai.com.
