@@ -166,6 +166,8 @@ The SDK does not scan the sandbox or decide which task files are artifacts. User
 
 `osmosis submit` normally requires a Python `AgentWorkflow` + `Grader` and rejects a rollout that has neither. Native rollouts have neither (reward comes from the Harbor verifier), so the contract check special-cases them: when the workflow fails to load, `discover_native_backend` ([eval/common/cli.py](../osmosis_ai/eval/common/cli.py)) verifies that the entrypoint constructs a `NativeHarborBackend` (or subclass) and passes it as `create_rollout_server(backend=...)`; only then does preflight skip the Grader requirement ([workspace_directory_contract.py](../osmosis_ai/platform/cli/workspace_directory_contract.py)). The deeper checks (task resolves, agent exists, verifier present) cannot run statically at submit time — they are left to runtime inside `Trial.create().run()`. A self-deployed native server that never goes through `osmosis submit` is unaffected.
 
+The scanner follows module execution, `main()`, and reachable top-level helpers. It understands direct/default arguments and statically resolvable `*args` / `**kwargs` forwarding. Wiring assembled dynamically through reflection, runtime container mutation, or an opaque function call cannot be proven during submit preflight; keep the final backend path explicit in the entrypoint when using those techniques.
+
 ## See also
 
 - [rollout-sdk.md](./rollout-sdk.md) — `create_rollout_server`, `ExecutionBackend`, `RolloutContext`, and the `LocalBackend` / `HarborBackend` alternatives.

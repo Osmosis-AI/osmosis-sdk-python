@@ -65,6 +65,77 @@ def main():
     return build_app(backend)
 """
 
+VAR_POSITIONAL_HELPER_ENTRYPOINT = """\
+from osmosis_ai.rollout.backend.native_harbor.backend import NativeHarborBackend
+from osmosis_ai.rollout.server import create_rollout_server
+
+
+def forward_positional(*args):
+    return create_rollout_server(backend=args[0])
+
+
+def main():
+    arguments = (NativeHarborBackend(),)
+    return forward_positional(*arguments)
+"""
+
+VAR_KEYWORD_HELPER_ENTRYPOINT = """\
+from osmosis_ai.rollout.backend.native_harbor.backend import NativeHarborBackend
+from osmosis_ai.rollout.server import create_rollout_server
+
+
+def forward_keywords(**kwargs):
+    return create_rollout_server(**kwargs)
+
+
+def main():
+    options = {"backend": NativeHarborBackend()}
+    return forward_keywords(**options)
+"""
+
+DEFAULT_ARGUMENT_ENTRYPOINT = """\
+from osmosis_ai.rollout.backend.native_harbor.backend import NativeHarborBackend
+from osmosis_ai.rollout.server import create_rollout_server
+
+
+def build_app(backend=NativeHarborBackend()):
+    return create_rollout_server(backend=backend)
+
+
+def main():
+    return build_app()
+"""
+
+OVERRIDDEN_DEFAULT_ENTRYPOINT = """\
+from osmosis_ai.rollout.backend.native_harbor.backend import NativeHarborBackend
+from osmosis_ai.rollout.server import create_rollout_server
+
+
+def build_app(backend=NativeHarborBackend()):
+    return create_rollout_server(backend=backend)
+
+
+def main():
+    return build_app(object())
+"""
+
+DYNAMIC_KEYWORDS_ENTRYPOINT = """\
+from osmosis_ai.rollout.backend.native_harbor.backend import NativeHarborBackend
+from osmosis_ai.rollout.server import create_rollout_server
+
+
+def build_app(**kwargs):
+    return create_rollout_server(**kwargs)
+
+
+def options():
+    return {"backend": NativeHarborBackend()}
+
+
+def main():
+    return build_app(**options())
+"""
+
 DEAD_HELPER_ENTRYPOINT = """\
 from osmosis_ai.rollout.backend.native_harbor.backend import NativeHarborBackend
 from osmosis_ai.rollout.server import create_rollout_server
@@ -125,8 +196,20 @@ class TestDiscoverNativeBackend:
 
     @pytest.mark.parametrize(
         "source",
-        [HELPER_NATIVE_ENTRYPOINT, HELPER_ARGUMENT_ENTRYPOINT],
-        ids=["helper-constructs-backend", "main-passes-backend"],
+        [
+            HELPER_NATIVE_ENTRYPOINT,
+            HELPER_ARGUMENT_ENTRYPOINT,
+            VAR_POSITIONAL_HELPER_ENTRYPOINT,
+            VAR_KEYWORD_HELPER_ENTRYPOINT,
+            DEFAULT_ARGUMENT_ENTRYPOINT,
+        ],
+        ids=[
+            "helper-constructs-backend",
+            "main-passes-backend",
+            "var-positional-forwarding",
+            "var-keyword-forwarding",
+            "default-argument",
+        ],
     )
     def test_follows_wired_helper_from_main(self, tmp_path, source):
         _make_rollout(tmp_path, "native-rollout", source)
@@ -144,8 +227,16 @@ class TestDiscoverNativeBackend:
             IMPORT_ONLY_ENTRYPOINT,
             UNWIRED_NATIVE_ENTRYPOINT,
             DEAD_HELPER_ENTRYPOINT,
+            OVERRIDDEN_DEFAULT_ENTRYPOINT,
+            DYNAMIC_KEYWORDS_ENTRYPOINT,
         ],
-        ids=["import-only", "constructed-but-not-wired", "unreachable-helper"],
+        ids=[
+            "import-only",
+            "constructed-but-not-wired",
+            "unreachable-helper",
+            "overridden-default",
+            "dynamic-keywords",
+        ],
     )
     def test_none_when_native_backend_is_not_wired(self, tmp_path, source):
         _make_rollout(tmp_path, "native-rollout", source)

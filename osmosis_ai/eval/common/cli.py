@@ -15,6 +15,7 @@ import importlib.machinery
 import importlib.util
 import sys
 import types
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -300,6 +301,41 @@ def _assigned_names(target: ast.expr) -> list[str]:
     return []
 
 
+@dataclass(frozen=True)
+class _NativeBinding:
+    """Statically known native-backend values carried through helper calls."""
+
+    backend_class: type | None = None
+    positional: tuple[_NativeBinding, ...] | None = None
+    keywords: tuple[tuple[str, _NativeBinding], ...] | None = None
+
+    @classmethod
+    def keyword_mapping(cls, values: dict[str, _NativeBinding]) -> _NativeBinding:
+        return cls(keywords=tuple(sorted(values.items())))
+
+    def keyword_value(self, name: str) -> _NativeBinding | None:
+        if self.keywords is None:
+            return None
+        return dict(self.keywords).get(name)
+
+
+_UNKNOWN_NATIVE_BINDING = _NativeBinding()
+
+
+@dataclass(frozen=True)
+class _FunctionSignature:
+    positional_only: tuple[str, ...]
+    positional_or_keyword: tuple[str, ...]
+    keyword_only: tuple[str, ...]
+    vararg: str | None
+    kwarg: str | None
+    defaults: tuple[tuple[str, ast.expr], ...]
+
+    @property
+    def positional(self) -> tuple[str, ...]:
+        return (*self.positional_only, *self.positional_or_keyword)
+
+
 class _NativeBackendWiringVisitor(ast.NodeVisitor):
     """Find ``create_rollout_server(backend=<native instance>)`` in one scope."""
 
@@ -307,31 +343,126 @@ class _NativeBackendWiringVisitor(ast.NodeVisitor):
         self,
         backend_classes: dict[str, type],
         server_factories: set[str],
-        function_parameters: dict[str, list[str]],
-        inherited_bindings: dict[str, type] | None = None,
+        function_signatures: dict[str, _FunctionSignature],
+        inherited_bindings: dict[str, _NativeBinding] | None = None,
     ) -> None:
         self.backend_classes = backend_classes
         self.server_factories = server_factories
-        self.function_parameters = function_parameters
+        self.function_signatures = function_signatures
         self.bindings = dict(inherited_bindings or {})
         self.found: type | None = None
-        self.called_functions: list[tuple[str, dict[str, type]]] = []
+        self.called_functions: list[tuple[str, dict[str, _NativeBinding]]] = []
 
-    def _backend_class(self, expression: ast.expr) -> type | None:
+    def _binding(self, expression: ast.expr) -> _NativeBinding:
         if isinstance(expression, ast.Name):
-            return self.bindings.get(expression.id)
+            return self.bindings.get(expression.id, _UNKNOWN_NATIVE_BINDING)
         if isinstance(expression, ast.Call) and isinstance(expression.func, ast.Name):
-            return self.backend_classes.get(expression.func.id)
-        return None
+            backend_class = self.backend_classes.get(expression.func.id)
+            if backend_class is not None:
+                return _NativeBinding(backend_class=backend_class)
+        if isinstance(expression, (ast.List, ast.Tuple)):
+            return _NativeBinding(
+                positional=tuple(self._binding(item) for item in expression.elts)
+            )
+        if isinstance(expression, ast.Dict):
+            values: dict[str, _NativeBinding] = {}
+            for key, value in zip(expression.keys, expression.values, strict=True):
+                if not isinstance(key, ast.Constant) or not isinstance(key.value, str):
+                    return _UNKNOWN_NATIVE_BINDING
+                values[key.value] = self._binding(value)
+            return _NativeBinding.keyword_mapping(values)
+        if isinstance(expression, ast.Subscript):
+            container = self._binding(expression.value)
+            if isinstance(expression.slice, ast.Constant):
+                index = expression.slice.value
+                if isinstance(index, int) and container.positional is not None:
+                    try:
+                        return container.positional[index]
+                    except IndexError:
+                        return _UNKNOWN_NATIVE_BINDING
+                if isinstance(index, str):
+                    return container.keyword_value(index) or _UNKNOWN_NATIVE_BINDING
+        return _UNKNOWN_NATIVE_BINDING
+
+    def _call_bindings(
+        self, function_name: str, node: ast.Call | None = None
+    ) -> dict[str, _NativeBinding]:
+        signature = self.function_signatures[function_name]
+        bindings = {
+            name: self._binding(default) for name, default in signature.defaults
+        }
+
+        positional_values: list[_NativeBinding] = []
+        positional_unknown = False
+        if node is not None:
+            for argument in node.args:
+                if isinstance(argument, ast.Starred):
+                    expanded = self._binding(argument.value).positional
+                    if expanded is None:
+                        positional_unknown = True
+                    else:
+                        positional_values.extend(expanded)
+                else:
+                    positional_values.append(self._binding(argument))
+
+        positional_names = signature.positional
+        if positional_unknown:
+            for parameter_name in positional_names:
+                bindings[parameter_name] = _UNKNOWN_NATIVE_BINDING
+        else:
+            for parameter_name, value in zip(
+                positional_names, positional_values, strict=False
+            ):
+                bindings[parameter_name] = value
+
+        if signature.vararg is not None:
+            bindings[signature.vararg] = (
+                _UNKNOWN_NATIVE_BINDING
+                if positional_unknown
+                else _NativeBinding(
+                    positional=tuple(positional_values[len(positional_names) :])
+                )
+            )
+
+        keyword_values: dict[str, _NativeBinding] = {}
+        keyword_unpack_unknown = False
+        if node is not None:
+            for keyword in node.keywords:
+                if keyword.arg is not None:
+                    keyword_values[keyword.arg] = self._binding(keyword.value)
+                    continue
+                expanded = self._binding(keyword.value)
+                if expanded.keywords is None:
+                    keyword_unpack_unknown = True
+                else:
+                    keyword_values.update(expanded.keywords)
+
+        keyword_parameters = {
+            *signature.positional_or_keyword,
+            *signature.keyword_only,
+        }
+        extra_keywords: dict[str, _NativeBinding] = {}
+        for name, value in keyword_values.items():
+            if name in keyword_parameters:
+                bindings[name] = value
+            elif signature.kwarg is not None:
+                extra_keywords[name] = value
+        if keyword_unpack_unknown:
+            for parameter_name in keyword_parameters:
+                bindings[parameter_name] = _UNKNOWN_NATIVE_BINDING
+        if signature.kwarg is not None:
+            bindings[signature.kwarg] = (
+                _UNKNOWN_NATIVE_BINDING
+                if keyword_unpack_unknown
+                else _NativeBinding.keyword_mapping(extra_keywords)
+            )
+        return bindings
 
     def _record_assignment(self, targets: list[ast.expr], value: ast.expr) -> None:
-        backend_class = self._backend_class(value)
+        binding = self._binding(value)
         for target in targets:
             for name in _assigned_names(target):
-                if backend_class is None:
-                    self.bindings.pop(name, None)
-                else:
-                    self.bindings[name] = backend_class
+                self.bindings[name] = binding
 
     def visit_Assign(self, node: ast.Assign) -> None:
         self.visit(node.value)
@@ -348,23 +479,12 @@ class _NativeBackendWiringVisitor(ast.NodeVisitor):
         self._record_assignment([node.target], node.value)
 
     def visit_Call(self, node: ast.Call) -> None:
-        if isinstance(node.func, ast.Name):
-            parameter_names = self.function_parameters.get(node.func.id, [])
-            call_bindings: dict[str, type] = {}
-            for parameter_name, argument in zip(
-                parameter_names, node.args, strict=False
-            ):
-                backend_class = self._backend_class(argument)
-                if backend_class is not None:
-                    call_bindings[parameter_name] = backend_class
-            for keyword in node.keywords:
-                if keyword.arg in parameter_names:
-                    backend_class = self._backend_class(keyword.value)
-                    if backend_class is not None:
-                        call_bindings[keyword.arg] = backend_class
-            self.called_functions.append((node.func.id, call_bindings))
+        if isinstance(node.func, ast.Name) and node.func.id in self.function_signatures:
+            self.called_functions.append(
+                (node.func.id, self._call_bindings(node.func.id, node))
+            )
         if isinstance(node.func, ast.Name) and node.func.id in self.server_factories:
-            backend_value = next(
+            explicit_backend = next(
                 (
                     keyword.value
                     for keyword in node.keywords
@@ -372,10 +492,21 @@ class _NativeBackendWiringVisitor(ast.NodeVisitor):
                 ),
                 None,
             )
-            if backend_value is not None:
-                backend_class = self._backend_class(backend_value)
-                if backend_class is not None:
-                    self.found = backend_class
+            backend_binding = (
+                self._binding(explicit_backend)
+                if explicit_backend is not None
+                else _UNKNOWN_NATIVE_BINDING
+            )
+            if explicit_backend is None:
+                for keyword in node.keywords:
+                    if keyword.arg is None:
+                        unpacked_backend = self._binding(keyword.value).keyword_value(
+                            "backend"
+                        )
+                        if unpacked_backend is not None:
+                            backend_binding = unpacked_backend
+            if backend_binding.backend_class is not None:
+                self.found = backend_binding.backend_class
         self.generic_visit(node)
 
     # Nested definitions are different execution scopes. The caller follows only
@@ -413,19 +544,45 @@ def _find_wired_native_backend(
         for statement in tree.body
         if isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef))
     }
-    function_parameters = {
-        name: [
-            argument.arg
-            for argument in (
-                *definition.args.posonlyargs,
-                *definition.args.args,
-                *definition.args.kwonlyargs,
+    function_signatures = {
+        name: _FunctionSignature(
+            positional_only=tuple(
+                argument.arg for argument in definition.args.posonlyargs
+            ),
+            positional_or_keyword=tuple(
+                argument.arg for argument in definition.args.args
+            ),
+            keyword_only=tuple(argument.arg for argument in definition.args.kwonlyargs),
+            vararg=(definition.args.vararg.arg if definition.args.vararg else None),
+            kwarg=(definition.args.kwarg.arg if definition.args.kwarg else None),
+            defaults=tuple(
+                zip(
+                    (
+                        (
+                            *(argument.arg for argument in definition.args.posonlyargs),
+                            *(argument.arg for argument in definition.args.args),
+                        )[-len(definition.args.defaults) :]
+                        if definition.args.defaults
+                        else ()
+                    ),
+                    definition.args.defaults,
+                    strict=True,
+                )
             )
-        ]
+            + tuple(
+                (argument.arg, default)
+                for argument, default in zip(
+                    definition.args.kwonlyargs,
+                    definition.args.kw_defaults,
+                    strict=True,
+                )
+                if default is not None
+            ),
+        )
         for name, definition in function_definitions.items()
     }
     module_visitor = _NativeBackendWiringVisitor(
-        backend_classes, server_factories, function_parameters
+        backend_classes, server_factories, function_signatures
     )
     for statement in tree.body:
         if not isinstance(
@@ -441,13 +598,13 @@ def _find_wired_native_backend(
         if name in function_definitions
     ]
     if "main" in function_definitions:
-        pending_functions.append(("main", {}))
-    visited_functions: set[tuple[str, tuple[tuple[str, int], ...]]] = set()
+        pending_functions.append(("main", module_visitor._call_bindings("main")))
+    visited_functions: set[tuple[str, tuple[tuple[str, _NativeBinding], ...]]] = set()
     while pending_functions:
         function_name, call_bindings = pending_functions.pop()
         visit_key = (
             function_name,
-            tuple(sorted((name, id(value)) for name, value in call_bindings.items())),
+            tuple(sorted(call_bindings.items())),
         )
         if visit_key in visited_functions:
             continue
@@ -455,7 +612,7 @@ def _find_wired_native_backend(
         function_visitor = _NativeBackendWiringVisitor(
             backend_classes,
             server_factories,
-            function_parameters,
+            function_signatures,
             inherited_bindings={**module_visitor.bindings, **call_bindings},
         )
         for child in function_definitions[function_name].body:
