@@ -28,6 +28,29 @@ def main():
     return create_rollout_server(backend=backend)
 """
 
+INLINE_NATIVE_ENTRYPOINT = """\
+from osmosis_ai.rollout.backend.native_harbor.backend import NativeHarborBackend as Native
+from osmosis_ai.rollout.server import create_rollout_server as make_server
+
+
+def main():
+    return make_server(backend=Native())
+"""
+
+IMPORT_ONLY_ENTRYPOINT = """\
+from osmosis_ai.rollout.backend.native_harbor.backend import NativeHarborBackend
+"""
+
+UNWIRED_NATIVE_ENTRYPOINT = """\
+from osmosis_ai.rollout.backend.native_harbor.backend import NativeHarborBackend
+from osmosis_ai.rollout.server import create_rollout_server
+
+
+def main():
+    unused = NativeHarborBackend()
+    return create_rollout_server(backend=object())
+"""
+
 # No AgentWorkflow and no NativeHarborBackend -> a genuinely broken entrypoint.
 EMPTY_ENTRYPOINT = "VALUE = 1\n"
 
@@ -48,6 +71,32 @@ class TestDiscoverNativeBackend:
         )
         assert cls is not None
         assert cls.__name__ == "NativeHarborBackend"
+
+    def test_finds_inline_aliased_native_backend(self, tmp_path):
+        _make_rollout(tmp_path, "native-rollout", INLINE_NATIVE_ENTRYPOINT)
+        cls = discover_native_backend(
+            rollout="native-rollout",
+            entrypoint="main.py",
+            workspace_directory=tmp_path,
+        )
+        assert cls is not None
+        assert cls.__name__ == "NativeHarborBackend"
+
+    @pytest.mark.parametrize(
+        "source",
+        [IMPORT_ONLY_ENTRYPOINT, UNWIRED_NATIVE_ENTRYPOINT],
+        ids=["import-only", "constructed-but-not-wired"],
+    )
+    def test_none_when_native_backend_is_not_wired(self, tmp_path, source):
+        _make_rollout(tmp_path, "native-rollout", source)
+        assert (
+            discover_native_backend(
+                rollout="native-rollout",
+                entrypoint="main.py",
+                workspace_directory=tmp_path,
+            )
+            is None
+        )
 
     def test_none_for_non_native(self, tmp_path):
         _make_rollout(tmp_path, "empty-rollout", EMPTY_ENTRYPOINT)
@@ -84,6 +133,16 @@ class TestValidateRolloutBackendNative:
             entrypoint="main.py",
             command_label="Test",
         )
+
+    def test_import_only_native_backend_fails_preflight(self, tmp_path):
+        _make_rollout(tmp_path, "native-rollout", IMPORT_ONLY_ENTRYPOINT)
+        with pytest.raises(CLIError, match="preflight failed"):
+            validate_rollout_backend(
+                workspace_directory=tmp_path,
+                rollout="native-rollout",
+                entrypoint="main.py",
+                command_label="Test",
+            )
 
     def test_neither_workflow_nor_native_raises(self, tmp_path):
         _make_rollout(tmp_path, "empty-rollout", EMPTY_ENTRYPOINT)

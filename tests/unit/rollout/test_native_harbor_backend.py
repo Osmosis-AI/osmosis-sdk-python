@@ -443,17 +443,43 @@ class TestExecute:
             await backend.execute(_request(), on_wf, on_gr)
         assert on_wf.call_args.args[0].err_category == RolloutErrorCategory.AGENT_ERROR
 
-    async def test_grader_callback_failure_does_not_propagate(self, monkeypatch):
-        # A failing grader callback must NOT escape execute(): app.py's fallback
-        # would otherwise re-fire both callbacks and break fire-exactly-once.
+    async def test_grader_callback_failure_propagates_after_trial(self, monkeypatch):
+        # Once the callback's own HTTP retries are exhausted, execute() must
+        # surface the failure so app.py can run its final notification fallback.
         _patch_trial(monkeypatch, result=_trial_result(rewards={"reward": 1.0}))
         backend = NativeHarborBackend()
         on_wf = AsyncMock()
         on_gr = AsyncMock(side_effect=RuntimeError("controller down"))
         with _ctx():
-            await backend.execute(_request(), on_wf, on_gr)  # must not raise
+            with pytest.raises(RuntimeError, match="controller down"):
+                await backend.execute(_request(), on_wf, on_gr)
         on_wf.assert_awaited_once()
         on_gr.assert_awaited_once()
+
+    async def test_failed_verification_hook_callback_retries_after_trial(
+        self, monkeypatch
+    ):
+        result = _trial_result(rewards={"reward": 1.0})
+
+        async def _submit(queue: Any, trial_config: Any) -> Any:
+            hook = next(
+                callback
+                for event, callbacks in queue._hooks.items()
+                if event.value == "verification-start"
+                for callback in callbacks
+            )
+            await hook(
+                SimpleNamespace(trial_name=trial_config.trial_name, result=result)
+            )
+            return result
+
+        monkeypatch.setattr(bmod.TrialQueue, "submit", _submit)
+        on_wf = AsyncMock(side_effect=[RuntimeError("temporary outage"), None])
+
+        with _ctx():
+            await NativeHarborBackend().execute(_request(), on_wf)
+
+        assert on_wf.await_count == 2
 
     async def test_single_step_workflow_callback_precedes_verifier_completion(
         self, monkeypatch

@@ -267,6 +267,7 @@ class NativeHarborBackend(ExecutionBackend):
         self._pending[trial_name] = pending
         trial_result: TrialResult | None = None
         setup_error: Exception | None = None
+        callback_error: Exception | None = None
         try:
             try:
                 task_cfg = self.task_resolver(request)
@@ -288,16 +289,17 @@ class NativeHarborBackend(ExecutionBackend):
             # start. Multi-step verification is interleaved with agent work, so its
             # workflow callback intentionally waits for the final trial result.
             if not pending.workflow_complete_called:
-                workflow_result = self._build_workflow_result(
-                    pending,
-                    trial_result,
-                    setup_error=setup_error,
+                workflow_result = (
+                    pending.workflow_result
+                    or self._build_workflow_result(
+                        pending, trial_result, setup_error=setup_error
+                    )
                 )
                 pending.workflow_result = workflow_result
-                pending.workflow_complete_called = True
-                await self._safe_callback(
+                callback_error = await self._try_callback(
                     on_workflow_complete, workflow_result, request.id, "workflow"
                 )
+                pending.workflow_complete_called = callback_error is None
 
             workflow_result = pending.workflow_result or ExecutionResult(
                 status=RolloutStatus.FAILURE,
@@ -308,9 +310,10 @@ class NativeHarborBackend(ExecutionBackend):
                 grader_result = self._build_grader_result(
                     request, workflow_result, trial_result
                 )
-                await self._safe_callback(
+                grader_callback_error = await self._try_callback(
                     on_grader_complete, grader_result, request.id, "grader"
                 )
+                callback_error = callback_error or grader_callback_error
 
             relocated = self._relocate_trial_artifacts(request.id)
             successful = bool(
@@ -324,24 +327,35 @@ class NativeHarborBackend(ExecutionBackend):
                 and self.cleanup_successful_trials
             ):
                 self._cleanup_trial(trial_name)
+            if callback_error is not None:
+                # The server owns the final failure-notification path. Raising only
+                # after outputs are safe avoids aborting Harbor mid-trial while still
+                # guaranteeing that an unacknowledged callback is not silently lost.
+                raise callback_error
         finally:
             self._pending.pop(trial_name, None)
 
     @staticmethod
-    async def _safe_callback(
+    async def _try_callback(
         callback: ResultCallback, result: ExecutionResult, rollout_id: str, label: str
-    ) -> None:
-        """Swallow callback errors: a propagating one re-fires both callbacks in
-        app.py, breaking fire-exactly-once."""
+    ) -> Exception | None:
+        """Attempt a controller callback without aborting an in-flight Harbor trial.
+
+        Traingate callbacks are idempotent by rollout id. A failed hook delivery can
+        therefore be retried after the trial, and a final failure must escape to the
+        server's fallback instead of leaving the controller waiting forever.
+        """
         try:
             await callback(result)
-        except Exception:
+        except Exception as exc:
             logger.error(
                 "Native %s callback for rollout %s failed: %s",
                 label,
                 rollout_id,
                 traceback.format_exc(),
             )
+            return exc
+        return None
 
     async def _on_verification_started(self, event: TrialHookEvent) -> None:
         pending = self._pending.get(event.trial_name)
@@ -359,13 +373,13 @@ class NativeHarborBackend(ExecutionBackend):
 
         result = self._build_workflow_result(pending, event.result)
         pending.workflow_result = result
-        pending.workflow_complete_called = True
-        await self._safe_callback(
+        callback_error = await self._try_callback(
             pending.on_workflow_complete,
             result,
             pending.request.id,
             "workflow",
         )
+        pending.workflow_complete_called = callback_error is None
 
     def _build_workflow_result(
         self,

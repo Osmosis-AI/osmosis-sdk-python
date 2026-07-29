@@ -9,6 +9,7 @@ remote training run or evaluation run.
 
 from __future__ import annotations
 
+import ast
 import hashlib
 import importlib.machinery
 import importlib.util
@@ -291,32 +292,163 @@ def load_workflow(
     return workflow_cls, workflow_config, entrypoint_module, None
 
 
+def _assigned_names(target: ast.expr) -> list[str]:
+    if isinstance(target, ast.Name):
+        return [target.id]
+    if isinstance(target, (ast.Tuple, ast.List)):
+        return [name for item in target.elts for name in _assigned_names(item)]
+    return []
+
+
+class _NativeBackendWiringVisitor(ast.NodeVisitor):
+    """Find ``create_rollout_server(backend=<native instance>)`` in one scope."""
+
+    def __init__(
+        self,
+        backend_classes: dict[str, type],
+        server_factories: set[str],
+        inherited_bindings: dict[str, type] | None = None,
+    ) -> None:
+        self.backend_classes = backend_classes
+        self.server_factories = server_factories
+        self.bindings = dict(inherited_bindings or {})
+        self.found: type | None = None
+
+    def _backend_class(self, expression: ast.expr) -> type | None:
+        if isinstance(expression, ast.Name):
+            return self.bindings.get(expression.id)
+        if isinstance(expression, ast.Call) and isinstance(expression.func, ast.Name):
+            return self.backend_classes.get(expression.func.id)
+        return None
+
+    def _record_assignment(self, targets: list[ast.expr], value: ast.expr) -> None:
+        backend_class = self._backend_class(value)
+        for target in targets:
+            for name in _assigned_names(target):
+                if backend_class is None:
+                    self.bindings.pop(name, None)
+                else:
+                    self.bindings[name] = backend_class
+
+    def visit_Assign(self, node: ast.Assign) -> None:
+        self.visit(node.value)
+        self._record_assignment(node.targets, node.value)
+
+    def visit_AnnAssign(self, node: ast.AnnAssign) -> None:
+        if node.value is None:
+            return
+        self.visit(node.value)
+        self._record_assignment([node.target], node.value)
+
+    def visit_NamedExpr(self, node: ast.NamedExpr) -> None:
+        self.visit(node.value)
+        self._record_assignment([node.target], node.value)
+
+    def visit_Call(self, node: ast.Call) -> None:
+        if isinstance(node.func, ast.Name) and node.func.id in self.server_factories:
+            backend_value = next(
+                (
+                    keyword.value
+                    for keyword in node.keywords
+                    if keyword.arg == "backend"
+                ),
+                None,
+            )
+            if backend_value is not None:
+                backend_class = self._backend_class(backend_value)
+                if backend_class is not None:
+                    self.found = backend_class
+        self.generic_visit(node)
+
+    # Nested definitions are different execution scopes. ``discover_native_backend``
+    # explicitly inspects the module scope and the entrypoint's ``main`` function.
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+        return
+
+    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+        return
+
+    def visit_ClassDef(self, node: ast.ClassDef) -> None:
+        return
+
+
+def _find_wired_native_backend(
+    module: types.ModuleType,
+    entrypoint_path: Path,
+    native_backend_base: type,
+    server_factory: Any,
+) -> type | None:
+    backend_classes = {
+        name: value
+        for name, value in vars(module).items()
+        if isinstance(value, type) and issubclass(value, native_backend_base)
+    }
+    server_factories = {
+        name for name, value in vars(module).items() if value is server_factory
+    }
+    if not backend_classes or not server_factories:
+        return None
+
+    tree = ast.parse(entrypoint_path.read_text(encoding="utf-8"), entrypoint_path)
+    module_visitor = _NativeBackendWiringVisitor(backend_classes, server_factories)
+    for statement in tree.body:
+        if not isinstance(
+            statement, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
+        ):
+            module_visitor.visit(statement)
+    if module_visitor.found is not None:
+        return module_visitor.found
+
+    for statement in tree.body:
+        if isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef)) and (
+            statement.name == "main"
+        ):
+            main_visitor = _NativeBackendWiringVisitor(
+                backend_classes,
+                server_factories,
+                inherited_bindings=module_visitor.bindings,
+            )
+            for child in statement.body:
+                main_visitor.visit(child)
+            if main_visitor.found is not None:
+                return main_visitor.found
+    return None
+
+
 def discover_native_backend(
     rollout: str,
     entrypoint: str,
     *,
     workspace_directory: Path | None = None,
 ) -> type | None:
-    """Return the ``NativeHarborBackend`` class declared by the entrypoint, else
-    ``None``. Native rollouts carry no Python Grader (reward comes from the
-    harbor task's verifier), so submit preflight uses this to skip the Grader
-    requirement. A load failure returns ``None`` (surfaced by the workflow path).
+    """Return the native backend class wired into ``create_rollout_server``.
+
+    Native rollouts carry no Python Grader, so submit preflight uses this to skip
+    the Grader requirement. Merely importing ``NativeHarborBackend`` is not enough:
+    the entrypoint must construct it and pass that value as the server's ``backend``.
+    A load or static-analysis failure returns ``None`` and is surfaced by the normal
+    workflow preflight path.
     """
     try:
         from osmosis_ai.rollout.backend.native_harbor.backend import (
             NativeHarborBackend,
         )
+        from osmosis_ai.rollout.server import create_rollout_server
 
         mod = _load_rollout_module(
             rollout, entrypoint, workspace_directory=workspace_directory
         )
+        _, entrypoint_path = _resolve_rollout_entrypoint(
+            rollout, entrypoint, workspace_directory=workspace_directory
+        )
+        return _find_wired_native_backend(
+            mod,
+            entrypoint_path,
+            NativeHarborBackend,
+            create_rollout_server,
+        )
     except Exception:
         return None
-
-    for value in vars(mod).values():
-        if isinstance(value, type) and issubclass(value, NativeHarborBackend):
-            return value
-    return None
 
 
 def auto_discover_grader(module_name: str) -> tuple[type | None, Any]:
