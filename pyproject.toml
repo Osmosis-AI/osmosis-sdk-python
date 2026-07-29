@@ -26,9 +26,9 @@ dependencies = [
     # requests 2.33.0. Lower bounds only, so they can still float up.
     "python-dotenv>=1.2.2,<2.0.0",
     "requests>=2.33.0,<3.0.0",
-    # >=1.84.0 is the security floor: it patches the proxy auth-bypass /
-    # SSTI / SQLi / RCE advisories (GHSA-4xpc-pv4p-pm3w and siblings).
-    "litellm>=1.84.0,<2.0.0",
+    # 1.91.1 is the tested compatibility floor and includes the proxy
+    # auth-bypass / SSTI / SQLi / RCE fixes from the earlier 1.84.0 floor.
+    "litellm>=1.91.1,<2.0.0",
     # LiteLLM's tool-call path imports orjson at runtime, but only declares it
     # through its larger proxy extra.
     "orjson>=3.11.6,<4.0",

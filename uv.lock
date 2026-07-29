@@ -1990,7 +1990,7 @@ requires-dist = [
     { name = "harbor", extras = ["daytona"], specifier = ">=0.20.0,<0.21" },
     { name = "httpx", specifier = ">=0.25.0,<1.0.0" },
     { name = "keyring", specifier = ">=25.0.0" },
-    { name = "litellm", specifier = ">=1.84.0,<2.0.0" },
+    { name = "litellm", specifier = ">=1.91.1,<2.0.0" },
     { name = "mcp", specifier = ">=1.28.1" },
     { name = "openai-agents", extras = ["litellm"], specifier = ">=0.18.1,<0.19" },
     { name = "orjson", specifier = ">=3.11.6,<4.0" },
