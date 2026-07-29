@@ -298,6 +298,35 @@ class TestAgentConfig:
         ac = backend._build_agent_config(_request(agent_timeout_sec=42.0), _ctx())
         assert ac.override_timeout_sec == 42.0
 
+    def test_agent_setup_timeout_stored_and_forwarded(self):
+        backend = NativeHarborBackend(agent_setup_timeout_sec=180.5)
+
+        ac = backend._build_agent_config(_request(), _ctx())
+
+        assert backend.agent_setup_timeout_sec == 180.5
+        assert ac.override_setup_timeout_sec == 180.5
+
+    def test_agent_setup_timeout_is_separate_from_run_timeout(self):
+        backend = NativeHarborBackend(agent_setup_timeout_sec=180.0)
+
+        ac = backend._build_agent_config(
+            _request(agent_timeout_sec=42.0),
+            _ctx(),
+        )
+
+        assert ac.override_setup_timeout_sec == 180.0
+        assert ac.override_timeout_sec == 42.0
+
+    @pytest.mark.parametrize(
+        "invalid_timeout",
+        [0.0, -0.1, float("inf"), float("nan")],
+    )
+    def test_agent_setup_timeout_must_be_positive_and_finite(
+        self, invalid_timeout: float
+    ):
+        with pytest.raises(ValueError, match="agent_setup_timeout_sec must be > 0"):
+            NativeHarborBackend(agent_setup_timeout_sec=invalid_timeout)
+
 
 class TestRewardPicking:
     def test_named_channel(self):

@@ -41,6 +41,7 @@ from osmosis_ai.rollout.server import create_rollout_server
 
 backend = NativeHarborBackend(
     agent_name="terminus-2",   # the default; in-process, training-safe
+    agent_setup_timeout_sec=300, # agent setup/install only; not the run timeout
     max_concurrent=4,          # one Harbor Trial (often a container) per rollout
 )
 app = create_rollout_server(backend=backend)   # required module-level ASGI app
@@ -106,6 +107,7 @@ All arguments are keyword-only ([backend.py](../osmosis_ai/rollout/backend/nativ
 | `agent_import_path` | `None` | `"module:Class"` for a user-implemented `BaseAgent`. **Mutually exclusive** with `agent_name`. |
 | `agent_kwargs` | `None` | Harbor agent constructor kwargs. In-process SDK wiring overlays identity fields; installed agents consume their declared CLI/ENV options. |
 | `agent_env` | `None` | Extra env for an installed/CLI agent (base layer; SDK `OPENAI_*` overlays). |
+| `agent_setup_timeout_sec` | `None` | Positive, finite timeout for Harbor's agent setup/install phase (`AgentConfig.override_setup_timeout_sec`). This is separate from the per-request agent run timeout. |
 | `model_name` | `"openai/osmosis-rollout"` | Model id passed to Harbor. Overridable per row via `metadata["harbor_model"]`. |
 | `reward_key` | `"reward"` | Which named verifier channel becomes the scalar reward (see [Reward mapping](#reward-mapping)). |
 | `trials_dir` | `Path("native_trials")` | Where Harbor writes trial directories. |
@@ -127,6 +129,8 @@ Two agent kinds are wired differently, both **at the config layer** — the agen
 Any agent addressed by `agent_import_path` (a **custom agent**) is passed through untouched — only the SDK identity wiring is overlaid on top of your `agent_kwargs` / `agent_env`. The terminus-2 summarize defaults ([Append-only trajectories](#append-only-trajectories-training-caveat)) apply to the built-in default agent only.
 
 Installed agents also receive `agent_kwargs`, matching Harbor's `AgentConfig` contract. Harbor consumes agent-specific options declared by those agents (for example Cursor's `pricing` / `reasoning_effort`); endpoint and credential identity still come from the SDK-overlaid `agent_env` values below.
+
+`agent_setup_timeout_sec` controls only Harbor's setup/install phase for each Trial. The controller-provided `ExecutionRequest.agent_timeout_sec` remains the separate agent **run** timeout: the backend maps setup to `AgentConfig.override_setup_timeout_sec` and run to `AgentConfig.override_timeout_sec` without one replacing the other.
 
 ### Model endpoint injection
 

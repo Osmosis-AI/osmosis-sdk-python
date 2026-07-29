@@ -5,6 +5,7 @@ backend; only the task and model vary per rollout via metadata."""
 import importlib
 import json
 import logging
+import math
 import shutil
 import traceback
 from collections.abc import Callable
@@ -198,6 +199,7 @@ class NativeHarborBackend(ExecutionBackend):
         agent_import_path: str | None = None,
         agent_kwargs: dict[str, Any] | None = None,
         agent_env: dict[str, str] | None = None,
+        agent_setup_timeout_sec: float | None = None,
         model_name: str = DEFAULT_MODEL_NAME,
         reward_key: str = DEFAULT_REWARD_KEY,
         trials_dir: Path | str = Path("native_trials"),
@@ -217,10 +219,15 @@ class NativeHarborBackend(ExecutionBackend):
             raise ValueError("set agent_name or agent_import_path, not both")
         if agent_name is None and agent_import_path is None:
             agent_name = DEFAULT_AGENT_NAME
+        if agent_setup_timeout_sec is not None and (
+            not math.isfinite(agent_setup_timeout_sec) or agent_setup_timeout_sec <= 0
+        ):
+            raise ValueError("agent_setup_timeout_sec must be > 0 and finite")
         self.agent_name = agent_name
         self.agent_import_path = agent_import_path
         self.agent_kwargs = agent_kwargs
         self.agent_env = agent_env
+        self.agent_setup_timeout_sec = agent_setup_timeout_sec
         self.model_name = model_name
         self.reward_key = reward_key
         self.trials_dir: Path = Path(trials_dir)
@@ -639,6 +646,8 @@ class NativeHarborBackend(ExecutionBackend):
             kwargs=kwargs,
             env=env,
         )
+        if self.agent_setup_timeout_sec is not None:
+            agent_cfg.override_setup_timeout_sec = self.agent_setup_timeout_sec
         if request.agent_timeout_sec is not None:
             agent_cfg.override_timeout_sec = request.agent_timeout_sec
         return agent_cfg
