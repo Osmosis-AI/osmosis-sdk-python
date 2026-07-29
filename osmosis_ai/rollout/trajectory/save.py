@@ -136,6 +136,32 @@ async def save_trajectories(
     artifact_root: Path | None = None,
 ) -> None:
     """Save the rollout's sample as an ATIF document. Never raises."""
+    await _save_trajectories_with_status(
+        rollout_id=rollout_id,
+        result=result,
+        request_label=request_label,
+        request_metadata=request_metadata,
+        request_extra_fields=request_extra_fields,
+        report=report,
+        artifact_root=artifact_root,
+    )
+
+
+async def _save_trajectories_with_status(
+    *,
+    rollout_id: str,
+    result: ExecutionResult,
+    request_label: str | None = None,
+    request_metadata: dict[str, Any] | None = None,
+    request_extra_fields: dict[str, Any] | None = None,
+    report: TrajectoryReport | None = None,
+    artifact_root: Path | None = None,
+) -> bool:
+    """Save a trajectory and report success without propagating failures.
+
+    Native Harbor uses the status to decide whether its source trial is safe to
+    delete. Other backends keep the public best-effort ``save_trajectories`` API.
+    """
     try:
         await _save(
             rollout_id=rollout_id,
@@ -146,12 +172,14 @@ async def save_trajectories(
             report=report,
             artifact_root=artifact_root or default_artifact_root(),
         )
+        return True
     except Exception:
         logger.warning(
             "Failed to save trajectories for rollout %s (best-effort)",
             rollout_id,
             exc_info=True,
         )
+        return False
 
 
 async def _save(

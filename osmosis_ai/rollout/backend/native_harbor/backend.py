@@ -42,6 +42,7 @@ from osmosis_ai.rollout.context import (
     RolloutContext,
     get_rollout_context,
 )
+from osmosis_ai.rollout.trajectory.save import _save_trajectories_with_status
 from osmosis_ai.rollout.types import (
     ExecutionRequest,
     ExecutionResult,
@@ -306,20 +307,37 @@ class NativeHarborBackend(ExecutionBackend):
                 err_message="Trial ended before the agent result was available",
                 err_category=RolloutErrorCategory.AGENT_ERROR,
             )
+            result_to_persist = workflow_result
             if on_grader_complete is not None:
                 grader_result = self._build_grader_result(
                     request, workflow_result, trial_result
                 )
+                result_to_persist = grader_result
                 grader_callback_error = await self._try_callback(
                     on_grader_complete, grader_result, request.id, "grader"
                 )
                 callback_error = callback_error or grader_callback_error
 
-            relocated = self._relocate_trial_artifacts(request.id)
             successful = bool(
                 trial_result is not None
                 and getattr(trial_result, "exception_info", None) is None
             )
+            if successful and result_to_persist.trajectory_document is not None:
+                # The server writes the final document after execute() returns so it
+                # can overlay controller metrics. Persist a provisional, already
+                # validated/redacted copy first; if that fails, keep Harbor's source
+                # trial instead of deleting the only durable ATIF document.
+                persisted = await _save_trajectories_with_status(
+                    rollout_id=request.id,
+                    result=result_to_persist,
+                    request_label=request.label,
+                    request_metadata=request.metadata,
+                    artifact_root=self.artifact_root,
+                )
+                if not persisted:
+                    pending.preserve_trial = True
+
+            relocated = self._relocate_trial_artifacts(request.id)
             if (
                 successful
                 and relocated

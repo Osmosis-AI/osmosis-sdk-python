@@ -37,6 +37,16 @@ def main():
     return make_server(backend=Native())
 """
 
+QUALIFIED_NATIVE_ENTRYPOINT = """\
+import osmosis_ai.rollout.backend.native_harbor as native_harbor
+import osmosis_ai.rollout.server as server
+
+
+def main():
+    backend = native_harbor.NativeHarborBackend()
+    return server.create_rollout_server(backend=backend)
+"""
+
 HELPER_NATIVE_ENTRYPOINT = """\
 from osmosis_ai.rollout.backend.native_harbor.backend import NativeHarborBackend
 from osmosis_ai.rollout.server import create_rollout_server
@@ -63,6 +73,40 @@ def build_app(backend):
 def main():
     backend = NativeHarborBackend()
     return build_app(backend)
+"""
+
+DESTRUCTURED_NATIVE_ENTRYPOINT = """\
+from osmosis_ai.rollout.backend.native_harbor.backend import NativeHarborBackend
+from osmosis_ai.rollout.server import create_rollout_server
+
+
+def main():
+    ignored, backend = [object(), NativeHarborBackend()]
+    return create_rollout_server(backend=backend)
+"""
+
+CALLED_LAMBDA_ENTRYPOINT = """\
+from osmosis_ai.rollout.backend.native_harbor.backend import NativeHarborBackend
+from osmosis_ai.rollout.server import create_rollout_server
+
+
+build_app = lambda backend: create_rollout_server(backend=backend)
+
+
+def main():
+    return build_app(NativeHarborBackend())
+"""
+
+UNCALLED_LAMBDA_ENTRYPOINT = """\
+from osmosis_ai.rollout.backend.native_harbor.backend import NativeHarborBackend
+from osmosis_ai.rollout.server import create_rollout_server
+
+
+unused_build_app = lambda: create_rollout_server(backend=NativeHarborBackend())
+
+
+def main():
+    return None
 """
 
 VAR_POSITIONAL_HELPER_ENTRYPOINT = """\
@@ -208,11 +252,23 @@ class TestDiscoverNativeBackend:
         assert cls is not None
         assert cls.__name__ == "NativeHarborBackend"
 
+    def test_finds_qualified_native_backend(self, tmp_path):
+        _make_rollout(tmp_path, "native-rollout", QUALIFIED_NATIVE_ENTRYPOINT)
+        cls = discover_native_backend(
+            rollout="native-rollout",
+            entrypoint="main.py",
+            workspace_directory=tmp_path,
+        )
+        assert cls is not None
+        assert cls.__name__ == "NativeHarborBackend"
+
     @pytest.mark.parametrize(
         "source",
         [
             HELPER_NATIVE_ENTRYPOINT,
             HELPER_ARGUMENT_ENTRYPOINT,
+            DESTRUCTURED_NATIVE_ENTRYPOINT,
+            CALLED_LAMBDA_ENTRYPOINT,
             VAR_POSITIONAL_HELPER_ENTRYPOINT,
             NEGATIVE_VAR_POSITIONAL_HELPER_ENTRYPOINT,
             VAR_KEYWORD_HELPER_ENTRYPOINT,
@@ -221,6 +277,8 @@ class TestDiscoverNativeBackend:
         ids=[
             "helper-constructs-backend",
             "main-passes-backend",
+            "destructured-backend",
+            "called-lambda",
             "var-positional-forwarding",
             "negative-var-positional-forwarding",
             "var-keyword-forwarding",
@@ -243,6 +301,7 @@ class TestDiscoverNativeBackend:
             IMPORT_ONLY_ENTRYPOINT,
             UNWIRED_NATIVE_ENTRYPOINT,
             DEAD_HELPER_ENTRYPOINT,
+            UNCALLED_LAMBDA_ENTRYPOINT,
             OVERRIDDEN_DEFAULT_ENTRYPOINT,
             DYNAMIC_KEYWORDS_ENTRYPOINT,
         ],
@@ -250,6 +309,7 @@ class TestDiscoverNativeBackend:
             "import-only",
             "constructed-but-not-wired",
             "unreachable-helper",
+            "uncalled-lambda",
             "overridden-default",
             "dynamic-keywords",
         ],

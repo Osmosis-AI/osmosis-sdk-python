@@ -581,6 +581,7 @@ class TestConcurrencyAndLifecycle:
     ):
         _patch_trial(monkeypatch, result=_trial_result(rewards={"reward": 1.0}))
         backend = NativeHarborBackend(trials_dir=tmp_path)
+        backend.artifact_root = tmp_path / "saved"
         trajectory_path = tmp_path / "native-ROLL" / "agent" / "trajectory.json"
         trajectory_path.parent.mkdir(parents=True)
         trajectory_path.write_text(json.dumps(_native_trajectory()))
@@ -600,6 +601,25 @@ class TestConcurrencyAndLifecycle:
         }
         assert extra["command"] == ["agent", "--token", "[REDACTED]"]
         assert extra["safe"] == "kept"
+        assert (backend.artifact_root / "ROLL" / "trajectory.json").is_file()
+        assert not trajectory_path.exists()
+
+    async def test_native_atif_persistence_failure_preserves_successful_trial(
+        self, monkeypatch, tmp_path
+    ):
+        _patch_trial(monkeypatch, result=_trial_result(rewards={"reward": 1.0}))
+        backend = NativeHarborBackend(trials_dir=tmp_path)
+        trajectory_path = tmp_path / "native-ROLL" / "agent" / "trajectory.json"
+        trajectory_path.parent.mkdir(parents=True)
+        trajectory_path.write_text(json.dumps(_native_trajectory()))
+        persist = AsyncMock(return_value=False)
+        monkeypatch.setattr(bmod, "_save_trajectories_with_status", persist)
+
+        with _ctx():
+            await backend.execute(_request(), AsyncMock(), AsyncMock())
+
+        assert trajectory_path.exists()
+        persist.assert_awaited_once()
 
     async def test_invalid_native_atif_preserves_successful_trial(
         self, monkeypatch, tmp_path

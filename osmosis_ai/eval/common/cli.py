@@ -293,14 +293,6 @@ def load_workflow(
     return workflow_cls, workflow_config, entrypoint_module, None
 
 
-def _assigned_names(target: ast.expr) -> list[str]:
-    if isinstance(target, ast.Name):
-        return [target.id]
-    if isinstance(target, (ast.Tuple, ast.List)):
-        return [name for item in target.elts for name in _assigned_names(item)]
-    return []
-
-
 @dataclass(frozen=True)
 class _NativeBinding:
     """Statically known native-backend values carried through helper calls."""
@@ -343,22 +335,45 @@ class _NativeBackendWiringVisitor(ast.NodeVisitor):
         self,
         backend_classes: dict[str, type],
         server_factories: set[str],
+        module_symbols: dict[str, Any],
+        native_backend_base: type,
+        server_factory: Any,
         function_signatures: dict[str, _FunctionSignature],
         inherited_bindings: dict[str, _NativeBinding] | None = None,
     ) -> None:
         self.backend_classes = backend_classes
         self.server_factories = server_factories
+        self.module_symbols = module_symbols
+        self.native_backend_base = native_backend_base
+        self.server_factory = server_factory
         self.function_signatures = function_signatures
         self.bindings = dict(inherited_bindings or {})
         self.found: type | None = None
         self.called_functions: list[tuple[str, dict[str, _NativeBinding]]] = []
 
+    def _qualified_symbol(self, expression: ast.expr) -> Any:
+        if isinstance(expression, ast.Name):
+            if expression.id in self.bindings:
+                return None
+            return self.module_symbols.get(expression.id)
+        if isinstance(expression, ast.Attribute):
+            parent = self._qualified_symbol(expression.value)
+            if isinstance(parent, types.ModuleType):
+                return vars(parent).get(expression.attr)
+        return None
+
     def _binding(self, expression: ast.expr) -> _NativeBinding:
         if isinstance(expression, ast.Name):
             return self.bindings.get(expression.id, _UNKNOWN_NATIVE_BINDING)
-        if isinstance(expression, ast.Call) and isinstance(expression.func, ast.Name):
-            backend_class = self.backend_classes.get(expression.func.id)
-            if backend_class is not None:
+        if isinstance(expression, ast.Call):
+            backend_class = (
+                self.backend_classes.get(expression.func.id)
+                if isinstance(expression.func, ast.Name)
+                else self._qualified_symbol(expression.func)
+            )
+            if isinstance(backend_class, type) and issubclass(
+                backend_class, self.native_backend_base
+            ):
                 return _NativeBinding(backend_class=backend_class)
         if isinstance(expression, (ast.List, ast.Tuple)):
             return _NativeBinding(
@@ -460,11 +475,58 @@ class _NativeBackendWiringVisitor(ast.NodeVisitor):
             )
         return bindings
 
+    def _record_target(self, target: ast.expr, binding: _NativeBinding) -> None:
+        if isinstance(target, ast.Name):
+            self.bindings[target.id] = binding
+            return
+        if isinstance(target, ast.Starred):
+            self._record_target(target.value, binding)
+            return
+        if not isinstance(target, (ast.Tuple, ast.List)):
+            return
+
+        values = binding.positional
+        starred = [
+            index
+            for index, item in enumerate(target.elts)
+            if isinstance(item, ast.Starred)
+        ]
+        if values is None or len(starred) > 1:
+            for item in target.elts:
+                self._record_target(item, _UNKNOWN_NATIVE_BINDING)
+            return
+        if not starred:
+            if len(values) != len(target.elts):
+                values = tuple(_UNKNOWN_NATIVE_BINDING for _ in target.elts)
+            for item, value in zip(target.elts, values, strict=True):
+                self._record_target(item, value)
+            return
+
+        star_index = starred[0]
+        trailing_count = len(target.elts) - star_index - 1
+        if len(values) < len(target.elts) - 1:
+            for item in target.elts:
+                self._record_target(item, _UNKNOWN_NATIVE_BINDING)
+            return
+        for item, value in zip(
+            target.elts[:star_index], values[:star_index], strict=True
+        ):
+            self._record_target(item, value)
+        star_end = len(values) - trailing_count if trailing_count else len(values)
+        self._record_target(
+            target.elts[star_index],
+            _NativeBinding(positional=values[star_index:star_end]),
+        )
+        if trailing_count:
+            for item, value in zip(
+                target.elts[-trailing_count:], values[-trailing_count:], strict=True
+            ):
+                self._record_target(item, value)
+
     def _record_assignment(self, targets: list[ast.expr], value: ast.expr) -> None:
         binding = self._binding(value)
         for target in targets:
-            for name in _assigned_names(target):
-                self.bindings[name] = binding
+            self._record_target(target, binding)
 
     def visit_Assign(self, node: ast.Assign) -> None:
         self.visit(node.value)
@@ -485,7 +547,10 @@ class _NativeBackendWiringVisitor(ast.NodeVisitor):
             self.called_functions.append(
                 (node.func.id, self._call_bindings(node.func.id, node))
             )
-        if isinstance(node.func, ast.Name) and node.func.id in self.server_factories:
+        is_server_factory = (
+            isinstance(node.func, ast.Name) and node.func.id in self.server_factories
+        ) or self._qualified_symbol(node.func) is self.server_factory
+        if is_server_factory:
             explicit_backend = next(
                 (
                     keyword.value
@@ -519,6 +584,9 @@ class _NativeBackendWiringVisitor(ast.NodeVisitor):
     def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
         return
 
+    def visit_Lambda(self, node: ast.Lambda) -> None:
+        return
+
     def visit_ClassDef(self, node: ast.ClassDef) -> None:
         return
 
@@ -537,15 +605,29 @@ def _find_wired_native_backend(
     server_factories = {
         name for name, value in vars(module).items() if value is server_factory
     }
-    if not backend_classes or not server_factories:
-        return None
+    module_symbols = dict(vars(module))
 
     tree = ast.parse(entrypoint_path.read_text(encoding="utf-8"), entrypoint_path)
-    function_definitions = {
+    function_definitions: dict[
+        str, ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda
+    ] = {
         statement.name: statement
         for statement in tree.body
         if isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef))
     }
+    for statement in tree.body:
+        if isinstance(statement, ast.Assign) and isinstance(
+            statement.value, ast.Lambda
+        ):
+            for target in statement.targets:
+                if isinstance(target, ast.Name):
+                    function_definitions[target.id] = statement.value
+        elif (
+            isinstance(statement, ast.AnnAssign)
+            and isinstance(statement.target, ast.Name)
+            and isinstance(statement.value, ast.Lambda)
+        ):
+            function_definitions[statement.target.id] = statement.value
     function_signatures = {
         name: _FunctionSignature(
             positional_only=tuple(
@@ -584,7 +666,12 @@ def _find_wired_native_backend(
         for name, definition in function_definitions.items()
     }
     module_visitor = _NativeBackendWiringVisitor(
-        backend_classes, server_factories, function_signatures
+        backend_classes,
+        server_factories,
+        module_symbols,
+        native_backend_base,
+        server_factory,
+        function_signatures,
     )
     for statement in tree.body:
         if not isinstance(
@@ -614,10 +701,17 @@ def _find_wired_native_backend(
         function_visitor = _NativeBackendWiringVisitor(
             backend_classes,
             server_factories,
+            module_symbols,
+            native_backend_base,
+            server_factory,
             function_signatures,
             inherited_bindings={**module_visitor.bindings, **call_bindings},
         )
-        for child in function_definitions[function_name].body:
+        definition = function_definitions[function_name]
+        children = (
+            [definition.body] if isinstance(definition, ast.Lambda) else definition.body
+        )
+        for child in children:
             function_visitor.visit(child)
         if function_visitor.found is not None:
             return function_visitor.found
