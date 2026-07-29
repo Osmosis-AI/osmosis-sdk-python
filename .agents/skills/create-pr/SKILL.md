@@ -39,7 +39,7 @@ For multi-module changes, the title may include **1-3 module brackets total**:
 
 ### Allowed modules
 
-`reward`, `rollout`, `server`, `cli`, `auth`, `eval`, `misc`, `ci`, `doc`
+`rollout`, `server`, `cli`, `auth`, `eval`, `misc`, `ci`, `doc`
 
 Pick the module that best matches the primary area of change. If the diff touches multiple modules meaningfully, stack **up to three** brackets in descending importance: `[cli][rollout] ...`.
 

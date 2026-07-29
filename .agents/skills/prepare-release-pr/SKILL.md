@@ -22,13 +22,15 @@ Accept release versions as `X.Y.Z` or `X.Y.ZrcN`, without a leading `v` in sourc
 Run the following preflight checks:
 
 ```bash
+VERSION=0.3.0rc1  # Replace with the target version.
+TARGET_REF=origin/main
 git status --short --branch
-git fetch origin main --tags
+git fetch origin --tags
 git tag --list --sort=-version:refname
-gh release list --limit 100
+gh release view "v$VERSION"
 ```
 
-Default the target commit to `origin/main`. Confirm that the target version does not already have a published tag or release. If the requested version is ambiguous, ask the user to specify it before editing files.
+Default `TARGET_REF` to `origin/main`. The `gh release view` command must report that the target release does not exist; stop if it finds one. Also confirm that the target tag does not exist locally. If the requested version is ambiguous, ask the user to specify it before editing files.
 
 ## 2. Select the Comparison Tag
 
@@ -50,13 +52,15 @@ Examples:
 
 Report the selected comparison tag before changing files so the choice is visible and auditable.
 
+Set `PREVIOUS_TAG` to the selected tag and confirm that it is a published GitHub release with `gh release view "$PREVIOUS_TAG"`.
+
 ## 3. Build a Release Inventory
 
 Inspect the complete comparison range rather than relying on commit subjects alone:
 
 ```bash
-git log --oneline <previous-tag>..origin/main
-git diff --stat <previous-tag>..origin/main
+git log --oneline "$PREVIOUS_TAG..$TARGET_REF"
+git diff --stat "$PREVIOUS_TAG..$TARGET_REF"
 ```
 
 Use the PR numbers in the commit log to inspect associated PR titles, labels, descriptions, and relevant diffs with `gh pr view`. Verify unclear PR titles against their actual behavior. Include only changes contained in the selected range; do not ask GitHub to generate the changelog text.
