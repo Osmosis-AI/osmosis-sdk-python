@@ -79,6 +79,20 @@ def main():
     return forward_positional(*arguments)
 """
 
+NEGATIVE_VAR_POSITIONAL_HELPER_ENTRYPOINT = """\
+from osmosis_ai.rollout.backend.native_harbor.backend import NativeHarborBackend
+from osmosis_ai.rollout.server import create_rollout_server
+
+
+def forward_positional(*args):
+    return create_rollout_server(backend=args[-1])
+
+
+def main():
+    arguments = (object(), NativeHarborBackend())
+    return forward_positional(*arguments)
+"""
+
 VAR_KEYWORD_HELPER_ENTRYPOINT = """\
 from osmosis_ai.rollout.backend.native_harbor.backend import NativeHarborBackend
 from osmosis_ai.rollout.server import create_rollout_server
@@ -200,6 +214,7 @@ class TestDiscoverNativeBackend:
             HELPER_NATIVE_ENTRYPOINT,
             HELPER_ARGUMENT_ENTRYPOINT,
             VAR_POSITIONAL_HELPER_ENTRYPOINT,
+            NEGATIVE_VAR_POSITIONAL_HELPER_ENTRYPOINT,
             VAR_KEYWORD_HELPER_ENTRYPOINT,
             DEFAULT_ARGUMENT_ENTRYPOINT,
         ],
@@ -207,6 +222,7 @@ class TestDiscoverNativeBackend:
             "helper-constructs-backend",
             "main-passes-backend",
             "var-positional-forwarding",
+            "negative-var-positional-forwarding",
             "var-keyword-forwarding",
             "default-argument",
         ],

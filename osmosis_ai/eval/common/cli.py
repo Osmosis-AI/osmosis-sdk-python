@@ -373,15 +373,17 @@ class _NativeBackendWiringVisitor(ast.NodeVisitor):
             return _NativeBinding.keyword_mapping(values)
         if isinstance(expression, ast.Subscript):
             container = self._binding(expression.value)
-            if isinstance(expression.slice, ast.Constant):
-                index = expression.slice.value
-                if isinstance(index, int) and container.positional is not None:
-                    try:
-                        return container.positional[index]
-                    except IndexError:
-                        return _UNKNOWN_NATIVE_BINDING
-                if isinstance(index, str):
-                    return container.keyword_value(index) or _UNKNOWN_NATIVE_BINDING
+            try:
+                index = ast.literal_eval(expression.slice)
+            except (TypeError, ValueError):
+                return _UNKNOWN_NATIVE_BINDING
+            if isinstance(index, int) and container.positional is not None:
+                try:
+                    return container.positional[index]
+                except IndexError:
+                    return _UNKNOWN_NATIVE_BINDING
+            if isinstance(index, str):
+                return container.keyword_value(index) or _UNKNOWN_NATIVE_BINDING
         return _UNKNOWN_NATIVE_BINDING
 
     def _call_bindings(
