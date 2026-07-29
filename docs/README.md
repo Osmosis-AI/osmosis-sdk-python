@@ -37,4 +37,5 @@ The package (`osmosis_ai/`) is organized into top-level domains. See [architectu
 ## See also
 
 - [CONTRIBUTING.md](../CONTRIBUTING.md) — dev environment, tests, lint, type checking, PR conventions
+- [CHANGELOG.md](../CHANGELOG.md) — SDK changes by release
 - [docs.osmosis.ai/cli/command-reference](https://docs.osmosis.ai/cli/command-reference) — the user-facing command reference

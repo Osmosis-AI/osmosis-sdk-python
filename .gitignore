@@ -56,8 +56,13 @@ todo.md
 /AGENTS.md
 **/superpowers/
 
-.claude/
-.cursor/
+# Agent-specific local state; shared skills live in .agents/skills.
+.claude/*
+!.claude/skills/
+!.claude/skills/**
+.cursor/*
+!.cursor/skills/
+!.cursor/skills/**
 .gemini/
 .mcp.json
 

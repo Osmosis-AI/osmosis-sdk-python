@@ -1,0 +1,4 @@
+interface:
+  display_name: "Prepare Release PR"
+  short_description: "Prepare a version bump and concise changelog PR"
+  default_prompt: "Use $prepare-release-pr to prepare the next SDK release PR with a concise changelog."
