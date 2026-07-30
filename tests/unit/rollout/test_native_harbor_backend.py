@@ -555,37 +555,16 @@ class TestExecute:
 
         assert events == ["workflow", "verifier-finished", "grader"]
 
-    async def test_retry_config_defers_workflow_callback_to_final_attempt(
-        self, monkeypatch
-    ):
-        events: list[str] = []
-        result = _trial_result(rewards={"reward": 1.0})
-
-        async def _submit(queue: Any, trial_config: Any) -> Any:
-            hook = next(
-                callback
-                for event, callbacks in queue._hooks.items()
-                if event.value == "verification-start"
-                for callback in callbacks
-            )
-            await hook(
-                SimpleNamespace(trial_name=trial_config.trial_name, result=result)
-            )
-            events.append("attempt-hook")
-            return result
-
-        async def _workflow_callback(result: Any) -> None:
-            events.append("workflow")
-
-        monkeypatch.setattr(bmod.TrialQueue, "submit", _submit)
-        backend = NativeHarborBackend(retry_config=bmod.RetryConfig(max_retries=1))
-        with _ctx():
-            await backend.execute(_request(), _workflow_callback)
-
-        assert events == ["attempt-hook", "workflow"]
-
 
 class TestConcurrencyAndLifecycle:
+    def test_retry_config_is_not_a_constructor_argument(self):
+        with pytest.raises(TypeError, match="retry_config"):
+            NativeHarborBackend(retry_config=bmod.RetryConfig(max_retries=1))  # type: ignore[call-arg]
+
+    def test_trial_queue_retries_are_hard_disabled(self):
+        backend = NativeHarborBackend()
+        assert backend._queue._retry_config.max_retries == 0
+
     def test_unbounded_concurrency_rejected(self):
         with pytest.raises(ValueError, match="max_concurrent must be >= 1"):
             NativeHarborBackend(max_concurrent=0)

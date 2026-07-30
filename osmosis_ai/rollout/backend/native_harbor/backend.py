@@ -206,7 +206,6 @@ class NativeHarborBackend(ExecutionBackend):
         task_resolver: TaskResolver | None = None,
         environment_config: HarborEnvironmentConfig | None = None,
         max_concurrent: int = DEFAULT_MAX_CONCURRENT,
-        retry_config: RetryConfig | None = None,
         cleanup_successful_trials: bool = True,
     ) -> None:
         if max_concurrent < 1:
@@ -241,9 +240,9 @@ class NativeHarborBackend(ExecutionBackend):
         self._max_concurrency = max_concurrent
         self.artifact_root: Path = default_artifact_root()
         self._pending: dict[str, _PendingNativeTrial] = {}
-        self._retry_config: RetryConfig = retry_config or RetryConfig()
         self._queue = TrialQueue(
-            n_concurrent=max_concurrent, retry_config=self._retry_config
+            n_concurrent=max_concurrent,
+            retry_config=RetryConfig(max_retries=0),
         )
         self._queue.on_verification_started(self._on_verification_started)
 
@@ -283,7 +282,7 @@ class NativeHarborBackend(ExecutionBackend):
                 trial_cfg = self._build_trial_config(
                     request, task_cfg, agent_cfg, trial_name
                 )
-                # submit() = Trial.create + run under the queue's semaphore (+ retry).
+                # submit() = Trial.create + run under the queue's semaphore.
                 trial_result = await self._queue.submit(trial_cfg)
             except Exception as exc:
                 setup_error = exc
@@ -385,11 +384,6 @@ class NativeHarborBackend(ExecutionBackend):
     async def _on_verification_started(self, event: TrialHookEvent) -> None:
         pending = self._pending.get(event.trial_name)
         if pending is None or pending.workflow_complete_called:
-            return
-        if self._retry_config.max_retries > 0:
-            # The event belongs to an attempt, not necessarily the attempt that
-            # TrialQueue ultimately returns. Defer to the final result so a retry
-            # cannot leave the controller holding a stale trajectory.
             return
         if event.result.step_results is not None:
             # Multi-step trials verify after every agent step. Firing here would

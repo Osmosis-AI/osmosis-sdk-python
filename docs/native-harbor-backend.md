@@ -114,7 +114,6 @@ All arguments are keyword-only ([backend.py](../osmosis_ai/rollout/backend/nativ
 | `task_resolver` | `resolve_task` | Override `ExecutionRequest -> TaskConfig` resolution. |
 | `environment_config` | Harbor `EnvironmentConfig()` | Harbor environment selector (Docker/Daytona/SkyPilot). |
 | `max_concurrent` | `8` | In-flight Trial cap (`>= 1`). Each Trial is often a container, so this bounds host load. |
-| `retry_config` | `None` | Harbor `RetryConfig` passed to the `TrialQueue`. |
 | `cleanup_successful_trials` | `True` | Delete a successful trial only after its ATIF has been validated and Harbor-collected artifacts have been copied out. |
 
 ## Agents
@@ -173,7 +172,7 @@ The SDK does not scan the sandbox or decide which task files are artifacts. User
 
 ## Concurrency and trial directories
 
-`max_concurrent` bounds in-flight Trials through a `TrialQueue` semaphore; because each Trial is typically a container, leaving this unbounded would exhaust the host (so `max_concurrent < 1` is rejected). With no retries, a single-step trial fires the workflow callback when verification starts and the grader callback when the trial finishes. Multi-step verification is interleaved with agent execution, and a retried attempt may not be the final attempt, so those configurations fire the workflow callback from the final result instead. Successful trials are removed only after artifact relocation and durable provisional ATIF persistence; failed trials and successful trials whose outputs could not be safely preserved are kept for inspection. Harbor reports in-trial failures via `result.exception_info` rather than by raising, and the backend always fires the grader callback even on failure so the trainer never hangs waiting on a missing reward.
+`max_concurrent` bounds in-flight Trials through a `TrialQueue` semaphore; because each Trial is typically a container, leaving this unbounded would exhaust the host (so `max_concurrent < 1` is rejected). Harbor trial retries are hard-disabled: each rollout id owns exactly one Trial attempt and its linear model session. A single-step trial fires the workflow callback when verification starts and the grader callback when the trial finishes; multi-step trials defer the workflow callback to the final result. Successful trials are removed only after artifact relocation and durable provisional ATIF persistence; failed trials and successful trials whose outputs could not be safely preserved are kept for inspection. Harbor reports in-trial failures via `result.exception_info` rather than by raising, and the backend always fires the grader callback even on failure so the trainer never hangs waiting on a missing reward.
 
 ## Submit preflight
 
