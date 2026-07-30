@@ -269,10 +269,20 @@ def resolve_task(request: ExecutionRequest) -> TaskConfig:
 
     if md.get(GIT_URL_KEY):
         task_path = md.get(GIT_TASK_PATH_KEY)
+        git_commit_id = md.get(GIT_COMMIT_KEY)
+        if not git_commit_id or (
+            isinstance(git_commit_id, str) and not git_commit_id.strip()
+        ):
+            logger.warning(
+                "Native Harbor rollout %s uses an unpinned git task; set "
+                "metadata[%r] to an immutable commit SHA",
+                request.id,
+                GIT_COMMIT_KEY,
+            )
         return TaskConfig(
             git_url=md[GIT_URL_KEY],
             path=Path(task_path) if task_path else None,
-            git_commit_id=md.get(GIT_COMMIT_KEY),
+            git_commit_id=git_commit_id,
         )
 
     name, _, ref = str(raw).partition("@")
@@ -281,7 +291,17 @@ def resolve_task(request: ExecutionRequest) -> TaskConfig:
             f"metadata[{HARBOR_TASK_KEY!r}]={raw!r} must be a local path "
             "(./, /, ~), a git form (set git_url), or a package 'org/name[@ref]'"
         )
-    return TaskConfig(name=name, ref=ref or "latest")
+    effective_ref = ref or "latest"
+    if effective_ref == "latest":
+        logger.warning(
+            "Native Harbor rollout %s uses package task %r with mutable ref "
+            "%r; pin metadata[%r] to an immutable sha256 digest",
+            request.id,
+            name,
+            effective_ref,
+            HARBOR_TASK_KEY,
+        )
+    return TaskConfig(name=name, ref=effective_ref)
 
 
 def _categorize_exception(exc: Exception) -> RolloutErrorCategory:
