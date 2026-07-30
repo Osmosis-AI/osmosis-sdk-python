@@ -16,6 +16,7 @@ from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
+from harbor.agents.factory import AgentFactory
 from harbor.models.environment_type import EnvironmentType
 from harbor.models.task.config import MCPServerConfig
 from harbor.models.trial.config import (
@@ -331,7 +332,39 @@ class TestAgentConfig:
             "OPENAI_BASE_URL": "http://ctrl:8080",
             "OPENAI_API_KEY": "sk-test",
         }
-        assert ac.kwargs == {"version": "1.18.9"}
+        assert ac.kwargs == {
+            "opencode_config": {
+                "provider": {"openai": {"options": {"baseURL": "http://ctrl:8080"}}}
+            },
+            "version": "1.18.9",
+        }
+
+    def test_opencode_generated_config_uses_scoped_controller_url(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ):
+        monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
+        with pytest.warns(UserWarning, match="opencode.*eval-only"):
+            backend = NativeHarborBackend(
+                agent=AgentConfig(
+                    name="opencode",
+                    kwargs={
+                        "opencode_config": {
+                            "experimental": {"continue_loop_on_deny": True}
+                        }
+                    },
+                ),
+                allow_unverified_agent=True,
+            )
+
+        config = backend._build_agent_config(_request(), _ctx())
+        agent = AgentFactory.create_agent_from_config(config, logs_dir=tmp_path)
+        command = agent._build_register_config_command()  # type: ignore[attr-defined]
+
+        assert command is not None
+        assert '"baseURL": "http://ctrl:8080"' in command
+        assert '"continue_loop_on_deny": true' in command
 
     def test_agent_kwargs_passthrough_for_installed(self):
         with pytest.warns(UserWarning, match="opencode.*eval-only"):
@@ -343,7 +376,13 @@ class TestAgentConfig:
 
         ac = backend._build_agent_config(_request(), _ctx())
 
-        assert ac.kwargs == {"reasoning_effort": "high", "version": "1.18.9"}
+        assert ac.kwargs == {
+            "reasoning_effort": "high",
+            "opencode_config": {
+                "provider": {"openai": {"options": {"baseURL": "http://ctrl:8080"}}}
+            },
+            "version": "1.18.9",
+        }
 
     def test_opencode_requires_explicit_opt_in(self):
         with pytest.raises(ValueError, match="allow_unverified_agent=True"):

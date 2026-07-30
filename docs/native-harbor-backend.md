@@ -242,7 +242,7 @@ sensitive environment values.
 |---|---|
 | `AgentConfig.name` / `import_path` | Preserve; they select the binding. Setting both is rejected. |
 | `model_name` | Overlay: dataset row `harbor_model` > explicit constructor `model_name` > `agent.model_name` > SDK default. |
-| `kwargs` | Preserve, then overlay binding-owned `api_base`, `llm_kwargs.api_key`, `extra_body.stream=False`, and pinned CLI version where applicable. |
+| `kwargs` | Preserve, then overlay binding-owned `api_base`, `llm_kwargs.api_key`, `extra_body.stream=False`, OpenCode `provider.openai.options.baseURL`, and pinned CLI version where applicable. |
 | `env` | Preserve non-identity variables. User-supplied binding identity/auth-selection keys are rejected rather than silently overwritten. Direct bindings receive the controller endpoint/key; translated bindings receive the gateway origin plus an opaque, short-lived route token. |
 | `skills`, `mcp_servers`, `include_logs`, `exclude_logs`, `extra_allowed_hosts` | Preserve. |
 | `override_setup_timeout_sec` | Preserve unless `agent_setup_timeout_sec` explicitly overlays it. |
@@ -268,7 +268,7 @@ named in the error.
 |---|---|---:|---:|---|
 | `terminus-2` | Chat Completions via `kwargs["api_base"]` and `kwargs["llm_kwargs"]["api_key"]` | ✓ | ✓ | Summarization is off by default. |
 | `oracle` | No model endpoint | ✓ | ✗ | Emits a construction warning; use it to validate datasets and verifiers. |
-| `opencode` | Chat Completions via `OPENAI_BASE_URL` / `OPENAI_API_KEY`; CLI `1.18.9` | opt-in | ✗ | Requires `allow_unverified_agent=True` and an `openai/...` model; Harbor base-URL behavior and trajectory linearity still need E2E validation. |
+| `opencode` | Chat Completions via binding-owned `provider.openai.options.baseURL` plus `OPENAI_BASE_URL` / `OPENAI_API_KEY`; CLI `1.18.9` | opt-in | ✗ | Requires `allow_unverified_agent=True` and an `openai/...` model; trajectory linearity still needs E2E validation. |
 | `codex` | OpenAI Responses at `/v1/responses`, translated to Chat Completions; bearer route token; CLI `0.146.0` | ✓ | ✗ | Requires `gateway_base_url`; emits an eval-only warning. Real-infrastructure streaming, tools, accounting, and append-only behavior remain E2E dependencies. |
 | `claude-code` | Anthropic Messages at `/v1/messages`, translated to Chat Completions; `x-api-key` route token; CLI `2.1.220` | ✓ | ✗ | Requires `gateway_base_url`; emits an eval-only warning and masks Anthropic/OAuth plus Bedrock, Vertex, and Foundry selectors. Active host Bedrock mode is rejected so it cannot bypass the gateway. The same E2E dependencies remain. |
 | `custom-chat-completions` | Chat Completions kwargs for `AgentConfig.import_path` | opt-in | ✗ | Explicit binding plus `allow_unverified_agent=True`; emits an eval-only warning. |
@@ -289,8 +289,11 @@ remains the separate agent **run** timeout and overlays
 
 Endpoint and key come from the ambient `RolloutContext` ([context.py](../osmosis_ai/rollout/context.py)) — `chat_completions_url` and `api_key` — which the controller supplies per rollout (read from `OSMOSIS_CHAT_COMPLETIONS_URL` / `OSMOSIS_API_KEY` on a container host).
 
-Chat Completions bindings receive that endpoint directly. For Codex and Claude
-Code, the backend instead registers an opaque route token for the duration of
+Chat Completions bindings receive that endpoint directly. OpenCode also receives
+the endpoint in its binding-owned `provider.openai.options.baseURL` config because
+Harbor 0.20 generates `opencode.json` from host environment state that cannot see
+the rollout-scoped `AgentConfig.env`. For Codex and Claude Code, the backend
+instead registers an opaque route token for the duration of
 `execute()` and gives the agent the configured gateway origin. Codex sends the
 token as bearer auth to `/v1/responses`; Claude Code sends it as `x-api-key` to
 `/v1/messages`. The same FastAPI app resolves the token, uses LiteLLM to
