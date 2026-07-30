@@ -96,4 +96,5 @@ def test_quickstart_json_reports_the_interactive_requirement(capsys) -> None:
 
     assert exit_code == 1
     assert envelope["error"]["code"] == "INTERACTIVE_REQUIRED"
+    assert "cannot run with --json or --plain" in envelope["error"]["message"]
     assert MANUAL_SETUP_URL in envelope["error"]["message"]

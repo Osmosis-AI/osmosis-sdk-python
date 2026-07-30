@@ -14,6 +14,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+import typer
 
 import osmosis_ai.platform.cli.quickstart as quickstart_module
 from osmosis_ai.cli.console import Console
@@ -24,8 +25,16 @@ from osmosis_ai.cli.output.context import (
     override_output_context,
 )
 from osmosis_ai.platform.api.models import QuickstartStatus, WorkspaceSummary
-from osmosis_ai.platform.auth.platform_client import PlatformAPIError
+from osmosis_ai.platform.auth.platform_client import (
+    AuthenticationExpiredError,
+    PlatformAPIError,
+)
 from tests.unit.platform.cli.conftest import strip_ansi
+
+# Captured at import so the spinner-rendering test can restore what the fixtures
+# stub out and drive the real Rich spinner.
+_REAL_OUTPUT_STATUS = OutputContext.status
+_REAL_RUN_GIT_CLONE = quickstart_module._run_git_clone
 
 PLATFORM_URL = "https://platform.osmosis.ai"
 FULL_NAME = "acme/acme-workspace"
@@ -132,6 +141,7 @@ class Prompts:
         self.texts: dict[str, list[str | None]] = {}
         self.select_calls: list[tuple[str, list[Any]]] = []
         self.text_calls: list[tuple[str, str, str | None]] = []
+        self.rejections: list[tuple[str, str, Any]] = []
 
     def select_list(self, message: str, items: Any, **_kwargs: Any) -> Any:
         titles = [getattr(item, "title", item) for item in items]
@@ -149,11 +159,19 @@ class Prompts:
         validate: Any = None,
         instruction: str | None = None,
     ) -> str | None:
-        self.text_calls.append((message, default, instruction))
+        """Answer the prompt, re-asking while ``validate`` rejects the answer."""
         answers = self.texts.get(message)
-        if not answers:
-            pytest.fail(f"unexpected text prompt: {message}")
-        return answers.pop(0)
+        while True:
+            self.text_calls.append((message, default, instruction))
+            if not answers:
+                pytest.fail(f"unexpected text prompt: {message}")
+            answer = answers.pop(0)
+            if answer is None or validate is None:
+                return answer
+            outcome = validate(answer)
+            if outcome is True:
+                return answer
+            self.rejections.append((message, answer, outcome))
 
 
 @pytest.fixture(autouse=True)
@@ -277,15 +295,15 @@ def _cloned_wizard(wizard: Any, tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize(
-    ("fmt", "interactive"),
+    ("fmt", "interactive", "cause"),
     [
-        (OutputFormat.rich, False),
-        (OutputFormat.json, True),
-        (OutputFormat.plain, True),
+        (OutputFormat.rich, False, "needs an interactive terminal"),
+        (OutputFormat.json, True, "cannot run with --json or --plain"),
+        (OutputFormat.plain, True, "cannot run with --json or --plain"),
     ],
 )
 def test_requires_an_interactive_terminal(
-    wizard: Any, fmt: OutputFormat, interactive: bool
+    wizard: Any, fmt: OutputFormat, interactive: bool, cause: str
 ) -> None:
     _install_client(wizard)
 
@@ -296,6 +314,7 @@ def test_requires_an_interactive_terminal(
         quickstart_module.run_quickstart()
 
     assert excinfo.value.code == "INTERACTIVE_REQUIRED"
+    assert cause in str(excinfo.value)
     assert "https://docs.osmosis.ai/platform/onboarding" in str(excinfo.value)
 
 
@@ -454,6 +473,56 @@ def test_reprompts_when_the_path_holds_a_different_repo(
     ]
 
 
+def test_clones_into_an_existing_empty_directory(wizard: Any, tmp_path: Path) -> None:
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    _install_client(wizard)
+    wizard.prompts.texts[CLONE_QUESTION] = ["./empty"]
+    wizard.prompts.selects[TRANSPORT_QUESTION] = ["https"]
+    _train_answers(wizard)
+
+    result = quickstart_module.run_quickstart(cwd=tmp_path)
+
+    assert wizard.clone_calls == [
+        (f"https://github.com/{FULL_NAME}.git", empty.resolve())
+    ]
+    assert len(wizard.prompts.text_calls) == 2  # clone path once, then the task
+    assert "already exists" not in strip_ansi(wizard.stderr.getvalue())
+    assert result.resource is not None
+    assert result.resource["workspace_directory"] == str(empty.resolve())
+
+
+def test_clone_spinner_survives_a_bracketed_destination(
+    wizard: Any, tmp_path: Path
+) -> None:
+    """Render the real spinner: a path Rich would read as markup must not crash."""
+    wizard.monkeypatch.setattr(OutputContext, "status", _REAL_OUTPUT_STATUS)
+    wizard.monkeypatch.setattr(quickstart_module, "_run_git_clone", _REAL_RUN_GIT_CLONE)
+    wizard.monkeypatch.setattr(
+        quickstart_module.shutil, "which", lambda _name: "/usr/bin/git"
+    )
+    commands: list[list[str]] = []
+
+    def _run(command: list[str], **_kwargs: Any) -> Any:
+        commands.append(command)
+        return SimpleNamespace(returncode=0, stderr="")
+
+    wizard.monkeypatch.setattr(quickstart_module.subprocess, "run", _run)
+    _install_client(wizard)
+    wizard.prompts.texts[CLONE_QUESTION] = ["./weird[/x]dir"]
+    wizard.prompts.selects[TRANSPORT_QUESTION] = ["https"]
+    _train_answers(wizard)
+
+    result = quickstart_module.run_quickstart(cwd=tmp_path)
+
+    target = (tmp_path / "weird[" / "x]dir").resolve()
+    assert commands == [
+        ["git", "clone", f"https://github.com/{FULL_NAME}.git", str(target)]
+    ]
+    assert result.resource is not None
+    assert result.resource["workspace_directory"] == str(target)
+
+
 def test_workspace_is_inferred_from_the_surrounding_clone(
     wizard: Any, tmp_path: Path
 ) -> None:
@@ -564,6 +633,33 @@ def test_explore_intent_prints_docs_links_only(wizard: Any, tmp_path: Path) -> N
     assert "paste the prompt below" not in output
 
 
+def test_a_blank_task_is_rejected_until_described(wizard: Any, tmp_path: Path) -> None:
+    _cloned_wizard(wizard, tmp_path)
+    wizard.prompts.selects[INTENT_QUESTION] = ["train"]
+    wizard.prompts.texts[TASK_QUESTION] = ["", "   ", "support ticket triage"]
+
+    result = quickstart_module.run_quickstart(cwd=tmp_path)
+
+    assert wizard.prompts.rejections == [
+        (TASK_QUESTION, "", "Describe your task in a few words."),
+        (TASK_QUESTION, "   ", "Describe your task in a few words."),
+    ]
+    assert result.resource is not None
+    assert result.resource["task"] == "support ticket triage"
+    assert result.resource["agent_prompt"] == TRAIN_PROMPT
+
+
+def test_cancelling_the_intent_prompt_exits_130(wizard: Any, tmp_path: Path) -> None:
+    _cloned_wizard(wizard, tmp_path)
+    wizard.prompts.selects[INTENT_QUESTION] = [None]
+
+    with pytest.raises(typer.Exit) as excinfo:
+        quickstart_module.run_quickstart(cwd=tmp_path)
+
+    assert excinfo.value.exit_code == 130
+    assert "Cancelled." in _out(wizard)
+
+
 def test_prompt_is_copied_to_the_clipboard_when_available(
     wizard: Any, tmp_path: Path
 ) -> None:
@@ -611,6 +707,59 @@ def test_completion_failure_warns_and_still_prints_the_prompt(
     warning = strip_ansi(wizard.stderr.getvalue())
     assert "was not notified" in warning
     assert "osmosis quickstart" in warning
+
+
+def test_an_expired_session_relogs_in_and_retries_the_workspace_list(
+    wizard: Any, tmp_path: Path
+) -> None:
+    _cloned_wizard(wizard, tmp_path)
+    client = _install_client(
+        wizard, list_errors=[AuthenticationExpiredError("session has expired")]
+    )
+    _train_answers(wizard)
+    new_credentials = SimpleNamespace(
+        user=SimpleNamespace(email="new@osmosis.ai"),
+        is_expired=lambda: False,
+    )
+    logins: list[str] = []
+    saved: list[Any] = []
+
+    def _device_login() -> Any:
+        logins.append("device")
+        return (
+            SimpleNamespace(user=SimpleNamespace(email="new@osmosis.ai")),
+            new_credentials,
+        )
+
+    wizard.monkeypatch.setattr(quickstart_module, "device_login", _device_login)
+    wizard.monkeypatch.setattr(
+        quickstart_module, "save_credentials", lambda creds: saved.append(creds)
+    )
+
+    result = quickstart_module.run_quickstart(cwd=tmp_path)
+
+    assert logins == ["device"]
+    assert saved == [new_credentials]
+    assert client.credentials == [CREDENTIALS, new_credentials]
+    assert result.resource is not None
+    assert result.resource["intent"] == "train"
+
+    output = _out(wizard)
+    assert "saved session is no longer valid" in output
+    assert "authenticated as new@osmosis.ai" in output
+
+
+def test_an_account_without_workspaces_points_at_the_platform(
+    wizard: Any, tmp_path: Path
+) -> None:
+    _install_client(wizard, workspaces=[])
+
+    with pytest.raises(CLIError) as excinfo:
+        quickstart_module.run_quickstart(cwd=tmp_path)
+
+    assert excinfo.value.code == "NOT_FOUND"
+    assert PLATFORM_URL in str(excinfo.value)
+    assert wizard.prompts.select_calls == []
 
 
 def test_missing_credentials_trigger_the_browser_login(
