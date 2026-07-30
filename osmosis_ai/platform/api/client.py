@@ -27,6 +27,7 @@ from .models import (
     PaginatedLoraModels,
     PaginatedRollouts,
     PaginatedTrainingRuns,
+    QuickstartStatus,
     RunDownloadFile,
     RunDownloadManifest,
     RunDownloadURLBatch,
@@ -855,3 +856,37 @@ class OsmosisClient:
             git_identity=git_identity,
         )
         return PaginatedDevRolloutServers.from_dict(data)
+
+    # ── Quickstart ────────────────────────────────────────────────
+    # Scoped by an explicit organization_id rather than a git identity: the
+    # wizard runs before a workspace clone exists.
+
+    def get_quickstart_status(
+        self,
+        organization_id: str,
+        *,
+        credentials: Credentials | None = None,
+    ) -> QuickstartStatus:
+        qs = urlencode({"organizationId": organization_id})
+        data = platform_request(
+            f"/api/cli/quickstart?{qs}",
+            credentials=credentials,
+            require_git_repo=False,
+        )
+        return QuickstartStatus.from_dict(data)
+
+    def complete_quickstart(
+        self,
+        organization_id: str,
+        intent: str,
+        *,
+        credentials: Credentials | None = None,
+    ) -> None:
+        """Record that the caller finished the quickstart wizard; idempotent."""
+        platform_request(
+            "/api/cli/quickstart",
+            method="POST",
+            data={"organizationId": organization_id, "intent": intent},
+            credentials=credentials,
+            require_git_repo=False,
+        )

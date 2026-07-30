@@ -1201,3 +1201,32 @@ class RunDownloadURLBatch:
             items=[RunDownloadURL.from_dict(item) for item in raw_items],
             expires_in=expires_in if isinstance(expires_in, int) else None,
         )
+
+
+# ── Quickstart ───────────────────────────────────────────────────
+
+
+@dataclass
+class QuickstartStatus:
+    """Setup state of one workspace, as read by the quickstart wizard.
+
+    The wire response nests the repository under ``repo``; this flattens it so
+    the wizard's poll loop reads ``status.repo_connected`` directly.
+    """
+
+    repo_connected: bool
+    repo_full_name: str | None
+    billing_ready: bool
+    completed: bool
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> QuickstartStatus:
+        repo = data.get("repo")
+        repo_data = repo if isinstance(repo, dict) else {}
+        full_name = repo_data.get("full_name")
+        return cls(
+            repo_connected=repo_data.get("connected", False),
+            repo_full_name=full_name if isinstance(full_name, str) else None,
+            billing_ready=data.get("billing_ready", False),
+            completed=data.get("completed", False),
+        )
