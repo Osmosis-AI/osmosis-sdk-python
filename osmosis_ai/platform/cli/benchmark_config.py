@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Annotated, Any, ClassVar, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.platform.cli.shared_config import (
@@ -62,6 +62,20 @@ class BenchmarkEndpointModel(_StrictSection):
     model: str
     api_key_secret: str
     extra_headers: dict[str, str] | None = None
+
+    @field_validator("extra_headers")
+    @classmethod
+    def reject_authorization_header(
+        cls, extra_headers: dict[str, str] | None
+    ) -> dict[str, str] | None:
+        if extra_headers is not None and any(
+            name.casefold() == "authorization" for name in extra_headers
+        ):
+            raise ValueError(
+                "extra_headers must not include an Authorization header; "
+                "use api_key_secret for endpoint authentication"
+            )
+        return extra_headers
 
 
 class BenchmarkHostedModel(_StrictSection):

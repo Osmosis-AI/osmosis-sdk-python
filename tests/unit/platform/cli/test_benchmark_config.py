@@ -81,6 +81,67 @@ LOG_LEVEL = "info"
     }
 
 
+@pytest.mark.parametrize(
+    "header_name",
+    ["Authorization", "authorization", "AUTHORIZATION", "aUtHoRiZaTiOn"],
+)
+def test_load_benchmark_submit_config_rejects_endpoint_authorization_header(
+    tmp_path: Path,
+    header_name: str,
+) -> None:
+    path = _write_config(
+        tmp_path / "benchmark.toml",
+        f"""
+[experiment]
+benchmark = "DeepSWE"
+
+[[agents]]
+[agents.model]
+type = "endpoint"
+base_url = "https://models.example.com/v1"
+model = "custom-model"
+api_key_secret = "CUSTOM_API_KEY"
+
+[agents.model.extra_headers]
+"{header_name}" = "Bearer literal-token"
+""",
+    )
+
+    with pytest.raises(
+        CLIError,
+        match=r"use api_key_secret for endpoint authentication",
+    ):
+        load_benchmark_submit_config(path)
+
+
+def test_load_benchmark_submit_config_accepts_non_authorization_endpoint_header(
+    tmp_path: Path,
+) -> None:
+    path = _write_config(
+        tmp_path / "benchmark.toml",
+        """
+[experiment]
+benchmark = "DeepSWE"
+
+[[agents]]
+[agents.model]
+type = "endpoint"
+base_url = "https://models.example.com/v1"
+model = "custom-model"
+api_key_secret = "CUSTOM_API_KEY"
+
+[agents.model.extra_headers]
+"X-Request-ID" = "benchmark-run"
+""",
+    )
+
+    config = load_benchmark_submit_config(path)
+
+    assert config.agents_config[0]["model"]["extra_headers"] == {
+        "X-Request-ID": "benchmark-run"
+    }
+
+
 def test_load_benchmark_submit_config_accepts_hosted_model(tmp_path: Path) -> None:
     path = _write_config(
         tmp_path / "benchmark.toml",
