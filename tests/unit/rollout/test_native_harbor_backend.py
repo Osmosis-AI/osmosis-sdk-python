@@ -304,15 +304,145 @@ class TestAgentConfig:
                 allow_unverified_agent=True,
             )
 
-    def test_claude_code_fails_fast_with_protocol_blocker(self):
+    def test_claude_code_requires_gateway_base_url(self):
         with pytest.raises(
             ValueError, match=r"Anthropic Messages.*translation gateway"
         ):
             NativeHarborBackend(agent_name="claude-code")
 
-    def test_codex_fails_fast_with_protocol_blocker(self):
+    def test_codex_requires_gateway_base_url(self):
         with pytest.raises(ValueError, match=r"OpenAI Responses.*translation gateway"):
             NativeHarborBackend(agent_name="codex")
+
+    def test_claude_code_gateway_binding_is_eval_only_and_uses_api_key_header(self):
+        with pytest.warns(UserWarning, match="claude-code.*eval-only"):
+            backend = NativeHarborBackend(
+                agent_name="claude-code",
+                gateway_base_url="http://gateway.example:8000/",
+            )
+
+        built = backend._build_agent_config(
+            _request(),
+            _ctx(),
+            gateway_token="route-token",
+        )
+
+        assert built.env == {
+            "ANTHROPIC_API_KEY": "route-token",
+            "ANTHROPIC_AUTH_TOKEN": "",
+            "ANTHROPIC_BASE_URL": "http://gateway.example:8000",
+            "ANTHROPIC_FOUNDRY_API_KEY": "",
+            "ANTHROPIC_FOUNDRY_BASE_URL": "",
+            "ANTHROPIC_FOUNDRY_RESOURCE": "",
+            "ANTHROPIC_SMALL_FAST_MODEL_AWS_REGION": "",
+            "ANTHROPIC_VERTEX_BASE_URL": "",
+            "ANTHROPIC_VERTEX_PROJECT_ID": "",
+            "AWS_ACCESS_KEY_ID": "",
+            "AWS_BEARER_TOKEN_BEDROCK": "",
+            "AWS_PROFILE": "",
+            "AWS_REGION": "",
+            "AWS_SECRET_ACCESS_KEY": "",
+            "AWS_SESSION_TOKEN": "",
+            "CLAUDE_CODE_OAUTH_TOKEN": "",
+            "CLAUDE_CODE_USE_BEDROCK": "",
+            "CLAUDE_CODE_USE_FOUNDRY": "",
+            "CLAUDE_CODE_USE_VERTEX": "",
+            "CLAUDE_FORCE_OAUTH": "0",
+            "CLOUD_ML_REGION": "",
+            "GOOGLE_APPLICATION_CREDENTIALS": "",
+            "GOOGLE_CLOUD_PROJECT": "",
+        }
+        assert built.kwargs == {"version": "2.1.220"}
+        assert "sk-test" not in built.env.values()
+
+    def test_codex_gateway_binding_is_eval_only_and_uses_bearer_token(self):
+        with pytest.warns(UserWarning, match="codex.*eval-only"):
+            backend = NativeHarborBackend(
+                agent_name="codex",
+                gateway_base_url="http://gateway.example:8000",
+            )
+
+        built = backend._build_agent_config(
+            _request(),
+            _ctx(),
+            gateway_token="route-token",
+        )
+
+        assert built.env == {
+            "CODEX_AUTH_JSON_PATH": "",
+            "CODEX_FORCE_AUTH_JSON": "0",
+            "OPENAI_API_KEY": "route-token",
+            "OPENAI_BASE_URL": "http://gateway.example:8000/v1",
+        }
+        assert built.kwargs == {"version": "0.146.0"}
+        assert "sk-test" not in built.env.values()
+
+    @pytest.mark.parametrize(
+        ("name", "value"),
+        [
+            ("CLAUDE_CODE_USE_BEDROCK", "1"),
+            ("AWS_BEARER_TOKEN_BEDROCK", "host-bedrock-token"),
+        ],
+    )
+    def test_claude_code_rejects_host_bedrock_bypass(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        name: str,
+        value: str,
+    ) -> None:
+        monkeypatch.setenv(name, value)
+
+        with pytest.raises(ValueError, match=r"host Bedrock mode.*bypass"):
+            NativeHarborBackend(
+                agent_name="claude-code",
+                gateway_base_url="http://gateway.example:8000",
+            )
+
+    @pytest.mark.parametrize(
+        "identity_key",
+        [
+            "CLAUDE_CODE_USE_BEDROCK",
+            "AWS_BEARER_TOKEN_BEDROCK",
+            "AWS_ACCESS_KEY_ID",
+            "AWS_SECRET_ACCESS_KEY",
+            "AWS_SESSION_TOKEN",
+            "AWS_PROFILE",
+            "CLAUDE_CODE_USE_VERTEX",
+            "ANTHROPIC_VERTEX_BASE_URL",
+            "GOOGLE_APPLICATION_CREDENTIALS",
+            "CLAUDE_CODE_USE_FOUNDRY",
+            "ANTHROPIC_FOUNDRY_BASE_URL",
+            "ANTHROPIC_FOUNDRY_API_KEY",
+        ],
+    )
+    def test_claude_code_rejects_scoped_bedrock_identity(
+        self, identity_key: str
+    ) -> None:
+        with pytest.raises(ValueError, match=r"owns agent\.env identity keys"):
+            NativeHarborBackend(
+                agent=AgentConfig(
+                    name="claude-code",
+                    env={identity_key: "user-owned"},
+                ),
+                gateway_base_url="http://gateway.example:8000",
+            )
+
+    def test_claude_code_rechecks_host_bedrock_mode_per_rollout(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        with pytest.warns(UserWarning, match="claude-code.*eval-only"):
+            backend = NativeHarborBackend(
+                agent_name="claude-code",
+                gateway_base_url="http://gateway.example:8000",
+            )
+        monkeypatch.setenv("CLAUDE_CODE_USE_BEDROCK", "1")
+
+        with pytest.raises(ValueError, match=r"host Bedrock mode.*bypass"):
+            backend._build_agent_config(
+                _request(),
+                _ctx(),
+                gateway_token="route-token",
+            )
 
     def test_oracle_is_eval_only_and_needs_no_model_endpoint(self):
         with pytest.warns(UserWarning, match="oracle.*eval-only"):
@@ -769,6 +899,36 @@ class TestExecute:
             == "RuntimeError"
         )
         assert on_gr.call_args.args[0].status == RolloutStatus.FAILURE
+
+    @pytest.mark.parametrize("queue_fails", [False, True])
+    async def test_gateway_route_is_active_only_for_trial_execution(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        queue_fails: bool,
+    ) -> None:
+        with pytest.warns(UserWarning, match="codex.*eval-only"):
+            backend = NativeHarborBackend(
+                agent_name="codex",
+                gateway_base_url="http://gateway.example:8000",
+            )
+        gateway = backend.translation_gateway
+        assert gateway is not None
+        captured: dict[str, Any] = {}
+
+        async def _submit(queue: Any, trial_config: Any) -> Any:
+            captured["agent"] = trial_config.agent
+            captured["active_routes"] = gateway.active_routes
+            if queue_fails:
+                raise RuntimeError("trial failed")
+            return _trial_result(rewards={"reward": 1.0})
+
+        monkeypatch.setattr(bmod.TrialQueue, "submit", _submit)
+        with _ctx():
+            await backend.execute(_request(), AsyncMock(), AsyncMock())
+
+        assert captured["active_routes"] == 1
+        assert captured["agent"].env["OPENAI_API_KEY"] != "sk-test"
+        assert gateway.active_routes == 0
 
     async def test_missing_task_is_validation_error(self, monkeypatch):
         _patch_trial(monkeypatch)

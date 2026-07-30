@@ -7,6 +7,7 @@ import importlib
 import json
 import logging
 import math
+import os
 import shutil
 import traceback
 import warnings
@@ -40,6 +41,9 @@ from osmosis_ai.rollout.backend.harbor.backend import (
     log_trial_exception,
     rewrite_url_for_docker,
     uses_local_docker_runtime,
+)
+from osmosis_ai.rollout.backend.native_harbor.gateway import (
+    NativeHarborTranslationGateway,
 )
 from osmosis_ai.rollout.context import (
     RolloutContext,
@@ -96,6 +100,11 @@ class _IdentityChannel(StrEnum):
     NONE = "none"
 
 
+_TRANSLATED_PROTOCOLS = frozenset(
+    {_AgentProtocol.OPENAI_RESPONSES, _AgentProtocol.ANTHROPIC_MESSAGES}
+)
+
+
 @dataclass(frozen=True)
 class _AgentBinding:
     name: str
@@ -150,24 +159,29 @@ _AGENT_BINDINGS: dict[str, _AgentBinding] = {
         name="codex",
         protocol=_AgentProtocol.OPENAI_RESPONSES,
         identity_channel=_IdentityChannel.OPENAI_ENV,
-        eval_supported=False,
+        eval_supported=True,
         training_supported=False,
         cli_version="0.146.0",
-        blocker=(
-            "the rollout controllers expose only OpenAI Chat Completions; an "
-            "OpenAI Responses translation gateway is required"
+        allowed_model_providers=frozenset({"openai"}),
+        warning=(
+            "The native Harbor codex binding is eval-only: its Responses traffic "
+            "is translated to Chat Completions, but its opaque context management "
+            "has not passed the append-only training E2E. Do not use it for training."
         ),
     ),
     "claude-code": _AgentBinding(
         name="claude-code",
         protocol=_AgentProtocol.ANTHROPIC_MESSAGES,
         identity_channel=_IdentityChannel.ANTHROPIC_ENV,
-        eval_supported=False,
+        eval_supported=True,
         training_supported=False,
         cli_version="2.1.220",
-        blocker=(
-            "the rollout controllers expose only OpenAI Chat Completions; an "
-            "Anthropic Messages translation gateway is required"
+        allowed_model_providers=frozenset({"openai"}),
+        warning=(
+            "The native Harbor claude-code binding is eval-only: its Messages "
+            "traffic is translated to Chat Completions, but its opaque context "
+            "management has not passed the append-only training E2E. Do not use "
+            "it for training."
         ),
     ),
     _CUSTOM_CHAT_BINDING: _AgentBinding(
@@ -363,11 +377,43 @@ def _validate_agent_kwargs(
         )
 
 
+_CLAUDE_IDENTITY_ENV_KEYS = frozenset(
+    {
+        "ANTHROPIC_AUTH_TOKEN",
+        "ANTHROPIC_BASE_URL",
+        "ANTHROPIC_API_KEY",
+        "ANTHROPIC_FOUNDRY_API_KEY",
+        "ANTHROPIC_FOUNDRY_BASE_URL",
+        "ANTHROPIC_FOUNDRY_RESOURCE",
+        "ANTHROPIC_SMALL_FAST_MODEL_AWS_REGION",
+        "ANTHROPIC_VERTEX_BASE_URL",
+        "ANTHROPIC_VERTEX_PROJECT_ID",
+        "AWS_ACCESS_KEY_ID",
+        "AWS_BEARER_TOKEN_BEDROCK",
+        "AWS_PROFILE",
+        "AWS_REGION",
+        "AWS_SECRET_ACCESS_KEY",
+        "AWS_SESSION_TOKEN",
+        "CLAUDE_CODE_OAUTH_TOKEN",
+        "CLAUDE_CODE_USE_BEDROCK",
+        "CLAUDE_CODE_USE_FOUNDRY",
+        "CLAUDE_CODE_USE_VERTEX",
+        "CLAUDE_FORCE_OAUTH",
+        "CLOUD_ML_REGION",
+        "GOOGLE_APPLICATION_CREDENTIALS",
+        "GOOGLE_CLOUD_PROJECT",
+    }
+)
+
+
 def _identity_env_keys(binding: _AgentBinding) -> frozenset[str]:
     if binding.identity_channel == _IdentityChannel.OPENAI_ENV:
-        return frozenset({"OPENAI_BASE_URL", "OPENAI_API_KEY"})
+        keys = {"OPENAI_BASE_URL", "OPENAI_API_KEY"}
+        if binding.name == "codex":
+            keys.update({"CODEX_AUTH_JSON_PATH", "CODEX_FORCE_AUTH_JSON"})
+        return frozenset(keys)
     if binding.identity_channel == _IdentityChannel.ANTHROPIC_ENV:
-        return frozenset({"ANTHROPIC_BASE_URL", "ANTHROPIC_API_KEY"})
+        return _CLAUDE_IDENTITY_ENV_KEYS
     return frozenset()
 
 
@@ -377,6 +423,26 @@ def _validate_agent_env(binding: _AgentBinding, agent_env: dict[str, str]) -> No
         raise ValueError(
             f"Native Harbor binding {binding.name!r} owns agent.env identity "
             f"keys {conflicts!r}; remove them so model traffic cannot be redirected"
+        )
+
+
+def _validate_host_auth_mode(binding: _AgentBinding) -> None:
+    if binding.name != "claude-code":
+        return
+    bedrock_signals = {
+        "CLAUDE_CODE_USE_BEDROCK": os.environ.get("CLAUDE_CODE_USE_BEDROCK", ""),
+        "AWS_BEARER_TOKEN_BEDROCK": os.environ.get("AWS_BEARER_TOKEN_BEDROCK", ""),
+    }
+    active = sorted(
+        key
+        for key, value in bedrock_signals.items()
+        if value.strip() and (key != "CLAUDE_CODE_USE_BEDROCK" or value.strip() == "1")
+    )
+    if active:
+        raise ValueError(
+            "Native Harbor binding 'claude-code' cannot use the translation "
+            f"gateway while host Bedrock mode is active via {active!r}; unset "
+            "those host variables so Messages traffic cannot bypass the gateway"
         )
 
 
@@ -480,6 +546,7 @@ class NativeHarborBackend(ExecutionBackend):
         agent_setup_timeout_sec: float | None = None,
         binding: str | None = None,
         allow_unverified_agent: bool = False,
+        gateway_base_url: str | None = None,
         model_name: str | None = None,
         reward_key: str = DEFAULT_REWARD_KEY,
         trials_dir: Path | str = Path("native_trials"),
@@ -542,6 +609,17 @@ class NativeHarborBackend(ExecutionBackend):
         )
         _validate_agent_kwargs(resolved_binding, agent_template.kwargs)
         _validate_agent_env(resolved_binding, agent_template.env)
+        _validate_host_auth_mode(resolved_binding)
+        if (
+            resolved_binding.protocol in _TRANSLATED_PROTOCOLS
+            and gateway_base_url is None
+        ):
+            raise ValueError(
+                f"Native Harbor binding {resolved_binding.name!r} speaks "
+                f"{resolved_binding.protocol.value} and requires gateway_base_url "
+                "for the translation gateway to reach the controller's Chat "
+                "Completions endpoint"
+            )
 
         effective_model_name = (
             model_name
@@ -557,6 +635,11 @@ class NativeHarborBackend(ExecutionBackend):
         self._agent_import_path = agent_import_path
         self._agent_config = agent_template
         self._binding = resolved_binding
+        self._translation_gateway = (
+            NativeHarborTranslationGateway(gateway_base_url)
+            if gateway_base_url is not None
+            else None
+        )
         self.agent_setup_timeout_sec = agent_setup_timeout_sec
         if resolved_binding.warning is not None:
             warnings.warn(resolved_binding.warning, UserWarning, stacklevel=2)
@@ -617,6 +700,15 @@ class NativeHarborBackend(ExecutionBackend):
     def binding(self) -> str:
         return self._binding.name
 
+    @property
+    def gateway_base_url(self) -> str | None:
+        gateway = self._translation_gateway
+        return gateway.base_url if gateway is not None else None
+
+    @property
+    def translation_gateway(self) -> NativeHarborTranslationGateway | None:
+        return self._translation_gateway
+
     def health(self) -> dict[str, Any]:
         return {
             "status": "ok",
@@ -642,10 +734,22 @@ class NativeHarborBackend(ExecutionBackend):
         trial_result: TrialResult | None = None
         setup_error: Exception | None = None
         callback_error: Exception | None = None
+        gateway_token: str | None = None
         try:
             try:
                 task_cfg = self.task_resolver(request)
-                agent_cfg = self._build_agent_config(request, ctx)
+                if self._binding.protocol in _TRANSLATED_PROTOCOLS:
+                    gateway = self._translation_gateway
+                    assert gateway is not None
+                    gateway_token = gateway.register(
+                        chat_completions_url=ctx.chat_completions_url,
+                        controller_api_key=ctx.api_key,
+                    )
+                agent_cfg = self._build_agent_config(
+                    request,
+                    ctx,
+                    gateway_token=gateway_token,
+                )
                 trial_cfg = self._build_trial_config(
                     request, task_cfg, agent_cfg, trial_name
                 )
@@ -740,6 +844,8 @@ class NativeHarborBackend(ExecutionBackend):
                 # guaranteeing that an unacknowledged callback is not silently lost.
                 raise callback_error
         finally:
+            if gateway_token is not None and self._translation_gateway is not None:
+                self._translation_gateway.unregister(gateway_token)
             self._pending.pop(trial_name, None)
 
     @staticmethod
@@ -1149,7 +1255,11 @@ class NativeHarborBackend(ExecutionBackend):
         )
 
     def _build_agent_config(
-        self, request: ExecutionRequest, ctx: RolloutContext
+        self,
+        request: ExecutionRequest,
+        ctx: RolloutContext,
+        *,
+        gateway_token: str | None = None,
     ) -> AgentConfig:
         md = request.metadata or {}
         agent_cfg = self._agent_config.model_copy(deep=True)
@@ -1164,6 +1274,9 @@ class NativeHarborBackend(ExecutionBackend):
         _validate_model_for_binding(self._binding, model_name)
         _validate_agent_kwargs(self._binding, agent_cfg.kwargs)
         _validate_agent_env(self._binding, agent_cfg.env)
+        # Host auth mode can change after backend construction. Re-check for each
+        # rollout so Claude can never switch to Bedrock around the gateway.
+        _validate_host_auth_mode(self._binding)
         # User passthrough is the base layer; SDK-wired values below overlay it.
         kwargs = agent_cfg.kwargs
         env = agent_cfg.env
@@ -1171,9 +1284,23 @@ class NativeHarborBackend(ExecutionBackend):
         endpoint: str | None = None
         api_key = ctx.api_key
         if self._binding.identity_channel != _IdentityChannel.NONE:
-            endpoint = ctx.chat_completions_url
-            if not endpoint:
-                raise ValueError(f"rollout {request.id!r} has no chat_completions_url")
+            if self._binding.protocol in _TRANSLATED_PROTOCOLS:
+                gateway = self._translation_gateway
+                if gateway is None or gateway_token is None:
+                    raise ValueError(
+                        f"rollout {request.id!r} has no active translation "
+                        "gateway route"
+                    )
+                endpoint = gateway.base_url
+                api_key = gateway_token
+                if self._binding.protocol == _AgentProtocol.OPENAI_RESPONSES:
+                    endpoint = f"{endpoint}/v1"
+            else:
+                endpoint = ctx.chat_completions_url
+                if not endpoint:
+                    raise ValueError(
+                        f"rollout {request.id!r} has no chat_completions_url"
+                    )
             if uses_local_docker_runtime(self._environment_config):
                 endpoint = rewrite_url_for_docker(endpoint)
 
@@ -1186,11 +1313,22 @@ class NativeHarborBackend(ExecutionBackend):
             env["OPENAI_BASE_URL"] = endpoint
             if api_key:
                 env["OPENAI_API_KEY"] = api_key
+            if self._binding.name == "codex":
+                # Mask host subscription/auth.json settings so the generated
+                # per-rollout gateway credential is always the wire identity.
+                env["CODEX_AUTH_JSON_PATH"] = ""
+                env["CODEX_FORCE_AUTH_JSON"] = "0"
         elif self._binding.identity_channel == _IdentityChannel.ANTHROPIC_ENV:
             assert endpoint is not None
+            # Scoped AgentConfig.env has the highest Harbor merge precedence.
+            # Clear every supported alternate provider selector/credential so
+            # neither persistent environment config nor the installed CLI can
+            # route around this rollout's gateway token.
+            env.update(dict.fromkeys(_CLAUDE_IDENTITY_ENV_KEYS, ""))
             env["ANTHROPIC_BASE_URL"] = endpoint
             if api_key:
                 env["ANTHROPIC_API_KEY"] = api_key
+            env["CLAUDE_FORCE_OAUTH"] = "0"
         elif self._binding.identity_channel == _IdentityChannel.KWARGS:
             assert endpoint is not None
             # Precedence low -> high: default-agent kwargs, user kwargs, SDK wiring.
