@@ -141,7 +141,7 @@ def _get_device_name() -> str:
         return "Unknown"
 
 
-def _copy_to_clipboard(text: str) -> bool:
+def copy_to_clipboard(text: str) -> bool:
     """Try to copy text to system clipboard. Returns True on success."""
     system = platform.system()
     try:
@@ -421,7 +421,7 @@ def device_login(timeout: float = 900.0) -> tuple[LoginResult, Credentials]:
         device_code_resp = request_device_code()
 
     console.print()
-    copied = _copy_to_clipboard(device_code_resp.user_code)
+    copied = copy_to_clipboard(device_code_resp.user_code)
     if copied:
         console.print("Your one-time code (copied to clipboard):", style="dim")
     else:

@@ -1,0 +1,642 @@
+"""Tests for the `osmosis quickstart` wizard handler.
+
+The agent prompts and the wizard's user-facing questions are a cross-repo
+contract (workspace-template skills, docs), so they are asserted verbatim here.
+"""
+
+from __future__ import annotations
+
+import sys
+from contextlib import contextmanager
+from io import StringIO
+from pathlib import Path
+from types import SimpleNamespace
+from typing import Any
+
+import pytest
+
+import osmosis_ai.platform.cli.quickstart as quickstart_module
+from osmosis_ai.cli.console import Console
+from osmosis_ai.cli.errors import CLIError
+from osmosis_ai.cli.output.context import (
+    OutputContext,
+    OutputFormat,
+    override_output_context,
+)
+from osmosis_ai.platform.api.models import QuickstartStatus, WorkspaceSummary
+from osmosis_ai.platform.auth.platform_client import PlatformAPIError
+from tests.unit.platform.cli.conftest import strip_ansi
+
+PLATFORM_URL = "https://platform.osmosis.ai"
+FULL_NAME = "acme/acme-workspace"
+WORKSPACE = WorkspaceSummary(
+    id="ws-1",
+    name="acme",
+    connected_repo_full_name=FULL_NAME,
+)
+OTHER_WORKSPACE = WorkspaceSummary(
+    id="ws-2",
+    name="globex",
+    connected_repo_full_name=None,
+)
+CREDENTIALS = SimpleNamespace(
+    user=SimpleNamespace(email="allen@osmosis.ai"),
+    is_expired=lambda: False,
+)
+
+CLONE_QUESTION = f"Where should we clone {FULL_NAME}?"
+TRANSPORT_QUESTION = "Clone over HTTPS or SSH?"
+INTENT_QUESTION = "What do you want to do?"
+TASK_QUESTION = "Describe your task:"
+WORKSPACE_QUESTION = "Which workspace?"
+
+TRAIN_PROMPT = (
+    "I want to train a model for support ticket triage in this Osmosis "
+    "workspace. Start with the plan-training skill: read the workspace "
+    "instructions, help me settle the dataset plan, and propose the next step "
+    "before creating rollouts, running evaluation runs, or submitting a "
+    "training run."
+)
+EVAL_PROMPT = (
+    "I want to evaluate a model on grader accuracy in this Osmosis workspace. "
+    "Start with the plan-eval skill: read the workspace instructions, help me "
+    "settle the rollout and evaluation config, and propose the next step "
+    "before submitting an evaluation run."
+)
+BENCHMARK_PROMPT = (
+    "I want to benchmark agents on managed suites in this Osmosis workspace. "
+    "Use the submit-benchmarks skill: help me pick a suite and configuration, "
+    "submit the run, and interpret the results."
+)
+
+
+def _status(
+    *,
+    connected: bool = True,
+    billing_ready: bool = True,
+    completed: bool = False,
+) -> QuickstartStatus:
+    return QuickstartStatus(
+        repo_connected=connected,
+        repo_full_name=FULL_NAME if connected else None,
+        billing_ready=billing_ready,
+        completed=completed,
+    )
+
+
+class FakeClient:
+    """Client double for the two quickstart endpoints plus the workspace list."""
+
+    def __init__(
+        self,
+        workspaces: list[WorkspaceSummary],
+        statuses: list[QuickstartStatus],
+        complete_error: Exception | None,
+        list_errors: list[Exception],
+    ) -> None:
+        self._workspaces = workspaces
+        self._statuses = statuses
+        self._complete_error = complete_error
+        self._list_errors = list_errors
+        self.status_calls: list[str] = []
+        self.completions: list[tuple[str, str]] = []
+        self.credentials: list[Any] = []
+
+    def list_workspaces(self, *, credentials: Any = None) -> list[WorkspaceSummary]:
+        self.credentials.append(credentials)
+        if self._list_errors:
+            raise self._list_errors.pop(0)
+        return list(self._workspaces)
+
+    def get_quickstart_status(
+        self, organization_id: str, *, credentials: Any = None
+    ) -> QuickstartStatus:
+        self.status_calls.append(organization_id)
+        if len(self._statuses) > 1:
+            return self._statuses.pop(0)
+        return self._statuses[0]
+
+    def complete_quickstart(
+        self, organization_id: str, intent: str, *, credentials: Any = None
+    ) -> None:
+        if self._complete_error is not None:
+            raise self._complete_error
+        self.completions.append((organization_id, intent))
+
+
+class Prompts:
+    """Scripted answers keyed by question text; records every question asked."""
+
+    def __init__(self) -> None:
+        self.selects: dict[str, list[Any]] = {}
+        self.texts: dict[str, list[str | None]] = {}
+        self.select_calls: list[tuple[str, list[Any]]] = []
+        self.text_calls: list[tuple[str, str, str | None]] = []
+
+    def select_list(self, message: str, items: Any, **_kwargs: Any) -> Any:
+        titles = [getattr(item, "title", item) for item in items]
+        self.select_calls.append((message, titles))
+        answers = self.selects.get(message)
+        if not answers:
+            pytest.fail(f"unexpected select prompt: {message}")
+        return answers.pop(0)
+
+    def text_input(
+        self,
+        message: str,
+        *,
+        default: str = "",
+        validate: Any = None,
+        instruction: str | None = None,
+    ) -> str | None:
+        self.text_calls.append((message, default, instruction))
+        answers = self.texts.get(message)
+        if not answers:
+            pytest.fail(f"unexpected text prompt: {message}")
+        return answers.pop(0)
+
+
+@pytest.fixture(autouse=True)
+def status_messages(monkeypatch: pytest.MonkeyPatch) -> Any:
+    """Record spinner copy and keep an interactive rich session for the wizard."""
+    messages: list[str] = []
+
+    @contextmanager
+    def _status(_self: OutputContext, message: str) -> Any:
+        messages.append(message)
+        yield
+
+    monkeypatch.setattr(OutputContext, "status", _status)
+    with override_output_context(format=OutputFormat.rich, interactive=True):
+        yield messages
+
+
+@pytest.fixture
+def wizard(monkeypatch: pytest.MonkeyPatch) -> Any:
+    buffer = StringIO()
+    # Console binds its warning stream to sys.stderr at construction time.
+    stderr = StringIO()
+    monkeypatch.setattr(sys, "stderr", stderr)
+    console = Console(file=buffer, force_terminal=False, width=400)
+    prompts = Prompts()
+    clone_calls: list[tuple[str, Path]] = []
+    remotes: dict[Path, str] = {}
+
+    monkeypatch.setattr(quickstart_module, "console", console)
+    monkeypatch.setattr(quickstart_module, "select_list", prompts.select_list)
+    monkeypatch.setattr(quickstart_module, "text_input", prompts.text_input)
+    monkeypatch.setattr(quickstart_module, "copy_to_clipboard", lambda _text: False)
+    monkeypatch.setattr(quickstart_module, "get_platform_url", lambda: PLATFORM_URL)
+    monkeypatch.setattr(
+        quickstart_module, "find_workspace_directory", lambda _start: None
+    )
+    monkeypatch.setattr(
+        quickstart_module,
+        "get_local_git_remote_url",
+        lambda path: remotes.get(Path(path)),
+    )
+    monkeypatch.setattr(quickstart_module, "load_credentials", lambda: CREDENTIALS)
+    monkeypatch.setattr(
+        quickstart_module,
+        "device_login",
+        lambda: pytest.fail("valid credentials must not trigger a login"),
+    )
+    monkeypatch.setattr(quickstart_module, "save_credentials", lambda _creds: "keyring")
+    monkeypatch.setattr(
+        quickstart_module,
+        "_run_git_clone",
+        lambda url, target: clone_calls.append((url, target)),
+    )
+    monkeypatch.setattr("time.sleep", lambda _seconds: None)
+
+    return SimpleNamespace(
+        buffer=buffer,
+        stderr=stderr,
+        console=console,
+        prompts=prompts,
+        clone_calls=clone_calls,
+        remotes=remotes,
+        monkeypatch=monkeypatch,
+    )
+
+
+def _install_client(
+    wizard: Any,
+    *,
+    workspaces: list[WorkspaceSummary] | None = None,
+    statuses: list[QuickstartStatus] | None = None,
+    complete_error: Exception | None = None,
+    list_errors: list[Exception] | None = None,
+) -> FakeClient:
+    client = FakeClient(
+        workspaces if workspaces is not None else [WORKSPACE],
+        statuses if statuses is not None else [_status()],
+        complete_error,
+        list_errors if list_errors is not None else [],
+    )
+    wizard.monkeypatch.setattr(quickstart_module, "OsmosisClient", lambda: client)
+    return client
+
+
+def _adopt_clone(wizard: Any, path: Path) -> None:
+    """Make ``path`` look like an existing clone of the workspace repo."""
+    path.mkdir(parents=True, exist_ok=True)
+    (path / ".git").mkdir(exist_ok=True)
+    wizard.remotes[path.resolve()] = f"https://github.com/{FULL_NAME}.git"
+
+
+def _out(wizard: Any) -> str:
+    return strip_ansi(wizard.buffer.getvalue())
+
+
+def _train_answers(wizard: Any) -> None:
+    wizard.prompts.selects[INTENT_QUESTION] = ["train"]
+    wizard.prompts.texts[TASK_QUESTION] = ["support ticket triage"]
+
+
+def _intent_labels() -> list[str]:
+    return [
+        "Train a model for a task",
+        "Run an evaluation on a dataset",
+        "Run a benchmark",
+        "Just exploring for now",
+    ]
+
+
+def _cloned_wizard(wizard: Any, tmp_path: Path) -> None:
+    """Put the wizard in a workspace clone so setup has nothing left to do."""
+    clone = tmp_path / "acme-workspace"
+    _adopt_clone(wizard, clone)
+    wizard.monkeypatch.setattr(
+        quickstart_module, "find_workspace_directory", lambda _start: clone.resolve()
+    )
+    _install_client(wizard)
+
+
+# ── TTY guard ────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    ("fmt", "interactive"),
+    [
+        (OutputFormat.rich, False),
+        (OutputFormat.json, True),
+        (OutputFormat.plain, True),
+    ],
+)
+def test_requires_an_interactive_terminal(
+    wizard: Any, fmt: OutputFormat, interactive: bool
+) -> None:
+    _install_client(wizard)
+
+    with (
+        override_output_context(format=fmt, interactive=interactive),
+        pytest.raises(CLIError) as excinfo,
+    ):
+        quickstart_module.run_quickstart()
+
+    assert excinfo.value.code == "INTERACTIVE_REQUIRED"
+    assert "https://docs.osmosis.ai/platform/onboarding" in str(excinfo.value)
+
+
+# ── Idempotent all-ok rerun ──────────────────────────────────────
+
+
+def test_all_green_rerun_reads_as_a_diagnostic(wizard: Any, tmp_path: Path) -> None:
+    clone = tmp_path / "acme-workspace"
+    _adopt_clone(wizard, clone)
+    wizard.monkeypatch.setattr(
+        quickstart_module, "find_workspace_directory", lambda _start: clone.resolve()
+    )
+    client = _install_client(wizard, statuses=[_status(completed=True)])
+    _train_answers(wizard)
+
+    result = quickstart_module.run_quickstart(cwd=tmp_path)
+
+    assert wizard.clone_calls == []
+    assert [message for message, _titles in wizard.prompts.select_calls] == [
+        INTENT_QUESTION
+    ]
+    assert client.completions == [("ws-1", "train")]
+    assert result.resource is not None
+    assert result.resource["workspace_directory"] == str(clone.resolve())
+    assert result.resource["intent"] == "train"
+    assert result.resource["previously_completed"] is True
+    assert result.resource["completion_recorded"] is True
+
+    output = _out(wizard)
+    assert "allen@osmosis.ai" in output
+    assert "acme" in output
+    assert FULL_NAME in output
+    assert "need billing set up" not in output
+
+
+def test_single_workspace_is_selected_without_a_prompt(
+    wizard: Any, tmp_path: Path
+) -> None:
+    _install_client(wizard)
+    wizard.prompts.texts[CLONE_QUESTION] = ["./acme-workspace"]
+    wizard.prompts.selects[TRANSPORT_QUESTION] = ["https"]
+    _train_answers(wizard)
+
+    quickstart_module.run_quickstart(cwd=tmp_path)
+
+    assert WORKSPACE_QUESTION not in [
+        message for message, _titles in wizard.prompts.select_calls
+    ]
+
+
+def test_several_workspaces_prompt_for_one(wizard: Any, tmp_path: Path) -> None:
+    client = _install_client(wizard, workspaces=[WORKSPACE, OTHER_WORKSPACE])
+    wizard.prompts.selects[WORKSPACE_QUESTION] = ["ws-2"]
+    wizard.prompts.texts[CLONE_QUESTION] = ["./acme-workspace"]
+    wizard.prompts.selects[TRANSPORT_QUESTION] = ["https"]
+    _train_answers(wizard)
+
+    result = quickstart_module.run_quickstart(cwd=tmp_path)
+
+    workspace_titles = dict(wizard.prompts.select_calls)[WORKSPACE_QUESTION]
+    assert workspace_titles == ["acme", "globex"]
+    assert client.completions == [("ws-2", "train")]
+    assert result.resource is not None
+    assert result.resource["workspace"] == {"id": "ws-2", "name": "globex"}
+
+
+# ── Repository connection + clone ────────────────────────────────
+
+
+def test_waits_for_the_repository_then_clones(
+    wizard: Any, tmp_path: Path, status_messages: list[str]
+) -> None:
+    client = _install_client(
+        wizard,
+        statuses=[_status(connected=False), _status(connected=False), _status()],
+    )
+    wizard.prompts.texts[CLONE_QUESTION] = ["./acme-workspace"]
+    wizard.prompts.selects[TRANSPORT_QUESTION] = ["https"]
+    _train_answers(wizard)
+
+    quickstart_module.run_quickstart(cwd=tmp_path)
+
+    assert len(client.status_calls) == 3
+    assert (
+        "waiting for repository... "
+        "(Ctrl+C to exit; re-run 'osmosis quickstart' to resume)" in status_messages
+    )
+    assert wizard.clone_calls == [
+        (
+            f"https://github.com/{FULL_NAME}.git",
+            (tmp_path / "acme-workspace").resolve(),
+        )
+    ]
+
+    output = _out(wizard)
+    assert f"{PLATFORM_URL}/acme/integrations/git" in output
+    assert f"detected {FULL_NAME}" in output
+
+
+def test_clone_prompt_echoes_the_resolved_path_and_hint(
+    wizard: Any, tmp_path: Path
+) -> None:
+    _install_client(wizard)
+    wizard.prompts.texts[CLONE_QUESTION] = ["./acme-workspace"]
+    wizard.prompts.selects[TRANSPORT_QUESTION] = ["ssh"]
+    _train_answers(wizard)
+
+    quickstart_module.run_quickstart(cwd=tmp_path)
+
+    target = (tmp_path / "acme-workspace").resolve()
+    assert wizard.prompts.text_calls[0] == (
+        CLONE_QUESTION,
+        "./acme-workspace",
+        "(this folder will be created and become the repo root)",
+    )
+    assert f"cloning {FULL_NAME} into {target}" in _out(wizard)
+    assert wizard.clone_calls == [(f"git@github.com:{FULL_NAME}.git", target)]
+
+
+def test_adopts_an_existing_clone_at_the_requested_path(
+    wizard: Any, tmp_path: Path
+) -> None:
+    existing = tmp_path / "somewhere-else"
+    _adopt_clone(wizard, existing)
+    _install_client(wizard)
+    wizard.prompts.texts[CLONE_QUESTION] = ["./somewhere-else"]
+    _train_answers(wizard)
+
+    result = quickstart_module.run_quickstart(cwd=tmp_path)
+
+    assert wizard.clone_calls == []
+    assert TRANSPORT_QUESTION not in [
+        message for message, _titles in wizard.prompts.select_calls
+    ]
+    assert result.resource is not None
+    assert result.resource["workspace_directory"] == str(existing.resolve())
+
+
+def test_reprompts_when_the_path_holds_a_different_repo(
+    wizard: Any, tmp_path: Path
+) -> None:
+    taken = tmp_path / "taken"
+    taken.mkdir()
+    (taken / ".git").mkdir()
+    wizard.remotes[taken.resolve()] = "https://github.com/other/repo.git"
+    _install_client(wizard)
+    wizard.prompts.texts[CLONE_QUESTION] = ["./taken", "./fresh"]
+    wizard.prompts.selects[TRANSPORT_QUESTION] = ["https"]
+    _train_answers(wizard)
+
+    quickstart_module.run_quickstart(cwd=tmp_path)
+
+    assert len(wizard.prompts.text_calls) == 3  # clone path twice, then the task
+    assert wizard.clone_calls == [
+        (f"https://github.com/{FULL_NAME}.git", (tmp_path / "fresh").resolve())
+    ]
+
+
+def test_workspace_is_inferred_from_the_surrounding_clone(
+    wizard: Any, tmp_path: Path
+) -> None:
+    clone = tmp_path / "acme-workspace"
+    _adopt_clone(wizard, clone)
+    wizard.monkeypatch.setattr(
+        quickstart_module,
+        "find_workspace_directory",
+        lambda _start: clone.resolve(),
+    )
+    client = _install_client(wizard, workspaces=[WORKSPACE, OTHER_WORKSPACE])
+    _train_answers(wizard)
+
+    result = quickstart_module.run_quickstart(cwd=clone / "configs")
+
+    assert wizard.prompts.select_calls == [(INTENT_QUESTION, _intent_labels())]
+    assert client.status_calls == ["ws-1"]
+    assert result.resource is not None
+    assert result.resource["workspace"] == {"id": "ws-1", "name": "acme"}
+
+
+# ── Billing ──────────────────────────────────────────────────────
+
+
+def test_billing_warning_is_informational(wizard: Any, tmp_path: Path) -> None:
+    clone = tmp_path / "acme-workspace"
+    _adopt_clone(wizard, clone)
+    wizard.monkeypatch.setattr(
+        quickstart_module, "find_workspace_directory", lambda _start: clone.resolve()
+    )
+    _install_client(wizard, statuses=[_status(billing_ready=False)])
+    _train_answers(wizard)
+
+    result = quickstart_module.run_quickstart(cwd=tmp_path)
+
+    output = _out(wizard)
+    assert (
+        "Paid features (training, evaluations, benchmarks, deployments, ...) "
+        f"need billing set up: {PLATFORM_URL}/acme/billing" in output
+    )
+    assert TRAIN_PROMPT in output
+    assert result.resource is not None
+    assert result.resource["billing_ready"] is False
+
+
+# ── Intent, task, and the agent prompts ──────────────────────────
+
+
+def test_intent_labels_are_verbatim(wizard: Any, tmp_path: Path) -> None:
+    _cloned_wizard(wizard, tmp_path)
+    wizard.prompts.selects[INTENT_QUESTION] = ["explore"]
+
+    quickstart_module.run_quickstart(cwd=tmp_path)
+
+    assert dict(wizard.prompts.select_calls)[INTENT_QUESTION] == _intent_labels()
+
+
+def test_train_intent_prints_the_frozen_prompt(wizard: Any, tmp_path: Path) -> None:
+    _cloned_wizard(wizard, tmp_path)
+    _train_answers(wizard)
+
+    result = quickstart_module.run_quickstart(cwd=tmp_path)
+
+    assert result.resource is not None
+    assert result.resource["agent_prompt"] == TRAIN_PROMPT
+    assert TRAIN_PROMPT in _out(wizard)
+
+
+def test_eval_intent_prints_the_frozen_prompt(wizard: Any, tmp_path: Path) -> None:
+    _cloned_wizard(wizard, tmp_path)
+    wizard.prompts.selects[INTENT_QUESTION] = ["eval"]
+    wizard.prompts.texts[TASK_QUESTION] = ["grader accuracy"]
+
+    result = quickstart_module.run_quickstart(cwd=tmp_path)
+
+    assert result.resource is not None
+    assert result.resource["agent_prompt"] == EVAL_PROMPT
+    assert EVAL_PROMPT in _out(wizard)
+
+
+def test_benchmark_intent_skips_the_task_question(wizard: Any, tmp_path: Path) -> None:
+    _cloned_wizard(wizard, tmp_path)
+    wizard.prompts.selects[INTENT_QUESTION] = ["benchmark"]
+
+    result = quickstart_module.run_quickstart(cwd=tmp_path)
+
+    assert wizard.prompts.text_calls == []
+    assert result.resource is not None
+    assert result.resource["agent_prompt"] == BENCHMARK_PROMPT
+    output = _out(wizard)
+    assert BENCHMARK_PROMPT in output
+    assert f"{PLATFORM_URL}/acme/benchmarks/new" in output
+    assert "https://docs.osmosis.ai/platform/benchmarks" in output
+
+
+def test_explore_intent_prints_docs_links_only(wizard: Any, tmp_path: Path) -> None:
+    _cloned_wizard(wizard, tmp_path)
+    wizard.prompts.selects[INTENT_QUESTION] = ["explore"]
+
+    result = quickstart_module.run_quickstart(cwd=tmp_path)
+
+    assert wizard.prompts.text_calls == []
+    assert result.resource is not None
+    assert result.resource["agent_prompt"] is None
+    output = _out(wizard)
+    assert "https://docs.osmosis.ai/platform/quickstart" in output
+    assert "https://docs.osmosis.ai/cli/rollout/overview" in output
+    assert "paste the prompt below" not in output
+
+
+def test_prompt_is_copied_to_the_clipboard_when_available(
+    wizard: Any, tmp_path: Path
+) -> None:
+    _cloned_wizard(wizard, tmp_path)
+    _train_answers(wizard)
+    copied: list[str] = []
+    wizard.monkeypatch.setattr(
+        quickstart_module,
+        "copy_to_clipboard",
+        lambda text: bool(copied.append(text)) or True,
+    )
+
+    quickstart_module.run_quickstart(cwd=tmp_path)
+
+    assert copied == [TRAIN_PROMPT]
+    assert "paste the prompt below (copied to clipboard):" in _out(wizard)
+
+
+def test_clipboard_failure_is_silent(wizard: Any, tmp_path: Path) -> None:
+    _cloned_wizard(wizard, tmp_path)
+    _train_answers(wizard)
+
+    quickstart_module.run_quickstart(cwd=tmp_path)
+
+    output = _out(wizard)
+    assert "paste the prompt below:" in output
+    assert "(copied to clipboard)" not in output
+
+
+# ── Completion + auth repair ─────────────────────────────────────
+
+
+def test_completion_failure_warns_and_still_prints_the_prompt(
+    wizard: Any, tmp_path: Path
+) -> None:
+    _cloned_wizard(wizard, tmp_path)
+    _install_client(wizard, complete_error=PlatformAPIError("Connection error: down"))
+    _train_answers(wizard)
+
+    result = quickstart_module.run_quickstart(cwd=tmp_path)
+
+    assert TRAIN_PROMPT in _out(wizard)
+    assert result.resource is not None
+    assert result.resource["completion_recorded"] is False
+    warning = strip_ansi(wizard.stderr.getvalue())
+    assert "was not notified" in warning
+    assert "osmosis quickstart" in warning
+
+
+def test_missing_credentials_trigger_the_browser_login(
+    wizard: Any, tmp_path: Path
+) -> None:
+    _cloned_wizard(wizard, tmp_path)
+    _train_answers(wizard)
+    new_credentials = SimpleNamespace(
+        user=SimpleNamespace(email="new@osmosis.ai"),
+        is_expired=lambda: False,
+    )
+    saved: list[Any] = []
+    wizard.monkeypatch.setattr(quickstart_module, "load_credentials", lambda: None)
+    wizard.monkeypatch.setattr(
+        quickstart_module,
+        "device_login",
+        lambda: (
+            SimpleNamespace(user=SimpleNamespace(email="new@osmosis.ai")),
+            new_credentials,
+        ),
+    )
+    wizard.monkeypatch.setattr(
+        quickstart_module, "save_credentials", lambda creds: saved.append(creds)
+    )
+
+    quickstart_module.run_quickstart(cwd=tmp_path)
+
+    assert saved == [new_credentials]
+    assert "new@osmosis.ai" in _out(wizard)

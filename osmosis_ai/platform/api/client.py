@@ -35,6 +35,7 @@ from .models import (
     TrainingRunCheckpoints,
     TrainingRunDetail,
     TrainingRunMetrics,
+    WorkspaceSummary,
 )
 
 if TYPE_CHECKING:
@@ -856,6 +857,23 @@ class OsmosisClient:
             git_identity=git_identity,
         )
         return PaginatedDevRolloutServers.from_dict(data)
+
+    # ── Workspaces ────────────────────────────────────────────────
+
+    def list_workspaces(
+        self,
+        *,
+        credentials: Credentials | None = None,
+    ) -> list[WorkspaceSummary]:
+        data = platform_request(
+            "/api/cli/workspaces",
+            credentials=credentials,
+            require_git_repo=False,
+        )
+        return [
+            WorkspaceSummary.from_dict(workspace)
+            for workspace in data.get("workspaces", [])
+        ]
 
     # ── Quickstart ────────────────────────────────────────────────
     # Scoped by an explicit organization_id rather than a git identity: the

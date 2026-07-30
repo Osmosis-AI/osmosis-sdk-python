@@ -1203,6 +1203,28 @@ class RunDownloadURLBatch:
         )
 
 
+# ── Workspaces ───────────────────────────────────────────────────
+
+
+@dataclass
+class WorkspaceSummary:
+    """One workspace the caller belongs to."""
+
+    id: str
+    name: str
+    connected_repo_full_name: str | None
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> WorkspaceSummary:
+        repo = data.get("connected_repo")
+        full_name = repo.get("repo_full_name") if isinstance(repo, dict) else None
+        return cls(
+            id=data.get("id", ""),
+            name=data.get("name", ""),
+            connected_repo_full_name=full_name if isinstance(full_name, str) else None,
+        )
+
+
 # ── Quickstart ───────────────────────────────────────────────────
 
 

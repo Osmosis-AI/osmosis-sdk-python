@@ -302,6 +302,32 @@ def confirm(
     ).ask()
 
 
+def text_input(
+    message: str,
+    *,
+    default: str = "",
+    validate: Any = None,
+    instruction: str | None = None,
+) -> str | None:
+    """Interactive free-text prompt with an optional pre-filled, editable default.
+
+    The validate callable receives the input string and should return True
+    if valid, or an error message string if invalid.
+
+    Returns the entered text, or None if the user cancels (Ctrl+C / ESC).
+    """
+    return _add_escape_binding(
+        questionary.text(
+            message,
+            default=default,
+            validate=validate,
+            style=OSMOSIS_STYLE,
+            qmark="?",
+            instruction=instruction,
+        )
+    ).ask()
+
+
 def password(
     message: str,
     *,
@@ -418,4 +444,5 @@ __all__ = [
     "password",
     "require_confirmation",
     "select_list",
+    "text_input",
 ]
