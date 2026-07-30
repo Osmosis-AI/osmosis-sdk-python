@@ -16,7 +16,6 @@ from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
-from harbor.agents.factory import AgentFactory
 from harbor.models.environment_type import EnvironmentType
 from harbor.models.task.config import MCPServerConfig
 from harbor.models.trial.config import (
@@ -348,12 +347,7 @@ class TestAgentConfig:
             "version": "1.18.9",
         }
 
-    def test_opencode_generated_config_uses_scoped_controller_url(
-        self,
-        monkeypatch: pytest.MonkeyPatch,
-        tmp_path: Path,
-    ):
-        monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
+    def test_opencode_config_merges_scoped_controller_url(self):
         with pytest.warns(UserWarning, match="opencode.*eval-only"):
             backend = NativeHarborBackend(
                 agent=AgentConfig(
@@ -371,12 +365,12 @@ class TestAgentConfig:
         config = backend._build_agent_config(
             _request(), _ctx(), gateway_token="route-token"
         )
-        agent = AgentFactory.create_agent_from_config(config, logs_dir=tmp_path)
-        command = agent._build_register_config_command()  # type: ignore[attr-defined]
-
-        assert command is not None
-        assert '"baseURL": "http://gateway.example:8000/v1"' in command
-        assert '"continue_loop_on_deny": true' in command
+        assert config.kwargs["opencode_config"] == {
+            "experimental": {"continue_loop_on_deny": True},
+            "provider": {
+                "openai": {"options": {"baseURL": "http://gateway.example:8000/v1"}}
+            },
+        }
 
     def test_agent_kwargs_passthrough_for_installed(self):
         with pytest.warns(UserWarning, match="opencode.*eval-only"):

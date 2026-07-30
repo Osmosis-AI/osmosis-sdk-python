@@ -191,34 +191,28 @@ async def test_native_late_failure_without_grader_url_keeps_final_diagnostics(
 ) -> None:
     posted = patch_callbacks(monkeypatch)
     patch_artifact_root(monkeypatch, tmp_path)
+    backend = NativeHarborBackend(trials_dir=tmp_path / "trials")
+    backend.artifact_root = tmp_path
     result = SimpleNamespace(
         verifier_result=SimpleNamespace(rewards={"reward": 0.7}),
         step_results=None,
         exception_info=None,
     )
 
-    async def fake_submit(queue: Any, trial_config: Any) -> Any:
+    async def fake_submit(_queue: Any, trial_config: Any) -> Any:
         hook_event = SimpleNamespace(
             trial_name=trial_config.trial_name,
             result=result,
         )
-        verification_event = next(
-            event for event in queue._hooks if event.value == "verification-start"
-        )
-        for callback in queue._hooks[verification_event]:
-            await callback(hook_event)
+        await backend._on_verification_started(hook_event)
         result.exception_info = SimpleNamespace(
             exception_message="verifier timed out",
             exception_type="VerifierTimeoutError",
         )
-        end_event = next(event for event in queue._hooks if event.value == "end")
-        for callback in queue._hooks[end_event]:
-            await callback(hook_event)
+        await backend._on_trial_ended(hook_event)
         return result
 
     monkeypatch.setattr(native_backend_module.TrialQueue, "submit", fake_submit)
-    backend = NativeHarborBackend(trials_dir=tmp_path / "trials")
-    backend.artifact_root = tmp_path
 
     await _handle_rollout(
         backend,
