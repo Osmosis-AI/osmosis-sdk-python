@@ -98,9 +98,15 @@ def _require_interactive_session() -> None:
     output = get_output_context()
     if output.format is OutputFormat.rich and output.interactive:
         return
+    if output.format is not OutputFormat.rich:
+        reason = (
+            "osmosis quickstart asks questions and prints an agent prompt, so it "
+            "requires interactive rich output and cannot run with --json or --plain"
+        )
+    else:
+        reason = "osmosis quickstart needs an interactive terminal"
     raise CLIError(
-        "osmosis quickstart needs an interactive terminal; "
-        f"set your workspace up manually instead: {_MANUAL_SETUP_URL}",
+        f"{reason}; set your workspace up manually instead: {_MANUAL_SETUP_URL}",
         code="INTERACTIVE_REQUIRED",
     )
 
@@ -230,7 +236,7 @@ def _run_git_clone(url: str, target: Path) -> None:
             code="NOT_FOUND",
         )
     output = get_output_context()
-    with output.status(f"cloning into {target}..."):
+    with output.status(f"cloning into {console.escape(str(target))}..."):
         result = subprocess.run(
             ["git", "clone", url, str(target)],
             capture_output=True,
