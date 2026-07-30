@@ -576,9 +576,9 @@ def _resolve_binding(
 
 
 class NativeHarborBackend(ExecutionBackend):
-    model_name: str
-
     """Drive a harbor Trial per rollout and map its verifier reward."""
+
+    model_name: str
 
     def __init__(
         self,
@@ -1403,7 +1403,7 @@ class NativeHarborBackend(ExecutionBackend):
             agent_cfg.override_setup_timeout_sec = self.agent_setup_timeout_sec
 
         verifier_cfg = self._verifier_config.model_copy(deep=True)
-        verifier_cfg.disable = False
+        verifier_cfg.disable = True
         return TrialConfig(
             task=task_cfg.model_copy(deep=True),
             trial_name=f"{PREWARM_TRIAL_NAME_PREFIX}{uuid4().hex}",
