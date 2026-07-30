@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import json
 import logging
 from collections.abc import AsyncIterator, Mapping
@@ -89,16 +90,72 @@ async def _request_body(request: Request) -> dict[str, Any]:
     return body
 
 
-def _response_event_json(event: Any) -> str:
+def _response_event_value(event: Any) -> dict[str, Any] | str:
     if isinstance(event, BaseModel):
-        return event.model_dump_json(exclude_none=True, exclude_unset=True)
+        return event.model_dump(
+            mode="json",
+            exclude_none=True,
+            exclude_unset=True,
+        )
     if isinstance(event, Mapping):
-        return json.dumps(dict(event), separators=(",", ":"))
+        return copy.deepcopy(dict(event))
     if isinstance(event, bytes):
-        return event.decode("utf-8")
+        event = event.decode("utf-8")
     if isinstance(event, str):
-        return event
+        try:
+            parsed = json.loads(event)
+        except json.JSONDecodeError:
+            return event
+        return parsed if isinstance(parsed, dict) else event
     raise TypeError(f"Unsupported Responses stream event {type(event)!r}")
+
+
+def _normalize_responses_event(
+    event: dict[str, Any],
+    *,
+    response_id: str | None,
+    item_ids: dict[int, str],
+) -> str | None:
+    """Keep Responses lifecycle identifiers stable across translated chunks."""
+    event_type = event.get("type")
+    response = event.get("response")
+    if isinstance(response, dict):
+        current_response_id = response.get("id")
+        if (
+            event_type == "response.created"
+            and isinstance(current_response_id, str)
+            and current_response_id
+        ):
+            response_id = current_response_id
+        elif response_id is not None:
+            response["id"] = response_id
+
+    output_index = event.get("output_index")
+    item = event.get("item")
+    if (
+        event_type == "response.output_item.added"
+        and isinstance(output_index, int)
+        and isinstance(item, dict)
+    ):
+        item_id = item.get("id")
+        if isinstance(item_id, str) and item_id:
+            item_ids[output_index] = item_id
+
+    if isinstance(output_index, int) and output_index in item_ids:
+        stable_item_id = item_ids[output_index]
+        if "item_id" in event:
+            event["item_id"] = stable_item_id
+        if isinstance(item, dict) and "id" in item:
+            item["id"] = stable_item_id
+
+    if isinstance(response, dict):
+        output = response.get("output")
+        if isinstance(output, list):
+            for index, output_item in enumerate(output):
+                if isinstance(output_item, dict) and index in item_ids:
+                    output_item["id"] = item_ids[index]
+
+    return response_id
 
 
 async def _anthropic_stream(response: Any) -> AsyncIterator[bytes | str]:
@@ -116,13 +173,30 @@ async def _anthropic_stream(response: Any) -> AsyncIterator[bytes | str]:
 
 
 async def _responses_stream(response: Any) -> AsyncIterator[str]:
+    response_id: str | None = None
+    item_ids: dict[int, str] = {}
+
+    def frame(event: Any) -> str:
+        nonlocal response_id
+        value = _response_event_value(event)
+        if isinstance(value, dict):
+            response_id = _normalize_responses_event(
+                value,
+                response_id=response_id,
+                item_ids=item_ids,
+            )
+            payload = json.dumps(value, separators=(",", ":"))
+        else:
+            payload = value
+        return f"data: {payload}\n\n"
+
     try:
         if hasattr(response, "__aiter__"):
             async for event in response:
-                yield f"data: {_response_event_json(event)}\n\n"
+                yield frame(event)
         else:
             for event in response:
-                yield f"data: {_response_event_json(event)}\n\n"
+                yield frame(event)
     except Exception as exc:
         logger.exception("Native Harbor Responses gateway stream failed")
         payload = _error_payload("openai", _error_message(exc), _error_status(exc))

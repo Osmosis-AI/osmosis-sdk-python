@@ -431,3 +431,51 @@ async def test_gateway_streams_translated_protocol_events(
     upstream = fake_chat_upstream.requests[0]
     assert upstream["body"]["stream"] is True
     assert upstream["body"]["stream_options"] == {"include_usage": True}
+
+
+async def test_responses_stream_keeps_response_and_item_ids_stable(
+    fake_chat_upstream: Any,
+) -> None:
+    fake_chat_upstream.enqueue_sse(_chat_text_stream())
+    app, _, token = _gateway_app(
+        fake_chat_upstream,
+        controller_api_key="controller-real",
+    )
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://gateway.example:8000",
+    ) as client:
+        response = await client.post(
+            "/v1/responses",
+            headers={"authorization": f"Bearer {token}"},
+            json={
+                "model": "openai/osmosis-rollout",
+                "input": "hello",
+                "stream": True,
+            },
+        )
+
+    events = [
+        json.loads(line.removeprefix("data: "))
+        for line in response.text.splitlines()
+        if line.startswith("data: {")
+    ]
+    created = next(event for event in events if event["type"] == "response.created")
+    added = next(
+        event for event in events if event["type"] == "response.output_item.added"
+    )
+    delta = next(
+        event for event in events if event["type"] == "response.output_text.delta"
+    )
+    item_done = next(
+        event for event in events if event["type"] == "response.output_item.done"
+    )
+    completed = next(event for event in events if event["type"] == "response.completed")
+
+    response_id = created["response"]["id"]
+    item_id = added["item"]["id"]
+    assert completed["response"]["id"] == response_id
+    assert delta["item_id"] == item_id
+    assert item_done["item"]["id"] == item_id
+    assert completed["response"]["output"][0]["id"] == item_id
