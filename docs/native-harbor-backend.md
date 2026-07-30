@@ -34,15 +34,19 @@ A native rollout server is the standard `create_rollout_server(backend=...)` wir
 import os
 
 import uvicorn
+from harbor.models.trial.config import AgentConfig
 
 from osmosis_ai.rollout.backend.native_harbor import NativeHarborBackend
 from osmosis_ai.rollout.server import create_rollout_server
 
 
 backend = NativeHarborBackend(
-    agent_name="terminus-2",   # the default; in-process, training-safe
-    agent_setup_timeout_sec=300, # agent setup/install only; not the run timeout
-    max_concurrent=4,          # one Harbor Trial (often a container) per rollout
+    agent=AgentConfig(
+        name="terminus-2",                 # the default; training-safe binding
+        model_name="openai/osmosis-rollout",
+        override_setup_timeout_sec=300,    # setup/install, not the agent run
+    ),
+    max_concurrent=4,                      # one Trial per in-flight rollout
 )
 app = create_rollout_server(backend=backend)   # required module-level ASGI app
 
@@ -57,22 +61,38 @@ if __name__ == "__main__":
 
 The model endpoint and key are **not** configured here — they arrive per rollout from the ambient `RolloutContext` (see [Model endpoint injection](#model-endpoint-injection)). To exercise the server locally, set the same env vars a training controller would: `OSMOSIS_CHAT_COMPLETIONS_URL`, `OSMOSIS_API_KEY`, `OSMOSIS_ROLLOUT_ID` ([context.py](../osmosis_ai/rollout/context.py)).
 
-### Selecting the environment (Docker / Daytona / SkyPilot)
+### Supplying full Harbor configuration
 
-The Quickstart leaves `environment_config` at its default. Harbor decides where each Trial runs — local Docker, a remote Daytona sandbox, etc. — through `EnvironmentConfig`; pass it explicitly to pick one:
+The Quickstart leaves `environment` and `verifier` at their defaults. The
+canonical constructor accepts Harbor's complete `AgentConfig`,
+`EnvironmentConfig`, and `VerifierConfig`, including skills, MCP servers, log
+filters, network settings, mounts, resource controls, and custom verifier fields:
 
 ```python
 from harbor.models.environment_type import EnvironmentType
-from harbor.models.trial.config import EnvironmentConfig as HarborEnvironmentConfig
+from harbor.models.trial.config import AgentConfig, EnvironmentConfig, VerifierConfig
 
 backend = NativeHarborBackend(
-    agent_name="terminus-2",                                              # constructor arg is agent_name
-    environment_config=HarborEnvironmentConfig(type=EnvironmentType.DAYTONA),
+    agent=AgentConfig(
+        name="terminus-2",
+        model_name="openai/osmosis-rollout",
+        skills=["org/my-skill@sha256:..."],
+        include_logs=["*.json"],
+        extra_allowed_hosts=["models.example.com"],
+    ),
+    environment=EnvironmentConfig(
+        type=EnvironmentType.DAYTONA,
+        override_cpus=4,
+    ),
+    verifier=VerifierConfig(
+        max_timeout_sec=300,
+        include_logs=["reward.json"],
+    ),
     max_concurrent=8,
 )
 ```
 
-Each Trial is one environment instance, so keep `max_concurrent` aligned with the host/remote capacity (see [Concurrency and trial directories](#concurrency-and-trial-directories)). For managed SkyPilot runs, an explicit `environment_config.kwargs["context_name"]` wins; otherwise the backend reads `HARBOR_SKYPILOT_CONTEXT`. On macOS local Docker, controller URLs using `localhost` or `127.0.0.1` are rewritten to `host.docker.internal` so the agent container can reach them.
+Each Trial is one environment instance, so keep `max_concurrent` aligned with the host/remote capacity (see [Concurrency and trial directories](#concurrency-and-trial-directories)). For managed SkyPilot runs, an explicit `environment.kwargs["context_name"]` wins; otherwise the backend reads `HARBOR_SKYPILOT_CONTEXT`. On macOS local Docker, controller URLs using `localhost` or `127.0.0.1` are rewritten to `host.docker.internal` so the agent container can reach them.
 
 ## Dataset contract
 
@@ -103,20 +123,45 @@ All arguments are keyword-only ([backend.py](../osmosis_ai/rollout/backend/nativ
 
 | Argument | Default | Purpose |
 |----------|---------|---------|
-| `agent_name` | `"terminus-2"` (when neither agent arg is set) | Built-in Harbor agent by name. It must have a validated binding in the table below. |
-| `agent_import_path` | `None` | `"module:Class"` for a user-implemented `BaseAgent`. **Mutually exclusive** with `agent_name`; requires the explicit `custom-chat-completions` binding and opt-in. Registered Harbor built-ins cannot be selected through this escape hatch. |
-| `agent_kwargs` | `None` | Harbor agent constructor kwargs. Binding-owned identity and installed-CLI version fields are overlaid. |
-| `agent_env` | `None` | Extra agent environment (base layer); the selected binding overlays only its own identity variables. |
-| `agent_setup_timeout_sec` | `None` | Positive, finite timeout for Harbor's agent setup/install phase (`AgentConfig.override_setup_timeout_sec`). This is separate from the per-request agent run timeout. |
+| `agent` | `AgentConfig(name="terminus-2")` | Complete Harbor agent configuration. Its name/import path selects the validated binding; all preserved fields are cloned per rollout. |
+| `environment` | `EnvironmentConfig()` | Complete Harbor environment configuration (Docker, Daytona, SkyPilot, or a custom import). |
+| `verifier` | `VerifierConfig()` | Complete Harbor verifier configuration. Native always enables it because it is the reward source. |
+| `agent_setup_timeout_sec` | `None` | Compatibility overlay for `AgentConfig.override_setup_timeout_sec`; prefer setting the field on `agent`. |
 | `binding` | agent name | Validated wire/identity binding. Import-path agents must select `custom-chat-completions` explicitly. |
 | `allow_unverified_agent` | `False` | Explicit eval-only opt-in for bindings that have not passed the real-infrastructure E2E checklist. |
-| `model_name` | `"openai/osmosis-rollout"` | Model id passed to Harbor. Overridable per row via `metadata["harbor_model"]`, subject to the binding's provider restriction. |
+| `model_name` | `agent.model_name`, else `"openai/osmosis-rollout"` | Compatibility/default overlay. Per-row `metadata["harbor_model"]` wins, subject to the binding's provider restriction. |
 | `reward_key` | `"reward"` | Which named verifier channel becomes the scalar reward (see [Reward mapping](#reward-mapping)). |
 | `trials_dir` | `Path("native_trials")` | Where Harbor writes trial directories. |
 | `task_resolver` | `resolve_task` | Override `ExecutionRequest -> TaskConfig` resolution. |
-| `environment_config` | Harbor `EnvironmentConfig()` | Harbor environment selector (Docker/Daytona/SkyPilot). |
 | `max_concurrent` | `8` | In-flight Trial cap (`>= 1`). Each Trial is often a container, so this bounds host load. |
 | `cleanup_successful_trials` | `True` | Delete a successful trial only after its ATIF has been validated and Harbor-collected artifacts have been copied out. |
+| `agent_name`, `agent_import_path`, `agent_kwargs`, `agent_env`, `environment_config` | `None` | Compatibility shims for the original reduced surface. They cannot be mixed with the corresponding canonical object. |
+
+### Configuration ownership and cloning
+
+The constructor deep-clones all three Harbor objects immediately and again for
+every rollout. Harbor may resolve agent skills in place, so no rollout can mutate
+the caller's objects or another rollout's nested dictionaries, lists, env, skills,
+or MCP definitions. Cloning uses Pydantic's `model_copy(deep=True)` rather than a
+serialization round trip; Harbor's serializers intentionally redact or templatize
+sensitive environment values.
+
+| Configuration field | Native policy |
+|---|---|
+| `AgentConfig.name` / `import_path` | Preserve; they select the binding. Setting both is rejected. |
+| `model_name` | Overlay: dataset row `harbor_model` > explicit constructor `model_name` > `agent.model_name` > SDK default. |
+| `kwargs` | Preserve, then overlay binding-owned `api_base`, `llm_kwargs.api_key`, `extra_body.stream=False`, and pinned CLI version where applicable. |
+| `env` | Preserve non-identity variables. User-supplied binding identity keys such as `OPENAI_BASE_URL` / `OPENAI_API_KEY` are rejected rather than silently overwritten. |
+| `skills`, `mcp_servers`, `include_logs`, `exclude_logs`, `extra_allowed_hosts` | Preserve. |
+| `override_setup_timeout_sec` | Preserve unless `agent_setup_timeout_sec` explicitly overlays it. |
+| `override_timeout_sec` | Preserve unless the rollout request supplies `agent_timeout_sec`. |
+| `max_timeout_sec` | Preserve as the user's safety cap. With Native-owned timeout multipliers at `1.0`, it caps the request overlay. |
+| `n_concurrent`, `concurrency_group`, `resume_trajectory=True` | Reject at construction; they conflict with the backend's queue/single-session ownership. |
+| All `EnvironmentConfig` fields | Preserve. Managed SkyPilot fills `kwargs.context_name` only when the user left it unset. |
+| `VerifierConfig.disable` | SDK-owned and always `False`; the verifier produces the reward. |
+| `VerifierConfig.override_timeout_sec` | Preserve unless the rollout request supplies `grader_timeout_sec`. |
+| Other `VerifierConfig` fields, including `max_timeout_sec` | Preserve. |
+| Trial-level task, name, directory, job/source/install flags, and timeout multipliers | SDK-owned; they are not constructor fields. |
 
 ## Agents
 
@@ -133,25 +178,29 @@ translation named in the error.
 | `opencode` | Chat Completions via `OPENAI_BASE_URL` / `OPENAI_API_KEY`; CLI `1.18.9` | opt-in | ✗ | Requires `allow_unverified_agent=True` and an `openai/...` model; Harbor base-URL behavior and trajectory linearity still need E2E validation. |
 | `codex` | OpenAI Responses; CLI `0.146.0` | blocked | ✗ | The controllers expose Chat Completions, so construction fails until a Responses translation gateway exists. |
 | `claude-code` | Anthropic Messages; CLI `2.1.220` | blocked | ✗ | Construction fails until a Messages translation gateway exists; it is never given generic `OPENAI_*` identity. |
-| `custom-chat-completions` | Chat Completions kwargs for an `agent_import_path` | opt-in | ✗ | Explicit binding plus `allow_unverified_agent=True`; emits an eval-only warning. |
+| `custom-chat-completions` | Chat Completions kwargs for `AgentConfig.import_path` | opt-in | ✗ | Explicit binding plus `allow_unverified_agent=True`; emits an eval-only warning. |
 
 Installed-agent versions are binding-owned and cannot be overridden through
-`agent_kwargs`. This prevents Harbor's default `@latest` installs from silently
+`agent.kwargs`. This prevents Harbor's default `@latest` installs from silently
 changing behavior during a long run. Binding identity is also owned: OpenCode
 configuration cannot override `provider.openai.options.baseURL`, and Chat
 Completions bindings reject model prefixes for other providers.
 
-`agent_setup_timeout_sec` controls only Harbor's setup/install phase for each Trial. The controller-provided `ExecutionRequest.agent_timeout_sec` remains the separate agent **run** timeout: the backend maps setup to `AgentConfig.override_setup_timeout_sec` and run to `AgentConfig.override_timeout_sec` without one replacing the other.
+`AgentConfig.override_setup_timeout_sec` controls only Harbor's setup/install
+phase for each Trial. The controller-provided `ExecutionRequest.agent_timeout_sec`
+remains the separate agent **run** timeout and overlays
+`AgentConfig.override_timeout_sec` for that rollout. The compatibility
+`agent_setup_timeout_sec` argument can still overlay the setup value.
 
 ### Model endpoint injection
 
-Endpoint and key come from the ambient `RolloutContext` ([context.py](../osmosis_ai/rollout/context.py)) — `chat_completions_url` and `api_key` — which the controller supplies per rollout (read from `OSMOSIS_CHAT_COMPLETIONS_URL` / `OSMOSIS_API_KEY` on a container host). The backend overwrites the selected binding's corresponding identity slots so user `agent_kwargs` / `agent_env` cannot redirect model traffic. For kwargs-wired agents, `extra_body.stream=False` is pinned until the controllers support that streaming path. The `oracle` binding is the exception: it invokes the task's reference solution and needs no model endpoint.
+Endpoint and key come from the ambient `RolloutContext` ([context.py](../osmosis_ai/rollout/context.py)) — `chat_completions_url` and `api_key` — which the controller supplies per rollout (read from `OSMOSIS_CHAT_COMPLETIONS_URL` / `OSMOSIS_API_KEY` on a container host). The backend overlays the selected binding's corresponding `agent.kwargs` identity slots and rejects user-set identity keys in `agent.env`, so configuration cannot redirect model traffic. For kwargs-wired agents, `extra_body.stream=False` is pinned until the controllers support that streaming path. The `oracle` binding is the exception: it invokes the task's reference solution and needs no model endpoint.
 
 ## Append-only trajectories (training caveat)
 
 RL training needs a single, linear, **append-only** token trajectory. Anything that rewrites the running context mid-run — summarization, compaction, subagents — forks that trajectory and corrupts the training signal. The backend does **not** gate or police this; it only sets a safe default for the built-in default agent and otherwise stays out of the way ([backend.py](../osmosis_ai/rollout/backend/native_harbor/backend.py)):
 
-- **`terminus-2` (the default agent)** summarizes mid-run, so the backend defaults `enable_summarize=False` + `proactive_summarization_threshold=0` on it. These are *overridable defaults* — your `agent_kwargs` win — so pass `agent_kwargs={"enable_summarize": True}` to get summarization back (e.g. for long-context eval).
+- **`terminus-2` (the default agent)** summarizes mid-run, so the backend defaults `enable_summarize=False` + `proactive_summarization_threshold=0` on it. These are *overridable defaults* — `agent.kwargs` wins — so set `AgentConfig(kwargs={"enable_summarize": True})` to get summarization back (e.g. for long-context eval).
 - **Every other binding is not training-safe.** Eval-only bindings warn when constructed, and unverified bindings additionally require an explicit opt-in. Protocol reachability alone cannot prove that an opaque installed CLI keeps one append-only trajectory.
 
 | Agent | Run (eval — reward only) | Train (needs a linear token trajectory) |

@@ -16,6 +16,14 @@ from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
+from harbor.models.environment_type import EnvironmentType
+from harbor.models.task.config import MCPServerConfig
+from harbor.models.trial.config import (
+    AgentConfig,
+    EnvironmentConfig,
+    TaskConfig,
+    VerifierConfig,
+)
 
 from osmosis_ai.rollout.backend.base import ExecutionBackend
 from osmosis_ai.rollout.backend.native_harbor import backend as bmod
@@ -218,16 +226,27 @@ class TestAgentConfig:
         assert ac.kwargs["llm_kwargs"]["extra_body"]["stream"] is False
 
     def test_agent_env_passthrough_for_installed(self):
-        # Binding-specific identity env wins on collision.
+        # Non-identity environment survives alongside binding-owned identity.
         with pytest.warns(UserWarning, match="opencode.*eval-only"):
             backend = NativeHarborBackend(
                 agent_name="opencode",
-                agent_env={"FOO": "bar", "OPENAI_BASE_URL": "http://evil"},
+                agent_env={"FOO": "bar"},
                 allow_unverified_agent=True,
             )
         ac = backend._build_agent_config(_request(), _ctx())
         assert ac.env["FOO"] == "bar"
-        assert ac.env["OPENAI_BASE_URL"] == "http://ctrl:8080"  # SDK wins
+        assert ac.env["OPENAI_BASE_URL"] == "http://ctrl:8080"
+
+    @pytest.mark.parametrize("identity_key", ["OPENAI_BASE_URL", "OPENAI_API_KEY"])
+    def test_agent_identity_env_is_rejected(self, identity_key: str):
+        with pytest.raises(ValueError, match=r"owns agent\.env identity keys"):
+            NativeHarborBackend(
+                agent=AgentConfig(
+                    name="opencode",
+                    env={identity_key: "user-owned"},
+                ),
+                allow_unverified_agent=True,
+            )
 
     def test_custom_agent_not_injected(self):
         # An import_path agent (name=None) gets identity wiring only -- no defaults.
@@ -386,6 +405,14 @@ class TestAgentConfig:
         assert ac.name == "terminus-2"
         assert ac.model_name == "openai/custom"
 
+    @pytest.mark.parametrize("invalid_model", [None, "", "   ", 0, False])
+    def test_explicit_invalid_metadata_model_is_rejected(self, invalid_model: Any):
+        backend = NativeHarborBackend()
+        request = _request({"harbor_task": "/tmp/task", "harbor_model": invalid_model})
+
+        with pytest.raises(ValueError, match=r"harbor_model.*non-empty string"):
+            backend._build_agent_config(request, _ctx())
+
     def test_agent_timeout_forwarded(self):
         backend = NativeHarborBackend()
         ac = backend._build_agent_config(_request(agent_timeout_sec=42.0), _ctx())
@@ -419,6 +446,233 @@ class TestAgentConfig:
     ):
         with pytest.raises(ValueError, match="agent_setup_timeout_sec must be > 0"):
             NativeHarborBackend(agent_setup_timeout_sec=invalid_timeout)
+
+
+class TestFullConfigConstructor:
+    def test_full_configs_are_preserved_and_deep_cloned_per_rollout(self):
+        agent = AgentConfig(
+            name="terminus-2",
+            model_name="openai/config-model",
+            skills=["org/skill@1"],
+            mcp_servers=[
+                MCPServerConfig(
+                    name="shell-tools",
+                    transport="stdio",
+                    command="serve-tools",
+                    args=["--safe"],
+                )
+            ],
+            include_logs=["*.json"],
+            exclude_logs=["debug-*"],
+            extra_allowed_hosts=["models.example.com"],
+            override_setup_timeout_sec=11.0,
+            override_timeout_sec=12.0,
+            max_timeout_sec=13.0,
+            kwargs={"nested": {"items": ["original"]}},
+            env={"CUSTOM_TOKEN": "agent-secret"},
+        )
+        environment = EnvironmentConfig(
+            type=EnvironmentType.DAYTONA,
+            force_build=True,
+            delete=False,
+            override_cpus=4,
+            env={"SANDBOX_TOKEN": "environment-secret"},
+            kwargs={"nested": {"region": "us-west"}},
+            extra_allowed_hosts=["packages.example.com"],
+        )
+        verifier = VerifierConfig(
+            override_timeout_sec=21.0,
+            max_timeout_sec=22.0,
+            include_logs=["reward.json"],
+            exclude_logs=["verbose.log"],
+            env={"VERIFIER_TOKEN": "verifier-secret"},
+            import_path="my.verifier:Verifier",
+            kwargs={"nested": {"threshold": 0.75}},
+            disable=True,
+        )
+        backend = NativeHarborBackend(
+            agent=agent,
+            environment=environment,
+            verifier=verifier,
+        )
+
+        agent_one = backend._build_agent_config(_request(), _ctx())
+        agent_two = backend._build_agent_config(_request(), _ctx())
+        trial_one = backend._build_trial_config(
+            _request(), TaskConfig(path=Path("/tmp/task")), agent_one, "trial-one"
+        )
+        trial_two = backend._build_trial_config(
+            _request(), TaskConfig(path=Path("/tmp/task")), agent_two, "trial-two"
+        )
+
+        assert agent_one.model_name == "openai/config-model"
+        assert agent_one.skills == ["org/skill@1"]
+        assert agent_one.mcp_servers[0].command == "serve-tools"
+        assert agent_one.include_logs == ["*.json"]
+        assert agent_one.exclude_logs == ["debug-*"]
+        assert agent_one.extra_allowed_hosts == ["models.example.com"]
+        assert agent_one.override_setup_timeout_sec == 11.0
+        assert agent_one.override_timeout_sec == 12.0
+        assert agent_one.max_timeout_sec == 13.0
+        assert agent_one.env["CUSTOM_TOKEN"] == "agent-secret"
+        assert trial_one.environment.type == EnvironmentType.DAYTONA
+        assert trial_one.environment.force_build is True
+        assert trial_one.environment.delete is False
+        assert trial_one.environment.override_cpus == 4
+        assert trial_one.environment.env["SANDBOX_TOKEN"] == "environment-secret"
+        assert trial_one.verifier.disable is False
+        assert trial_one.verifier.override_timeout_sec == 21.0
+        assert trial_one.verifier.max_timeout_sec == 22.0
+        assert trial_one.verifier.include_logs == ["reward.json"]
+        assert trial_one.verifier.exclude_logs == ["verbose.log"]
+        assert trial_one.verifier.env["VERIFIER_TOKEN"] == "verifier-secret"
+        assert trial_one.verifier.import_path == "my.verifier:Verifier"
+
+        agent_one.kwargs["nested"]["items"].append("mutated")
+        agent_one.skills.append("mutated-skill")
+        agent_one.env["CUSTOM_TOKEN"] = "mutated"
+        trial_one.environment.kwargs["nested"]["region"] = "mutated"
+        trial_one.verifier.kwargs["nested"]["threshold"] = 0.0
+
+        assert agent.kwargs == {"nested": {"items": ["original"]}}
+        assert agent.skills == ["org/skill@1"]
+        assert agent.env["CUSTOM_TOKEN"] == "agent-secret"
+        assert environment.kwargs == {"nested": {"region": "us-west"}}
+        assert environment.env["SANDBOX_TOKEN"] == "environment-secret"
+        assert verifier.kwargs == {"nested": {"threshold": 0.75}}
+        assert verifier.disable is True
+        assert agent_two.kwargs["nested"]["items"] == ["original"]
+        assert agent_two.skills == ["org/skill@1"]
+        assert agent_two.env["CUSTOM_TOKEN"] == "agent-secret"
+        assert trial_two.environment.kwargs == {"nested": {"region": "us-west"}}
+        assert trial_two.verifier.kwargs == {"nested": {"threshold": 0.75}}
+        assert agent_one is not agent_two
+        assert trial_one.environment is not trial_two.environment
+        assert trial_one.verifier is not trial_two.verifier
+
+    def test_model_and_timeout_ownership_overlays_preserve_safety_caps(self):
+        agent = AgentConfig(
+            name="terminus-2",
+            model_name="openai/agent-default",
+            override_setup_timeout_sec=10.0,
+            override_timeout_sec=20.0,
+            max_timeout_sec=30.0,
+        )
+        verifier = VerifierConfig(
+            override_timeout_sec=40.0,
+            max_timeout_sec=50.0,
+        )
+        backend = NativeHarborBackend(
+            agent=agent,
+            verifier=verifier,
+            model_name="openai/constructor-default",
+            agent_setup_timeout_sec=15.0,
+        )
+        request = _request(
+            {
+                "harbor_task": "/tmp/task",
+                "harbor_model": "openai/row-model",
+            },
+            agent_timeout_sec=25.0,
+            grader_timeout_sec=45.0,
+        )
+
+        rollout_agent = backend._build_agent_config(request, _ctx())
+        rollout = backend._build_trial_config(
+            request,
+            TaskConfig(path=Path("/tmp/task")),
+            rollout_agent,
+            "trial-overlays",
+        )
+
+        assert rollout.agent.model_name == "openai/row-model"
+        assert rollout.agent.override_setup_timeout_sec == 15.0
+        assert rollout.agent.override_timeout_sec == 25.0
+        assert rollout.agent.max_timeout_sec == 30.0
+        assert rollout.verifier.override_timeout_sec == 45.0
+        assert rollout.verifier.max_timeout_sec == 50.0
+        assert agent.model_name == "openai/agent-default"
+        assert agent.override_setup_timeout_sec == 10.0
+        assert agent.override_timeout_sec == 20.0
+        assert verifier.override_timeout_sec == 40.0
+
+        default_request = _request()
+        default_agent = backend._build_agent_config(default_request, _ctx())
+        default_trial = backend._build_trial_config(
+            default_request,
+            TaskConfig(path=Path("/tmp/task")),
+            default_agent,
+            "trial-defaults",
+        )
+        assert default_agent.model_name == "openai/constructor-default"
+        assert default_agent.override_timeout_sec == 20.0
+        assert default_trial.verifier.override_timeout_sec == 40.0
+
+    @pytest.mark.parametrize(
+        ("agent", "message"),
+        [
+            (
+                AgentConfig(name="terminus-2", n_concurrent=1),
+                "agent.n_concurrent is unsupported",
+            ),
+            (
+                AgentConfig(name="terminus-2", concurrency_group="shared"),
+                "agent.concurrency_group is unsupported",
+            ),
+            (
+                AgentConfig(name="terminus-2", resume_trajectory=True),
+                "agent.resume_trajectory is unsupported",
+            ),
+        ],
+    )
+    def test_agent_owned_fields_are_rejected(
+        self, agent: AgentConfig, message: str
+    ) -> None:
+        with pytest.raises(ValueError, match=message):
+            NativeHarborBackend(agent=agent)
+
+    def test_canonical_and_legacy_config_inputs_cannot_be_mixed(self):
+        with pytest.raises(ValueError, match="agent cannot be combined"):
+            NativeHarborBackend(
+                agent=AgentConfig(name="terminus-2"),
+                agent_kwargs={"temperature": 0},
+            )
+        with pytest.raises(ValueError, match="cannot both be set"):
+            NativeHarborBackend(
+                environment=EnvironmentConfig(type=EnvironmentType.DOCKER),
+                environment_config=EnvironmentConfig(type=EnvironmentType.DAYTONA),
+            )
+
+    def test_managed_skypilot_placement_does_not_mutate_caller(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("HARBOR_SKYPILOT_CONTEXT", "managed-cluster")
+        environment = EnvironmentConfig(
+            type=EnvironmentType.SKYPILOT,
+            kwargs={"nested": {"value": "preserved"}},
+        )
+        backend = NativeHarborBackend(environment=environment)
+        agent = backend._build_agent_config(_request(), _ctx())
+        trial = backend._build_trial_config(
+            _request(), TaskConfig(path=Path("/tmp/task")), agent, "trial-sky"
+        )
+
+        assert "context_name" not in environment.kwargs
+        assert trial.environment.kwargs["context_name"] == "managed-cluster"
+        assert trial.environment.kwargs["nested"] == {"value": "preserved"}
+
+    def test_explicit_empty_agent_config_preserves_oracle_default(self):
+        agent = AgentConfig()
+        with pytest.warns(UserWarning, match="oracle.*eval-only"):
+            backend = NativeHarborBackend(agent=agent)
+
+        built = backend._build_agent_config(
+            _request(), RolloutContext(chat_completions_url="", api_key=None)
+        )
+
+        assert agent.name == "oracle"
+        assert built.name == "oracle"
+        assert backend.agent_name == "oracle"
 
 
 class TestRewardPicking:
