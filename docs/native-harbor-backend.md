@@ -62,6 +62,10 @@ if __name__ == "__main__":
 
 The model endpoint and key are **not** configured here — they arrive per rollout from the ambient `RolloutContext` (see [Model endpoint injection](#model-endpoint-injection)). To exercise the server locally, set the same env vars a training controller would: `OSMOSIS_CHAT_COMPLETIONS_URL`, `OSMOSIS_API_KEY`, `OSMOSIS_ROLLOUT_ID` ([context.py](../osmosis_ai/rollout/context.py)).
 
+The plain Harbor `Trial` path used here does not invoke Harbor's telemetry
+reporting call sites. Managed images should nevertheless set
+`HARBOR_TELEMETRY=0` as a belt-and-suspenders opt-out.
+
 Codex and Claude Code are eval-only bindings that need protocol translation.
 For either one, also pass `gateway_base_url` as the fixed, externally reachable
 origin of this same rollout server. `create_rollout_server` then mounts the
@@ -100,6 +104,67 @@ backend = NativeHarborBackend(
 ```
 
 Each Trial is one environment instance, so keep `max_concurrent` aligned with the host/remote capacity (see [Concurrency and trial directories](#concurrency-and-trial-directories)). For managed SkyPilot runs, an explicit `environment.kwargs["context_name"]` wins; otherwise the backend reads `HARBOR_SKYPILOT_CONTEXT`. On macOS local Docker, controller URLs using `localhost` or `127.0.0.1` are rewritten to `host.docker.internal` so the agent container can reach them.
+
+### Prewarm setup before the server becomes ready
+
+`NativeHarborBackend.prewarm()` runs one Harbor `TrialConfig(install_only=True)`
+per supplied `TaskConfig`. The convenience `prewarm_lifespan()` turns that into
+a startup gate for the same FastAPI server:
+
+```python
+from pathlib import Path
+
+from harbor.models.trial.config import TaskConfig
+
+
+prewarm_tasks = [
+    TaskConfig(path=Path("./tasks/foo")),
+    TaskConfig(name="org/task", ref="sha256:9f2c..."),
+    TaskConfig(
+        git_url="https://example.com/org/tasks.git",
+        path=Path("tasks/bar"),
+        git_commit_id="abc123...",
+    ),
+]
+
+app = create_rollout_server(
+    backend=backend,
+    lifespan=backend.prewarm_lifespan(prewarm_tasks),
+)
+```
+
+The lifespan finishes prewarming before FastAPI accepts health checks or rollout
+requests. For an existing custom lifespan, call `await backend.prewarm(tasks)`
+before yielding. The backend clones the task list and its full
+agent/environment/verifier templates, assigns unique `native-prewarm-*` trial
+names, and uses the same `max_concurrent` queue with Harbor retries pinned to
+zero. It needs no `RolloutContext`, controller URL/key, or callbacks. Harbor
+resolves the task, starts and health-checks the environment, uploads configured
+skills, and runs agent setup/install; it skips the agent run and verification,
+so it makes no model call and produces no reward.
+
+Every configured task is attempted. Raised setup exceptions and Harbor
+`result.exception_info` failures are reported together, and any failure aborts
+server startup. The aggregate names each task and exception type, but keeps raw
+setup output out of startup logs because it may contain configured credentials.
+When Harbor got far enough to create a failed trial directory, the aggregate
+points to it for details; earlier resolution failures explicitly say that no
+directory was created. Successful prewarm trial directories follow
+`cleanup_successful_trials`; failed directories that exist are retained for
+inspection.
+Use immutable package digests and git commits in this startup list just as in
+dataset metadata.
+
+This list is a one-shot startup preparation plan, **not** a rollout-server work
+list: it does not sample, retry, grade, or schedule controller rollouts. Miles or
+eval still owns all real work. Harbor describes `install_only` as a fast setup
+compatibility check, and durable cache benefit depends on the environment
+provider and its lifecycle configuration. In particular, default local Docker
+uses `EnvironmentConfig.delete=True`; finalization removes the container, local
+image, and volumes, so an installed CLI is not guaranteed to survive into a
+later Trial. Prewarming can prime only the task/package/image caches that the
+chosen provider actually retains. It also does not run the real Miles/eval
+closed loop and makes no new training-safety or E2E claim.
 
 ## Dataset contract
 
@@ -185,7 +250,7 @@ sensitive environment values.
 | `max_timeout_sec` | Preserve as the user's safety cap. With Native-owned timeout multipliers at `1.0`, it caps the request overlay. |
 | `n_concurrent`, `concurrency_group`, `resume_trajectory=True` | Reject at construction; they conflict with the backend's queue/single-session ownership. |
 | All `EnvironmentConfig` fields | Preserve. Managed SkyPilot fills `kwargs.context_name` only when the user left it unset. |
-| `VerifierConfig.disable` | SDK-owned and always `False`; the verifier produces the reward. |
+| `VerifierConfig.disable` | SDK-owned: `False` for real rollouts because the verifier produces the reward; Harbor sets it to `True` on setup-only prewarm Trials. |
 | `VerifierConfig.override_timeout_sec` | Preserve unless the rollout request supplies `grader_timeout_sec`. |
 | Other `VerifierConfig` fields, including `max_timeout_sec` | Preserve. |
 | Trial-level task, name, directory, job/source/install flags, and timeout multipliers | SDK-owned; they are not constructor fields. |
@@ -269,7 +334,7 @@ RL training needs a single, linear, **append-only** token trajectory. Anything t
 
 ## Reward mapping
 
-Harbor verifiers emit a **named-channel** dict (`dict[str, float]`, e.g. `{"reward": 1.0}`), not a scalar. `_pick_reward` ([backend.py](../osmosis_ai/rollout/backend/native_harbor/backend.py)) collapses it: it takes the `reward_key` channel if present, else the sole value when there is exactly one channel. If multiple channels exist and none matches `reward_key`, the reward is left unset and the sample fails grading with a logged warning — set `reward_key` to the channel you want. The reward is read from the in-memory `TrialResult` (trial-level verifier result, falling back to the first step result that has rewards), so no `reward.json` parsing is needed.
+Harbor verifiers emit a **named-channel** dict (`dict[str, float]`, e.g. `{"reward": 1.0}`), not a scalar. `_pick_reward` ([backend.py](../osmosis_ai/rollout/backend/native_harbor/backend.py)) collapses it: it takes the `reward_key` channel if present, else the sole value when there is exactly one channel. If multiple channels exist and none matches `reward_key`, the reward is left unset and the sample fails grading with a logged warning — set `reward_key` to the channel you want. The reward is read from the in-memory trial-level `TrialResult`, so no `reward.json` parsing is needed. A defensive legacy step-result fallback remains internal; it does not make multi-step tasks supported.
 
 A Harbor `TrialResult.exception_info` is authoritative: both callbacks report
 failure and the sample reward remains unset, even if a verifier emitted a numeric
@@ -326,11 +391,11 @@ When the Harbor agent writes `agent/trajectory.json`, the backend treats that AT
 
 `agent.extra` is preserved. Before the document leaves the backend, credential-shaped leaves such as `api_key`, `authorization`, `password`, `secret`, and `token` are recursively replaced with `[REDACTED]`; other agent configuration remains intact.
 
-ATIF availability is still an agent capability: an agent that emits no `trajectory.json` can run and be graded, but there is no native document to persist. A malformed document, or multiple independent multi-step documents that cannot be represented as one trajectory without inventing structure, causes the successful trial directory to be retained for inspection instead of being deleted.
+ATIF availability is still an agent capability: an agent that emits no `trajectory.json` can run and be graded, but there is no native document to persist. A malformed document causes the successful trial directory to be retained for inspection instead of being deleted. Multi-step tasks are unsupported; defensive loading code may preserve unexpected step-shaped output for inspection, but that is not a supported trajectory contract.
 
 ## Artifacts
 
-The SDK does not scan the sandbox or decide which task files are artifacts. User or task code publishes selected files to Harbor's conventional `/logs/artifacts` directory (or declares additional artifacts in the Harbor task configuration), and Harbor downloads those files into the host trial directory. The backend only copies that already-collected tree to `~/.osmosis/<rollout_id>/artifacts`, alongside `trajectory.json`, before cleanup. Multi-step Harbor artifacts are retained beneath `artifacts/steps/<step-name>/`.
+The SDK does not scan the sandbox or decide which task files are artifacts. User or task code publishes selected files to Harbor's conventional `/logs/artifacts` directory (or declares additional artifacts in the Harbor task configuration), and Harbor downloads those files into the host trial directory. The backend only copies that already-collected tree to `~/.osmosis/<rollout_id>/artifacts`, alongside `trajectory.json`, before cleanup. Native has no supported multi-step artifact contract; defensive handling of unexpected step directories exists only to preserve evidence rather than discard it.
 
 ## Concurrency and trial directories
 
