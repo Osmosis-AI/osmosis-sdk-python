@@ -29,6 +29,7 @@ from .result import (
     detail_fields,
 )
 from .serializers import (
+    serialize_benchmark_run,
     serialize_checkpoint,
     serialize_dataset,
     serialize_dev_rollout_server,
@@ -64,6 +65,7 @@ __all__ = [
     "render",
     "render_command_result",
     "resolve_format_selectors",
+    "serialize_benchmark_run",
     "serialize_checkpoint",
     "serialize_dataset",
     "serialize_dev_rollout_server",

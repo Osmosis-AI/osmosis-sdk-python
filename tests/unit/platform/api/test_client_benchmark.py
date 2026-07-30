@@ -69,10 +69,26 @@ def test_get_benchmark_encodes_name_and_parses_detail(mock_request: MagicMock) -
             "requires_harness": True,
             "requires_judge_model": False,
             "judge_model_default": None,
+            "required_secret_names": ["HF_TOKEN"],
             "pass_threshold": 1,
             "categories": [{"name": "terminal", "task_count": 89}],
-            "tasks": [{"name": "task-1", "category": "terminal"}],
-            "unavailable_tasks": None,
+            "tasks": [
+                {
+                    "name": "task-1",
+                    "category": "terminal",
+                    "difficulty": "hard",
+                }
+            ],
+            "unavailable_tasks": {
+                "reason": "Missing fixture",
+                "tasks": [
+                    {
+                        "name": "task-2",
+                        "category": "terminal",
+                        "difficulty": None,
+                    }
+                ],
+            },
         }
     }
 
@@ -83,7 +99,14 @@ def test_get_benchmark_encodes_name_and_parses_detail(mock_request: MagicMock) -
 
     assert result.name == "Terminal-Bench 2.1"
     assert result.categories[0].name == "terminal"
-    assert result.tasks == [{"name": "task-1", "category": "terminal"}]
+    assert result.tasks == [
+        {"name": "task-1", "category": "terminal", "difficulty": "hard"}
+    ]
+    assert result.unavailable_tasks == {
+        "reason": "Missing fixture",
+        "tasks": [{"name": "task-2", "category": "terminal", "difficulty": None}],
+    }
+    assert result.required_secret_names == ["HF_TOKEN"]
     assert mock_request.call_args.args[0] == (
         "/api/cli/benchmarks/Terminal-Bench%202.1"
     )
@@ -91,6 +114,51 @@ def test_get_benchmark_encodes_name_and_parses_detail(mock_request: MagicMock) -
         "credentials": None,
         "git_identity": "acme/workspace",
     }
+
+
+@patch("osmosis_ai.platform.api.client.platform_request")
+def test_get_benchmark_defaults_missing_required_secret_names(
+    mock_request: MagicMock,
+) -> None:
+    mock_request.return_value = {
+        "benchmark": {
+            "id": "benchmark-2",
+            "name": "Terminal-Bench 2.1",
+            "description": "Terminal benchmark",
+            "source_type": "osmosis_managed",
+            "source_ref": "terminal-bench-2-1",
+            "task_count": 89,
+            "category_count": 1,
+            "task_sets": [],
+            "runner_family": "harbor",
+            "supports_harness": True,
+            "requires_harness": True,
+            "requires_judge_model": False,
+            "judge_model_default": None,
+            "pass_threshold": 1,
+            "categories": [{"name": "terminal", "task_count": 89}],
+            "tasks": [
+                {"name": "task-1", "category": "terminal"},
+                {
+                    "name": "task-2",
+                    "category": "terminal",
+                    "difficulty": "extreme",
+                },
+            ],
+            "unavailable_tasks": None,
+        }
+    }
+
+    result = OsmosisClient().get_benchmark(
+        "Terminal-Bench 2.1",
+        git_identity="acme/workspace",
+    )
+
+    assert result.required_secret_names == []
+    assert result.tasks == [
+        {"name": "task-1", "category": "terminal", "difficulty": None},
+        {"name": "task-2", "category": "terminal", "difficulty": None},
+    ]
 
 
 @patch("osmosis_ai.platform.api.client.platform_request")
@@ -225,3 +293,148 @@ def test_submit_benchmark_run_omits_empty_optional_sections(
             }
         ],
     }
+
+
+@patch("osmosis_ai.platform.api.client.platform_request")
+def test_list_benchmark_runs_gets_paginated_runs(mock_request: MagicMock) -> None:
+    mock_request.return_value = {
+        "benchmark_runs": [
+            {
+                "id": "run-1",
+                "name": "hle-smoke",
+                "status": "running",
+                "benchmark": {"id": "benchmark-1", "name": "HLE"},
+                "agent_count": 2,
+                "best_pass_at_1": 0.42,
+                "ingested_results": 50,
+                "expected_results": 100,
+                "created_at": "2026-07-30T00:00:00Z",
+            }
+        ],
+        "total_count": 1,
+        "has_more": False,
+        "next_offset": None,
+    }
+
+    result = OsmosisClient().list_benchmark_runs(
+        limit=25,
+        offset=50,
+        git_identity="acme/workspace",
+    )
+
+    assert result.benchmark_runs[0].name == "hle-smoke"
+    assert result.benchmark_runs[0].best_pass_at_1 == 0.42
+    mock_request.assert_called_once_with(
+        "/api/cli/benchmark-runs?limit=25&offset=50",
+        credentials=None,
+        git_identity="acme/workspace",
+    )
+
+
+@patch("osmosis_ai.platform.api.client.platform_request")
+def test_get_benchmark_run_parses_detail(mock_request: MagicMock) -> None:
+    mock_request.return_value = {
+        "benchmark_run": {
+            "id": "run-1",
+            "name": "hle-smoke",
+            "status": "finished",
+            "created_at": "2026-07-30T00:00:00Z",
+            "platform_url": "https://platform.example/benchmarks/run-1",
+        },
+        "configuration": {
+            "benchmark_id": "benchmark-1",
+            "benchmark_name": "HLE",
+            "task_filters": {"task_set": "parity"},
+        },
+        "agents": [{"agent_index": 0, "model_display_name": "GPT-5"}],
+        "progress": {"ingested": 249, "expected": 249},
+        "totals": {"passed": 100, "failed": 149},
+        "agent_metrics": [
+            {
+                "benchmark_run_agent_id": "agent-1",
+                "pass_at_1": {"value": 0.75},
+            }
+        ],
+    }
+
+    result = OsmosisClient().get_benchmark_run(
+        "hle smoke",
+        git_identity="acme/workspace",
+    )
+
+    assert result.benchmark_name == "HLE"
+    assert result.benchmark_id == "benchmark-1"
+    assert result.agent_count == 1
+    assert result.progress == {"ingested": 249, "expected": 249}
+    assert result.ingested_results == 249
+    assert result.expected_results == 249
+    assert result.best_pass_at_1 == 0.75
+    mock_request.assert_called_once_with(
+        "/api/cli/benchmark-runs/hle%20smoke",
+        credentials=None,
+        git_identity="acme/workspace",
+    )
+
+
+@patch("osmosis_ai.platform.api.client.platform_request")
+def test_benchmark_logs_stop_and_output_routes(mock_request: MagicMock) -> None:
+    client = OsmosisClient()
+
+    mock_request.return_value = {"logs": [], "next_cursor": None}
+    client.get_benchmark_run_logs(
+        "run/name",
+        limit=20,
+        cursor="cursor-1",
+        git_identity="acme/workspace",
+    )
+    assert mock_request.call_args.args[0] == (
+        "/api/cli/benchmark-runs/run%2Fname/logs?"
+        "limit=20&direction=older&cursor=cursor-1"
+    )
+
+    mock_request.return_value = {}
+    client.stop_benchmark_run("run/name", git_identity="acme/workspace")
+    mock_request.assert_called_with(
+        "/api/cli/benchmark-runs/run%2Fname/stop",
+        method="POST",
+        data={},
+        credentials=None,
+        git_identity="acme/workspace",
+    )
+
+    mock_request.return_value = {
+        "files": [{"path": "summary.csv", "size": 10, "token": "export-1"}],
+        "totals": {"files": 1, "bytes": 10},
+    }
+    manifest = client.get_benchmark_run_download_manifest(
+        "run/name",
+        types=["summary", "results"],
+        git_identity="acme/workspace",
+    )
+    assert manifest.files[0].path == "summary.csv"
+    assert mock_request.call_args.args[0] == (
+        "/api/cli/benchmark-runs/run%2Fname/outputs/manifest?types=summary%2Cresults"
+    )
+
+    mock_request.return_value = {
+        "items": [
+            {
+                "path": "summary.csv",
+                "token": "export-1",
+                "url": "https://example.test/summary.csv",
+            }
+        ]
+    }
+    urls = client.get_benchmark_run_download_urls(
+        "run/name",
+        items=manifest.files,
+        git_identity="acme/workspace",
+    )
+    assert urls.items[0].token == "export-1"
+    mock_request.assert_called_with(
+        "/api/cli/benchmark-runs/run%2Fname/outputs/download-urls",
+        method="POST",
+        data={"items": [{"path": "summary.csv", "token": "export-1"}]},
+        credentials=None,
+        git_identity="acme/workspace",
+    )

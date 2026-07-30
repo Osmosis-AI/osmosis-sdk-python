@@ -113,6 +113,28 @@ def test_command_path_falls_back_to_argv_when_no_context(monkeypatch) -> None:
     assert command_path_for_error(None) == "dataset list"
 
 
+@pytest.mark.parametrize(
+    ("argv", "expected"),
+    [
+        (
+            ["osmosis", "--json", "benchmark", "download", "hle-smoke"],
+            "benchmark download",
+        ),
+        (
+            ["osmosis", "--json", "benchmark", "catalog", "info", "HLE"],
+            "benchmark catalog info",
+        ),
+    ],
+)
+def test_benchmark_command_path_falls_back_to_full_command(
+    monkeypatch: pytest.MonkeyPatch,
+    argv: list[str],
+    expected: str,
+) -> None:
+    monkeypatch.setattr("sys.argv", argv)
+    assert command_path_for_error(None) == expected
+
+
 def test_command_path_fallback_excludes_top_level_argument(monkeypatch) -> None:
     monkeypatch.setattr("sys.argv", ["osmosis", "--json", "deploy", "ckpt-name"])
     assert command_path_for_error(None) == "deploy"

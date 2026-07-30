@@ -12,6 +12,11 @@ from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.cli.output import DetailSection, ListColumn, ListResult
 from osmosis_ai.cli.output.display import format_local_datetime
 from osmosis_ai.platform.api.models import (
+    BENCHMARK_RUN_STATUSES_ERROR,
+    BENCHMARK_RUN_STATUSES_IN_PROGRESS,
+    BENCHMARK_RUN_STATUSES_PENDING,
+    BENCHMARK_RUN_STATUSES_STOPPED,
+    BENCHMARK_RUN_STATUSES_SUCCESS,
     DEPLOYMENT_STATUSES_SUCCESS,
     EVAL_RUN_STATUSES_ERROR,
     EVAL_RUN_STATUSES_IN_PROGRESS,
@@ -144,6 +149,13 @@ _EVAL_STATUS_STYLES: _StatusStyleMap = (
     (EVAL_RUN_STATUSES_ERROR, "red"),
     (EVAL_RUN_STATUSES_STOPPED, "dim"),
 )
+_BENCHMARK_STATUS_STYLES: _StatusStyleMap = (
+    (BENCHMARK_RUN_STATUSES_SUCCESS, "green"),
+    (BENCHMARK_RUN_STATUSES_PENDING, "orange3"),
+    (BENCHMARK_RUN_STATUSES_IN_PROGRESS, "blue"),
+    (BENCHMARK_RUN_STATUSES_ERROR, "red"),
+    (BENCHMARK_RUN_STATUSES_STOPPED, "dim"),
+)
 
 
 def format_status_token(
@@ -198,6 +210,11 @@ def format_deployment_status(status: str | None, *, plain: bool = False) -> str:
 def format_eval_status(run: Any) -> str:
     """Format an evaluation run status token with Rich styling."""
     return format_status_token(run.status, _EVAL_STATUS_STYLES)
+
+
+def format_benchmark_status(run: Any) -> str:
+    """Format a benchmark run status token with Rich styling."""
+    return format_status_token(run.status, _BENCHMARK_STATUS_STYLES)
 
 
 def format_reward(reward: float | None) -> str:

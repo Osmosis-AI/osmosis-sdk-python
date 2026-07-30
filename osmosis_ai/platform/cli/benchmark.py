@@ -1,4 +1,4 @@
-"""Handlers for benchmark catalog discovery and run submission."""
+"""Handlers for benchmark catalog discovery and run management."""
 
 from __future__ import annotations
 
@@ -9,17 +9,25 @@ from osmosis_ai.cli.console import console
 from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.cli.output import (
     DetailResult,
+    DetailSection,
     ListColumn,
     ListResult,
     OperationResult,
     detail_fields,
     get_output_context,
+    serialize_benchmark_run,
 )
+from osmosis_ai.cli.output.display import format_local_date, format_local_datetime
 from osmosis_ai.cli.prompts import require_confirmation
 from osmosis_ai.platform.api.client import OsmosisClient
 from osmosis_ai.platform.api.models import (
+    BENCHMARK_RUN_STATUSES_ERROR,
+    BENCHMARK_RUN_STATUSES_PENDING,
+    BENCHMARK_RUN_STATUSES_TERMINAL,
     BenchmarkCatalogDetail,
     BenchmarkCatalogEntry,
+    BenchmarkRun,
+    BenchmarkRunDetail,
     BenchmarkTaskSet,
     SubmitBenchmarkRunResult,
 )
@@ -38,6 +46,14 @@ from osmosis_ai.platform.cli.shared_submit import (
     _missing_secret_message,
 )
 from osmosis_ai.platform.cli.utils import (
+    build_logs_result,
+    format_benchmark_status,
+    format_env_config,
+    format_progress,
+    format_secret_scopes,
+    jsonish,
+    kv_section,
+    make_progress,
     paginated_fetch,
     require_git_workspace_directory_context,
     validate_list_options,
@@ -140,12 +156,13 @@ def list_benchmarks(*, limit: int, all_: bool) -> ListResult:
             for benchmark in benchmarks
         ],
         display_hints=[
-            "Use osmosis benchmark info <name> for task sets, categories, and tasks."
+            "Use osmosis benchmark catalog info <name> for task sets, "
+            "categories, and tasks."
         ],
     )
 
 
-def info(name_or_id: str) -> DetailResult:
+def catalog_info(name_or_id: str) -> DetailResult:
     """Show benchmark metadata and task-selection options."""
     context = require_git_workspace_directory_context()
     client = OsmosisClient()
@@ -185,6 +202,10 @@ def info(name_or_id: str) -> DetailResult:
         ("Named Task Sets", _task_set_display(benchmark.task_sets)),
         ("Harness", harness),
         ("LLM Judge", judge),
+        (
+            "Required Secret Records",
+            ", ".join(benchmark.required_secret_names) or "–",
+        ),
         ("Pass Threshold", f"{benchmark.pass_threshold:g}"),
     ]
 
@@ -195,6 +216,7 @@ def info(name_or_id: str) -> DetailResult:
         "requires_harness": benchmark.requires_harness,
         "requires_judge_model": benchmark.requires_judge_model,
         "judge_model_default": benchmark.judge_model_default,
+        "required_secret_names": benchmark.required_secret_names,
         "pass_threshold": benchmark.pass_threshold,
         "categories": [
             {"name": category.name, "task_count": category.task_count}
@@ -207,7 +229,8 @@ def info(name_or_id: str) -> DetailResult:
     display_hints = [
         f"Omit [tasks] to select all {benchmark.task_count:,} tasks.",
         "Use task_names or categories under [tasks] for a custom subset.",
-        "Use osmosis --json benchmark info <name> to inspect the full task list.",
+        "Use osmosis --json benchmark catalog info <name> to inspect the full "
+        "task list.",
     ]
     for task_set in benchmark.task_sets:
         if task_set.recommended:
@@ -222,6 +245,359 @@ def info(name_or_id: str) -> DetailResult:
         data={"benchmark": benchmark_data, **git_result_context(context)},
         fields=detail_fields(rows),
         display_hints=display_hints,
+    )
+
+
+def _benchmark_progress(run: BenchmarkRun) -> dict[str, Any] | None:
+    return make_progress(run.ingested_results, run.expected_results, "results")
+
+
+def _format_pass_at_1(value: float | None) -> str:
+    return "–" if value is None else f"{value:.1%}"
+
+
+def list_benchmark_runs(*, limit: int, all_: bool) -> ListResult:
+    """List benchmark runs for the current workspace directory."""
+    effective_limit, fetch_all = validate_list_options(limit=limit, all_=all_)
+    context = require_git_workspace_directory_context()
+    client = OsmosisClient()
+    output = get_output_context()
+    with output.status("Fetching benchmark runs..."):
+        runs, total_count, has_more, next_offset = paginated_fetch(
+            lambda lim, off: client.list_benchmark_runs(
+                limit=lim,
+                offset=off,
+                credentials=context.credentials,
+                git_identity=context.git_identity,
+            ),
+            items_attr="benchmark_runs",
+            limit=effective_limit,
+            fetch_all=fetch_all,
+        )
+
+    return ListResult(
+        title="Benchmark Runs",
+        items=[
+            {
+                **serialize_benchmark_run(run),
+                "progress": _benchmark_progress(run),
+            }
+            for run in runs
+        ],
+        total_count=total_count,
+        has_more=has_more,
+        next_offset=next_offset,
+        extra=git_result_context(context),
+        columns=[
+            ListColumn(key="name", label="Name", ratio=3, overflow="fold"),
+            ListColumn(key="status", label="Status", no_wrap=True, ratio=1),
+            ListColumn(key="benchmark", label="Benchmark", ratio=2, overflow="fold"),
+            ListColumn(key="progress", label="Progress", no_wrap=True, ratio=2),
+            ListColumn(key="best_pass_at_1", label="Best Pass@1", no_wrap=True),
+            ListColumn(key="created_at", label="Submitted", no_wrap=True, ratio=1),
+            ListColumn(key="creator_name", label="Submitted By", no_wrap=True),
+        ],
+        display_items=[
+            {
+                **serialize_benchmark_run(run),
+                "status": format_benchmark_status(run),
+                "benchmark": run.benchmark_name or "–",
+                "progress": format_progress(_benchmark_progress(run)) or "–",
+                "best_pass_at_1": _format_pass_at_1(run.best_pass_at_1),
+                "created_at": format_local_date(run.created_at),
+                "creator_name": run.creator_name or "–",
+            }
+            for run in runs
+        ],
+        display_hints=["Use osmosis benchmark info <name-or-id> for details."],
+    )
+
+
+def _configuration_rows(detail: BenchmarkRunDetail) -> list[tuple[str, str]]:
+    configuration = detail.configuration or {}
+    rows: list[tuple[str, str]] = []
+    source_type = configuration.get("source_type")
+    source_ref = configuration.get("source_ref")
+    if source_type or source_ref:
+        rows.append(
+            (
+                "Source",
+                ": ".join(str(value) for value in (source_type, source_ref) if value),
+            )
+        )
+    version = configuration.get("resolved_version")
+    if version:
+        rows.append(("Version", str(version)))
+    digest = configuration.get("resolved_digest")
+    if digest:
+        rows.append(("Digest", str(digest)))
+    task_filters = configuration.get("task_filters")
+    if task_filters:
+        rows.append(("Tasks", jsonish(task_filters)))
+    config = configuration.get("config")
+    if config:
+        rows.append(("Settings", jsonish(config)))
+    scopes = format_secret_scopes(configuration.get("resolved_secret_scopes"))
+    if scopes:
+        rows.append(("Secrets", scopes))
+    env = format_env_config(configuration.get("env_config"))
+    if env:
+        rows.append(("Environment Variables", env))
+    return rows
+
+
+def _agent_rows(detail: BenchmarkRunDetail) -> list[tuple[str, str]]:
+    rows: list[tuple[str, str]] = []
+    for position, agent in enumerate(detail.agents or [], start=1):
+        index = agent.get("agent_index")
+        label = f"Agent {index + 1 if isinstance(index, int) else position}"
+        model = (
+            agent.get("model_display_name")
+            or agent.get("model")
+            or agent.get("model_ref")
+            or "–"
+        )
+        if not isinstance(model, str):
+            model = jsonish(model)
+        harness = agent.get("harness") or "default"
+        status = agent.get("status")
+        value = f"{harness} · {model}"
+        if status:
+            value += f" · {status}"
+        rows.append((label, value))
+    return rows
+
+
+def _result_rows(detail: BenchmarkRunDetail) -> list[tuple[str, str]]:
+    totals = detail.totals or {}
+    rows: list[tuple[str, str]] = []
+    outcome_parts = [
+        f"{int(totals[key]):,} {key}"
+        for key in ("passed", "failed", "errored", "cancelled")
+        if isinstance(totals.get(key), int | float)
+    ]
+    if outcome_parts:
+        rows.append(("Outcomes", ", ".join(outcome_parts)))
+    for key, label in (
+        ("total_input_tokens", "Input Tokens"),
+        ("total_output_tokens", "Output Tokens"),
+        ("total_cost_usd", "Reported Cost"),
+    ):
+        value = totals.get(key)
+        if not isinstance(value, int | float) or isinstance(value, bool):
+            continue
+        rows.append(
+            (
+                label,
+                f"${value:,.4f}" if key == "total_cost_usd" else f"{int(value):,}",
+            )
+        )
+    return rows
+
+
+def run_info(name_or_id: str) -> DetailResult:
+    """Show benchmark run details, progress, configuration, and results."""
+    context = require_git_workspace_directory_context()
+    client = OsmosisClient()
+    output = get_output_context()
+    with output.status("Fetching benchmark run..."):
+        detail = client.get_benchmark_run(
+            name_or_id,
+            credentials=context.credentials,
+            git_identity=context.git_identity,
+        )
+
+    rows: list[tuple[str, str]] = [
+        ("Name", console.escape(detail.name)),
+        ("ID", detail.id),
+    ]
+    rows.extend(
+        [
+            ("Status", detail.status.replace("_", " ").title()),
+            ("Benchmark", console.escape(detail.benchmark_name or "–")),
+        ]
+    )
+    progress = detail.progress
+    if isinstance(progress, dict):
+        progress = make_progress(
+            progress.get("ingested"),
+            progress.get("expected"),
+            "results",
+        )
+    else:
+        progress = _benchmark_progress(detail)
+    progress_label = format_progress(progress)
+    if progress_label:
+        rows.append(("Progress", progress_label))
+    if detail.best_pass_at_1 is not None:
+        rows.append(("Best Pass@1", _format_pass_at_1(detail.best_pass_at_1)))
+    rows.append(("Agents", f"{detail.agent_count:,}"))
+    if detail.created_at:
+        rows.append(("Submitted", format_local_datetime(detail.created_at)))
+    if detail.creator_name:
+        rows.append(("Submitted By", console.escape(detail.creator_name)))
+    if detail.started_at:
+        rows.append(("Started", format_local_datetime(detail.started_at)))
+    if detail.completed_at:
+        rows.append(("Completed", format_local_datetime(detail.completed_at)))
+
+    sections: list[DetailSection] = []
+    for section in (
+        kv_section("Configuration", _configuration_rows(detail)),
+        kv_section("Agents", _agent_rows(detail)),
+        kv_section("Results", _result_rows(detail)),
+    ):
+        if section is not None:
+            sections.append(section)
+
+    display_hints: list[str] = []
+    if detail.platform_url:
+        display_hints.append(f"View: {detail.platform_url}")
+    if detail.status in BENCHMARK_RUN_STATUSES_ERROR:
+        display_hints.append(f"See logs with: osmosis benchmark logs {detail.name}")
+    if detail.status not in BENCHMARK_RUN_STATUSES_TERMINAL:
+        display_hints.append(f"Stop with: osmosis benchmark stop {detail.name}")
+    display_hints.append(
+        f"Download outputs with: osmosis benchmark download {detail.name}"
+    )
+
+    return DetailResult(
+        title="Benchmark Run",
+        data={
+            "benchmark_run": serialize_benchmark_run(detail),
+            "configuration": detail.configuration,
+            "agents": detail.agents,
+            "progress": progress,
+            "totals": detail.totals,
+            "agent_metrics": detail.agent_metrics,
+            **git_result_context(context),
+        },
+        fields=detail_fields(rows),
+        sections=sections,
+        display_hints=display_hints,
+    )
+
+
+def logs(name_or_id: str, *, limit: int, cursor: str | None = None) -> ListResult:
+    """Show the most recent logs for a benchmark run, oldest-first."""
+    context = require_git_workspace_directory_context()
+    client = OsmosisClient()
+    output = get_output_context()
+    with output.status("Fetching logs..."):
+        page = client.get_benchmark_run_logs(
+            name_or_id,
+            limit=limit,
+            cursor=cursor,
+            credentials=context.credentials,
+            git_identity=context.git_identity,
+        )
+    return build_logs_result(
+        title=f"Benchmark Run Logs: {name_or_id}",
+        page=page,
+        context=context,
+        next_step_hint=f"Use osmosis benchmark info {name_or_id} for run details.",
+    )
+
+
+def download(
+    name_or_id: str,
+    *,
+    output: str | None,
+    types: str = "summary,results",
+    overwrite: bool = False,
+    yes: bool = False,
+) -> OperationResult:
+    """Download selected benchmark run outputs through the manifest contract."""
+    from osmosis_ai.cli.metrics_export import resolve_benchmark_output_dir
+    from osmosis_ai.platform.cli.run_download import (
+        BENCHMARK_DOWNLOAD_TYPES,
+        benchmark_path_category,
+        parse_download_types,
+        run_download,
+    )
+
+    selected_types = parse_download_types(types, allowed=BENCHMARK_DOWNLOAD_TYPES)
+    context = require_git_workspace_directory_context()
+    client = OsmosisClient()
+    output_ctx = get_output_context()
+    with output_ctx.status("Fetching benchmark run..."):
+        detail = client.get_benchmark_run(
+            name_or_id,
+            credentials=context.credentials,
+            git_identity=context.git_identity,
+        )
+    if detail.status in BENCHMARK_RUN_STATUSES_PENDING:
+        raise CLIError(
+            "Outputs are not yet available for pending or queued benchmark runs.",
+            code="CONFLICT",
+        )
+    try:
+        return run_download(
+            run_id=detail.id,
+            run_name=detail.name,
+            run_status=detail.status,
+            selected_types=selected_types,
+            output=output,
+            overwrite=overwrite,
+            yes=yes,
+            workspace_directory=context.workspace_directory,
+            result_context=git_result_context(context),
+            manifest_loader=lambda requested_types: (
+                client.get_benchmark_run_download_manifest(
+                    detail.id,
+                    types=requested_types,
+                    credentials=context.credentials,
+                    git_identity=context.git_identity,
+                )
+            ),
+            url_loader=lambda items: client.get_benchmark_run_download_urls(
+                detail.id,
+                items=items,
+                credentials=context.credentials,
+                git_identity=context.git_identity,
+            ),
+            output_resolver=resolve_benchmark_output_dir,
+            path_category=benchmark_path_category,
+            operation="benchmark.download",
+            resource_key="benchmark_run",
+        )
+    except PlatformAPIError as exc:
+        if exc.status_code == 404:
+            raise CLIError(
+                "Benchmark run output route was not found. The run may have been "
+                "deleted or the platform may not support benchmark downloads yet."
+            ) from exc
+        raise
+
+
+def stop(name_or_id: str, *, yes: bool) -> OperationResult:
+    """Stop a benchmark run."""
+    context = require_git_workspace_directory_context()
+    client = OsmosisClient()
+    output = get_output_context()
+    with output.status("Fetching benchmark run..."):
+        detail = client.get_benchmark_run(
+            name_or_id,
+            credentials=context.credentials,
+            git_identity=context.git_identity,
+        )
+    require_confirmation(
+        f'Stop benchmark run "{detail.name}"?',
+        yes=yes,
+        default=False,
+        summary=[("Name", detail.name), ("ID", detail.id)],
+    )
+    with output.status("Stopping benchmark run..."):
+        client.stop_benchmark_run(
+            detail.id,
+            credentials=context.credentials,
+            git_identity=context.git_identity,
+        )
+    return OperationResult(
+        operation="benchmark.stop",
+        status="success",
+        resource={"id": detail.id, "name": detail.name, "status": "stopped"},
+        message=f'Benchmark run "{detail.name}" stopped.',
     )
 
 
@@ -399,8 +775,12 @@ def submit(config_path: Path, *, yes: bool) -> OperationResult:
     display_next_steps = [
         f"Status: {result.status}",
         f"Benchmark: {config.experiment.benchmark}",
+        f"Check status with: osmosis benchmark info {result.name}",
     ]
-    structured_next_steps: list[dict[str, Any]] = []
+    structured_next_steps: list[dict[str, Any]] = [
+        {"action": "benchmark_info", "name": result.name},
+        {"action": "benchmark_list"},
+    ]
     if result.platform_url:
         display_next_steps.append(f"View: {result.platform_url}")
         structured_next_steps.append({"action": "open_url", "url": result.platform_url})
@@ -431,4 +811,13 @@ def submit(config_path: Path, *, yes: bool) -> OperationResult:
     )
 
 
-__all__ = ["info", "list_benchmarks", "submit"]
+__all__ = [
+    "catalog_info",
+    "download",
+    "list_benchmark_runs",
+    "list_benchmarks",
+    "logs",
+    "run_info",
+    "stop",
+    "submit",
+]

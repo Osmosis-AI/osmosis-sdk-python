@@ -19,6 +19,11 @@ Files in [../osmosis_ai/cli/commands/](../osmosis_ai/cli/commands/) are thin Typ
 
 Module-level imports in `commands/` are kept light: `typer`, `cli.console`, `cli.errors`, the lightweight `osmosis_ai.platform.constants` (pagination limits), and stdlib. Everything heavy (`rollout.*`, `platform.api.*`, `platform.cli.*`, `eval.*`) must be imported **inside the function** to keep CLI startup fast — see the lazy-loading section of [architecture.md](./architecture.md).
 
+`osmosis benchmark` follows the same run-lifecycle surface as train/eval:
+`submit`, `list`, `info`, `logs`, `stop`, and `download`. Benchmark-definition
+discovery is a separate nested namespace, `benchmark catalog list|info`, so
+top-level `list` and `info` always refer to submitted runs.
+
 ## Commands return results; they don't print
 
 The Typer app is created with `result_callback=render_command_result` ([../osmosis_ai/cli/main.py](../osmosis_ai/cli/main.py)). A command function **returns** a `CommandResult`; the callback renders it in the active format. Do not `print()` from a command — return a typed result instead.

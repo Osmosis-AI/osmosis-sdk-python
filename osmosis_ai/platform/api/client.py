@@ -11,6 +11,7 @@ from osmosis_ai.platform.constants import DEFAULT_PAGE_SIZE
 
 from .models import (
     BenchmarkCatalogDetail,
+    BenchmarkRunDetail,
     DatasetDownloadInfo,
     DatasetFile,
     EnvironmentSecretInfo,
@@ -21,6 +22,7 @@ from .models import (
     LoraModelDetail,
     LoraModelSummary,
     PaginatedBaseModels,
+    PaginatedBenchmarkRuns,
     PaginatedBenchmarks,
     PaginatedDatasets,
     PaginatedDevRolloutServers,
@@ -86,6 +88,7 @@ class OsmosisClient:
         *,
         types: Sequence[str],
         rows: str | None = None,
+        route: str = "samples",
         credentials: Credentials | None = None,
         git_identity: str,
     ) -> RunDownloadManifest:
@@ -93,7 +96,7 @@ class OsmosisClient:
         if rows is not None:
             params["rows"] = rows
         data = platform_request(
-            f"{resource_path}/samples/manifest?{urlencode(params)}",
+            f"{resource_path}/{route}/manifest?{urlencode(params)}",
             credentials=credentials,
             git_identity=git_identity,
         )
@@ -104,6 +107,7 @@ class OsmosisClient:
         resource_path: str,
         *,
         items: Sequence[RunDownloadFile],
+        route: str = "samples",
         credentials: Credentials | None = None,
         git_identity: str,
     ) -> RunDownloadURLBatch:
@@ -112,7 +116,7 @@ class OsmosisClient:
                 "Download URL batches must contain between 1 and 500 items"
             )
         data = platform_request(
-            f"{resource_path}/samples/download-urls",
+            f"{resource_path}/{route}/download-urls",
             method="POST",
             data={"items": [item.to_request_item() for item in items]},
             credentials=credentials,
@@ -700,6 +704,108 @@ class OsmosisClient:
             git_identity=git_identity,
         )
         return BenchmarkCatalogDetail.from_dict(data)
+
+    def list_benchmark_runs(
+        self,
+        limit: int = DEFAULT_PAGE_SIZE,
+        offset: int = 0,
+        *,
+        credentials: Credentials | None = None,
+        git_identity: str,
+    ) -> PaginatedBenchmarkRuns:
+        """List benchmark runs in the current workspace."""
+        qs = urlencode({"limit": limit, "offset": offset})
+        data = platform_request(
+            f"/api/cli/benchmark-runs?{qs}",
+            credentials=credentials,
+            git_identity=git_identity,
+        )
+        return PaginatedBenchmarkRuns.from_dict(data)
+
+    def get_benchmark_run(
+        self,
+        name_or_id: str,
+        *,
+        credentials: Credentials | None = None,
+        git_identity: str,
+    ) -> BenchmarkRunDetail:
+        """Get benchmark run details by name or ID."""
+        data = platform_request(
+            f"/api/cli/benchmark-runs/{_safe_path(name_or_id)}",
+            credentials=credentials,
+            git_identity=git_identity,
+        )
+        return BenchmarkRunDetail.from_dict(data)
+
+    def get_benchmark_run_logs(
+        self,
+        name_or_id: str,
+        *,
+        limit: int = DEFAULT_PAGE_SIZE,
+        cursor: str | None = None,
+        direction: str = "older",
+        credentials: Credentials | None = None,
+        git_identity: str,
+    ) -> LogsPage:
+        """Fetch one cursor page of benchmark run logs."""
+        return self._get_logs(
+            f"/api/cli/benchmark-runs/{_safe_path(name_or_id)}",
+            limit=limit,
+            cursor=cursor,
+            direction=direction,
+            credentials=credentials,
+            git_identity=git_identity,
+        )
+
+    def get_benchmark_run_download_manifest(
+        self,
+        benchmark_run_id: str,
+        *,
+        types: Sequence[str],
+        credentials: Credentials | None = None,
+        git_identity: str,
+    ) -> RunDownloadManifest:
+        """Get the fixed-layout download manifest for a benchmark run."""
+        return self._get_run_download_manifest(
+            f"/api/cli/benchmark-runs/{_safe_path(benchmark_run_id)}",
+            types=types,
+            route="outputs",
+            credentials=credentials,
+            git_identity=git_identity,
+        )
+
+    def get_benchmark_run_download_urls(
+        self,
+        benchmark_run_id: str,
+        *,
+        items: Sequence[RunDownloadFile],
+        credentials: Credentials | None = None,
+        git_identity: str,
+    ) -> RunDownloadURLBatch:
+        """Exchange benchmark manifest items for bounded presigned URLs."""
+        return self._get_run_download_urls(
+            f"/api/cli/benchmark-runs/{_safe_path(benchmark_run_id)}",
+            items=items,
+            route="outputs",
+            credentials=credentials,
+            git_identity=git_identity,
+        )
+
+    def stop_benchmark_run(
+        self,
+        name_or_id: str,
+        *,
+        credentials: Credentials | None = None,
+        git_identity: str,
+    ) -> dict[str, Any]:
+        """Stop a non-terminal benchmark run."""
+        return platform_request(
+            f"/api/cli/benchmark-runs/{_safe_path(name_or_id)}/stop",
+            method="POST",
+            data={},
+            credentials=credentials,
+            git_identity=git_identity,
+        )
 
     def list_eval_runs(
         self,

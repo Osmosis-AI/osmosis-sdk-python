@@ -1,6 +1,6 @@
-# Evaluation run output download contract
+# Run output download contracts
 
-The eval download implementation lives in [`platform/cli/run_download.py`](../osmosis_ai/platform/cli/run_download.py). Its Typer shell remains thin and lives in [`cli/commands/eval.py`](../osmosis_ai/cli/commands/eval.py).
+The shared manifest-to-disk engine lives in [`platform/cli/run_download.py`](../osmosis_ai/platform/cli/run_download.py). Eval and benchmark handlers provide their route loader, fixed path classifier, output-root resolver, operation name, and resource key; they do not duplicate transfer behavior.
 
 ## Commands
 
@@ -11,9 +11,15 @@ osmosis eval download NAME_OR_ID
   -o, --output ROOT
   --overwrite
   -y, --yes
+
+osmosis benchmark download NAME_OR_ID
+  --type summary,results|artifacts|logs|all
+  -o, --output ROOT
+  --overwrite
+  -y, --yes
 ```
 
-`--type` replaces the default selection and defaults to `metrics,trajectories`. A row selection includes every run for each selected row.
+`--type` replaces the default selection. Eval defaults to `metrics,trajectories`; benchmark defaults to `summary,results`. Eval row selection includes every run for each selected row.
 
 ## Platform routes
 
@@ -22,6 +28,13 @@ After resolving a run name or ID, the SDK uses two eval routes:
 ```text
 GET  /api/cli/eval-runs/[id]/samples/manifest?types=&rows=
 POST /api/cli/eval-runs/[id]/samples/download-urls
+```
+
+Benchmark downloads use the parallel output routes:
+
+```text
+GET  /api/cli/benchmark-runs/[id]/outputs/manifest?types=
+POST /api/cli/benchmark-runs/[id]/outputs/download-urls
 ```
 
 The manifest returns `{files: [{token?, path, size}], totals}`. `path` is the final path relative to the local run root, and `token` is an opaque server handle (a rollout id or an export snapshot token). URL requests contain at most 500 `{token, path}` items. The platform derives full S3 keys server-side and returns 15-minute presigned GET URLs; the SDK never accepts raw object keys.
@@ -36,10 +49,15 @@ The manifest returns `{files: [{token?, path, size}], totals}`. `path` is the fi
 │   ├── trajectories/row_3_run_0.json
 │   ├── artifacts/row_3_run_0/logs/agent.log
 │   └── logs.txt
+├── benchmarks/<run-name>/
+│   ├── summary.csv
+│   ├── results.csv
+│   ├── artifacts/<stable-result-identity>/<artifact-path>
+│   └── logs.txt
 └── metrics/                       # legacy eval exports; never deleted
 ```
 
-`--output` relocates the run root; filenames and subdirectories below it do not change. Rich-mode `eval info` uses the same resolver and writes the same run-scoped `metrics.json` path. Names that require filesystem sanitization gain a stable run-ID suffix so distinct runs never share a local directory. Training download and training metrics-path migration are intentionally out of scope until the platform routes are ready; `train info` keeps its existing export behavior for now.
+`--output` relocates the run root; filenames and subdirectories below it do not change. Rich-mode `eval info` uses the same resolver and writes the same run-scoped `metrics.json` path. Names that require filesystem sanitization gain a stable run-ID suffix so distinct runs never share a local directory. Each domain supplies a strict path classifier: an eval manifest cannot write benchmark filenames and a benchmark manifest cannot write eval filenames. Training download and training metrics-path migration are intentionally out of scope until the platform routes are ready; `train info` keeps its existing export behavior for now.
 
 ## Transfer behavior
 

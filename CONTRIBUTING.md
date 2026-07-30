@@ -44,6 +44,14 @@ The table below lists all development commands. If you installed with **pip**, d
 
 Coverage configuration is in `pyproject.toml` under `[tool.coverage.*]`. CI enforces a minimum coverage threshold of 70%.
 
+When changing remote run commands, preserve the lifecycle convention:
+`train`, `eval`, and `benchmark` use top-level `submit`, `list`, `info`,
+`logs`, and `stop` for run management. Benchmark-definition discovery lives
+under `osmosis benchmark catalog list|info`. Eval and benchmark downloads
+share the manifest transfer engine in `osmosis_ai/platform/cli/run_download.py`;
+add domain-specific routes and fixed path classifiers instead of copying the
+transfer loop.
+
 ## Linting & Formatting
 
 This project uses [Ruff](https://docs.astral.sh/ruff/) for both linting and code formatting. Configuration lives in `pyproject.toml` under `[tool.ruff]`.
