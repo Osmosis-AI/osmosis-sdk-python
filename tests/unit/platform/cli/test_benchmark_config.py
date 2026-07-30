@@ -20,13 +20,14 @@ def test_load_benchmark_submit_config_accepts_provider_and_endpoint_agents(
         tmp_path / "benchmark.toml",
         """
 [experiment]
-benchmark = "Terminal-Bench 2.1"
+benchmark = "DeepSWE"
 
 [tasks]
-task_names = ["git-multibranch"]
+task_names = ["abs-module-cache-flags"]
 
 [[agents]]
-harness = "codex"
+harness = "cursor-cli"
+harness_api_key_secret = "CURSOR_API_KEY"
 
 [agents.model]
 type = "provider"
@@ -56,16 +57,21 @@ LOG_LEVEL = "info"
 
     config = load_benchmark_submit_config(path)
 
-    assert config.experiment_config == {"benchmark": "Terminal-Bench 2.1"}
-    assert config.tasks_config == {"task_names": ["git-multibranch"]}
+    assert config.experiment_config == {"benchmark": "DeepSWE"}
+    assert config.tasks_config == {"task_names": ["abs-module-cache-flags"]}
     assert config.execution_config == {
         "attempts_per_task": 2,
         "max_concurrent_attempts": 8,
     }
     assert config.env == {"LOG_LEVEL": "info"}
-    assert config.required_secrets == ["OPENAI_API_KEY", "CUSTOM_API_KEY"]
+    assert config.required_secrets == [
+        "OPENAI_API_KEY",
+        "CUSTOM_API_KEY",
+        "CURSOR_API_KEY",
+    ]
     assert config.agents_config[0] == {
-        "harness": "codex",
+        "harness": "cursor-cli",
+        "harness_api_key_secret": "CURSOR_API_KEY",
         "model": {
             "type": "provider",
             "model": "openai/gpt-5",
@@ -99,12 +105,114 @@ checkpoint_name = "terminal-agent"
     assert config.required_secrets == []
 
 
+def test_load_benchmark_submit_config_accepts_hle_parity_with_explicit_filters(
+    tmp_path: Path,
+) -> None:
+    """The platform gives task_set precedence over explicit filters."""
+    path = _write_config(
+        tmp_path / "benchmark.toml",
+        """
+[experiment]
+benchmark = "HLE"
+
+[tasks]
+task_set = "parity"
+task_names = ["hle__sample"]
+categories = ["Math"]
+
+[[agents]]
+harness = "codex"
+
+[agents.model]
+type = "hosted"
+base_model = "Qwen/Qwen3-8B"
+checkpoint_name = "hle-agent"
+
+[execution]
+judge_model = "openai/gpt-5"
+judge_api_key_secret = "OPENAI_API_KEY"
+""",
+    )
+
+    config = load_benchmark_submit_config(path)
+
+    assert config.tasks_config == {
+        "categories": ["Math"],
+        "task_names": ["hle__sample"],
+        "task_set": "parity",
+    }
+    assert config.required_secrets == ["OPENAI_API_KEY", "HF_TOKEN"]
+
+
+def test_load_benchmark_submit_config_rejects_unknown_task_set(
+    tmp_path: Path,
+) -> None:
+    path = _write_config(
+        tmp_path / "benchmark.toml",
+        """
+[experiment]
+benchmark = "HLE"
+
+[tasks]
+task_set = "full"
+
+[[agents]]
+harness = "codex"
+
+[agents.model]
+type = "hosted"
+base_model = "Qwen/Qwen3-8B"
+checkpoint_name = "hle-agent"
+""",
+    )
+
+    with pytest.raises(CLIError, match=r"tasks.task_set"):
+        load_benchmark_submit_config(path)
+
+
+@pytest.mark.parametrize(
+    "tasks_body, field_name",
+    [
+        ('task_names = "hle__sample"', "task_names"),
+        ('task_names = [""]', "task_names"),
+        ('categories = "Math"', "categories"),
+        ('categories = [""]', "categories"),
+    ],
+)
+def test_load_benchmark_submit_config_rejects_invalid_explicit_task_filters(
+    tmp_path: Path,
+    tasks_body: str,
+    field_name: str,
+) -> None:
+    path = _write_config(
+        tmp_path / "benchmark.toml",
+        f"""
+[experiment]
+benchmark = "HLE"
+
+[tasks]
+{tasks_body}
+
+[[agents]]
+harness = "codex"
+
+[agents.model]
+type = "hosted"
+base_model = "Qwen/Qwen3-8B"
+checkpoint_name = "hle-agent"
+""",
+    )
+
+    with pytest.raises(CLIError, match=rf"tasks.{field_name}"):
+        load_benchmark_submit_config(path)
+
+
 def test_load_benchmark_submit_config_rejects_unknown_section(tmp_path: Path) -> None:
     path = _write_config(
         tmp_path / "benchmark.toml",
         """
 [experiment]
-benchmark = "Terminal-Bench 2.1"
+benchmark = "DeepSWE"
 
 [[agents]]
 [agents.model]
@@ -130,7 +238,7 @@ def test_load_benchmark_submit_config_rejects_secret_env_collision(
         tmp_path / "benchmark.toml",
         """
 [experiment]
-benchmark = "Terminal-Bench 2.1"
+benchmark = "DeepSWE"
 
 [[agents]]
 [agents.model]
@@ -159,7 +267,7 @@ def test_load_benchmark_submit_config_allows_cross_agent_secret_env_names(
         tmp_path / "benchmark.toml",
         """
 [experiment]
-benchmark = "Terminal-Bench 2.1"
+benchmark = "DeepSWE"
 
 [[agents]]
 [agents.model]
@@ -192,7 +300,7 @@ def test_load_benchmark_submit_config_rejects_judge_secret_env_collision(
         tmp_path / "benchmark.toml",
         """
 [experiment]
-benchmark = "Terminal-Bench 2.1"
+benchmark = "DeepSWE"
 
 [[agents]]
 [agents.model]
@@ -210,4 +318,258 @@ judge_api_key_secret = "JUDGE_KEY"
     )
 
     with pytest.raises(CLIError, match=r"judge_api_key_secret"):
+        load_benchmark_submit_config(path)
+
+
+@pytest.mark.parametrize(
+    "secret_name",
+    [
+        "HF_TOKEN",
+        "DAYTONA_API_KEY",
+        "DAYTONA_API_URL",
+        "SKYPILOT_SERVICE_ACCOUNT_TOKEN",
+        "SKYPILOT_API_SERVER_ENDPOINT",
+    ],
+)
+@pytest.mark.parametrize("model_type", ["provider", "endpoint"])
+def test_load_benchmark_submit_config_rejects_reserved_model_secret_names(
+    tmp_path: Path,
+    secret_name: str,
+    model_type: str,
+) -> None:
+    model_fields = (
+        'model = "openai/gpt-5"'
+        if model_type == "provider"
+        else 'base_url = "https://models.example.com/v1"\nmodel = "custom-model"'
+    )
+    path = _write_config(
+        tmp_path / "benchmark.toml",
+        f"""
+[experiment]
+benchmark = "Terminal-Bench 2.1"
+
+[[agents]]
+harness = "codex"
+
+[agents.model]
+type = "{model_type}"
+{model_fields}
+api_key_secret = "{secret_name}"
+""",
+    )
+
+    with pytest.raises(CLIError) as exc_info:
+        load_benchmark_submit_config(path)
+
+    assert secret_name in str(exc_info.value)
+    assert "reserved by the benchmark runner" in str(exc_info.value)
+
+
+@pytest.mark.parametrize("benchmark", ["Terminal-Bench 2.1", "HLE"])
+@pytest.mark.parametrize(
+    "env_section",
+    [
+        '[env]\nHF_TOKEN = "literal-token"',
+        '[agents.env]\nHF_TOKEN = "literal-token"',
+    ],
+)
+def test_load_benchmark_submit_config_rejects_literal_hf_token_for_every_benchmark(
+    tmp_path: Path,
+    benchmark: str,
+    env_section: str,
+) -> None:
+    path = _write_config(
+        tmp_path / "benchmark.toml",
+        f"""
+[experiment]
+benchmark = "{benchmark}"
+
+[[agents]]
+harness = "codex"
+
+[agents.model]
+type = "hosted"
+base_model = "Qwen/Qwen3-8B"
+checkpoint_name = "benchmark-agent"
+
+{env_section}
+""",
+    )
+
+    with pytest.raises(CLIError, match=r"reserved by the benchmark runner"):
+        load_benchmark_submit_config(path)
+
+
+def test_load_benchmark_submit_config_validates_harness_secret_name(
+    tmp_path: Path,
+) -> None:
+    path = _write_config(
+        tmp_path / "benchmark.toml",
+        """
+[experiment]
+benchmark = "DeepSWE"
+
+[[agents]]
+harness = "cursor-cli"
+harness_api_key_secret = "invalid-secret"
+
+[agents.model]
+type = "provider"
+model = "openai/gpt-5"
+api_key_secret = "OPENAI_API_KEY"
+""",
+    )
+
+    with pytest.raises(CLIError, match=r"Invalid secret name 'invalid-secret'"):
+        load_benchmark_submit_config(path)
+
+
+def test_load_benchmark_submit_config_allows_harness_secret_record_name_as_env(
+    tmp_path: Path,
+) -> None:
+    """The record name is separate from the harness's destination env name."""
+    path = _write_config(
+        tmp_path / "benchmark.toml",
+        """
+[experiment]
+benchmark = "DeepSWE"
+
+[[agents]]
+harness = "cursor-cli"
+harness_api_key_secret = "MY_CURSOR_TOKEN"
+
+[agents.model]
+type = "provider"
+model = "openai/gpt-5"
+api_key_secret = "OPENAI_API_KEY"
+
+[agents.env]
+MY_CURSOR_TOKEN = "literal-for-the-agent"
+""",
+    )
+
+    config = load_benchmark_submit_config(path)
+
+    assert config.required_secrets == ["OPENAI_API_KEY", "MY_CURSOR_TOKEN"]
+    assert config.agents[0].env == {"MY_CURSOR_TOKEN": "literal-for-the-agent"}
+
+
+@pytest.mark.parametrize(
+    "harness, harness_secret, destination_env",
+    [
+        ("cursor-cli", "MY_CURSOR_TOKEN", "CURSOR_API_KEY"),
+        ("mini-swe-agent", "MY_MSWEA_TOKEN", "MSWEA_API_KEY"),
+    ],
+)
+def test_load_benchmark_submit_config_rejects_harness_destination_env_collision(
+    tmp_path: Path,
+    harness: str,
+    harness_secret: str,
+    destination_env: str,
+) -> None:
+    path = _write_config(
+        tmp_path / "benchmark.toml",
+        f"""
+[experiment]
+benchmark = "DeepSWE"
+
+[[agents]]
+harness = "{harness}"
+harness_api_key_secret = "{harness_secret}"
+
+[agents.model]
+type = "hosted"
+base_model = "Qwen/Qwen3-8B"
+checkpoint_name = "deep-swe-agent"
+
+[agents.env]
+{destination_env} = "literal-for-the-agent"
+""",
+    )
+
+    with pytest.raises(CLIError, match=destination_env):
+        load_benchmark_submit_config(path)
+
+
+def test_load_benchmark_submit_config_rejects_harness_destination_env_without_secret(
+    tmp_path: Path,
+) -> None:
+    path = _write_config(
+        tmp_path / "benchmark.toml",
+        """
+[experiment]
+benchmark = "DeepSWE"
+
+[[agents]]
+harness = "cursor-cli"
+
+[agents.model]
+type = "hosted"
+base_model = "Qwen/Qwen3-8B"
+checkpoint_name = "deep-swe-agent"
+
+[agents.env]
+CURSOR_API_KEY = "literal-for-the-agent"
+""",
+    )
+
+    with pytest.raises(CLIError, match=r"CURSOR_API_KEY"):
+        load_benchmark_submit_config(path)
+
+
+def test_load_benchmark_submit_config_requires_known_harness_secret(
+    tmp_path: Path,
+) -> None:
+    path = _write_config(
+        tmp_path / "benchmark.toml",
+        """
+[experiment]
+benchmark = "DeepSWE"
+
+[[agents]]
+harness = "mini-swe-agent"
+
+[agents.model]
+type = "hosted"
+base_model = "Qwen/Qwen3-8B"
+checkpoint_name = "deep-swe-agent"
+""",
+    )
+
+    with pytest.raises(CLIError, match=r"requires harness_api_key_secret"):
+        load_benchmark_submit_config(path)
+
+
+@pytest.mark.parametrize(
+    "secret_field, section",
+    [
+        ('harness_api_key_secret = ""', ""),
+        ("", '[execution]\njudge_api_key_secret = ""'),
+    ],
+)
+def test_load_benchmark_submit_config_rejects_empty_secret_references(
+    tmp_path: Path,
+    secret_field: str,
+    section: str,
+) -> None:
+    path = _write_config(
+        tmp_path / "benchmark.toml",
+        f"""
+[experiment]
+benchmark = "DeepSWE"
+
+[[agents]]
+harness = "cursor-cli"
+{secret_field}
+
+[agents.model]
+type = "hosted"
+base_model = "Qwen/Qwen3-8B"
+checkpoint_name = "deep-swe-agent"
+
+{section}
+""",
+    )
+
+    with pytest.raises(CLIError, match=r"Invalid secret name ''"):
         load_benchmark_submit_config(path)

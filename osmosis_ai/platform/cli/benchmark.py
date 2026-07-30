@@ -32,6 +32,12 @@ from osmosis_ai.platform.cli.workspace_directory_contract import (
     validate_workspace_directory_contract,
 )
 
+_HLE_PARITY_WARNING = (
+    'For HLE, we recommend [tasks] task_set = "parity" so results are '
+    "comparable with published scores. This submission uses the full or a "
+    "custom task selection."
+)
+
 
 def _agent_model_label(agent: dict[str, Any]) -> str:
     model = agent["model"]
@@ -52,6 +58,17 @@ def _task_selection_label(config: BenchmarkSubmitConfig) -> str:
     if isinstance(categories, list) and categories:
         parts.append(f"{len(categories)} category(s)")
     return ", ".join(parts) if parts else "all tasks"
+
+
+def _warn_if_hle_without_parity(config: BenchmarkSubmitConfig) -> None:
+    # Catch likely casing mistakes too: the route will still return its precise
+    # case-sensitive benchmark-name error after the user sees this guidance.
+    benchmark_name = config.experiment.benchmark.strip().casefold()
+    if benchmark_name == "hle" and config.tasks.task_set != "parity":
+        console.print_warning(
+            _HLE_PARITY_WARNING,
+            code="HLE_PARITY_RECOMMENDED",
+        )
 
 
 def _submit_benchmark(
@@ -141,6 +158,8 @@ def submit(config_path: Path, *, yes: bool) -> OperationResult:
         )
         full_summary.extend((f"env.{name}", value) for name, value in env_rows)
 
+    _warn_if_hle_without_parity(config)
+
     if config.required_secrets:
         scopes = _fetch_secret_scopes(
             OsmosisClient(),
@@ -208,9 +227,10 @@ def submit(config_path: Path, *, yes: bool) -> OperationResult:
             "name": result.name,
             "status": result.status,
             "benchmark_name": config.experiment.benchmark,
+            "workflow_id": result.workflow_id,
             "task_count": result.task_count,
             "created_at": result.created_at,
-            **({"url": result.platform_url} if result.platform_url else {}),
+            **({"platform_url": result.platform_url} if result.platform_url else {}),
             **git_result_context(context),
             "config": {
                 "experiment": config.experiment_config,

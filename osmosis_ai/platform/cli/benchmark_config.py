@@ -18,6 +18,19 @@ from osmosis_ai.platform.cli.shared_config import (
 )
 
 _BENCHMARK_CONFIG_LABEL = "benchmark"
+_HARNESS_API_KEY_ENV = {
+    "cursor-cli": "CURSOR_API_KEY",
+    "mini-swe-agent": "MSWEA_API_KEY",
+}
+_RESERVED_MODEL_API_KEY_SECRET_NAMES = frozenset(
+    {
+        "HF_TOKEN",
+        "DAYTONA_API_KEY",
+        "DAYTONA_API_URL",
+        "SKYPILOT_SERVICE_ACCOUNT_TOKEN",
+        "SKYPILOT_API_SERVER_ENDPOINT",
+    }
+)
 
 
 class _StrictSection(BaseModel):
@@ -28,10 +41,13 @@ class BenchmarkExperimentSection(_StrictSection):
     benchmark: str
 
 
+_NonEmptyTaskSelector = Annotated[str, Field(min_length=1)]
+
+
 class BenchmarkTasksSection(_StrictSection):
-    categories: Any = None
-    task_names: Any = None
-    task_set: Any = None
+    categories: list[_NonEmptyTaskSelector] | None = None
+    task_names: list[_NonEmptyTaskSelector] | None = None
+    task_set: Literal["parity"] | None = None
 
 
 class BenchmarkProviderModel(_StrictSection):
@@ -62,6 +78,7 @@ BenchmarkModel = Annotated[
 
 class BenchmarkAgentSection(_StrictSection):
     harness: str | None = None
+    harness_api_key_secret: str | None = None
     model: BenchmarkModel
     env: dict[str, str] = Field(default_factory=dict)
 
@@ -110,9 +127,18 @@ class BenchmarkSubmitConfig(_StrictSection):
             for agent in self.agents
             if isinstance(agent.model, BenchmarkProviderModel | BenchmarkEndpointModel)
         ]
+        names.extend(
+            agent.harness_api_key_secret
+            for agent in self.agents
+            if agent.harness_api_key_secret is not None
+        )
         judge_secret = self.execution.judge_api_key_secret
-        if isinstance(judge_secret, str) and judge_secret:
+        if isinstance(judge_secret, str):
             names.append(judge_secret)
+        # HLE's managed adapter reads the dataset through a fixed Platform
+        # secret, even though the name is not repeated in the submit config.
+        if self.experiment.benchmark.strip() == "HLE":
+            names.append("HF_TOKEN")
         return list(dict.fromkeys(names))
 
 
@@ -125,11 +151,15 @@ def _env_source_label(name: str, agent_index: int, agent_env: dict[str, str]) ->
 def _validate_secret_references(config: BenchmarkSubmitConfig, path: Path) -> None:
     """Validate secret record names and per-agent env collisions.
 
-    The platform injects an agent's ``api_key_secret`` value (and any judge
-    secret) as an env var of the same name into that agent's runtime env, so a
-    literal env var with that name would be silently overwritten. Collisions
-    are scoped per agent: one agent's secret name may still be another agent's
-    literal env var.
+    The platform injects an agent model's ``api_key_secret`` value (and any
+    judge secret) as an env var of the same name into that agent's runtime env,
+    so a literal env var with that name would be silently overwritten.
+    Collisions are scoped per agent: one agent's secret name may still be
+    another agent's literal env var. Model secrets also cannot use names the
+    runner removes before model-key aliasing. Harness credentials travel
+    through a separate reserved channel; known credentialed harnesses must
+    reference a secret record and cannot also set their platform-managed
+    destination env. ``HF_TOKEN`` is always runner-reserved as a literal env.
     """
     for name in config.required_secrets:
         if not SECRET_NAME_RE.match(name):
@@ -146,16 +176,22 @@ def _validate_secret_references(config: BenchmarkSubmitConfig, path: Path) -> No
     for index, agent in enumerate(config.agents, start=1):
         effective_env = {**config.env, **agent.env}
         model = agent.model
-        if (
-            isinstance(model, BenchmarkProviderModel | BenchmarkEndpointModel)
-            and model.api_key_secret in effective_env
-        ):
-            source = _env_source_label(model.api_key_secret, index, agent.env)
-            raise CLIError(
-                f"'{model.api_key_secret}' appears in {source} and as agent "
-                f"{index}'s api_key_secret in {path}. The platform injects the "
-                "secret value under that name; remove the env var or rename it."
-            )
+        if isinstance(model, BenchmarkProviderModel | BenchmarkEndpointModel):
+            if model.api_key_secret in _RESERVED_MODEL_API_KEY_SECRET_NAMES:
+                raise CLIError(
+                    f"Agent {index}'s api_key_secret '{model.api_key_secret}' "
+                    f"in {path} uses a name reserved by the benchmark runner. "
+                    "Store the model credential under a different Platform "
+                    "secret record name."
+                )
+            if model.api_key_secret in effective_env:
+                source = _env_source_label(model.api_key_secret, index, agent.env)
+                raise CLIError(
+                    f"'{model.api_key_secret}' appears in {source} and as agent "
+                    f"{index}'s api_key_secret in {path}. The platform injects "
+                    "the secret value under that name; remove the env var or "
+                    "rename it."
+                )
         if judge_name and judge_name in effective_env:
             source = _env_source_label(judge_name, index, agent.env)
             raise CLIError(
@@ -163,6 +199,30 @@ def _validate_secret_references(config: BenchmarkSubmitConfig, path: Path) -> No
                 f"judge_api_key_secret in {path}. The platform injects the "
                 "judge secret value under that name; remove the env var or "
                 "rename it."
+            )
+        if "HF_TOKEN" in effective_env:
+            source = _env_source_label("HF_TOKEN", index, agent.env)
+            raise CLIError(
+                f"'HF_TOKEN' appears in {source} but is reserved by the "
+                f"benchmark runner in {path}. The runner removes this literal "
+                "env var before starting the agent; remove it from the config. "
+                "For HLE, store the dataset credential in the HF_TOKEN Platform "
+                "secret record instead."
+            )
+        harness_env_name = _HARNESS_API_KEY_ENV.get(agent.harness or "")
+        if harness_env_name and harness_env_name in effective_env:
+            source = _env_source_label(harness_env_name, index, agent.env)
+            raise CLIError(
+                f"'{harness_env_name}' appears in {source} but is managed by "
+                f"agent {index}'s {agent.harness} harness API key secret in "
+                f"{path}. Remove the env var and set harness_api_key_secret "
+                "to a Platform secret record name."
+            )
+        if harness_env_name and agent.harness_api_key_secret is None:
+            raise CLIError(
+                f"Agent {index}'s {agent.harness} harness requires "
+                f"harness_api_key_secret in {path}. Set it to the name of a "
+                f"Platform secret record containing {harness_env_name}."
             )
 
 

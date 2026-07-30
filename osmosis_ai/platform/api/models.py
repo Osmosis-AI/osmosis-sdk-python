@@ -360,8 +360,8 @@ class SubmitBenchmarkRunResult:
     name: str
     status: str
     created_at: str
-    workflow_id: str = ""
-    task_count: int = 0
+    workflow_id: str
+    task_count: int
     platform_url: str | None = None
 
     @classmethod
@@ -371,8 +371,8 @@ class SubmitBenchmarkRunResult:
             name=data["name"],
             status=data["status"],
             created_at=data["created_at"],
-            workflow_id=data.get("workflow_id", ""),
-            task_count=data.get("task_count", 0),
+            workflow_id=data["workflow_id"],
+            task_count=data["task_count"],
             platform_url=data.get("platform_url"),
         )
 
