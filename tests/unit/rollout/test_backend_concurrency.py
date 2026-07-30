@@ -10,6 +10,7 @@ def test_base_backend_max_concurrency_default_zero():
 
     backend = StubBackend()
     assert backend.max_concurrency == 0
+    assert backend.max_queue_depth is None
 
 
 def test_local_backend_max_concurrency():

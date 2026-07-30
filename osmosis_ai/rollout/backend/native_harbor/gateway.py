@@ -18,6 +18,7 @@ from urllib.parse import urlsplit, urlunsplit
 logger: logging.Logger = logging.getLogger(__name__)
 
 _NO_CONTROLLER_KEY = "osmosis-no-controller-key"
+_ROUTING_MODE = "header_token"
 _ROUTING_ONLY_FIELDS = frozenset(
     {
         "api_base",
@@ -98,6 +99,11 @@ class NativeHarborTranslationGateway:
     def active_routes(self) -> int:
         with self._lock:
             return len(self._routes)
+
+    @property
+    def routing_mode(self) -> str:
+        """Stable health-check name for opaque header-token routing."""
+        return _ROUTING_MODE
 
     def register(
         self,

@@ -46,7 +46,8 @@ backend = NativeHarborBackend(
         model_name="openai/osmosis-rollout",
         override_setup_timeout_sec=300,    # setup/install, not the agent run
     ),
-    max_concurrent=4,                      # one Trial per in-flight rollout
+    max_concurrent=4,                      # running Trials
+    max_queue_depth=4,                     # accepted rollouts waiting for a slot
 )
 app = create_rollout_server(backend=backend)   # required module-level ASGI app
 
@@ -141,6 +142,7 @@ All arguments are keyword-only ([backend.py](../osmosis_ai/rollout/backend/nativ
 | `trials_dir` | `Path("native_trials")` | Where Harbor writes trial directories. |
 | `task_resolver` | `resolve_task` | Override `ExecutionRequest -> TaskConfig` resolution. |
 | `max_concurrent` | `8` | In-flight Trial cap (`>= 1`). Each Trial is often a container, so this bounds host load. |
+| `max_queue_depth` | `max_concurrent` | Maximum accepted rollouts waiting beyond the running cap (`>= 0`). Set `0` to reject whenever all Trial slots are occupied. |
 | `cleanup_successful_trials` | `True` | Delete a successful trial only after its ATIF has been validated and Harbor-collected artifacts have been copied out. |
 | `agent_name`, `agent_import_path`, `agent_kwargs`, `agent_env`, `environment_config` | `None` | Compatibility shims for the original reduced surface. They cannot be mixed with the corresponding canonical object. |
 
@@ -314,7 +316,68 @@ The SDK does not scan the sandbox or decide which task files are artifacts. User
 
 ## Concurrency and trial directories
 
-`max_concurrent` bounds in-flight Trials through a `TrialQueue` semaphore; because each Trial is typically a container, leaving this unbounded would exhaust the host (so `max_concurrent < 1` is rejected). Harbor trial retries are hard-disabled: each rollout id owns exactly one Trial attempt and its linear model session. A single-step trial fires the workflow callback when verification starts and the grader callback when the trial finishes; multi-step trials defer the workflow callback to the final result. Successful trials are removed only after artifact relocation and durable provisional ATIF persistence; failed trials and successful trials whose outputs could not be safely preserved are kept for inspection. Harbor reports in-trial failures via `result.exception_info` rather than by raising, and the backend always fires the grader callback even on failure so the trainer never hangs waiting on a missing reward.
+`max_concurrent` bounds running Trials through Harbor's `TrialQueue` semaphore;
+because each Trial is typically a container, `max_concurrent < 1` is rejected.
+`max_queue_depth` separately bounds requests already accepted by `POST /rollout`
+but waiting beyond those running slots. It defaults to `max_concurrent`, so the
+default backend accepts at most 16 rollouts: 8 running and 8 queued. Once that
+bound is full, `/rollout` returns HTTP 429 immediately instead of spending the
+controller's agent deadline in an unbounded SDK queue. Set `max_queue_depth=0`
+to admit no work beyond the current in-flight cap. The reservation is held
+through callbacks and trajectory persistence, then released on success,
+failure, or cancellation.
+Admission accounting is process-local; run one rollout-server worker per
+configured capacity, or budget each worker's limits independently.
+
+The server's `/health` response preserves the backend fields and adds a live
+capacity snapshot. Protocol fields describe this configured server instance:
+Chat Completions is always reachable; Responses and Messages appear only when
+the translation gateway is mounted. For example, an idle Codex eval server
+configured with eight running and eight queued slots reports:
+
+```json
+{
+  "status": "ok",
+  "backend": "native_harbor",
+  "agent": "codex",
+  "binding": "codex",
+  "binding_protocol": "OpenAI Responses",
+  "protocol_capabilities": [
+    "OpenAI Chat Completions",
+    "OpenAI Responses",
+    "Anthropic Messages"
+  ],
+  "gateway_routing": "header_token",
+  "evaluation_supported": true,
+  "training_supported": false,
+  "max_concurrency": 8,
+  "max_queue_depth": 8,
+  "capacity": {
+    "max_concurrent": 8,
+    "max_queue_depth": 8,
+    "in_flight": 0,
+    "queue_depth": 0,
+    "available": 16,
+    "accepting": true
+  }
+}
+```
+
+Controllers currently ignore the additional health fields, so capacity and
+protocol surfacing are forward-compatible rather than full negotiation. The
+real Miles/eval capacity-mismatch measurement remains an E2E dependency.
+
+Native is explicitly single-step and single-agent; a task with scripted Harbor
+steps is unsupported rather than deferred. Harbor trial retries are hard-disabled:
+each rollout id owns exactly one Trial attempt and its linear model session. A
+single-step trial fires the workflow callback when verification starts and the
+grader callback when the trial finishes. Successful trials are removed only
+after artifact relocation and durable provisional ATIF persistence; failed
+trials and successful trials whose outputs could not be safely preserved are
+kept for inspection. Harbor reports in-trial failures via
+`result.exception_info` rather than by raising, and the backend always fires the
+grader callback even on failure so the trainer never hangs waiting on a missing
+reward.
 
 ## Submit preflight
 

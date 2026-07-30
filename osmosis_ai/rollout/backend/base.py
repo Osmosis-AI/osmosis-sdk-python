@@ -23,6 +23,16 @@ class ExecutionBackend(ABC):
         return 0
 
     @property
+    def max_queue_depth(self) -> int | None:
+        """Max accepted executions waiting beyond ``max_concurrency``.
+
+        ``None`` leaves server admission unbounded. Backends that own a finite
+        execution pool can override this to make ``POST /rollout`` fail fast
+        instead of letting controller deadlines expire in an unbounded queue.
+        """
+        return None
+
+    @property
     def capture_final_result(self) -> bool:
         """Whether the server should capture a final result without a grader URL."""
         return False
