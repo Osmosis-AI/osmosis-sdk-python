@@ -303,6 +303,7 @@ def test_extra_carries_platform_context() -> None:
         request_label="request label",
         request_metadata={"dataset_row": {"q": "x"}},
         request_extra_fields={"eval_run_id": "er-1", "row_index": 3},
+        result_extra_fields={"backend": "native_harbor", "phase": "agent"},
     )
 
     osmosis = trajectory.extra["osmosis"]
@@ -313,6 +314,10 @@ def test_extra_carries_platform_context() -> None:
     assert osmosis["sample_extra_fields"] == {"custom": True}
     assert osmosis["request_metadata"] == {"dataset_row": {"q": "x"}}
     assert osmosis["request_extra_fields"] == {"eval_run_id": "er-1", "row_index": 3}
+    assert osmosis["result_extra_fields"] == {
+        "backend": "native_harbor",
+        "phase": "agent",
+    }
 
 
 def test_request_label_used_when_sample_has_none() -> None:

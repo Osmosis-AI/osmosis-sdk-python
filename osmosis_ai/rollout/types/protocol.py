@@ -105,5 +105,6 @@ class GraderCompleteRequest(BaseModel):
     status: GraderStatus
     rollout_id: str | None = None
     sample: RolloutSample | None = None
+    extra_fields: dict[str, Any] | None = None
     err_message: str | None = None
     err_category: RolloutErrorCategory | None = None

@@ -172,6 +172,48 @@ into trainable or successful eval samples by a partial reward.
 
 The dataset row's `ground_truth` is **not** required for native tasks — the Harbor task's verifier is self-contained.
 
+## Structured diagnostics
+
+Native results carry an emit-only diagnostics object in callback `extra_fields`
+(`RolloutCompleteRequest` and, for failures discovered after agent completion,
+`GraderCompleteRequest`). Existing controllers ignore this unknown field, so it
+does not change callback handling, but it makes failures attributable without
+parsing Harbor log text:
+
+```json
+{
+  "backend": "native_harbor",
+  "phase": "verification",
+  "harbor_exception_type": "VerifierTimeoutError",
+  "category": "agent_error",
+  "timings_sec": {
+    "setup": 0.12,
+    "environment_setup": 8.4,
+    "agent_setup": 1.7,
+    "agent": 41.2,
+    "verification": 3.1,
+    "trial": 54.6
+  }
+}
+```
+
+The backend advances phase state from Harbor's `TrialQueue` lifecycle hooks.
+Possible phases are `setup`, `trial_setup`, `environment_setup`, `agent_setup`,
+`agent`, `verification`, `grading`, and `cancelled`. Hook durations cover the
+pre-trial intervals; when Harbor supplies its own `TimingInfo`, the exact
+environment, agent-setup, agent, verifier, and total-trial durations win. Values
+are non-negative seconds. Successful results use the same shape with
+`harbor_exception_type` and `category` set to `null`.
+
+On failure, the exact object sent to the callback is also written to the SDK log
+and archived as `~/.osmosis/<rollout-id>/diagnostics.json`. When a trajectory
+exists, the same object is additionally embedded at
+`trajectory.json.extra.osmosis.result_extra_fields`. The sidecar means setup or
+agent failures remain inspectable even when no valid ATIF document exists.
+Grader-only failures that happen after the workflow callback (for example a
+verifier timeout) cannot alter the already-sent completion callback; they still
+retain the structured payload in the log and final archive.
+
 ## Native ATIF trajectories
 
 When the Harbor agent writes `agent/trajectory.json`, the backend treats that ATIF document as authoritative. It validates the document with Harbor's trajectory schema and passes its native steps, reasoning, tool calls, observations, subagent references, and metadata directly to trajectory persistence; it does not reconstruct them through `RolloutSample.messages`. Before deleting a successful trial, the backend durably writes a validated, redacted provisional document beside the collected artifacts. After `execute()` returns, the server overwrites it with the final document that normalizes the root `session_id` / `trajectory_id` to the rollout id, records the original ids under `extra.osmosis`, attaches rollout metadata and reward, and overlays exact per-call metrics reported by the controller. If provisional persistence fails, the source trial is retained.

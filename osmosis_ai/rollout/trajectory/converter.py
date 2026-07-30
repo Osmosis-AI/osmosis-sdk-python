@@ -45,6 +45,7 @@ def convert_sample_to_trajectory(
     request_label: str | None = None,
     request_metadata: dict[str, Any] | None = None,
     request_extra_fields: dict[str, Any] | None = None,
+    result_extra_fields: dict[str, Any] | None = None,
     report: SampleReport | None = None,
     default_model_name: str | None = None,
     unmatched_sample_reports: Mapping[str, SampleReport] | None = None,
@@ -82,6 +83,7 @@ def convert_sample_to_trajectory(
             request_label=request_label,
             request_metadata=request_metadata,
             request_extra_fields=request_extra_fields,
+            result_extra_fields=result_extra_fields,
             unmatched_llm_call_metrics=unmatched_llm_call_metrics,
             unmatched_sample_reports=unmatched_reports,
         ),
@@ -386,6 +388,7 @@ def _compose_extra(
     request_label: str | None,
     request_metadata: dict[str, Any] | None,
     request_extra_fields: dict[str, Any] | None,
+    result_extra_fields: dict[str, Any] | None,
     unmatched_llm_call_metrics: list[dict[str, Any]] | None,
     unmatched_sample_reports: dict[str, Any] | None,
 ) -> dict[str, Any]:
@@ -398,6 +401,7 @@ def _compose_extra(
         "sample_extra_fields": sample.extra_fields or None,
         "request_metadata": request_metadata,
         "request_extra_fields": request_extra_fields,
+        "result_extra_fields": result_extra_fields,
         "unmatched_llm_call_metrics": unmatched_llm_call_metrics,
         "unmatched_sample_reports": unmatched_sample_reports,
     }

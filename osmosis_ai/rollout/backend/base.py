@@ -22,5 +22,10 @@ class ExecutionBackend(ABC):
         """Max concurrent executions this backend supports. 0 = no limit."""
         return 0
 
+    @property
+    def capture_final_result(self) -> bool:
+        """Whether the server should capture a final result without a grader URL."""
+        return False
+
     def health(self) -> dict[str, Any]:
         return {"status": "ok"}

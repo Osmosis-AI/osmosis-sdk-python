@@ -8,6 +8,8 @@ reward lands on the one ``ExecutionResult.sample``.
 """
 
 import json
+import logging
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -507,6 +509,11 @@ class TestExecute:
             await backend.execute(_request(), on_wf, on_gr)
         assert on_wf.call_args.args[0].status == RolloutStatus.FAILURE
         assert "docker down" in on_wf.call_args.args[0].err_message
+        assert on_wf.call_args.args[0].extra_fields["phase"] == "setup"
+        assert (
+            on_wf.call_args.args[0].extra_fields["harbor_exception_type"]
+            == "RuntimeError"
+        )
         assert on_gr.call_args.args[0].status == RolloutStatus.FAILURE
 
     async def test_missing_task_is_validation_error(self, monkeypatch):
@@ -574,6 +581,199 @@ class TestExecute:
         with _ctx():
             await backend.execute(_request(), on_wf, on_gr)
         assert on_wf.call_args.args[0].err_category == RolloutErrorCategory.AGENT_ERROR
+
+    async def test_hook_phase_timings_and_error_payload_are_reused(
+        self, monkeypatch, caplog
+    ):
+        ticks = iter(float(value) for value in range(20))
+        monkeypatch.setattr(bmod, "monotonic", lambda: next(ticks))
+        started_at = datetime(2026, 1, 1, tzinfo=UTC)
+        result = _trial_result(
+            rewards={"reward": 0.7},
+            exc_message="agent timed out",
+            exc_type="AgentTimeoutError",
+        )
+        result.started_at = started_at
+        result.finished_at = started_at + timedelta(seconds=10)
+        result.environment_setup = SimpleNamespace(
+            started_at=started_at,
+            finished_at=started_at + timedelta(seconds=2),
+        )
+        result.agent_setup = SimpleNamespace(
+            started_at=started_at + timedelta(seconds=2),
+            finished_at=started_at + timedelta(seconds=3),
+        )
+        result.agent_execution = SimpleNamespace(
+            started_at=started_at + timedelta(seconds=3),
+            finished_at=started_at + timedelta(seconds=6),
+        )
+        result.verifier = SimpleNamespace(
+            started_at=started_at + timedelta(seconds=6),
+            finished_at=started_at + timedelta(seconds=10),
+        )
+
+        async def _submit(queue: Any, trial_config: Any) -> Any:
+            for event_name in (
+                "start",
+                "environment-start",
+                "agent-start",
+                "agent-end",
+                "verification-start",
+                "end",
+            ):
+                event = next(
+                    event for event in queue._hooks if event.value == event_name
+                )
+                hook_event = SimpleNamespace(
+                    trial_name=trial_config.trial_name,
+                    result=result,
+                )
+                for callback in queue._hooks[event]:
+                    await callback(hook_event)
+            return result
+
+        monkeypatch.setattr(bmod.TrialQueue, "submit", _submit)
+        caplog.set_level(
+            logging.ERROR,
+            logger="osmosis_ai.rollout.backend.native_harbor.backend",
+        )
+        on_wf, on_gr = AsyncMock(), AsyncMock()
+
+        with _ctx():
+            await NativeHarborBackend().execute(_request(), on_wf, on_gr)
+
+        workflow_payload = on_wf.call_args.args[0].extra_fields
+        grader_payload = on_gr.call_args.args[0].extra_fields
+        assert grader_payload == workflow_payload
+        assert workflow_payload == {
+            "backend": "native_harbor",
+            "phase": "agent",
+            "harbor_exception_type": "AgentTimeoutError",
+            "category": "agent_error",
+            "timings_sec": {
+                "setup": 1.0,
+                "trial_setup": 1.0,
+                "environment_setup": 2.0,
+                "agent_setup": 1.0,
+                "agent": 3.0,
+                "verification": 4.0,
+                "trial": 10.0,
+            },
+        }
+        assert json.dumps(workflow_payload, sort_keys=True) in caplog.text
+
+    async def test_late_verifier_failure_keeps_callback_timing_and_phase(
+        self, monkeypatch
+    ):
+        result = _trial_result(rewards={"reward": 0.7})
+
+        async def _submit(queue: Any, trial_config: Any) -> Any:
+            hook_event = SimpleNamespace(
+                trial_name=trial_config.trial_name,
+                result=result,
+            )
+            verification_event = next(
+                event for event in queue._hooks if event.value == "verification-start"
+            )
+            for callback in queue._hooks[verification_event]:
+                await callback(hook_event)
+
+            result.exception_info = SimpleNamespace(
+                exception_message="verifier timed out",
+                exception_type="VerifierTimeoutError",
+            )
+            end_event = next(event for event in queue._hooks if event.value == "end")
+            for callback in queue._hooks[end_event]:
+                await callback(hook_event)
+            return result
+
+        monkeypatch.setattr(bmod.TrialQueue, "submit", _submit)
+        on_wf, on_gr = AsyncMock(), AsyncMock()
+
+        with _ctx():
+            await NativeHarborBackend().execute(_request(), on_wf, on_gr)
+
+        workflow_result = on_wf.call_args.args[0]
+        grader_result = on_gr.call_args.args[0]
+        assert workflow_result.status == RolloutStatus.SUCCESS
+        assert workflow_result.extra_fields["harbor_exception_type"] is None
+        assert grader_result.status == RolloutStatus.FAILURE
+        assert grader_result.extra_fields["phase"] == "verification"
+        assert (
+            grader_result.extra_fields["harbor_exception_type"]
+            == "VerifierTimeoutError"
+        )
+
+    async def test_late_failure_without_grader_callback_is_archived(
+        self, monkeypatch, tmp_path
+    ):
+        result = _trial_result(rewards={"reward": 0.7})
+
+        async def _submit(queue: Any, trial_config: Any) -> Any:
+            hook_event = SimpleNamespace(
+                trial_name=trial_config.trial_name,
+                result=result,
+            )
+            verification_event = next(
+                event for event in queue._hooks if event.value == "verification-start"
+            )
+            for callback in queue._hooks[verification_event]:
+                await callback(hook_event)
+            result.exception_info = SimpleNamespace(
+                exception_message="verifier timed out",
+                exception_type="VerifierTimeoutError",
+            )
+            end_event = next(event for event in queue._hooks if event.value == "end")
+            for callback in queue._hooks[end_event]:
+                await callback(hook_event)
+            return result
+
+        monkeypatch.setattr(bmod.TrialQueue, "submit", _submit)
+        backend = NativeHarborBackend()
+        backend.artifact_root = tmp_path
+        on_wf = AsyncMock()
+
+        with _ctx():
+            await backend.execute(_request(), on_wf, None)
+
+        assert on_wf.call_args.args[0].status == RolloutStatus.SUCCESS
+        diagnostics = json.loads((tmp_path / "ROLL" / "diagnostics.json").read_text())
+        assert diagnostics["phase"] == "verification"
+        assert diagnostics["harbor_exception_type"] == "VerifierTimeoutError"
+        assert diagnostics["category"] == "agent_error"
+
+    async def test_post_callback_queue_exception_is_archived_and_graded(
+        self, monkeypatch, tmp_path
+    ):
+        result = _trial_result(rewards={"reward": 0.7})
+
+        async def _submit(queue: Any, trial_config: Any) -> Any:
+            hook_event = SimpleNamespace(
+                trial_name=trial_config.trial_name,
+                result=result,
+            )
+            verification_event = next(
+                event for event in queue._hooks if event.value == "verification-start"
+            )
+            for callback in queue._hooks[verification_event]:
+                await callback(hook_event)
+            raise RuntimeError("failed to finalize trial result")
+
+        monkeypatch.setattr(bmod.TrialQueue, "submit", _submit)
+        backend = NativeHarborBackend()
+        backend.artifact_root = tmp_path
+        on_wf, on_gr = AsyncMock(), AsyncMock()
+
+        with _ctx():
+            await backend.execute(_request(), on_wf, on_gr)
+
+        assert on_wf.call_args.args[0].status == RolloutStatus.SUCCESS
+        grader_result = on_gr.call_args.args[0]
+        assert grader_result.status == RolloutStatus.FAILURE
+        assert grader_result.extra_fields["phase"] == "verification"
+        assert grader_result.extra_fields["harbor_exception_type"] == "RuntimeError"
+        diagnostics = json.loads((tmp_path / "ROLL" / "diagnostics.json").read_text())
+        assert diagnostics == grader_result.extra_fields
 
     async def test_grader_callback_failure_propagates_after_trial(self, monkeypatch):
         # Once the callback's own HTTP retries are exhausted, execute() must
@@ -712,7 +912,14 @@ class TestConcurrencyAndLifecycle:
         }
         assert extra["command"] == ["agent", "--token", "[REDACTED]"]
         assert extra["safe"] == "kept"
-        assert (backend.artifact_root / "ROLL" / "trajectory.json").is_file()
+        saved_path = backend.artifact_root / "ROLL" / "trajectory.json"
+        assert saved_path.is_file()
+        saved = json.loads(saved_path.read_text())
+        diagnostics = saved["extra"]["osmosis"]["result_extra_fields"]
+        assert diagnostics["backend"] == "native_harbor"
+        assert diagnostics["phase"] == "setup"
+        assert diagnostics["harbor_exception_type"] is None
+        assert diagnostics["category"] is None
         assert not trajectory_path.exists()
 
     async def test_native_atif_persistence_failure_preserves_successful_trial(

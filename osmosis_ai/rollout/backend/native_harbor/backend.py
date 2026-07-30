@@ -11,9 +11,10 @@ import shutil
 import traceback
 import warnings
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
+from time import monotonic
 from typing import Any
 
 from harbor.agents.factory import AgentFactory
@@ -71,6 +72,7 @@ DEFAULT_MODEL_NAME = "openai/osmosis-rollout"
 DEFAULT_REWARD_KEY = "reward"
 DEFAULT_MAX_CONCURRENT = 8
 TRIAL_NAME_PREFIX = "native-"
+_BACKEND_DIAGNOSTIC_NAME = "native_harbor"
 
 # terminus-2 summarizes mid-run, breaking training's append-only trajectory; default
 # it off (agent_kwargs override). Default agent only -- other agents are the caller's job.
@@ -207,6 +209,36 @@ class _PendingNativeTrial:
     workflow_complete_called: bool = False
     workflow_result: ExecutionResult | None = None
     preserve_trial: bool = False
+    phase: str = "setup"
+    phase_started_at: float | None = field(default_factory=lambda: monotonic())
+    phase_timings_sec: dict[str, float] = field(default_factory=dict)
+    error_phase: str | None = None
+    error_payload: dict[str, Any] | None = None
+
+    def transition_phase(self, phase: str) -> None:
+        now = monotonic()
+        self._finish_phase(now)
+        self.phase = phase
+        self.phase_started_at = now
+
+    def finish_phase(self) -> None:
+        self._finish_phase(monotonic())
+
+    def timing_snapshot(self) -> dict[str, float]:
+        timings = dict(self.phase_timings_sec)
+        if self.phase_started_at is not None:
+            elapsed = max(0.0, monotonic() - self.phase_started_at)
+            timings[self.phase] = timings.get(self.phase, 0.0) + elapsed
+        return {key: round(value, 6) for key, value in timings.items()}
+
+    def _finish_phase(self, now: float) -> None:
+        if self.phase_started_at is None:
+            return
+        elapsed = max(0.0, now - self.phase_started_at)
+        self.phase_timings_sec[self.phase] = (
+            self.phase_timings_sec.get(self.phase, 0.0) + elapsed
+        )
+        self.phase_started_at = None
 
 
 def resolve_task(request: ExecutionRequest) -> TaskConfig:
@@ -464,11 +496,23 @@ class NativeHarborBackend(ExecutionBackend):
             n_concurrent=max_concurrent,
             retry_config=RetryConfig(max_retries=0),
         )
+        self._queue.on_trial_started(self._on_trial_started)
+        self._queue.on_environment_started(self._on_environment_started)
+        self._queue.on_agent_started(self._on_agent_started)
+        self._queue.on_agent_ended(self._on_agent_ended)
         self._queue.on_verification_started(self._on_verification_started)
+        self._queue.on_trial_ended(self._on_trial_ended)
+        self._queue.on_trial_cancelled(self._on_trial_cancelled)
 
     @property
     def max_concurrency(self) -> int:
         return self._max_concurrency
+
+    @property
+    def capture_final_result(self) -> bool:
+        # Harbor verification always runs as part of the Trial. Capture its final
+        # outcome for diagnostics/archive even when no remote grader URL was given.
+        return True
 
     @property
     def agent_name(self) -> str | None:
@@ -544,13 +588,28 @@ class NativeHarborBackend(ExecutionBackend):
                 status=RolloutStatus.FAILURE,
                 err_message="Trial ended before the agent result was available",
                 err_category=RolloutErrorCategory.AGENT_ERROR,
+                extra_fields=self._diagnostic_payload(
+                    pending,
+                    trial_result,
+                    category=RolloutErrorCategory.AGENT_ERROR,
+                ),
             )
-            result_to_persist = workflow_result
-            if on_grader_complete is not None:
-                grader_result = self._build_grader_result(
-                    request, workflow_result, trial_result
+            final_workflow_result = (
+                self._build_workflow_result(
+                    pending,
+                    trial_result,
+                    setup_error=setup_error,
                 )
-                result_to_persist = grader_result
+                if setup_error is not None
+                else workflow_result
+            )
+            grader_result = self._build_grader_result(
+                pending,
+                final_workflow_result,
+                trial_result,
+            )
+            result_to_persist = grader_result
+            if on_grader_complete is not None:
                 grader_callback_error = await self._try_callback(
                     on_grader_complete, grader_result, request.id, "grader"
                 )
@@ -560,11 +619,10 @@ class NativeHarborBackend(ExecutionBackend):
                 trial_result is not None
                 and getattr(trial_result, "exception_info", None) is None
             )
-            if successful and result_to_persist.trajectory_document is not None:
-                # The server writes the final document after execute() returns so it
-                # can overlay controller metrics. Persist a provisional, already
-                # validated/redacted copy first; if that fails, keep Harbor's source
-                # trial instead of deleting the only durable ATIF document.
+            if result_to_persist.extra_fields is not None:
+                # Persist diagnostics for every outcome, even when the agent emitted
+                # no ATIF document. The server later overlays controller metrics on
+                # any trajectory and rewrites the same diagnostics sidecar.
                 persisted = await _save_trajectories_with_status(
                     rollout_id=request.id,
                     result=result_to_persist,
@@ -572,7 +630,9 @@ class NativeHarborBackend(ExecutionBackend):
                     request_metadata=request.metadata,
                     artifact_root=self.artifact_root,
                 )
-                if not persisted:
+                if successful and not persisted:
+                    # Never delete the source trial after losing the only durable
+                    # diagnostics/trajectory archive for a successful rollout.
                     pending.preserve_trial = True
 
             relocated = self._relocate_trial_artifacts(request.id)
@@ -613,9 +673,55 @@ class NativeHarborBackend(ExecutionBackend):
             return exc
         return None
 
+    async def _on_trial_started(self, event: TrialHookEvent) -> None:
+        self._transition_pending_phase(event, "trial_setup")
+
+    async def _on_environment_started(self, event: TrialHookEvent) -> None:
+        self._transition_pending_phase(event, "environment_setup")
+
+    async def _on_agent_started(self, event: TrialHookEvent) -> None:
+        self._transition_pending_phase(event, "agent")
+
+    async def _on_agent_ended(self, event: TrialHookEvent) -> None:
+        pending = self._pending.get(event.trial_name)
+        if pending is not None and pending.phase == "agent":
+            pending.finish_phase()
+
+    async def _on_trial_ended(self, event: TrialHookEvent) -> None:
+        pending = self._pending.get(event.trial_name)
+        if pending is not None:
+            self._capture_error_phase(pending, event.result)
+            pending.finish_phase()
+
+    async def _on_trial_cancelled(self, event: TrialHookEvent) -> None:
+        pending = self._pending.get(event.trial_name)
+        if pending is not None:
+            pending.transition_phase("cancelled")
+            pending.finish_phase()
+
+    def _transition_pending_phase(self, event: TrialHookEvent, phase: str) -> None:
+        pending = self._pending.get(event.trial_name)
+        if pending is not None:
+            pending.transition_phase(phase)
+
+    def _capture_error_phase(
+        self, pending: _PendingNativeTrial, trial_result: TrialResult
+    ) -> None:
+        if (
+            pending.error_phase is None
+            and getattr(trial_result, "exception_info", None) is not None
+        ):
+            pending.error_phase = self._infer_phase(pending, trial_result)
+
     async def _on_verification_started(self, event: TrialHookEvent) -> None:
         pending = self._pending.get(event.trial_name)
-        if pending is None or pending.workflow_complete_called:
+        if pending is None:
+            return
+        # Single-step Harbor may continue into verification after recording an
+        # agent failure. Capture that failure's phase before advancing the hook state.
+        self._capture_error_phase(pending, event.result)
+        pending.transition_phase("verification")
+        if pending.workflow_complete_called:
             return
         if event.result.step_results is not None:
             # Multi-step trials verify after every agent step. Firing here would
@@ -632,6 +738,117 @@ class NativeHarborBackend(ExecutionBackend):
         )
         pending.workflow_complete_called = callback_error is None
 
+    def _diagnostic_payload(
+        self,
+        pending: _PendingNativeTrial,
+        trial_result: TrialResult | None,
+        *,
+        category: RolloutErrorCategory | None = None,
+        harbor_exception_type: str | None = None,
+        phase: str | None = None,
+    ) -> dict[str, Any]:
+        """Build the callback/archive diagnostics for one native result.
+
+        Failure payloads are cached so the callback, SDK log, grader result, and
+        trajectory archive all carry identical content even if later hooks advance
+        the timing state.
+        """
+        if category is not None and pending.error_payload is not None:
+            return pending.error_payload
+
+        resolved_phase = (
+            phase
+            or (pending.error_phase if category is not None else None)
+            or self._infer_phase(pending, trial_result)
+        )
+        payload: dict[str, Any] = {
+            "backend": _BACKEND_DIAGNOSTIC_NAME,
+            "phase": resolved_phase,
+            "harbor_exception_type": harbor_exception_type,
+            "category": category.value if category is not None else None,
+            "timings_sec": self._phase_timings(pending, trial_result),
+        }
+        if category is not None:
+            pending.error_payload = payload
+            logger.error(
+                "Native Harbor structured error for rollout %s: %s",
+                pending.request.id,
+                json.dumps(payload, sort_keys=True),
+            )
+        return payload
+
+    @staticmethod
+    def _infer_phase(
+        pending: _PendingNativeTrial, trial_result: TrialResult | None
+    ) -> str:
+        phase = pending.phase
+        if trial_result is None:
+            return phase
+
+        # Agent setup has no Harbor queue hook. Its TimingInfo is the only precise
+        # signal separating it from the broader environment/setup interval.
+        if (
+            phase == "environment_setup"
+            and getattr(trial_result, "agent_setup", None) is not None
+        ):
+            return "agent_setup"
+        if phase != "setup":
+            return phase
+
+        # Older/duck-typed queue integrations may not invoke hooks. Recover the
+        # furthest entered phase from Harbor's result timing slots.
+        for attr, inferred in (
+            ("verifier", "verification"),
+            ("agent_execution", "agent"),
+            ("agent_setup", "agent_setup"),
+            ("environment_setup", "environment_setup"),
+        ):
+            if getattr(trial_result, attr, None) is not None:
+                return inferred
+        return phase
+
+    @classmethod
+    def _phase_timings(
+        cls, pending: _PendingNativeTrial, trial_result: TrialResult | None
+    ) -> dict[str, float]:
+        timings = pending.timing_snapshot()
+        if trial_result is None:
+            return timings
+
+        exact: dict[str, float | None] = {
+            "trial": cls._duration_sec(
+                getattr(trial_result, "started_at", None),
+                getattr(trial_result, "finished_at", None),
+            )
+        }
+        for attr, key in (
+            ("environment_setup", "environment_setup"),
+            ("agent_setup", "agent_setup"),
+            ("agent_execution", "agent"),
+            ("verifier", "verification"),
+        ):
+            timing = getattr(trial_result, attr, None)
+            exact[key] = cls._duration_sec(
+                getattr(timing, "started_at", None),
+                getattr(timing, "finished_at", None),
+            )
+        timings.update(
+            {key: round(value, 6) for key, value in exact.items() if value is not None}
+        )
+        return timings
+
+    @staticmethod
+    def _duration_sec(started_at: Any, finished_at: Any) -> float | None:
+        if started_at is None or finished_at is None:
+            return None
+        try:
+            duration = float((finished_at - started_at).total_seconds())
+        except (AttributeError, TypeError, ValueError):
+            return None
+        if not math.isfinite(duration):
+            return None
+        return max(0.0, duration)
+
     def _build_workflow_result(
         self,
         pending: _PendingNativeTrial,
@@ -641,10 +858,17 @@ class NativeHarborBackend(ExecutionBackend):
     ) -> ExecutionResult:
         request = pending.request
         if setup_error is not None:
+            category = _categorize_exception(setup_error)
             return ExecutionResult(
                 status=RolloutStatus.FAILURE,
                 err_message=str(setup_error),
-                err_category=_categorize_exception(setup_error),
+                err_category=category,
+                extra_fields=self._diagnostic_payload(
+                    pending,
+                    trial_result,
+                    category=category,
+                    harbor_exception_type=type(setup_error).__name__,
+                ),
             )
 
         trajectory_document = self._load_native_trajectory(
@@ -680,11 +904,18 @@ class NativeHarborBackend(ExecutionBackend):
                 err_message=getattr(err, "exception_message", None)
                 or "Trial failed before completion",
                 err_category=RolloutErrorCategory.AGENT_ERROR,
+                extra_fields=self._diagnostic_payload(
+                    pending,
+                    trial_result,
+                    category=RolloutErrorCategory.AGENT_ERROR,
+                    harbor_exception_type=getattr(err, "exception_type", None),
+                ),
             )
         return ExecutionResult(
             status=RolloutStatus.SUCCESS,
             sample=sample,
             trajectory_document=trajectory_document,
+            extra_fields=self._diagnostic_payload(pending, trial_result),
         )
 
     @staticmethod
@@ -893,12 +1124,13 @@ class NativeHarborBackend(ExecutionBackend):
 
     def _build_grader_result(
         self,
-        request: ExecutionRequest,
+        pending: _PendingNativeTrial,
         workflow_result: ExecutionResult,
         trial_result: TrialResult | None,
     ) -> ExecutionResult:
         """Grade the rollout's single sample from the harbor verifier's in-memory
         result. On setup failure (no trial result) the workflow error is propagated."""
+        request = pending.request
         sample = (
             workflow_result.sample.model_copy(deep=True)
             if workflow_result.sample is not None
@@ -911,6 +1143,7 @@ class NativeHarborBackend(ExecutionBackend):
                 trajectory_document=workflow_result.trajectory_document,
                 err_message=workflow_result.err_message,
                 err_category=workflow_result.err_category,
+                extra_fields=workflow_result.extra_fields,
             )
 
         err = getattr(trial_result, "exception_info", None)
@@ -926,6 +1159,12 @@ class NativeHarborBackend(ExecutionBackend):
                 err_message=getattr(err, "exception_message", None)
                 or "Trial failed before grading completed",
                 err_category=RolloutErrorCategory.AGENT_ERROR,
+                extra_fields=self._diagnostic_payload(
+                    pending,
+                    trial_result,
+                    category=RolloutErrorCategory.AGENT_ERROR,
+                    harbor_exception_type=getattr(err, "exception_type", None),
+                ),
             )
 
         reward_value = self._pick_reward(self._extract_rewards(trial_result))
@@ -942,11 +1181,18 @@ class NativeHarborBackend(ExecutionBackend):
                 trajectory_document=workflow_result.trajectory_document,
                 err_message=str(e),
                 err_category=RolloutErrorCategory.VALIDATION_ERROR,
+                extra_fields=self._diagnostic_payload(
+                    pending,
+                    trial_result,
+                    category=RolloutErrorCategory.VALIDATION_ERROR,
+                    phase="grading",
+                ),
             )
         return ExecutionResult(
             status=RolloutStatus.SUCCESS,
             sample=sample,
             trajectory_document=workflow_result.trajectory_document,
+            extra_fields=self._diagnostic_payload(pending, trial_result),
         )
 
     @staticmethod
