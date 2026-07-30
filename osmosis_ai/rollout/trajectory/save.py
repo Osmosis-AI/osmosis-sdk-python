@@ -5,6 +5,7 @@ the rollout's file artifacts. Failures are logged and swallowed.
 """
 
 import asyncio
+import json
 import logging
 from collections.abc import Mapping
 from pathlib import Path
@@ -112,6 +113,7 @@ def _prepare_native_trajectory(
         else None,
         "request_metadata": request_metadata,
         "request_extra_fields": request_extra_fields,
+        "result_extra_fields": result.extra_fields,
         "unmatched_llm_call_metrics": unmatched_llm_call_metrics,
         "unmatched_sample_reports": {
             key: value.model_dump(exclude_none=True)
@@ -192,6 +194,25 @@ async def _save(
     report: TrajectoryReport | None,
     artifact_root: Path,
 ) -> None:
+    if result.extra_fields is not None:
+        diagnostics_dest = artifact_root / rollout_id / "diagnostics.json"
+        diagnostics_data = json.dumps(
+            result.extra_fields,
+            ensure_ascii=False,
+            indent=2,
+            sort_keys=True,
+        ).encode()
+        await asyncio.to_thread(
+            _write_document,
+            diagnostics_dest,
+            diagnostics_data,
+        )
+        logger.info(
+            "Saved rollout diagnostics for %s -> %s",
+            rollout_id,
+            diagnostics_dest,
+        )
+
     if result.trajectory_document is not None:
         trajectory = _prepare_native_trajectory(
             result.trajectory_document,
@@ -240,6 +261,7 @@ async def _save(
         request_label=request_label,
         request_metadata=request_metadata,
         request_extra_fields=request_extra_fields,
+        result_extra_fields=result.extra_fields,
         report=matched_report,
         default_model_name=report.model_name if report else None,
         unmatched_sample_reports=unmatched_reports or None,

@@ -80,6 +80,9 @@ class ExecutionRequest(BaseModel):
 class ExecutionResult(BaseModel):
     status: RolloutStatus
     sample: RolloutSample | None = None
+    # Backend-produced callback diagnostics. Unlike request/sample extra fields,
+    # these describe execution of the rollout itself and are archived separately.
+    extra_fields: dict[str, Any] | None = None
     # A backend-native ATIF document that is already richer than the SDK's
     # chat-message normalization. It is process-local execution state: callback
     # payloads are built explicitly by the server, and model serialization must

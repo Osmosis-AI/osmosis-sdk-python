@@ -56,6 +56,29 @@ async def test_save_without_sample_writes_nothing(tmp_path: Path) -> None:
     assert not (tmp_path / "r1").exists()
 
 
+async def test_save_diagnostics_without_sample_writes_sidecar(tmp_path: Path) -> None:
+    diagnostics = {
+        "backend": "native_harbor",
+        "phase": "setup",
+        "harbor_exception_type": "RuntimeError",
+        "category": "agent_error",
+    }
+
+    await save_trajectories(
+        rollout_id="r1",
+        result=ExecutionResult(
+            status=RolloutStatus.FAILURE,
+            extra_fields=diagnostics,
+        ),
+        artifact_root=tmp_path,
+    )
+
+    assert json.loads((tmp_path / "r1" / "diagnostics.json").read_text()) == (
+        diagnostics
+    )
+    assert not (tmp_path / "r1" / "trajectory.json").exists()
+
+
 async def test_save_skips_sample_without_trajectory_messages(
     tmp_path: Path, caplog
 ) -> None:
@@ -212,6 +235,7 @@ async def test_native_atif_is_preserved_and_enriched_without_message_roundtrip(
             trajectory_messages=None,
         ),
         trajectory_document=native_document,
+        extra_fields={"backend": "native_harbor", "phase": "verification"},
     )
     report = TrajectoryReport(
         model_name="controller-model",
@@ -250,3 +274,7 @@ async def test_native_atif_is_preserved_and_enriched_without_message_roundtrip(
     assert doc["extra"]["osmosis"]["native_trajectory_id"] == "harbor-trajectory"
     assert doc["extra"]["osmosis"]["reward"] == 0.75
     assert doc["extra"]["osmosis"]["request_metadata"] == {"harbor_task": "org/task"}
+    assert doc["extra"]["osmosis"]["result_extra_fields"] == {
+        "backend": "native_harbor",
+        "phase": "verification",
+    }

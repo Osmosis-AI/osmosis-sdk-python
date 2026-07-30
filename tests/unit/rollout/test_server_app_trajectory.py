@@ -6,6 +6,8 @@ from types import SimpleNamespace
 from typing import Any
 
 from osmosis_ai.rollout.backend.base import ExecutionBackend, ResultCallback
+from osmosis_ai.rollout.backend.native_harbor import NativeHarborBackend
+from osmosis_ai.rollout.backend.native_harbor import backend as native_backend_module
 from osmosis_ai.rollout.server.app import _handle_rollout
 from osmosis_ai.rollout.types import (
     ExecutionRequest,
@@ -117,6 +119,121 @@ async def test_records_graded_result(tmp_path: Path, monkeypatch) -> None:
         {"role": "assistant", "content": "hello"},
     ]
     assert "trajectory_messages" not in grader_payload["sample"]
+
+
+async def test_result_extra_fields_are_posted_and_archived(
+    tmp_path: Path, monkeypatch
+) -> None:
+    posted = patch_callbacks(monkeypatch)
+    patch_artifact_root(monkeypatch, tmp_path)
+    diagnostics = {
+        "backend": "native_harbor",
+        "phase": "agent",
+        "harbor_exception_type": "AgentTimeoutError",
+        "category": "timeout",
+        "timings_sec": {"agent": 42.0},
+    }
+    backend = StubBackend(
+        workflow_result=ExecutionResult(
+            status=RolloutStatus.FAILURE,
+            sample=make_sample(),
+            extra_fields=diagnostics,
+        ),
+        grader_result=ExecutionResult(
+            status=RolloutStatus.FAILURE,
+            sample=make_sample(),
+            extra_fields=diagnostics,
+        ),
+    )
+
+    await _handle_rollout(backend, make_request())
+
+    completion_payload = posted[0][1]
+    assert completion_payload["extra_fields"] == diagnostics
+    grader_payload = posted[1][1]
+    assert grader_payload["extra_fields"] == diagnostics
+    doc = json.loads((tmp_path / "r1" / "trajectory.json").read_text())
+    assert doc["extra"]["osmosis"]["result_extra_fields"] == diagnostics
+    assert json.loads((tmp_path / "r1" / "diagnostics.json").read_text()) == (
+        diagnostics
+    )
+
+
+async def test_result_extra_fields_are_archived_without_a_sample(
+    tmp_path: Path, monkeypatch
+) -> None:
+    posted = patch_callbacks(monkeypatch)
+    patch_artifact_root(monkeypatch, tmp_path)
+    diagnostics = {
+        "backend": "native_harbor",
+        "phase": "setup",
+        "harbor_exception_type": "RuntimeError",
+        "category": "agent_error",
+    }
+    backend = StubBackend(
+        workflow_result=ExecutionResult(
+            status=RolloutStatus.FAILURE,
+            extra_fields=diagnostics,
+        )
+    )
+
+    await _handle_rollout(backend, make_request(grader_callback_url=None))
+
+    assert posted[0][1]["extra_fields"] == diagnostics
+    assert json.loads((tmp_path / "r1" / "diagnostics.json").read_text()) == (
+        diagnostics
+    )
+    assert not (tmp_path / "r1" / "trajectory.json").exists()
+
+
+async def test_native_late_failure_without_grader_url_keeps_final_diagnostics(
+    tmp_path: Path, monkeypatch
+) -> None:
+    posted = patch_callbacks(monkeypatch)
+    patch_artifact_root(monkeypatch, tmp_path)
+    result = SimpleNamespace(
+        verifier_result=SimpleNamespace(rewards={"reward": 0.7}),
+        step_results=None,
+        exception_info=None,
+    )
+
+    async def fake_submit(queue: Any, trial_config: Any) -> Any:
+        hook_event = SimpleNamespace(
+            trial_name=trial_config.trial_name,
+            result=result,
+        )
+        verification_event = next(
+            event for event in queue._hooks if event.value == "verification-start"
+        )
+        for callback in queue._hooks[verification_event]:
+            await callback(hook_event)
+        result.exception_info = SimpleNamespace(
+            exception_message="verifier timed out",
+            exception_type="VerifierTimeoutError",
+        )
+        end_event = next(event for event in queue._hooks if event.value == "end")
+        for callback in queue._hooks[end_event]:
+            await callback(hook_event)
+        return result
+
+    monkeypatch.setattr(native_backend_module.TrialQueue, "submit", fake_submit)
+    backend = NativeHarborBackend(trials_dir=tmp_path / "trials")
+    backend.artifact_root = tmp_path
+
+    await _handle_rollout(
+        backend,
+        make_request(
+            grader_callback_url=None,
+            metadata={"harbor_task": "/tmp/task"},
+        ),
+    )
+
+    assert len(posted) == 1
+    assert posted[0][1]["status"] == "success"
+    diagnostics = json.loads((tmp_path / "r1" / "diagnostics.json").read_text())
+    assert diagnostics["phase"] == "verification"
+    assert diagnostics["harbor_exception_type"] == "VerifierTimeoutError"
+    assert diagnostics["category"] == "agent_error"
 
 
 async def test_records_workflow_result_without_grader_callback(

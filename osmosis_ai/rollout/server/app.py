@@ -114,6 +114,7 @@ async def _handle_rollout(
             payload=RolloutCompleteRequest(
                 status=result.status,
                 rollout_id=rollout_id,
+                extra_fields=result.extra_fields,
                 err_message=result.err_message,
                 err_category=result.err_category,
             ).model_dump(),
@@ -145,6 +146,7 @@ async def _handle_rollout(
                 if result.status == RolloutStatus.SUCCESS
                 else GraderStatus.FAILURE,
                 sample=result.sample,
+                extra_fields=result.extra_fields,
                 err_message=result.err_message,
                 err_category=result.err_category,
             ).model_dump(exclude={"sample": {"trajectory_messages"}}),
@@ -170,7 +172,7 @@ async def _handle_rollout(
                 ),
                 on_workflow_complete=on_workflow_complete,
                 on_grader_complete=on_grader_complete
-                if request.grader_callback_url
+                if request.grader_callback_url or backend.capture_final_result
                 else None,
             )
         logger.info("Rollout %s completed successfully", rollout_id)
@@ -182,6 +184,9 @@ async def _handle_rollout(
                 payload=RolloutCompleteRequest(
                     status=RolloutStatus.FAILURE,
                     rollout_id=rollout_id,
+                    extra_fields=result_to_save.extra_fields
+                    if result_to_save is not None
+                    else None,
                     err_message="Internal server error",
                 ).model_dump(),
                 headers=auth.as_bearer_headers(),
