@@ -1274,10 +1274,53 @@ class TestConcurrencyAndLifecycle:
         with pytest.raises(ValueError, match="max_concurrent must be >= 1"):
             NativeHarborBackend(max_concurrent=0)
 
-    def test_health_reports_max_concurrency(self):
+    def test_negative_queue_depth_rejected(self):
+        with pytest.raises(ValueError, match="max_queue_depth must be >= 0"):
+            NativeHarborBackend(max_queue_depth=-1)
+
+    def test_health_reports_capacity_and_direct_binding_capabilities(self):
         backend = NativeHarborBackend(max_concurrent=3)
         assert backend.max_concurrency == 3
-        assert backend.health()["max_concurrency"] == 3
+        assert backend.max_queue_depth == 3
+        assert backend.health() == {
+            "status": "ok",
+            "backend": "native_harbor",
+            "agent": "terminus-2",
+            "binding": "terminus-2",
+            "binding_protocol": "OpenAI Chat Completions",
+            "protocol_capabilities": ["OpenAI Chat Completions"],
+            "gateway_routing": None,
+            "evaluation_supported": True,
+            "training_supported": True,
+            "max_concurrency": 3,
+            "max_queue_depth": 3,
+        }
+
+    def test_health_reports_mounted_gateway_capabilities(self):
+        with pytest.warns(UserWarning, match="codex.*eval-only"):
+            backend = NativeHarborBackend(
+                agent_name="codex",
+                gateway_base_url="http://gateway.example:8000",
+                max_queue_depth=0,
+            )
+
+        assert backend.health() == {
+            "status": "ok",
+            "backend": "native_harbor",
+            "agent": "codex",
+            "binding": "codex",
+            "binding_protocol": "OpenAI Responses",
+            "protocol_capabilities": [
+                "OpenAI Chat Completions",
+                "OpenAI Responses",
+                "Anthropic Messages",
+            ],
+            "gateway_routing": "header_token",
+            "evaluation_supported": True,
+            "training_supported": False,
+            "max_concurrency": 8,
+            "max_queue_depth": 0,
+        }
 
     async def test_successful_trial_dir_cleaned_up(self, monkeypatch, tmp_path):
         # On success the (disposable) trial dir is removed; the reward is read

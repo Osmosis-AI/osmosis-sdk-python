@@ -553,6 +553,7 @@ class NativeHarborBackend(ExecutionBackend):
         task_resolver: TaskResolver | None = None,
         environment_config: HarborEnvironmentConfig | None = None,
         max_concurrent: int = DEFAULT_MAX_CONCURRENT,
+        max_queue_depth: int | None = None,
         cleanup_successful_trials: bool = True,
     ) -> None:
         if max_concurrent < 1:
@@ -561,6 +562,11 @@ class NativeHarborBackend(ExecutionBackend):
                 "harbor Trial (often a container) per rollout, so unbounded "
                 "concurrency would exhaust the host."
             )
+        resolved_max_queue_depth = (
+            max_concurrent if max_queue_depth is None else max_queue_depth
+        )
+        if resolved_max_queue_depth < 0:
+            raise ValueError("max_queue_depth must be >= 0")
         if agent_setup_timeout_sec is not None and (
             not math.isfinite(agent_setup_timeout_sec) or agent_setup_timeout_sec <= 0
         ):
@@ -664,6 +670,7 @@ class NativeHarborBackend(ExecutionBackend):
         self._verifier_config = verifier_template
         self.cleanup_successful_trials = cleanup_successful_trials
         self._max_concurrency = max_concurrent
+        self._max_queue_depth = resolved_max_queue_depth
         self.artifact_root: Path = default_artifact_root()
         self._pending: dict[str, _PendingNativeTrial] = {}
         self._queue = TrialQueue(
@@ -681,6 +688,10 @@ class NativeHarborBackend(ExecutionBackend):
     @property
     def max_concurrency(self) -> int:
         return self._max_concurrency
+
+    @property
+    def max_queue_depth(self) -> int:
+        return self._max_queue_depth
 
     @property
     def capture_final_result(self) -> bool:
@@ -710,11 +721,27 @@ class NativeHarborBackend(ExecutionBackend):
         return self._translation_gateway
 
     def health(self) -> dict[str, Any]:
+        gateway = self._translation_gateway
+        protocol_capabilities = [_AgentProtocol.CHAT_COMPLETIONS.value]
+        if gateway is not None:
+            protocol_capabilities.extend(
+                [
+                    _AgentProtocol.OPENAI_RESPONSES.value,
+                    _AgentProtocol.ANTHROPIC_MESSAGES.value,
+                ]
+            )
         return {
             "status": "ok",
             "backend": "native_harbor",
             "agent": self.agent_name or self.agent_import_path,
+            "binding": self._binding.name,
+            "binding_protocol": self._binding.protocol.value,
+            "protocol_capabilities": protocol_capabilities,
+            "gateway_routing": gateway.routing_mode if gateway is not None else None,
+            "evaluation_supported": self._binding.eval_supported,
+            "training_supported": self._binding.training_supported,
             "max_concurrency": self._max_concurrency,
+            "max_queue_depth": self._max_queue_depth,
         }
 
     async def execute(
