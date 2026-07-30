@@ -90,7 +90,7 @@ class BenchmarkExecutionSection(_StrictSection):
     max_retries: Any = None
     pass_threshold: Any = None
     judge_model: Any = None
-    judge_api_key_secret: Any = None
+    judge_api_key_secret: str | None = None
 
 
 class BenchmarkSubmitConfig(_StrictSection):

@@ -321,6 +321,30 @@ judge_api_key_secret = "JUDGE_KEY"
         load_benchmark_submit_config(path)
 
 
+def test_load_benchmark_submit_config_rejects_non_string_judge_secret(
+    tmp_path: Path,
+) -> None:
+    path = _write_config(
+        tmp_path / "benchmark.toml",
+        """
+[experiment]
+benchmark = "DeepSWE"
+
+[[agents]]
+[agents.model]
+type = "hosted"
+base_model = "Qwen/Qwen3-8B"
+checkpoint_name = "deep-swe-agent"
+
+[execution]
+judge_api_key_secret = 42
+""",
+    )
+
+    with pytest.raises(CLIError, match=r"execution.judge_api_key_secret"):
+        load_benchmark_submit_config(path)
+
+
 @pytest.mark.parametrize(
     "secret_name",
     [
