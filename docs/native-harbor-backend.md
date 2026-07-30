@@ -61,6 +61,12 @@ if __name__ == "__main__":
 
 The model endpoint and key are **not** configured here — they arrive per rollout from the ambient `RolloutContext` (see [Model endpoint injection](#model-endpoint-injection)). To exercise the server locally, set the same env vars a training controller would: `OSMOSIS_CHAT_COMPLETIONS_URL`, `OSMOSIS_API_KEY`, `OSMOSIS_ROLLOUT_ID` ([context.py](../osmosis_ai/rollout/context.py)).
 
+Codex and Claude Code are eval-only bindings that need protocol translation.
+For either one, also pass `gateway_base_url` as the fixed, externally reachable
+origin of this same rollout server. `create_rollout_server` then mounts the
+translation routes automatically. The URL must not include a path; the backend
+adds the binding-specific `/v1` prefix where needed.
+
 ### Supplying full Harbor configuration
 
 The Quickstart leaves `environment` and `verifier` at their defaults. The
@@ -129,6 +135,7 @@ All arguments are keyword-only ([backend.py](../osmosis_ai/rollout/backend/nativ
 | `agent_setup_timeout_sec` | `None` | Compatibility overlay for `AgentConfig.override_setup_timeout_sec`; prefer setting the field on `agent`. |
 | `binding` | agent name | Validated wire/identity binding. Import-path agents must select `custom-chat-completions` explicitly. |
 | `allow_unverified_agent` | `False` | Explicit eval-only opt-in for bindings that have not passed the real-infrastructure E2E checklist. |
+| `gateway_base_url` | `None` | Fixed HTTP(S) origin of this rollout server's translation gateway. Required by the `codex` and `claude-code` bindings; `create_rollout_server` mounts `/v1/responses` and `/v1/messages` on the same app. |
 | `model_name` | `agent.model_name`, else `"openai/osmosis-rollout"` | Compatibility/default overlay. Per-row `metadata["harbor_model"]` wins, subject to the binding's provider restriction. |
 | `reward_key` | `"reward"` | Which named verifier channel becomes the scalar reward (see [Reward mapping](#reward-mapping)). |
 | `trials_dir` | `Path("native_trials")` | Where Harbor writes trial directories. |
@@ -151,7 +158,7 @@ sensitive environment values.
 | `AgentConfig.name` / `import_path` | Preserve; they select the binding. Setting both is rejected. |
 | `model_name` | Overlay: dataset row `harbor_model` > explicit constructor `model_name` > `agent.model_name` > SDK default. |
 | `kwargs` | Preserve, then overlay binding-owned `api_base`, `llm_kwargs.api_key`, `extra_body.stream=False`, and pinned CLI version where applicable. |
-| `env` | Preserve non-identity variables. User-supplied binding identity keys such as `OPENAI_BASE_URL` / `OPENAI_API_KEY` are rejected rather than silently overwritten. |
+| `env` | Preserve non-identity variables. User-supplied binding identity/auth-selection keys are rejected rather than silently overwritten. Direct bindings receive the controller endpoint/key; translated bindings receive the gateway origin plus an opaque, short-lived route token. |
 | `skills`, `mcp_servers`, `include_logs`, `exclude_logs`, `extra_allowed_hosts` | Preserve. |
 | `override_setup_timeout_sec` | Preserve unless `agent_setup_timeout_sec` explicitly overlays it. |
 | `override_timeout_sec` | Preserve unless the rollout request supplies `agent_timeout_sec`. |
@@ -168,16 +175,17 @@ sensitive environment values.
 Agent support is binding-specific. A binding records the wire protocol, identity
 channel, eval/training status, and an exact CLI version for installed agents.
 Unknown built-ins fail at construction instead of inheriting generic `OPENAI_*`
-wiring. Unsupported protocols also fail at construction with the missing
-translation named in the error.
+wiring. Translated bindings require `gateway_base_url`; protocols without an
+implemented binding still fail at construction with the missing capability
+named in the error.
 
 | Binding | Protocol / identity | Eval | Train | Status |
 |---|---|---:|---:|---|
 | `terminus-2` | Chat Completions via `kwargs["api_base"]` and `kwargs["llm_kwargs"]["api_key"]` | ✓ | ✓ | Summarization is off by default. |
 | `oracle` | No model endpoint | ✓ | ✗ | Emits a construction warning; use it to validate datasets and verifiers. |
 | `opencode` | Chat Completions via `OPENAI_BASE_URL` / `OPENAI_API_KEY`; CLI `1.18.9` | opt-in | ✗ | Requires `allow_unverified_agent=True` and an `openai/...` model; Harbor base-URL behavior and trajectory linearity still need E2E validation. |
-| `codex` | OpenAI Responses; CLI `0.146.0` | blocked | ✗ | The controllers expose Chat Completions, so construction fails until a Responses translation gateway exists. |
-| `claude-code` | Anthropic Messages; CLI `2.1.220` | blocked | ✗ | Construction fails until a Messages translation gateway exists; it is never given generic `OPENAI_*` identity. |
+| `codex` | OpenAI Responses at `/v1/responses`, translated to Chat Completions; bearer route token; CLI `0.146.0` | ✓ | ✗ | Requires `gateway_base_url`; emits an eval-only warning. Real-infrastructure streaming, tools, accounting, and append-only behavior remain E2E dependencies. |
+| `claude-code` | Anthropic Messages at `/v1/messages`, translated to Chat Completions; `x-api-key` route token; CLI `2.1.220` | ✓ | ✗ | Requires `gateway_base_url`; emits an eval-only warning and masks Anthropic/OAuth plus Bedrock, Vertex, and Foundry selectors. Active host Bedrock mode is rejected so it cannot bypass the gateway. The same E2E dependencies remain. |
 | `custom-chat-completions` | Chat Completions kwargs for `AgentConfig.import_path` | opt-in | ✗ | Explicit binding plus `allow_unverified_agent=True`; emits an eval-only warning. |
 
 Installed-agent versions are binding-owned and cannot be overridden through
@@ -194,7 +202,36 @@ remains the separate agent **run** timeout and overlays
 
 ### Model endpoint injection
 
-Endpoint and key come from the ambient `RolloutContext` ([context.py](../osmosis_ai/rollout/context.py)) — `chat_completions_url` and `api_key` — which the controller supplies per rollout (read from `OSMOSIS_CHAT_COMPLETIONS_URL` / `OSMOSIS_API_KEY` on a container host). The backend overlays the selected binding's corresponding `agent.kwargs` identity slots and rejects user-set identity keys in `agent.env`, so configuration cannot redirect model traffic. For kwargs-wired agents, `extra_body.stream=False` is pinned until the controllers support that streaming path. The `oracle` binding is the exception: it invokes the task's reference solution and needs no model endpoint.
+Endpoint and key come from the ambient `RolloutContext` ([context.py](../osmosis_ai/rollout/context.py)) — `chat_completions_url` and `api_key` — which the controller supplies per rollout (read from `OSMOSIS_CHAT_COMPLETIONS_URL` / `OSMOSIS_API_KEY` on a container host).
+
+Chat Completions bindings receive that endpoint directly. For Codex and Claude
+Code, the backend instead registers an opaque route token for the duration of
+`execute()` and gives the agent the configured gateway origin. Codex sends the
+token as bearer auth to `/v1/responses`; Claude Code sends it as `x-api-key` to
+`/v1/messages`. The same FastAPI app resolves the token, uses LiteLLM to
+translate Responses or Messages into Chat Completions, replaces the gateway
+credential with the real controller key, and forwards to that rollout's raw
+`chat_completions_url`. If the controller supplied no key, the gateway sends an
+internal non-secret sentinel because LiteLLM requires a non-empty key; that
+sentinel is never used for routing. Route state is removed on success or
+failure, and an expired token receives `401` without reaching an upstream.
+
+The configured gateway URL is an origin only (no path, query, or fragment) and
+must be reachable by the Harbor environment. Local-Docker URL rewriting applies
+to the agent-facing gateway URL, not the controller URL used by the server.
+Streaming SSE and tool-call translation are covered by local round-trip unit
+tests; validation against real Miles/eval infrastructure, including controller
+token accounting, is still required by the E2E checklist and is not claimed
+here.
+
+The backend overlays the selected binding's identity slots and rejects
+user-set identity keys in `agent.env`, so configuration cannot redirect model
+traffic. It also masks Codex auth-file and Claude subscription/OAuth or alternate
+cloud-provider selectors; active host Bedrock mode causes Claude Code
+construction or execution to fail. For
+kwargs-wired agents, `extra_body.stream=False` is pinned until the controllers
+support that streaming path. The `oracle` binding is the exception: it invokes
+the task's reference solution and needs no model endpoint.
 
 ## Append-only trajectories (training caveat)
 
@@ -208,7 +245,7 @@ RL training needs a single, linear, **append-only** token trajectory. Anything t
 | `terminus-2` (summarize off by default) | ✓ | ✓ |
 | `oracle` | ✓ | ✗ (no model trajectory) |
 | `opencode` / custom Chat Completions | opt-in, pending E2E | ✗ |
-| `codex` / `claude-code` | blocked on protocol translation | ✗ |
+| `codex` / `claude-code` | ✓ through the SDK gateway; real-infrastructure E2E pending | ✗ |
 
 ## Reward mapping
 

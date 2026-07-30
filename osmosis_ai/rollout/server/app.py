@@ -8,6 +8,9 @@ from fastapi import BackgroundTasks, FastAPI, HTTPException
 from osmosis_ai.rollout.backend.base import ExecutionBackend
 from osmosis_ai.rollout.context import RolloutContext
 from osmosis_ai.rollout.server.auth import ControllerAuth
+from osmosis_ai.rollout.server.native_harbor_gateway import (
+    install_native_harbor_gateway_routes,
+)
 from osmosis_ai.rollout.trajectory import (
     TrajectoryReport,
     report_from_response,
@@ -55,6 +58,10 @@ def create_rollout_server(
         _configure_default_logging()
     app = FastAPI(lifespan=lifespan)
     setattr(app.state, _ROLLOUT_BACKEND_STATE_ATTR, backend)
+
+    translation_gateway = getattr(backend, "translation_gateway", None)
+    if translation_gateway is not None:
+        install_native_harbor_gateway_routes(app, translation_gateway)
 
     @app.get("/health")
     async def health() -> dict[str, Any]:
