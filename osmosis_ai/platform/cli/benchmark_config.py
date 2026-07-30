@@ -41,7 +41,7 @@ class BenchmarkExperimentSection(_StrictSection):
     benchmark: str
 
 
-_NonEmptyTaskSelector = Annotated[str, Field(min_length=1)]
+_NonEmptyTaskSelector = Annotated[str, Field(min_length=1, pattern=r"\S")]
 
 
 class BenchmarkTasksSection(_StrictSection):

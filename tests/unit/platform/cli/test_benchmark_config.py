@@ -236,8 +236,10 @@ checkpoint_name = "hle-agent"
     [
         ('task_names = "hle__sample"', "task_names"),
         ('task_names = [""]', "task_names"),
+        ('task_names = ["   "]', "task_names"),
         ('categories = "Math"', "categories"),
         ('categories = [""]', "categories"),
+        ('categories = ["   "]', "categories"),
     ],
 )
 def test_load_benchmark_submit_config_rejects_invalid_explicit_task_filters(
