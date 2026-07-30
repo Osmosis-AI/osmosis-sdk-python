@@ -294,6 +294,34 @@ n_attempts = 3
     assert "harbor: Unrecognized key" in str(exc_info.value)
 
 
+@pytest.mark.parametrize("env_key", ["bad-name", "_OSMOSIS_INTERNAL"])
+def test_load_benchmark_submit_config_labels_invalid_agent_env(
+    tmp_path: Path,
+    env_key: str,
+) -> None:
+    path = _write_config(
+        tmp_path / "benchmark.toml",
+        f"""
+[experiment]
+benchmark = "DeepSWE"
+
+[[agents]]
+[agents.model]
+type = "provider"
+model = "openai/gpt-5"
+api_key_secret = "OPENAI_API_KEY"
+
+[agents.env]
+{env_key} = "value"
+""",
+    )
+
+    with pytest.raises(CLIError) as exc_info:
+        load_benchmark_submit_config(path)
+
+    assert "agent 1's [agents.env]" in str(exc_info.value)
+
+
 def test_load_benchmark_submit_config_rejects_secret_env_collision(
     tmp_path: Path,
 ) -> None:

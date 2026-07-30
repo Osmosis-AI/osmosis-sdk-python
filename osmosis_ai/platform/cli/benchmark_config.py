@@ -261,8 +261,12 @@ def load_benchmark_submit_config(path: Path) -> BenchmarkSubmitConfig:
         ) from exc
 
     validate_env_var_keys(env=config.env, path=path)
-    for agent in config.agents:
-        validate_env_var_keys(env=agent.env, path=path)
+    for index, agent in enumerate(config.agents, start=1):
+        validate_env_var_keys(
+            env=agent.env,
+            path=path,
+            source_label=f"agent {index}'s [agents.env]",
+        )
     _validate_secret_references(config, path)
     return config
 

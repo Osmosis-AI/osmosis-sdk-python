@@ -301,17 +301,18 @@ def validate_env_var_keys(
     *,
     env: dict[str, str],
     path: Path,
+    source_label: str = "[env]",
 ) -> None:
-    """Reject invalid or reserved [env] var names."""
+    """Reject invalid or reserved environment variable names."""
     for key in env:
         if not ENV_VAR_NAME_RE.match(key):
             raise CLIError(
-                f"Invalid env var name '{key}' in [env] of {path}: "
+                f"Invalid env var name '{key}' in {source_label} of {path}: "
                 "must match ^[A-Z_][A-Z0-9_]*$"
             )
         if key.startswith(RESERVED_ENV_PREFIX):
             raise CLIError(
-                f"'{key}' in [env] of {path}: env var names starting "
+                f"'{key}' in {source_label} of {path}: env var names starting "
                 f"with {RESERVED_ENV_PREFIX} are reserved by the platform; "
                 "choose a different name."
             )
