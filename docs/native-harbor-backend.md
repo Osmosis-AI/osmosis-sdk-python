@@ -305,6 +305,9 @@ failure, and an expired token receives `401` without reaching an upstream.
 Harbor 0.20 generates `opencode.json` from host environment state that cannot
 see the rollout-scoped `AgentConfig.env`, so the backend also writes the gateway
 URL to the binding-owned `provider.openai.options.baseURL` config.
+The Responses stream adapter also normalizes response and output-item IDs so
+every lifecycle event refers to the same objects after Chat Completions
+translation.
 
 The configured gateway URL is an origin only (no path, query, or fragment) and
 must be reachable by the Harbor environment. Local-Docker URL rewriting applies
