@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import platform
 import shutil
 import subprocess
@@ -23,6 +24,7 @@ from harbor.models.trial.config import (
     TrialConfig,
     VerifierConfig,
 )
+from harbor.models.trial.result import ExceptionInfo
 from harbor.trial.hooks import TrialEvent, TrialHookEvent
 from harbor.trial.queue import TrialQueue
 
@@ -45,7 +47,7 @@ from osmosis_ai.rollout.utils.file_artifacts import (
     default_artifact_root,
 )
 from osmosis_ai.rollout.utils.imports import to_import_path
-from osmosis_ai.rollout.utils.rewards import validate_samples_have_rewards
+from osmosis_ai.rollout.utils.rewards import validate_sample_has_reward
 
 logger: logging.Logger = logging.getLogger(__name__)
 
@@ -59,13 +61,52 @@ TEST_SH_TEMPLATE = """\
 set -e
 PYTHONPATH=/workspace python -m osmosis_ai.rollout.backend.harbor.grader_runner \
     --config /logs/agent/rollout_config.json \
-    --samples /logs/agent/samples.json
+    --sample /logs/agent/sample.json
 """
 
 
 def uses_local_docker_runtime(environment_config: HarborEnvironmentConfig) -> bool:
     """Return whether Harbor will run the trial on the host Docker runtime."""
     return environment_config.type == EnvironmentType.DOCKER
+
+
+def log_trial_exception(rollout_id: str, err: ExceptionInfo, *, phase: str) -> None:
+    """Log a harbor trial exception in full.
+
+    ``ExecutionResult`` carries only the message, and Harbor's own copy lives in
+    the trial directory, which cleanup removes.
+    """
+    logger.error(
+        "Harbor trial %s failed %s [%s]: %s\n%s",
+        rollout_id,
+        phase,
+        err.exception_type,
+        err.exception_message,
+        err.exception_traceback,
+    )
+
+
+SKYPILOT_CONTEXT_ENV = "HARBOR_SKYPILOT_CONTEXT"
+
+
+def apply_managed_skypilot_placement(
+    environment_config: HarborEnvironmentConfig,
+) -> HarborEnvironmentConfig:
+    """Resolve the SkyPilot cluster context from the run environment.
+
+    Harbor reads its registry from ``HARBOR_SKYPILOT_REGISTRY`` but accepts the
+    cluster context only as a constructor argument. Bridging the two here lets a
+    rollout select ``EnvironmentType.SKYPILOT`` without naming a cluster. An
+    explicit ``context_name`` takes precedence.
+    """
+    if environment_config.type != EnvironmentType.SKYPILOT:
+        return environment_config
+    if environment_config.kwargs.get("context_name"):
+        return environment_config
+    context_name = os.environ.get(SKYPILOT_CONTEXT_ENV)
+    if context_name:
+        environment_config.kwargs["context_name"] = context_name
+    return environment_config
 
 
 class PendingTrial:
@@ -122,7 +163,9 @@ class HarborBackend(ExecutionBackend):
         self.grading: bool = self.grader_path is not None
         self.custom_tests_dir: Path | None = custom_tests_dir
         self.environment_config: HarborEnvironmentConfig = (
-            environment_config or HarborEnvironmentConfig()
+            apply_managed_skypilot_placement(
+                environment_config or HarborEnvironmentConfig()
+            )
         )
         self._sdk_source_dir = _sdk_source_dir
         uses_local_docker = uses_local_docker_runtime(self.environment_config)
@@ -431,8 +474,8 @@ class HarborBackend(ExecutionBackend):
 
         metadata = get_agent_metadata(event)
         if metadata and metadata.get("status") == "success":
-            samples = parse_samples(metadata.get("samples", {}))
-            result = ExecutionResult(status=RolloutStatus.SUCCESS, samples=samples)
+            sample = parse_sample(metadata.get("sample"))
+            result = ExecutionResult(status=RolloutStatus.SUCCESS, sample=sample)
         elif event.result and event.result.exception_info:
             err = event.result.exception_info
             result = ExecutionResult(
@@ -527,6 +570,7 @@ class HarborBackend(ExecutionBackend):
         if not pending.workflow_complete_called:
             if event.result and event.result.exception_info:
                 err = event.result.exception_info
+                log_trial_exception(rollout_id, err, phase="before the agent completed")
                 result = ExecutionResult(
                     status=RolloutStatus.FAILURE,
                     err_message=err.exception_message,
@@ -542,15 +586,19 @@ class HarborBackend(ExecutionBackend):
 
         if pending.on_grader_complete:
             metadata = get_agent_metadata(event)
-            samples = parse_samples(metadata.get("samples", {})) if metadata else {}
+            sample = parse_sample(metadata.get("sample") if metadata else None)
 
             if event.result and event.result.verifier_result:
+                # Harbor surfaces verifier output as ``rewards: dict[str, float]``
+                # regardless of what shape the verifier wrote. The single-sample
+                # contract names its sole score ``reward``; do not silently use an
+                # unrelated custom verifier dimension.
                 rewards = event.result.verifier_result.rewards or {}
-                for sid, reward in rewards.items():
-                    if sid in samples:
-                        samples[sid].reward = float(reward)
+                reward = rewards.get("reward")
+                if sample is not None and reward is not None:
+                    sample.reward = float(reward)
                 try:
-                    validate_samples_have_rewards(samples)
+                    validate_sample_has_reward(sample)
                 except ValueError as e:
                     if not rewards:
                         logger.warning(
@@ -566,24 +614,25 @@ class HarborBackend(ExecutionBackend):
                         )
                     result = ExecutionResult(
                         status=RolloutStatus.FAILURE,
-                        samples=samples,
+                        sample=sample,
                         err_message=str(e),
                         err_category=RolloutErrorCategory.VALIDATION_ERROR,
                     )
                 else:
                     result = ExecutionResult(
-                        status=RolloutStatus.SUCCESS, samples=samples
+                        status=RolloutStatus.SUCCESS, sample=sample
                     )
             elif event.result and event.result.exception_info:
                 err = event.result.exception_info
+                log_trial_exception(rollout_id, err, phase="during grading")
                 result = ExecutionResult(
                     status=RolloutStatus.FAILURE,
-                    samples=samples,
+                    sample=sample,
                     err_message=err.exception_message,
                     err_category=RolloutErrorCategory.AGENT_ERROR,
                 )
             else:
-                result = ExecutionResult(status=RolloutStatus.FAILURE, samples=samples)
+                result = ExecutionResult(status=RolloutStatus.FAILURE, sample=sample)
 
             await pending.on_grader_complete(result)
 
@@ -616,11 +665,14 @@ def get_agent_metadata(event: TrialHookEvent) -> dict[str, Any] | None:
     return None
 
 
-def parse_samples(raw: dict[str, Any]) -> dict[str, RolloutSample]:
-    return {
-        sid: RolloutSample.model_validate(data) if isinstance(data, dict) else data
-        for sid, data in raw.items()
-    }
+def parse_sample(raw: Any) -> RolloutSample | None:
+    if raw is None:
+        return None
+    if isinstance(raw, RolloutSample):
+        return raw
+    if isinstance(raw, dict):
+        return RolloutSample.model_validate(raw)
+    return None
 
 
 def rewrite_url_for_docker(url: str) -> str:

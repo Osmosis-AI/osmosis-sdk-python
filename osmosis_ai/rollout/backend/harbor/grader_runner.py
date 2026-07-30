@@ -1,7 +1,7 @@
-"""Grade agent samples inside a Harbor container.
+"""Grade the rollout's single sample inside a Harbor container.
 
 Usage:
-    osmosis-grader-runner --config /workspace/rollout_config.json --samples /logs/agent/samples.json
+    osmosis-grader-runner --config /workspace/rollout_config.json --sample /logs/agent/sample.json
 """
 
 from __future__ import annotations
@@ -29,12 +29,12 @@ VERIFIER_LOGS_DIR = Path("/logs/verifier")
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Grade agent samples")
+    parser = argparse.ArgumentParser(description="Grade the rollout sample")
     parser.add_argument(
         "--config", type=Path, required=True, help="Path to rollout_config.json"
     )
     parser.add_argument(
-        "--samples", type=Path, required=True, help="Path to samples.json"
+        "--sample", type=Path, required=True, help="Path to sample.json"
     )
     return parser.parse_args()
 
@@ -43,14 +43,16 @@ def load_config(path: Path) -> dict[str, Any]:
     return json.loads(path.read_text())
 
 
-def load_samples(path: Path) -> dict[str, RolloutSample]:
-    raw: dict[str, Any] = json.loads(path.read_text())
-    return {sid: RolloutSample.model_validate(data) for sid, data in raw.items()}
+def load_sample(path: Path) -> RolloutSample | None:
+    raw: Any = json.loads(path.read_text())
+    if raw is None:
+        return None
+    return RolloutSample.model_validate(raw)
 
 
-def write_rewards(rewards: dict[str, float | None]) -> None:
+def write_reward(reward: float | None) -> None:
     VERIFIER_LOGS_DIR.mkdir(parents=True, exist_ok=True)
-    (VERIFIER_LOGS_DIR / "reward.json").write_text(json.dumps(rewards))
+    (VERIFIER_LOGS_DIR / "reward.json").write_text(json.dumps({"reward": reward}))
 
 
 def capture_artifact_baseline() -> ArtifactFileState:
@@ -105,20 +107,25 @@ def main() -> None:
 
     if not label and metadata is None:
         print("No label or metadata in config, skipping grading")
-        write_rewards({})
+        write_reward(None)
         return
 
-    if not args.samples.exists():
-        print("No samples found, skipping grading")
-        write_rewards({})
+    if not args.sample.exists():
+        print("No sample found, skipping grading")
+        write_reward(None)
         return
 
     if "grader" not in config:
         print("No grader in config, skipping grading")
-        write_rewards({})
+        write_reward(None)
         return
 
-    samples = load_samples(args.samples)
+    sample = load_sample(args.sample)
+    if sample is None:
+        print("Sample file is empty, skipping grading")
+        write_reward(None)
+        return
+
     artifact_baseline = capture_artifact_baseline()
     try:
         # Resolving user modules and constructing the grader are part of its
@@ -131,7 +138,7 @@ def main() -> None:
         )
         ctx = GraderContext(
             label=label,
-            samples=samples,
+            sample=sample,
             metadata=metadata,
             artifacts_dir=HARBOR_ARTIFACTS_DIR,
         )
@@ -144,14 +151,11 @@ def main() -> None:
         # survive until HarborBackend.on_trial_end can merge and relocate them.
         stage_grader_artifacts(artifact_baseline)
 
-    graded = ctx.get_samples()
-    for sid, sample in graded.items():
-        if sample.reward is None:
-            raise RuntimeError(f"Sample {sid} has no reward after grading")
+    if ctx.sample is None or ctx.sample.reward is None:
+        raise RuntimeError("Sample has no reward after grading")
 
-    rewards = {sid: sample.reward for sid, sample in graded.items()}
-    write_rewards(rewards)
-    print(f"Grading complete: {rewards}")
+    write_reward(ctx.sample.reward)
+    print(f"Grading complete: reward={ctx.sample.reward}")
 
 
 if __name__ == "__main__":

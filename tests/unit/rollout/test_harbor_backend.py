@@ -10,7 +10,7 @@ from osmosis_ai.rollout.agent_workflow import AgentWorkflow
 from osmosis_ai.rollout.backend.harbor.backend import (
     HarborBackend,
     PendingTrial,
-    parse_samples,
+    parse_sample,
 )
 from osmosis_ai.rollout.context import (
     AgentWorkflowContext,
@@ -42,8 +42,8 @@ class _StaticSampleSource(SampleSource):
     def __init__(self, messages: list[dict[str, Any]]) -> None:
         self.messages = messages
 
-    async def get_sample(self, name: str) -> RolloutSample:
-        return RolloutSample(id=name, messages=self.messages)
+    async def get_sample(self) -> RolloutSample:
+        return RolloutSample(messages=self.messages)
 
 
 class MetadataCapturingWorkflow(AgentWorkflow):
@@ -54,8 +54,7 @@ class MetadataCapturingWorkflow(AgentWorkflow):
         _AGENT_CAPTURE["artifacts_dir"] = ctx.artifacts_dir
         rollout_ctx = get_rollout_context()
         if rollout_ctx:
-            rollout_ctx.register_sample_source(
-                "sample-1",
+            rollout_ctx.set_sample_source(
                 _StaticSampleSource([{"role": "assistant", "content": "done"}]),
             )
 
@@ -68,8 +67,7 @@ class MetadataCapturingGrader(Grader):
         if ctx.artifacts_dir:
             ctx.artifacts_dir.mkdir(parents=True, exist_ok=True)
             (ctx.artifacts_dir / "grader.txt").write_text("grader")
-        for sample_id in ctx.get_samples():
-            ctx.set_sample_reward(sample_id, 1.0)
+        ctx.set_reward(1.0)
 
 
 class ArtifactWritingFailingGrader(Grader):
@@ -114,15 +112,13 @@ def _make_backend_for_config(*, grader: bool = False) -> HarborBackend:
 class TestHarborBackend:
     def test_sample_round_trip_preserves_native_and_trajectory_messages(self):
         sample = RolloutSample(
-            id="s1",
             messages=[{"type": "function_call", "name": "f"}],
             trajectory_messages=[{"role": "assistant", "content": "done"}],
         )
 
-        parsed = parse_samples(
-            json.loads(json.dumps({"s1": sample.model_dump()}, default=str))
-        )["s1"]
+        parsed = parse_sample(json.loads(json.dumps(sample.model_dump(), default=str)))
 
+        assert parsed is not None
         assert parsed.messages == sample.messages
         assert parsed.trajectory_messages == sample.trajectory_messages
 
@@ -146,11 +142,7 @@ class TestHarborBackend:
                 agent_result=SimpleNamespace(
                     metadata={
                         "status": "success",
-                        "samples": {
-                            "sample-1": RolloutSample(
-                                id="sample-1", messages=[]
-                            ).model_dump()
-                        },
+                        "sample": RolloutSample(messages=[]).model_dump(),
                     }
                 ),
                 verifier_result=SimpleNamespace(rewards={}),
@@ -186,22 +178,55 @@ class TestHarborBackend:
         (trial_artifacts / "manifest.json").write_text("[]")
 
     @staticmethod
-    def _success_event() -> SimpleNamespace:
+    def _success_event(
+        rewards: dict[str, float] | None = None,
+    ) -> SimpleNamespace:
         return SimpleNamespace(
             config=SimpleNamespace(trial_name="trial-r1"),
             result=SimpleNamespace(
                 agent_result=SimpleNamespace(
                     metadata={
                         "status": "success",
-                        "samples": {
-                            "s1": RolloutSample(id="s1", messages=[]).model_dump()
-                        },
+                        "sample": RolloutSample(messages=[]).model_dump(),
                     }
                 ),
-                verifier_result=SimpleNamespace(rewards={"s1": 1.0}),
+                verifier_result=SimpleNamespace(
+                    rewards={"reward": 1.0} if rewards is None else rewards
+                ),
                 exception_info=None,
             ),
         )
+
+    async def test_on_trial_end_uses_named_reward_dimension(self, tmp_path):
+        backend = self._make_trial_end_backend(tmp_path, cleanup=False)
+        on_grader = AsyncMock()
+        pending = PendingTrial(AsyncMock(), on_grader)
+        pending.workflow_complete_called = True
+        backend.pending["r1"] = pending
+
+        await backend.on_trial_end(
+            self._success_event(rewards={"aux_score": 0.1, "reward": 0.9})
+        )
+
+        result = on_grader.call_args.args[0]
+        assert result.status == RolloutStatus.SUCCESS
+        assert result.sample is not None
+        assert result.sample.reward == 0.9
+
+    async def test_on_trial_end_rejects_rewards_without_named_dimension(self, tmp_path):
+        backend = self._make_trial_end_backend(tmp_path, cleanup=False)
+        on_grader = AsyncMock()
+        pending = PendingTrial(AsyncMock(), on_grader)
+        pending.workflow_complete_called = True
+        backend.pending["r1"] = pending
+
+        await backend.on_trial_end(self._success_event(rewards={"aux_score": 0.1}))
+
+        result = on_grader.call_args.args[0]
+        assert result.status == RolloutStatus.FAILURE
+        assert result.err_category == RolloutErrorCategory.VALIDATION_ERROR
+        assert result.sample is not None
+        assert result.sample.reward is None
 
     async def test_on_trial_end_relocates_artifacts_before_cleanup(self, tmp_path):
         backend = self._make_trial_end_backend(tmp_path, cleanup=True)
@@ -419,9 +444,9 @@ class TestAgentRunnerRoundTrip:
 
 
 class TestGraderRunnerRoundTrip:
-    def _write_samples(self, path):
-        sample = RolloutSample(id="sample-1", messages=[])
-        path.write_text(json.dumps({"sample-1": sample.model_dump()}, default=str))
+    def _write_sample(self, path):
+        sample = RolloutSample(messages=[])
+        path.write_text(json.dumps(sample.model_dump(), default=str))
 
     def test_grader_ctx_receives_metadata(self, tmp_path, monkeypatch):
         import osmosis_ai.rollout.backend.harbor.grader_runner as grader_runner
@@ -446,13 +471,13 @@ class TestGraderRunnerRoundTrip:
         config_path.write_text(
             json.dumps(backend.build_rollout_config(request), default=str)
         )
-        samples_path = tmp_path / "samples.json"
-        self._write_samples(samples_path)
+        sample_path = tmp_path / "sample.json"
+        self._write_sample(sample_path)
 
         monkeypatch.setattr(
             grader_runner,
             "parse_args",
-            lambda: SimpleNamespace(config=config_path, samples=samples_path),
+            lambda: SimpleNamespace(config=config_path, sample=sample_path),
         )
 
         grader_runner.main()
@@ -460,7 +485,7 @@ class TestGraderRunnerRoundTrip:
         assert _GRADER_CAPTURE["metadata"] == metadata
         assert _GRADER_CAPTURE["artifacts_dir"] == artifacts_dir
         rewards = json.loads((verifier_dir / "reward.json").read_text())
-        assert rewards == {"sample-1": 1.0}
+        assert rewards == {"reward": 1.0}
         snapshot = verifier_dir / GRADER_ARTIFACTS_SNAPSHOT_DIRNAME
         assert not (snapshot / "workflow.txt").exists()
         assert (snapshot / "grader.txt").read_text() == "grader"
@@ -487,13 +512,13 @@ class TestGraderRunnerRoundTrip:
         config_path.write_text(
             json.dumps(backend.build_rollout_config(request), default=str)
         )
-        samples_path = tmp_path / "samples.json"
-        self._write_samples(samples_path)
+        sample_path = tmp_path / "sample.json"
+        self._write_sample(sample_path)
 
         monkeypatch.setattr(
             grader_runner,
             "parse_args",
-            lambda: SimpleNamespace(config=config_path, samples=samples_path),
+            lambda: SimpleNamespace(config=config_path, sample=sample_path),
         )
 
         grader_runner.main()
@@ -501,7 +526,7 @@ class TestGraderRunnerRoundTrip:
         assert _GRADER_CAPTURE["label"] is None
         assert _GRADER_CAPTURE["metadata"] == {"tools": ["search"]}
         rewards = json.loads((verifier_dir / "reward.json").read_text())
-        assert rewards == {"sample-1": 1.0}
+        assert rewards == {"reward": 1.0}
 
     def test_grader_failure_still_stages_artifacts(self, tmp_path, monkeypatch):
         """The finally-block snapshot preserves files written before the crash."""
@@ -527,13 +552,13 @@ class TestGraderRunnerRoundTrip:
         config_path.write_text(
             json.dumps(backend.build_rollout_config(request), default=str)
         )
-        samples_path = tmp_path / "samples.json"
-        self._write_samples(samples_path)
+        sample_path = tmp_path / "sample.json"
+        self._write_sample(sample_path)
 
         monkeypatch.setattr(
             grader_runner,
             "parse_args",
-            lambda: SimpleNamespace(config=config_path, samples=samples_path),
+            lambda: SimpleNamespace(config=config_path, sample=sample_path),
         )
 
         with pytest.raises(RuntimeError, match="grader exploded"):
@@ -568,13 +593,13 @@ class TestGraderRunnerRoundTrip:
         config_path.write_text(
             json.dumps(backend.build_rollout_config(request), default=str)
         )
-        samples_path = tmp_path / "samples.json"
-        self._write_samples(samples_path)
+        sample_path = tmp_path / "sample.json"
+        self._write_sample(sample_path)
 
         monkeypatch.setattr(
             grader_runner,
             "parse_args",
-            lambda: SimpleNamespace(config=config_path, samples=samples_path),
+            lambda: SimpleNamespace(config=config_path, sample=sample_path),
         )
 
         with pytest.raises(RuntimeError, match="grader constructor exploded"):
@@ -619,3 +644,64 @@ class TestStageGraderArtifacts:
         snapshot = verifier_dir / GRADER_ARTIFACTS_SNAPSHOT_DIRNAME
         assert (snapshot / "grader.txt").read_text() == "fresh"
         assert not (snapshot / "stale.txt").exists()
+
+
+class TestManagedSkypilotPlacement:
+    """Placement comes from the run environment so rollouts name no infrastructure."""
+
+    @staticmethod
+    def _config(env_type, **kwargs):
+        from harbor.models.trial.config import EnvironmentConfig
+
+        return EnvironmentConfig(type=env_type, kwargs=kwargs)
+
+    def test_fills_context_name_from_environment(self, monkeypatch):
+        from harbor.models.environment_type import EnvironmentType
+
+        from osmosis_ai.rollout.backend.harbor.backend import (
+            apply_managed_skypilot_placement,
+        )
+
+        monkeypatch.setenv("HARBOR_SKYPILOT_CONTEXT", "managed-context")
+        config = self._config(EnvironmentType.SKYPILOT)
+
+        assert (
+            apply_managed_skypilot_placement(config).kwargs["context_name"]
+            == "managed-context"
+        )
+
+    def test_explicit_context_name_wins(self, monkeypatch):
+        from harbor.models.environment_type import EnvironmentType
+
+        from osmosis_ai.rollout.backend.harbor.backend import (
+            apply_managed_skypilot_placement,
+        )
+
+        monkeypatch.setenv("HARBOR_SKYPILOT_CONTEXT", "managed-context")
+        config = self._config(EnvironmentType.SKYPILOT, context_name="mine")
+
+        assert apply_managed_skypilot_placement(config).kwargs["context_name"] == "mine"
+
+    def test_unset_environment_leaves_kwargs_untouched(self, monkeypatch):
+        from harbor.models.environment_type import EnvironmentType
+
+        from osmosis_ai.rollout.backend.harbor.backend import (
+            apply_managed_skypilot_placement,
+        )
+
+        monkeypatch.delenv("HARBOR_SKYPILOT_CONTEXT", raising=False)
+        config = self._config(EnvironmentType.SKYPILOT)
+
+        assert apply_managed_skypilot_placement(config).kwargs == {}
+
+    def test_ignores_non_skypilot_environments(self, monkeypatch):
+        from harbor.models.environment_type import EnvironmentType
+
+        from osmosis_ai.rollout.backend.harbor.backend import (
+            apply_managed_skypilot_placement,
+        )
+
+        monkeypatch.setenv("HARBOR_SKYPILOT_CONTEXT", "managed-context")
+        config = self._config(EnvironmentType.DAYTONA)
+
+        assert apply_managed_skypilot_placement(config).kwargs == {}

@@ -27,7 +27,7 @@ from osmosis_ai.rollout.utils.file_artifacts import (
     default_artifact_root,
 )
 from osmosis_ai.rollout.utils.imports import resolve_object
-from osmosis_ai.rollout.utils.rewards import validate_samples_have_rewards
+from osmosis_ai.rollout.utils.rewards import validate_sample_has_reward
 
 logger: logging.Logger = logging.getLogger(__name__)
 
@@ -125,7 +125,7 @@ class LocalBackend(ExecutionBackend):
 
         return ExecutionResult(
             status=RolloutStatus.SUCCESS,
-            samples=await rollout_ctx.get_samples(),
+            sample=await rollout_ctx.get_sample(),
         )
 
     async def run_grader(
@@ -136,7 +136,7 @@ class LocalBackend(ExecutionBackend):
 
         grader_ctx = GraderContext(
             label=request.label,
-            samples=result.samples,
+            sample=result.sample,
             metadata=request.metadata,
             artifacts_dir=await create_rollout_artifacts_dir(
                 self.artifact_root, request.id
@@ -145,17 +145,16 @@ class LocalBackend(ExecutionBackend):
         try:
             grader = self.grader_cls(self.grader_config)
             await grader.grade(grader_ctx)
-            samples = grader_ctx.get_samples()
-            validate_samples_have_rewards(samples)
+            validate_sample_has_reward(grader_ctx.sample)
             return ExecutionResult(
                 status=RolloutStatus.SUCCESS,
-                samples=samples,
+                sample=grader_ctx.sample,
             )
         except Exception as e:
             logger.error(traceback.format_exc())
             return ExecutionResult(
                 status=RolloutStatus.FAILURE,
-                samples=result.samples,
+                sample=result.sample,
                 err_message=str(e),
                 err_category=_categorize_exception(e),
             )

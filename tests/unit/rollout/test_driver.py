@@ -6,7 +6,7 @@ from osmosis_ai.rollout.types import RolloutStatus
 def test_rollout_outcome_defaults():
     outcome = RolloutOutcome(status=RolloutStatus.SUCCESS)
     assert outcome.status == RolloutStatus.SUCCESS
-    assert outcome.samples == {}
+    assert outcome.sample is None
     assert outcome.error is None
     assert outcome.duration_ms == 0.0
     assert outcome.tokens == 0

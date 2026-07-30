@@ -22,14 +22,39 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Verify consts.py version matches the release tag
+      - name: Verify version and release type
         run: |
           VERSION=$(uv run --no-project --python 3.12 python -c 'import re, pathlib; text = pathlib.Path("osmosis_ai/consts.py").read_text(); print(re.search(r"^PACKAGE_VERSION\s*=\s*\"([^\"]+)\"", text, re.MULTILINE).group(1))')
           TAG="${{ github.event.release.tag_name }}"
-          if [ "v$VERSION" != "$TAG" ]; then
-            echo "::error::consts.py PACKAGE_VERSION ($VERSION) does not match release tag ($TAG)"
-            exit 1
-          fi
+          IS_PRERELEASE="${{ github.event.release.prerelease }}"
+          uv run --no-project --python 3.12 python - "$VERSION" "$TAG" "$IS_PRERELEASE" <<'PY'
+          import re
+          import sys
+
+          version, tag, prerelease_value = sys.argv[1:]
+          pattern = r"(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:rc[1-9]\d*)?"
+          if re.fullmatch(pattern, version) is None:
+              print(
+                  f"::error::PACKAGE_VERSION ({version}) must use canonical "
+                  "X.Y.Z or X.Y.ZrcN format"
+              )
+              sys.exit(1)
+          if tag != f"v{version}":
+              print(
+                  f"::error::consts.py PACKAGE_VERSION ({version}) does not "
+                  f"match release tag ({tag})"
+              )
+              sys.exit(1)
+
+          version_is_prerelease = re.search(r"rc\d+$", version) is not None
+          release_is_prerelease = prerelease_value.lower() == "true"
+          if version_is_prerelease != release_is_prerelease:
+              print(
+                  f"::error::Release prerelease={release_is_prerelease} does not "
+                  f"match PACKAGE_VERSION {version}"
+              )
+              sys.exit(1)
+          PY
 
   publish:
     needs: [tests, check-version]

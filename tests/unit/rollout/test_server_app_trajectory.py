@@ -31,7 +31,6 @@ def make_request(**overrides: Any) -> RolloutInitRequest:
 
 def make_sample(reward: float | None = None) -> RolloutSample:
     return RolloutSample(
-        id="s1",
         messages=[
             {"role": "user", "content": "hi"},
             {"role": "assistant", "content": "hello"},
@@ -96,10 +95,10 @@ async def test_records_graded_result(tmp_path: Path, monkeypatch) -> None:
     patch_artifact_root(monkeypatch, tmp_path)
     backend = StubBackend(
         workflow_result=ExecutionResult(
-            status=RolloutStatus.SUCCESS, samples={"s1": make_sample()}
+            status=RolloutStatus.SUCCESS, sample=make_sample()
         ),
         grader_result=ExecutionResult(
-            status=RolloutStatus.SUCCESS, samples={"s1": make_sample(reward=0.7)}
+            status=RolloutStatus.SUCCESS, sample=make_sample(reward=0.7)
         ),
     )
 
@@ -113,11 +112,11 @@ async def test_records_graded_result(tmp_path: Path, monkeypatch) -> None:
         "http://controller/v1/grader/completed",
     ]
     grader_payload = posted[1][1]
-    assert grader_payload["samples"]["s1"]["messages"] == [
+    assert grader_payload["sample"]["messages"] == [
         {"role": "user", "content": "hi"},
         {"role": "assistant", "content": "hello"},
     ]
-    assert "trajectory_messages" not in grader_payload["samples"]["s1"]
+    assert "trajectory_messages" not in grader_payload["sample"]
 
 
 async def test_records_workflow_result_without_grader_callback(
@@ -127,7 +126,7 @@ async def test_records_workflow_result_without_grader_callback(
     patch_artifact_root(monkeypatch, tmp_path)
     backend = StubBackend(
         workflow_result=ExecutionResult(
-            status=RolloutStatus.SUCCESS, samples={"s1": make_sample()}
+            status=RolloutStatus.SUCCESS, sample=make_sample()
         ),
     )
 
@@ -138,14 +137,14 @@ async def test_records_workflow_result_without_grader_callback(
     assert "reward" not in doc["extra"]["osmosis"]
 
 
-async def test_grader_failure_without_samples_keeps_workflow_samples(
+async def test_grader_failure_without_sample_keeps_workflow_sample(
     tmp_path: Path, monkeypatch
 ) -> None:
     patch_callbacks(monkeypatch)
     patch_artifact_root(monkeypatch, tmp_path)
     backend = StubBackend(
         workflow_result=ExecutionResult(
-            status=RolloutStatus.SUCCESS, samples={"s1": make_sample()}
+            status=RolloutStatus.SUCCESS, sample=make_sample()
         ),
         grader_result=ExecutionResult(status=RolloutStatus.FAILURE),
     )
@@ -160,7 +159,7 @@ async def test_records_even_when_backend_raises(tmp_path: Path, monkeypatch) -> 
     patch_artifact_root(monkeypatch, tmp_path)
     backend = StubBackend(
         workflow_result=ExecutionResult(
-            status=RolloutStatus.SUCCESS, samples={"s1": make_sample()}
+            status=RolloutStatus.SUCCESS, sample=make_sample()
         ),
         raises=RuntimeError("boom"),
     )
@@ -194,7 +193,7 @@ async def test_failure_completion_ack_report_lands_in_document(
     patch_artifact_root(monkeypatch, tmp_path)
     backend = StubBackend(
         workflow_result=ExecutionResult(
-            status=RolloutStatus.SUCCESS, samples={"s1": make_sample()}
+            status=RolloutStatus.SUCCESS, sample=make_sample()
         ),
         raises=RuntimeError("boom"),
     )
@@ -207,7 +206,7 @@ async def test_failure_completion_ack_report_lands_in_document(
     assert agent_steps[0]["metrics"]["prompt_tokens"] == 12
 
 
-async def test_backend_failure_without_samples_records_nothing(
+async def test_backend_failure_without_sample_records_nothing(
     tmp_path: Path, monkeypatch
 ) -> None:
     posted = patch_callbacks(monkeypatch)
@@ -248,10 +247,10 @@ async def test_callback_ack_report_lands_in_document(
     patch_artifact_root(monkeypatch, tmp_path)
     backend = StubBackend(
         workflow_result=ExecutionResult(
-            status=RolloutStatus.SUCCESS, samples={"s1": make_sample()}
+            status=RolloutStatus.SUCCESS, sample=make_sample()
         ),
         grader_result=ExecutionResult(
-            status=RolloutStatus.SUCCESS, samples={"s1": make_sample(reward=1.0)}
+            status=RolloutStatus.SUCCESS, sample=make_sample(reward=1.0)
         ),
     )
 
