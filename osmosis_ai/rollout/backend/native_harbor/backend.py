@@ -575,6 +575,8 @@ def _resolve_binding(
 
 
 class NativeHarborBackend(ExecutionBackend):
+    model_name: str
+
     """Drive a harbor Trial per rollout and map its verifier reward."""
 
     def __init__(
@@ -694,7 +696,7 @@ class NativeHarborBackend(ExecutionBackend):
         self.agent_setup_timeout_sec = agent_setup_timeout_sec
         if resolved_binding.warning is not None:
             warnings.warn(resolved_binding.warning, UserWarning, stacklevel=2)
-        self.model_name: str = effective_model_name
+        self.model_name = effective_model_name
         self.reward_key = reward_key
         self.trials_dir: Path = Path(trials_dir)
         self.task_resolver: TaskResolver = task_resolver or resolve_task
@@ -1491,7 +1493,43 @@ class NativeHarborBackend(ExecutionBackend):
             env["OPENAI_BASE_URL"] = endpoint
             if api_key:
                 env["OPENAI_API_KEY"] = api_key
-            if self._binding.name == "codex":
+            if self._binding.name == "opencode":
+                # Harbor 0.20 builds opencode.json from the rollout process's
+                # os.environ instead of the scoped AgentConfig.env. OpenCode
+                # requires a custom endpoint in provider.openai.options.baseURL,
+                # so also place the per-rollout endpoint in its generated config.
+                # User ownership of this slot is rejected by
+                # _validate_agent_kwargs above.
+                opencode_config = copy.deepcopy(kwargs.get("opencode_config") or {})
+                if not isinstance(opencode_config, dict):
+                    raise ValueError(
+                        "Native Harbor binding 'opencode' requires "
+                        "agent_kwargs['opencode_config'] to be a mapping"
+                    )
+                providers = opencode_config.setdefault("provider", {})
+                if not isinstance(providers, dict):
+                    raise ValueError(
+                        "Native Harbor binding 'opencode' requires "
+                        "agent_kwargs['opencode_config']['provider'] to be a "
+                        "mapping"
+                    )
+                openai_config = providers.setdefault("openai", {})
+                if not isinstance(openai_config, dict):
+                    raise ValueError(
+                        "Native Harbor binding 'opencode' requires "
+                        "agent_kwargs['opencode_config']['provider']['openai'] "
+                        "to be a mapping"
+                    )
+                options = openai_config.setdefault("options", {})
+                if not isinstance(options, dict):
+                    raise ValueError(
+                        "Native Harbor binding 'opencode' requires "
+                        "agent_kwargs['opencode_config']['provider']['openai']"
+                        "['options'] to be a mapping"
+                    )
+                options["baseURL"] = endpoint
+                kwargs["opencode_config"] = opencode_config
+            elif self._binding.name == "codex":
                 # Mask host subscription/auth.json settings so the generated
                 # per-rollout gateway credential is always the wire identity.
                 env["CODEX_AUTH_JSON_PATH"] = ""
