@@ -449,9 +449,8 @@ class TestExecute:
         assert gr_result.status == RolloutStatus.FAILURE
         assert gr_result.err_category == RolloutErrorCategory.VALIDATION_ERROR
 
-    async def test_reward_salvaged_when_exception_after_verify(self, monkeypatch):
-        # exception_info set AND a reward present: the verifier already computed a
-        # reward, so it must not be discarded.
+    async def test_reward_does_not_revive_failed_trial(self, monkeypatch):
+        # exception_info is authoritative even when a verifier emitted a reward.
         _patch_trial(
             monkeypatch,
             result=_trial_result(
@@ -462,12 +461,12 @@ class TestExecute:
         on_wf, on_gr = AsyncMock(), AsyncMock()
         with _ctx():
             await backend.execute(_request(), on_wf, on_gr)
-        # workflow honestly reflects the exception...
-        assert on_wf.call_args.args[0].status == RolloutStatus.FAILURE
-        # ...but grading salvages the real reward.
+        workflow_result = on_wf.call_args.args[0]
         gr_result = on_gr.call_args.args[0]
-        assert gr_result.status == RolloutStatus.SUCCESS
-        assert gr_result.sample.reward == 0.7
+        assert workflow_result.status == RolloutStatus.FAILURE
+        assert workflow_result.sample.reward is None
+        assert gr_result.status == RolloutStatus.FAILURE
+        assert gr_result.sample.reward is None
 
     async def test_swallowed_exception_is_agent_error(self, monkeypatch):
         # Harbor swallows in-trial failures into exception_info; we report them

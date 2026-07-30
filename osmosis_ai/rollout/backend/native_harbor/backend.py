@@ -674,12 +674,12 @@ class NativeHarborBackend(ExecutionBackend):
                 err_category=workflow_result.err_category,
             )
 
-        reward_value = self._pick_reward(self._extract_rewards(trial_result))
-        if reward_value is not None:
-            sample.reward = float(reward_value)
-
         err = getattr(trial_result, "exception_info", None)
-        if sample.reward is None and err is not None:
+        if err is not None:
+            # A Harbor failure is authoritative even when verification emitted a
+            # numeric reward before a later phase failed. Never let that reward
+            # revive the rollout for either eval or training.
+            sample.reward = None
             return ExecutionResult(
                 status=RolloutStatus.FAILURE,
                 sample=sample,
@@ -688,6 +688,10 @@ class NativeHarborBackend(ExecutionBackend):
                 or "Trial failed before grading completed",
                 err_category=RolloutErrorCategory.AGENT_ERROR,
             )
+
+        reward_value = self._pick_reward(self._extract_rewards(trial_result))
+        if reward_value is not None:
+            sample.reward = float(reward_value)
 
         try:
             validate_sample_has_reward(sample)
