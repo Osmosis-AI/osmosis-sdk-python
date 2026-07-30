@@ -7,6 +7,93 @@ from osmosis_ai.platform.api.client import OsmosisClient
 
 
 @patch("osmosis_ai.platform.api.client.platform_request")
+def test_list_benchmarks_gets_paginated_catalog(mock_request: MagicMock) -> None:
+    mock_request.return_value = {
+        "benchmarks": [
+            {
+                "id": "benchmark-1",
+                "name": "HLE",
+                "description": "Humanity's Last Exam",
+                "source_type": "osmosis_managed",
+                "source_ref": "hle",
+                "task_count": 2_500,
+                "category_count": 30,
+                "task_sets": [
+                    {
+                        "name": "parity",
+                        "task_count": 249,
+                        "recommended": True,
+                        "description": "Published comparison sample.",
+                    }
+                ],
+            }
+        ],
+        "total_count": 7,
+        "has_more": True,
+        "next_offset": 1,
+    }
+
+    result = OsmosisClient().list_benchmarks(
+        limit=1,
+        offset=0,
+        git_identity="acme/workspace",
+    )
+
+    assert result.total_count == 7
+    assert result.has_more is True
+    assert result.next_offset == 1
+    assert result.benchmarks[0].name == "HLE"
+    assert result.benchmarks[0].task_sets[0].name == "parity"
+    assert result.benchmarks[0].task_sets[0].recommended is True
+    assert mock_request.call_args.args[0] == "/api/cli/benchmarks?limit=1&offset=0"
+    assert mock_request.call_args.kwargs == {
+        "credentials": None,
+        "git_identity": "acme/workspace",
+    }
+
+
+@patch("osmosis_ai.platform.api.client.platform_request")
+def test_get_benchmark_encodes_name_and_parses_detail(mock_request: MagicMock) -> None:
+    mock_request.return_value = {
+        "benchmark": {
+            "id": "benchmark-2",
+            "name": "Terminal-Bench 2.1",
+            "description": "Terminal benchmark",
+            "source_type": "osmosis_managed",
+            "source_ref": "terminal-bench-2-1",
+            "task_count": 89,
+            "category_count": 1,
+            "task_sets": [],
+            "runner_family": "harbor",
+            "supports_harness": True,
+            "requires_harness": True,
+            "requires_judge_model": False,
+            "judge_model_default": None,
+            "pass_threshold": 1,
+            "categories": [{"name": "terminal", "task_count": 89}],
+            "tasks": [{"name": "task-1", "category": "terminal"}],
+            "unavailable_tasks": None,
+        }
+    }
+
+    result = OsmosisClient().get_benchmark(
+        "Terminal-Bench 2.1",
+        git_identity="acme/workspace",
+    )
+
+    assert result.name == "Terminal-Bench 2.1"
+    assert result.categories[0].name == "terminal"
+    assert result.tasks == [{"name": "task-1", "category": "terminal"}]
+    assert mock_request.call_args.args[0] == (
+        "/api/cli/benchmarks/Terminal-Bench%202.1"
+    )
+    assert mock_request.call_args.kwargs == {
+        "credentials": None,
+        "git_identity": "acme/workspace",
+    }
+
+
+@patch("osmosis_ai.platform.api.client.platform_request")
 def test_submit_benchmark_run_posts_config_sections(mock_request: MagicMock) -> None:
     mock_request.return_value = {
         "id": "benchmark-run-1",

@@ -46,6 +46,8 @@ PRESERVED_HELP_COMMANDS = [
     ["model", "deploy", "--help"],
     ["model", "undeploy", "--help"],
     ["benchmark", "--help"],
+    ["benchmark", "list", "--help"],
+    ["benchmark", "info", "--help"],
     ["benchmark", "submit", "--help"],
     ["rollout", "--help"],
     ["template", "--help"],

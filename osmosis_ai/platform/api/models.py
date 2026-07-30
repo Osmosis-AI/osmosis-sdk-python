@@ -353,6 +353,140 @@ class SubmitRunResult:
 
 
 @dataclass
+class BenchmarkTaskSet:
+    """A named task set exposed by a benchmark."""
+
+    name: str
+    task_count: int
+    recommended: bool
+    description: str | None
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> BenchmarkTaskSet:
+        return cls(
+            name=data["name"],
+            task_count=data["task_count"],
+            recommended=data.get("recommended", False),
+            description=data.get("description"),
+        )
+
+
+@dataclass
+class BenchmarkCategory:
+    """Task count for one benchmark category."""
+
+    name: str
+    task_count: int
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> BenchmarkCategory:
+        return cls(name=data["name"], task_count=data["task_count"])
+
+
+@dataclass
+class BenchmarkCatalogEntry:
+    """Benchmark available in the current workspace catalog."""
+
+    id: str
+    name: str
+    description: str | None
+    source_type: str
+    source_ref: str
+    task_count: int
+    category_count: int
+    task_sets: list[BenchmarkTaskSet]
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> BenchmarkCatalogEntry:
+        return cls(
+            id=data["id"],
+            name=data["name"],
+            description=data.get("description"),
+            source_type=data["source_type"],
+            source_ref=data["source_ref"],
+            task_count=data["task_count"],
+            category_count=data["category_count"],
+            task_sets=[
+                BenchmarkTaskSet.from_dict(item) for item in data.get("task_sets", [])
+            ],
+        )
+
+
+@dataclass
+class PaginatedBenchmarks:
+    """Paginated workspace benchmark catalog."""
+
+    benchmarks: list[BenchmarkCatalogEntry]
+    total_count: int
+    has_more: bool
+    next_offset: int | None
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> PaginatedBenchmarks:
+        return cls(
+            benchmarks=[
+                BenchmarkCatalogEntry.from_dict(item)
+                for item in data.get("benchmarks", [])
+            ],
+            total_count=data.get("total_count", 0),
+            has_more=data.get("has_more", False),
+            next_offset=data.get("next_offset"),
+        )
+
+
+@dataclass
+class BenchmarkCatalogDetail:
+    """Detailed benchmark metadata and task-selection options."""
+
+    id: str
+    name: str
+    description: str | None
+    source_type: str
+    source_ref: str
+    task_count: int
+    category_count: int
+    task_sets: list[BenchmarkTaskSet]
+    runner_family: str
+    supports_harness: bool
+    requires_harness: bool
+    requires_judge_model: bool
+    judge_model_default: str | None
+    pass_threshold: float
+    categories: list[BenchmarkCategory]
+    tasks: list[dict[str, Any]]
+    unavailable_tasks: dict[str, Any] | None
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> BenchmarkCatalogDetail:
+        benchmark = data["benchmark"]
+        return cls(
+            id=benchmark["id"],
+            name=benchmark["name"],
+            description=benchmark.get("description"),
+            source_type=benchmark["source_type"],
+            source_ref=benchmark["source_ref"],
+            task_count=benchmark["task_count"],
+            category_count=benchmark["category_count"],
+            task_sets=[
+                BenchmarkTaskSet.from_dict(item)
+                for item in benchmark.get("task_sets", [])
+            ],
+            runner_family=benchmark["runner_family"],
+            supports_harness=benchmark["supports_harness"],
+            requires_harness=benchmark["requires_harness"],
+            requires_judge_model=benchmark["requires_judge_model"],
+            judge_model_default=benchmark.get("judge_model_default"),
+            pass_threshold=float(benchmark["pass_threshold"]),
+            categories=[
+                BenchmarkCategory.from_dict(item)
+                for item in benchmark.get("categories", [])
+            ],
+            tasks=list(benchmark.get("tasks", [])),
+            unavailable_tasks=benchmark.get("unavailable_tasks"),
+        )
+
+
+@dataclass
 class SubmitBenchmarkRunResult:
     """Result of submitting a benchmark run."""
 

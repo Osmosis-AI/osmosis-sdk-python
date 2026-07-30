@@ -1,4 +1,4 @@
-"""Handler for ``osmosis benchmark submit``."""
+"""Handlers for benchmark catalog discovery and run submission."""
 
 from __future__ import annotations
 
@@ -7,10 +7,22 @@ from typing import Any
 
 from osmosis_ai.cli.console import console
 from osmosis_ai.cli.errors import CLIError
-from osmosis_ai.cli.output import OperationResult, get_output_context
+from osmosis_ai.cli.output import (
+    DetailResult,
+    ListColumn,
+    ListResult,
+    OperationResult,
+    detail_fields,
+    get_output_context,
+)
 from osmosis_ai.cli.prompts import require_confirmation
 from osmosis_ai.platform.api.client import OsmosisClient
-from osmosis_ai.platform.api.models import SubmitBenchmarkRunResult
+from osmosis_ai.platform.api.models import (
+    BenchmarkCatalogDetail,
+    BenchmarkCatalogEntry,
+    BenchmarkTaskSet,
+    SubmitBenchmarkRunResult,
+)
 from osmosis_ai.platform.auth.platform_client import PlatformAPIError
 from osmosis_ai.platform.cli.benchmark_config import (
     BenchmarkSubmitConfig,
@@ -25,7 +37,11 @@ from osmosis_ai.platform.cli.shared_submit import (
     _fetch_secret_scopes,
     _missing_secret_message,
 )
-from osmosis_ai.platform.cli.utils import require_git_workspace_directory_context
+from osmosis_ai.platform.cli.utils import (
+    paginated_fetch,
+    require_git_workspace_directory_context,
+    validate_list_options,
+)
 from osmosis_ai.platform.cli.workspace_directory_context import git_result_context
 from osmosis_ai.platform.cli.workspace_directory_contract import (
     ensure_workspace_directory_config_path,
@@ -37,6 +53,176 @@ _HLE_PARITY_WARNING = (
     "comparable with published scores. This submission uses the full or a "
     "custom task selection."
 )
+
+_BENCHMARK_COLUMNS = [
+    ListColumn(key="name", label="Name", ratio=4, overflow="fold"),
+    ListColumn(key="task_count", label="Tasks", no_wrap=True, ratio=1),
+    ListColumn(key="category_count", label="Categories", no_wrap=True, ratio=1),
+    ListColumn(key="task_sets", label="Named Task Sets", ratio=2, overflow="fold"),
+    ListColumn(key="source", label="Source", no_wrap=True, ratio=1),
+]
+
+
+def _task_set_resource(task_set: BenchmarkTaskSet) -> dict[str, Any]:
+    return {
+        "name": task_set.name,
+        "task_count": task_set.task_count,
+        "recommended": task_set.recommended,
+        "description": task_set.description,
+    }
+
+
+def _benchmark_resource(
+    benchmark: BenchmarkCatalogEntry | BenchmarkCatalogDetail,
+) -> dict[str, Any]:
+    return {
+        "id": benchmark.id,
+        "name": benchmark.name,
+        "description": benchmark.description,
+        "source_type": benchmark.source_type,
+        "source_ref": benchmark.source_ref,
+        "task_count": benchmark.task_count,
+        "category_count": benchmark.category_count,
+        "task_sets": [_task_set_resource(task_set) for task_set in benchmark.task_sets],
+    }
+
+
+def _task_set_display(task_sets: list[BenchmarkTaskSet]) -> str:
+    if not task_sets:
+        return "–"
+    labels = []
+    for task_set in task_sets:
+        suffix = ", recommended" if task_set.recommended else ""
+        labels.append(f"{task_set.name} ({task_set.task_count:,}{suffix})")
+    return ", ".join(labels)
+
+
+def list_benchmarks(*, limit: int, all_: bool) -> ListResult:
+    """List benchmarks available in the current workspace."""
+    effective_limit, fetch_all = validate_list_options(limit=limit, all_=all_)
+    context = require_git_workspace_directory_context()
+    client = OsmosisClient()
+    output = get_output_context()
+
+    with output.status("Fetching benchmarks..."):
+        benchmarks, total_count, has_more, next_offset = paginated_fetch(
+            lambda lim, off: client.list_benchmarks(
+                limit=lim,
+                offset=off,
+                credentials=context.credentials,
+                git_identity=context.git_identity,
+            ),
+            items_attr="benchmarks",
+            limit=effective_limit,
+            fetch_all=fetch_all,
+        )
+
+    return ListResult(
+        title="Benchmarks",
+        items=[_benchmark_resource(benchmark) for benchmark in benchmarks],
+        total_count=total_count,
+        has_more=has_more,
+        next_offset=next_offset,
+        extra=git_result_context(context),
+        columns=_BENCHMARK_COLUMNS,
+        display_items=[
+            {
+                **_benchmark_resource(benchmark),
+                "task_count": f"{benchmark.task_count:,}",
+                "category_count": f"{benchmark.category_count:,}",
+                "task_sets": _task_set_display(benchmark.task_sets),
+                "source": (
+                    "Managed"
+                    if benchmark.source_type == "osmosis_managed"
+                    else "Harbor"
+                ),
+            }
+            for benchmark in benchmarks
+        ],
+        display_hints=[
+            "Use osmosis benchmark info <name> for task sets, categories, and tasks."
+        ],
+    )
+
+
+def info(name_or_id: str) -> DetailResult:
+    """Show benchmark metadata and task-selection options."""
+    context = require_git_workspace_directory_context()
+    client = OsmosisClient()
+    output = get_output_context()
+
+    with output.status(f'Fetching benchmark "{console.escape(name_or_id)}"...'):
+        benchmark = client.get_benchmark(
+            name_or_id,
+            credentials=context.credentials,
+            git_identity=context.git_identity,
+        )
+
+    harness = (
+        "Required"
+        if benchmark.requires_harness
+        else "Optional"
+        if benchmark.supports_harness
+        else "Not supported"
+    )
+    judge = "Not required"
+    if benchmark.requires_judge_model:
+        judge = "Required"
+        if benchmark.judge_model_default:
+            judge += f" (default: {benchmark.judge_model_default})"
+
+    category_display = ", ".join(
+        f"{category.name} ({category.task_count:,})"
+        for category in benchmark.categories
+    )
+    rows = [
+        ("Name", console.escape(benchmark.name)),
+        ("Description", console.escape(benchmark.description or "–")),
+        ("Source", f"{benchmark.source_type}: {benchmark.source_ref}"),
+        ("Runner", benchmark.runner_family),
+        ("Tasks", f"{benchmark.task_count:,}"),
+        ("Categories", category_display or "–"),
+        ("Named Task Sets", _task_set_display(benchmark.task_sets)),
+        ("Harness", harness),
+        ("LLM Judge", judge),
+        ("Pass Threshold", f"{benchmark.pass_threshold:g}"),
+    ]
+
+    benchmark_data = {
+        **_benchmark_resource(benchmark),
+        "runner_family": benchmark.runner_family,
+        "supports_harness": benchmark.supports_harness,
+        "requires_harness": benchmark.requires_harness,
+        "requires_judge_model": benchmark.requires_judge_model,
+        "judge_model_default": benchmark.judge_model_default,
+        "pass_threshold": benchmark.pass_threshold,
+        "categories": [
+            {"name": category.name, "task_count": category.task_count}
+            for category in benchmark.categories
+        ],
+        "tasks": benchmark.tasks,
+        "unavailable_tasks": benchmark.unavailable_tasks,
+    }
+
+    display_hints = [
+        f"Omit [tasks] to select all {benchmark.task_count:,} tasks.",
+        "Use task_names or categories under [tasks] for a custom subset.",
+        "Use osmosis --json benchmark info <name> to inspect the full task list.",
+    ]
+    for task_set in benchmark.task_sets:
+        if task_set.recommended:
+            display_hints.insert(
+                0,
+                f"For {benchmark.name}, we recommend [tasks] task_set = "
+                f'"{task_set.name}" ({task_set.task_count:,} tasks).',
+            )
+
+    return DetailResult(
+        title="Benchmark Info",
+        data={"benchmark": benchmark_data, **git_result_context(context)},
+        fields=detail_fields(rows),
+        display_hints=display_hints,
+    )
 
 
 def _agent_model_label(agent: dict[str, Any]) -> str:
@@ -245,4 +431,4 @@ def submit(config_path: Path, *, yes: bool) -> OperationResult:
     )
 
 
-__all__ = ["submit"]
+__all__ = ["info", "list_benchmarks", "submit"]

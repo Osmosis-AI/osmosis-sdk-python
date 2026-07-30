@@ -10,6 +10,7 @@ from osmosis_ai.platform.auth.platform_client import platform_request, platform_
 from osmosis_ai.platform.constants import DEFAULT_PAGE_SIZE
 
 from .models import (
+    BenchmarkCatalogDetail,
     DatasetDownloadInfo,
     DatasetFile,
     EnvironmentSecretInfo,
@@ -20,6 +21,7 @@ from .models import (
     LoraModelDetail,
     LoraModelSummary,
     PaginatedBaseModels,
+    PaginatedBenchmarks,
     PaginatedDatasets,
     PaginatedDevRolloutServers,
     PaginatedEnvironmentSecrets,
@@ -666,6 +668,38 @@ class OsmosisClient:
             git_identity=git_identity,
         )
         return SubmitBenchmarkRunResult.from_dict(result)
+
+    def list_benchmarks(
+        self,
+        limit: int = DEFAULT_PAGE_SIZE,
+        offset: int = 0,
+        *,
+        credentials: Credentials | None = None,
+        git_identity: str,
+    ) -> PaginatedBenchmarks:
+        """List benchmarks available in the current workspace."""
+        qs = urlencode({"limit": limit, "offset": offset})
+        data = platform_request(
+            f"/api/cli/benchmarks?{qs}",
+            credentials=credentials,
+            git_identity=git_identity,
+        )
+        return PaginatedBenchmarks.from_dict(data)
+
+    def get_benchmark(
+        self,
+        name_or_id: str,
+        *,
+        credentials: Credentials | None = None,
+        git_identity: str,
+    ) -> BenchmarkCatalogDetail:
+        """Get benchmark metadata and task-selection options."""
+        data = platform_request(
+            f"/api/cli/benchmarks/{_safe_path(name_or_id)}",
+            credentials=credentials,
+            git_identity=git_identity,
+        )
+        return BenchmarkCatalogDetail.from_dict(data)
 
     def list_eval_runs(
         self,
