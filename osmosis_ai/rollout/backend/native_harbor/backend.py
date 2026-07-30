@@ -363,6 +363,42 @@ def _validate_agent_kwargs(
         )
 
 
+def _identity_env_keys(binding: _AgentBinding) -> frozenset[str]:
+    if binding.identity_channel == _IdentityChannel.OPENAI_ENV:
+        return frozenset({"OPENAI_BASE_URL", "OPENAI_API_KEY"})
+    if binding.identity_channel == _IdentityChannel.ANTHROPIC_ENV:
+        return frozenset({"ANTHROPIC_BASE_URL", "ANTHROPIC_API_KEY"})
+    return frozenset()
+
+
+def _validate_agent_env(binding: _AgentBinding, agent_env: dict[str, str]) -> None:
+    conflicts = sorted(_identity_env_keys(binding).intersection(agent_env))
+    if conflicts:
+        raise ValueError(
+            f"Native Harbor binding {binding.name!r} owns agent.env identity "
+            f"keys {conflicts!r}; remove them so model traffic cannot be redirected"
+        )
+
+
+def _validate_agent_config(agent: AgentConfig) -> None:
+    if agent.name is not None and agent.import_path is not None:
+        raise ValueError("agent config must set name or import_path, not both")
+    if agent.n_concurrent is not None:
+        raise ValueError(
+            "agent.n_concurrent is unsupported; NativeHarborBackend.max_concurrent "
+            "and TrialQueue own rollout concurrency"
+        )
+    if agent.concurrency_group is not None:
+        raise ValueError(
+            "agent.concurrency_group is unsupported; NativeHarborBackend.max_concurrent "
+            "and TrialQueue own rollout concurrency"
+        )
+    if agent.resume_trajectory:
+        raise ValueError(
+            "agent.resume_trajectory is unsupported for single-step native rollouts"
+        )
+
+
 def _validate_model_for_binding(binding: _AgentBinding, model_name: str) -> None:
     allowed = binding.allowed_model_providers
     if allowed is None:
@@ -433,6 +469,10 @@ class NativeHarborBackend(ExecutionBackend):
     def __init__(
         self,
         *,
+        agent: AgentConfig | None = None,
+        environment: HarborEnvironmentConfig | None = None,
+        verifier: VerifierConfig | None = None,
+        # Compatibility shims for the original reduced constructor surface.
         agent_name: str | None = None,
         agent_import_path: str | None = None,
         agent_kwargs: dict[str, Any] | None = None,
@@ -440,7 +480,7 @@ class NativeHarborBackend(ExecutionBackend):
         agent_setup_timeout_sec: float | None = None,
         binding: str | None = None,
         allow_unverified_agent: bool = False,
-        model_name: str = DEFAULT_MODEL_NAME,
+        model_name: str | None = None,
         reward_key: str = DEFAULT_REWARD_KEY,
         trials_dir: Path | str = Path("native_trials"),
         task_resolver: TaskResolver | None = None,
@@ -454,40 +494,91 @@ class NativeHarborBackend(ExecutionBackend):
                 "harbor Trial (often a container) per rollout, so unbounded "
                 "concurrency would exhaust the host."
             )
-        if agent_name is not None and agent_import_path is not None:
-            raise ValueError("set agent_name or agent_import_path, not both")
-        if agent_name is None and agent_import_path is None:
-            agent_name = DEFAULT_AGENT_NAME
         if agent_setup_timeout_sec is not None and (
             not math.isfinite(agent_setup_timeout_sec) or agent_setup_timeout_sec <= 0
         ):
             raise ValueError("agent_setup_timeout_sec must be > 0 and finite")
+
+        legacy_agent_fields = {
+            "agent_name": agent_name,
+            "agent_import_path": agent_import_path,
+            "agent_kwargs": agent_kwargs,
+            "agent_env": agent_env,
+        }
+        if agent is not None and any(
+            value is not None for value in legacy_agent_fields.values()
+        ):
+            supplied = sorted(
+                key for key, value in legacy_agent_fields.items() if value is not None
+            )
+            raise ValueError(
+                f"agent cannot be combined with legacy constructor fields {supplied!r}"
+            )
+        if environment is not None and environment_config is not None:
+            raise ValueError("environment and environment_config cannot both be set")
+
+        if agent is None:
+            if agent_name is not None and agent_import_path is not None:
+                raise ValueError("set agent_name or agent_import_path, not both")
+            if agent_name is None and agent_import_path is None:
+                agent_name = DEFAULT_AGENT_NAME
+            agent_template = AgentConfig(
+                name=agent_name,
+                import_path=agent_import_path,
+                kwargs=copy.deepcopy(agent_kwargs or {}),
+                env=dict(agent_env or {}),
+            )
+        else:
+            agent_template = agent.model_copy(deep=True)
+
+        _validate_agent_config(agent_template)
+        agent_name = agent_template.name
+        agent_import_path = agent_template.import_path
         resolved_binding = _resolve_binding(
             agent_name=agent_name,
             agent_import_path=agent_import_path,
             binding_name=binding,
             allow_unverified_agent=allow_unverified_agent,
         )
-        copied_kwargs = copy.deepcopy(agent_kwargs or {})
-        _validate_agent_kwargs(resolved_binding, copied_kwargs)
-        _validate_model_for_binding(resolved_binding, model_name)
+        _validate_agent_kwargs(resolved_binding, agent_template.kwargs)
+        _validate_agent_env(resolved_binding, agent_template.env)
+
+        effective_model_name = (
+            model_name
+            if model_name is not None
+            else agent_template.model_name
+            if agent_template.model_name is not None
+            else DEFAULT_MODEL_NAME
+        )
+        _validate_model_for_binding(resolved_binding, effective_model_name)
+        agent_template.model_name = effective_model_name
+
         self._agent_name = agent_name
         self._agent_import_path = agent_import_path
-        self._agent_kwargs = copied_kwargs
-        self._agent_env = dict(agent_env or {})
+        self._agent_config = agent_template
         self._binding = resolved_binding
         self.agent_setup_timeout_sec = agent_setup_timeout_sec
         if resolved_binding.warning is not None:
             warnings.warn(resolved_binding.warning, UserWarning, stacklevel=2)
-        self.model_name = model_name
+        self.model_name = effective_model_name
         self.reward_key = reward_key
         self.trials_dir: Path = Path(trials_dir)
         self.task_resolver: TaskResolver = task_resolver or resolve_task
+        environment_template = (
+            environment
+            if environment is not None
+            else environment_config
+            if environment_config is not None
+            else HarborEnvironmentConfig()
+        ).model_copy(deep=True)
         self._environment_config: HarborEnvironmentConfig = (
-            apply_managed_skypilot_placement(
-                environment_config or HarborEnvironmentConfig()
-            )
+            apply_managed_skypilot_placement(environment_template)
         )
+        verifier_template = (
+            verifier.model_copy(deep=True) if verifier is not None else VerifierConfig()
+        )
+        verifier_template.disable = False
+        self._verifier_config = verifier_template
         self.cleanup_successful_trials = cleanup_successful_trials
         self._max_concurrency = max_concurrent
         self.artifact_root: Path = default_artifact_root()
@@ -1043,7 +1134,9 @@ class NativeHarborBackend(ExecutionBackend):
         agent_cfg: AgentConfig,
         trial_name: str,
     ) -> TrialConfig:
-        verifier_cfg = VerifierConfig(disable=False)
+        verifier_cfg = self._verifier_config.model_copy(deep=True)
+        # The Harbor verifier is the sole reward source for native rollouts.
+        verifier_cfg.disable = False
         if request.grader_timeout_sec is not None:
             verifier_cfg.override_timeout_sec = request.grader_timeout_sec
         return TrialConfig(
@@ -1052,23 +1145,28 @@ class NativeHarborBackend(ExecutionBackend):
             trials_dir=self.trials_dir,
             agent=agent_cfg,
             verifier=verifier_cfg,
-            environment=self._environment_config,
+            environment=self._environment_config.model_copy(deep=True),
         )
 
     def _build_agent_config(
         self, request: ExecutionRequest, ctx: RolloutContext
     ) -> AgentConfig:
         md = request.metadata or {}
-        name = self._agent_name
-        import_path = self._agent_import_path
-        model_name = md.get(HARBOR_MODEL_KEY) or self.model_name
-        if not isinstance(model_name, str):
-            raise ValueError(f"rollout {request.id!r} has a non-string harbor_model")
+        agent_cfg = self._agent_config.model_copy(deep=True)
+        _validate_agent_config(agent_cfg)
+        name = agent_cfg.name
+        model_name = md.get(HARBOR_MODEL_KEY, self.model_name)
+        if not isinstance(model_name, str) or not model_name.strip():
+            raise ValueError(
+                f"rollout {request.id!r} has a harbor_model that is not a "
+                "non-empty string"
+            )
         _validate_model_for_binding(self._binding, model_name)
-        _validate_agent_kwargs(self._binding, self._agent_kwargs)
+        _validate_agent_kwargs(self._binding, agent_cfg.kwargs)
+        _validate_agent_env(self._binding, agent_cfg.env)
         # User passthrough is the base layer; SDK-wired values below overlay it.
-        kwargs: dict[str, Any] = copy.deepcopy(self._agent_kwargs)
-        env: dict[str, str] = dict(self._agent_env)
+        kwargs = agent_cfg.kwargs
+        env = agent_cfg.env
 
         endpoint: str | None = None
         api_key = ctx.api_key
@@ -1109,13 +1207,9 @@ class NativeHarborBackend(ExecutionBackend):
             llm_kwargs["extra_body"] = extra_body
             kwargs["llm_kwargs"] = llm_kwargs
 
-        agent_cfg = AgentConfig(
-            name=name,
-            import_path=import_path,
-            model_name=model_name,
-            kwargs=kwargs,
-            env=env,
-        )
+        agent_cfg.model_name = model_name
+        agent_cfg.kwargs = kwargs
+        agent_cfg.env = env
         if self.agent_setup_timeout_sec is not None:
             agent_cfg.override_setup_timeout_sec = self.agent_setup_timeout_sec
         if request.agent_timeout_sec is not None:
