@@ -2,20 +2,21 @@
 its verifier reward onto the rollout's single sample. The agent is fixed per
 backend; only the task and model vary per rollout via metadata."""
 
+import copy
 import importlib
 import json
 import logging
 import math
 import shutil
 import traceback
+import warnings
 from collections.abc import Callable
 from dataclasses import dataclass
+from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
-from harbor.agents.base import BaseAgent
 from harbor.agents.factory import AgentFactory
-from harbor.agents.installed.base import BaseInstalledAgent
 from harbor.models.agent.name import AgentName
 from harbor.models.job.config import RetryConfig
 from harbor.models.trajectories import Trajectory
@@ -76,6 +77,111 @@ TRIAL_NAME_PREFIX = "native-"
 _TERMINUS_2_DEFAULT_KWARGS: dict[str, Any] = {
     "enable_summarize": False,
     "proactive_summarization_threshold": 0,
+}
+
+
+class _AgentProtocol(StrEnum):
+    CHAT_COMPLETIONS = "OpenAI Chat Completions"
+    OPENAI_RESPONSES = "OpenAI Responses"
+    ANTHROPIC_MESSAGES = "Anthropic Messages"
+    NONE = "none"
+
+
+class _IdentityChannel(StrEnum):
+    KWARGS = "kwargs"
+    OPENAI_ENV = "openai_env"
+    ANTHROPIC_ENV = "anthropic_env"
+    NONE = "none"
+
+
+@dataclass(frozen=True)
+class _AgentBinding:
+    name: str
+    protocol: _AgentProtocol
+    identity_channel: _IdentityChannel
+    eval_supported: bool
+    training_supported: bool
+    cli_version: str | None = None
+    requires_opt_in: bool = False
+    blocker: str | None = None
+    warning: str | None = None
+    allowed_model_providers: frozenset[str] | None = None
+
+
+_CUSTOM_CHAT_BINDING = "custom-chat-completions"
+_AGENT_BINDINGS: dict[str, _AgentBinding] = {
+    DEFAULT_AGENT_NAME: _AgentBinding(
+        name=DEFAULT_AGENT_NAME,
+        protocol=_AgentProtocol.CHAT_COMPLETIONS,
+        identity_channel=_IdentityChannel.KWARGS,
+        eval_supported=True,
+        training_supported=True,
+        allowed_model_providers=frozenset({"openai"}),
+    ),
+    "oracle": _AgentBinding(
+        name="oracle",
+        protocol=_AgentProtocol.NONE,
+        identity_channel=_IdentityChannel.NONE,
+        eval_supported=True,
+        training_supported=False,
+        warning=(
+            "The native Harbor oracle binding is eval-only: it emits no model "
+            "trajectory, so it is not training-safe."
+        ),
+    ),
+    "opencode": _AgentBinding(
+        name="opencode",
+        protocol=_AgentProtocol.CHAT_COMPLETIONS,
+        identity_channel=_IdentityChannel.OPENAI_ENV,
+        eval_supported=True,
+        training_supported=False,
+        cli_version="1.18.9",
+        requires_opt_in=True,
+        allowed_model_providers=frozenset({"openai"}),
+        warning=(
+            "The native Harbor opencode binding is unverified and eval-only: "
+            "Harbor's baseURL injection and append-only behavior still require E2E "
+            "validation. Do not use it for training."
+        ),
+    ),
+    "codex": _AgentBinding(
+        name="codex",
+        protocol=_AgentProtocol.OPENAI_RESPONSES,
+        identity_channel=_IdentityChannel.OPENAI_ENV,
+        eval_supported=False,
+        training_supported=False,
+        cli_version="0.146.0",
+        blocker=(
+            "the rollout controllers expose only OpenAI Chat Completions; an "
+            "OpenAI Responses translation gateway is required"
+        ),
+    ),
+    "claude-code": _AgentBinding(
+        name="claude-code",
+        protocol=_AgentProtocol.ANTHROPIC_MESSAGES,
+        identity_channel=_IdentityChannel.ANTHROPIC_ENV,
+        eval_supported=False,
+        training_supported=False,
+        cli_version="2.1.220",
+        blocker=(
+            "the rollout controllers expose only OpenAI Chat Completions; an "
+            "Anthropic Messages translation gateway is required"
+        ),
+    ),
+    _CUSTOM_CHAT_BINDING: _AgentBinding(
+        name=_CUSTOM_CHAT_BINDING,
+        protocol=_AgentProtocol.CHAT_COMPLETIONS,
+        identity_channel=_IdentityChannel.KWARGS,
+        eval_supported=True,
+        training_supported=False,
+        requires_opt_in=True,
+        allowed_model_providers=frozenset({"openai"}),
+        warning=(
+            "The custom Chat Completions binding is unverified and eval-only. "
+            "Only use it with an agent that accepts api_base/llm_kwargs identity "
+            "wiring, and do not use it for training before an append-only E2E."
+        ),
+    ),
 }
 
 TaskResolver = Callable[[ExecutionRequest], TaskConfig]
@@ -140,30 +246,6 @@ def _categorize_exception(exc: Exception) -> RolloutErrorCategory:
     return RolloutErrorCategory.AGENT_ERROR
 
 
-def _resolve_agent_class(
-    name: str | None, import_path: str | None
-) -> type[BaseAgent] | None:
-    """Resolve the harbor agent class, or None to let Trial.create raise the canonical error."""
-    if import_path:
-        if ":" not in import_path:
-            return None
-        module_path, _, class_name = import_path.partition(":")
-        try:
-            return getattr(importlib.import_module(module_path), class_name)
-        except (ImportError, AttributeError):
-            return None
-    try:
-        # get_agent_class imports the class; _AGENT_MAP holds path strings, not classes.
-        return AgentFactory.get_agent_class(AgentName(name))
-    except (KeyError, ValueError, ImportError, AttributeError):
-        return None
-
-
-def _is_installed_agent(cls: type[BaseAgent] | None) -> bool:
-    """Whether the agent is a harbor installed CLI (env-wired) vs in-process."""
-    return cls is not None and issubclass(cls, BaseInstalledAgent)
-
-
 def _is_sensitive_agent_extra_key(key: str) -> bool:
     normalized = key.lower().replace("-", "_")
     return normalized in _SENSITIVE_AGENT_EXTRA_KEYS or any(
@@ -189,6 +271,130 @@ def _redact_agent_extra(value: Any, *, api_key: str | None) -> Any:
     return value
 
 
+def _canonical_agent_name_for_import_path(import_path: str) -> str | None:
+    """Return a registered Harbor name when an import path bypasses its binding."""
+    if ":" not in import_path:
+        return None
+    module_path, _, class_name = import_path.partition(":")
+    try:
+        imported = getattr(importlib.import_module(module_path), class_name)
+    except (ImportError, AttributeError):
+        return None
+
+    for name in _AGENT_BINDINGS:
+        if name == _CUSTOM_CHAT_BINDING:
+            continue
+        try:
+            registered = AgentFactory.get_agent_class(AgentName(name))
+        except (KeyError, ValueError, ImportError, AttributeError):
+            continue
+        if imported is registered:
+            return name
+    return None
+
+
+def _opencode_base_url_override(agent_kwargs: dict[str, Any]) -> bool:
+    config = agent_kwargs.get("opencode_config")
+    if not isinstance(config, dict):
+        return False
+    providers = config.get("provider")
+    if not isinstance(providers, dict):
+        return False
+    openai = providers.get("openai")
+    if not isinstance(openai, dict):
+        return False
+    options = openai.get("options")
+    if not isinstance(options, dict):
+        return False
+    return any(str(key).lower().replace("_", "") == "baseurl" for key in options)
+
+
+def _validate_agent_kwargs(
+    binding: _AgentBinding, agent_kwargs: dict[str, Any]
+) -> None:
+    configured_version = agent_kwargs.get("version")
+    if (
+        binding.cli_version is not None
+        and configured_version is not None
+        and configured_version != binding.cli_version
+    ):
+        raise ValueError(
+            f"Native Harbor binding {binding.name!r} pins CLI version "
+            f"{binding.cli_version}; remove conflicting agent_kwargs"
+            f"['version']={configured_version!r}"
+        )
+    if binding.name == "opencode" and _opencode_base_url_override(agent_kwargs):
+        raise ValueError(
+            "Native Harbor binding 'opencode' owns "
+            "agent_kwargs['opencode_config']['provider']['openai']['options']"
+            "['baseURL']; remove that override so model traffic cannot be redirected"
+        )
+
+
+def _validate_model_for_binding(binding: _AgentBinding, model_name: str) -> None:
+    allowed = binding.allowed_model_providers
+    if allowed is None:
+        return
+    provider, separator, _ = model_name.partition("/")
+    if not separator or provider not in allowed:
+        raise ValueError(
+            f"Native Harbor binding {binding.name!r} requires a model prefixed by "
+            f"one of {sorted(allowed)!r} so it uses {binding.protocol.value}; got "
+            f"{model_name!r}"
+        )
+
+
+def _resolve_binding(
+    *,
+    agent_name: str | None,
+    agent_import_path: str | None,
+    binding_name: str | None,
+    allow_unverified_agent: bool,
+) -> _AgentBinding:
+    if agent_import_path is not None:
+        canonical_name = _canonical_agent_name_for_import_path(agent_import_path)
+        if canonical_name is not None:
+            raise ValueError(
+                f"agent_import_path selects Harbor's built-in {canonical_name!r}; "
+                f"use agent_name={canonical_name!r} so its validated protocol "
+                "binding and CLI pin cannot be bypassed"
+            )
+        if binding_name is None:
+            raise ValueError(
+                "agent_import_path requires binding='custom-chat-completions' "
+                "so the agent's wire protocol is explicit"
+            )
+        if binding_name != _CUSTOM_CHAT_BINDING:
+            raise ValueError(
+                "agent_import_path only supports binding='custom-chat-completions'"
+            )
+    else:
+        binding_name = binding_name or agent_name
+        if binding_name != agent_name:
+            raise ValueError(
+                f"binding {binding_name!r} does not match agent_name {agent_name!r}; "
+                "built-in agents must use their own validated binding"
+            )
+
+    selected = _AGENT_BINDINGS.get(binding_name or "")
+    if selected is None:
+        raise ValueError(
+            f"no validated Native Harbor binding for {binding_name!r}; supported "
+            f"bindings: {', '.join(sorted(_AGENT_BINDINGS))}"
+        )
+    if not selected.eval_supported:
+        raise ValueError(
+            f"Native Harbor binding {selected.name!r} speaks "
+            f"{selected.protocol.value}, which is not reachable: {selected.blocker}."
+        )
+    if selected.requires_opt_in and not allow_unverified_agent:
+        raise ValueError(
+            f"Native Harbor binding {selected.name!r} is not E2E-verified; pass "
+            "allow_unverified_agent=True to opt in for eval only"
+        )
+    return selected
+
+
 class NativeHarborBackend(ExecutionBackend):
     """Drive a harbor Trial per rollout and map its verifier reward."""
 
@@ -200,6 +406,8 @@ class NativeHarborBackend(ExecutionBackend):
         agent_kwargs: dict[str, Any] | None = None,
         agent_env: dict[str, str] | None = None,
         agent_setup_timeout_sec: float | None = None,
+        binding: str | None = None,
+        allow_unverified_agent: bool = False,
         model_name: str = DEFAULT_MODEL_NAME,
         reward_key: str = DEFAULT_REWARD_KEY,
         trials_dir: Path | str = Path("native_trials"),
@@ -222,11 +430,23 @@ class NativeHarborBackend(ExecutionBackend):
             not math.isfinite(agent_setup_timeout_sec) or agent_setup_timeout_sec <= 0
         ):
             raise ValueError("agent_setup_timeout_sec must be > 0 and finite")
-        self.agent_name = agent_name
-        self.agent_import_path = agent_import_path
-        self.agent_kwargs = agent_kwargs
-        self.agent_env = agent_env
+        resolved_binding = _resolve_binding(
+            agent_name=agent_name,
+            agent_import_path=agent_import_path,
+            binding_name=binding,
+            allow_unverified_agent=allow_unverified_agent,
+        )
+        copied_kwargs = copy.deepcopy(agent_kwargs or {})
+        _validate_agent_kwargs(resolved_binding, copied_kwargs)
+        _validate_model_for_binding(resolved_binding, model_name)
+        self._agent_name = agent_name
+        self._agent_import_path = agent_import_path
+        self._agent_kwargs = copied_kwargs
+        self._agent_env = dict(agent_env or {})
+        self._binding = resolved_binding
         self.agent_setup_timeout_sec = agent_setup_timeout_sec
+        if resolved_binding.warning is not None:
+            warnings.warn(resolved_binding.warning, UserWarning, stacklevel=2)
         self.model_name = model_name
         self.reward_key = reward_key
         self.trials_dir: Path = Path(trials_dir)
@@ -249,6 +469,18 @@ class NativeHarborBackend(ExecutionBackend):
     @property
     def max_concurrency(self) -> int:
         return self._max_concurrency
+
+    @property
+    def agent_name(self) -> str | None:
+        return self._agent_name
+
+    @property
+    def agent_import_path(self) -> str | None:
+        return self._agent_import_path
+
+    @property
+    def binding(self) -> str:
+        return self._binding.name
 
     def health(self) -> dict[str, Any]:
         return {
@@ -596,28 +828,42 @@ class NativeHarborBackend(ExecutionBackend):
         self, request: ExecutionRequest, ctx: RolloutContext
     ) -> AgentConfig:
         md = request.metadata or {}
-        name = self.agent_name
-        import_path = self.agent_import_path
+        name = self._agent_name
+        import_path = self._agent_import_path
         model_name = md.get(HARBOR_MODEL_KEY) or self.model_name
-
-        agent_cls = _resolve_agent_class(name, import_path)
-
-        endpoint = ctx.chat_completions_url
-        if not endpoint:
-            raise ValueError(f"rollout {request.id!r} has no chat_completions_url")
-        if uses_local_docker_runtime(self._environment_config):
-            endpoint = rewrite_url_for_docker(endpoint)
-        api_key = ctx.api_key
+        if not isinstance(model_name, str):
+            raise ValueError(f"rollout {request.id!r} has a non-string harbor_model")
+        _validate_model_for_binding(self._binding, model_name)
+        _validate_agent_kwargs(self._binding, self._agent_kwargs)
         # User passthrough is the base layer; SDK-wired values below overlay it.
-        kwargs: dict[str, Any] = dict(self.agent_kwargs or {})
-        env: dict[str, str] = dict(self.agent_env or {})
+        kwargs: dict[str, Any] = copy.deepcopy(self._agent_kwargs)
+        env: dict[str, str] = dict(self._agent_env)
 
-        if _is_installed_agent(agent_cls):
-            # Env-wired; SDK endpoint/key overwrite agent_env so identity can't be redirected.
+        endpoint: str | None = None
+        api_key = ctx.api_key
+        if self._binding.identity_channel != _IdentityChannel.NONE:
+            endpoint = ctx.chat_completions_url
+            if not endpoint:
+                raise ValueError(f"rollout {request.id!r} has no chat_completions_url")
+            if uses_local_docker_runtime(self._environment_config):
+                endpoint = rewrite_url_for_docker(endpoint)
+
+        if self._binding.cli_version is not None:
+            # Binding-owned: installed CLIs must not float to @latest.
+            kwargs["version"] = self._binding.cli_version
+
+        if self._binding.identity_channel == _IdentityChannel.OPENAI_ENV:
+            assert endpoint is not None
             env["OPENAI_BASE_URL"] = endpoint
             if api_key:
                 env["OPENAI_API_KEY"] = api_key
-        else:
+        elif self._binding.identity_channel == _IdentityChannel.ANTHROPIC_ENV:
+            assert endpoint is not None
+            env["ANTHROPIC_BASE_URL"] = endpoint
+            if api_key:
+                env["ANTHROPIC_API_KEY"] = api_key
+        elif self._binding.identity_channel == _IdentityChannel.KWARGS:
+            assert endpoint is not None
             # Precedence low -> high: default-agent kwargs, user kwargs, SDK wiring.
             defaults = _TERMINUS_2_DEFAULT_KWARGS if name == DEFAULT_AGENT_NAME else {}
             kwargs = {**defaults, **kwargs}
@@ -626,10 +872,9 @@ class NativeHarborBackend(ExecutionBackend):
             llm_kwargs: dict[str, Any] = dict(kwargs.get("llm_kwargs") or {})
             if api_key:
                 llm_kwargs["api_key"] = api_key
-            # TODO(temporary): in-process agents need JSON; pin stream=False in extra_body
-            # (setdefault, so a user stream wins). REMOVE when controllers send JSON.
+            # Controllers require JSON for this path, so stream=False is binding-owned.
             extra_body: dict[str, Any] = dict(llm_kwargs.get("extra_body") or {})
-            extra_body.setdefault("stream", False)
+            extra_body["stream"] = False
             llm_kwargs["extra_body"] = extra_body
             kwargs["llm_kwargs"] = llm_kwargs
 
