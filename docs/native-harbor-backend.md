@@ -152,6 +152,11 @@ RL training needs a single, linear, **append-only** token trajectory. Anything t
 
 Harbor verifiers emit a **named-channel** dict (`dict[str, float]`, e.g. `{"reward": 1.0}`), not a scalar. `_pick_reward` ([backend.py](../osmosis_ai/rollout/backend/native_harbor/backend.py)) collapses it: it takes the `reward_key` channel if present, else the sole value when there is exactly one channel. If multiple channels exist and none matches `reward_key`, the reward is left unset and the sample fails grading with a logged warning — set `reward_key` to the channel you want. The reward is read from the in-memory `TrialResult` (trial-level verifier result, falling back to the first step result that has rewards), so no `reward.json` parsing is needed.
 
+A Harbor `TrialResult.exception_info` is authoritative: both callbacks report
+failure and the sample reward remains unset, even if a verifier emitted a numeric
+reward before the trial failed in a later phase. Failed trials can never be revived
+into trainable or successful eval samples by a partial reward.
+
 The dataset row's `ground_truth` is **not** required for native tasks — the Harbor task's verifier is self-contained.
 
 ## Native ATIF trajectories
