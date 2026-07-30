@@ -291,6 +291,36 @@ def load_workflow(
     return workflow_cls, workflow_config, entrypoint_module, None
 
 
+def discover_native_backend(
+    rollout: str,
+    entrypoint: str,
+    *,
+    workspace_directory: Path | None = None,
+) -> type | None:
+    """Return the native backend class exposed by the entrypoint's ASGI app.
+
+    Native rollouts carry no Python Grader, so submit preflight uses this to skip
+    the Grader requirement. The entrypoint must expose a module-level ``app`` built
+    by ``create_rollout_server`` with a ``NativeHarborBackend`` instance. Inspecting
+    that runtime marker proves the actual app wiring without interpreting Python
+    source. A load or inspection failure returns ``None`` and is surfaced by the
+    normal workflow preflight path.
+    """
+    try:
+        from osmosis_ai.rollout.backend.native_harbor.backend import (
+            NativeHarborBackend,
+        )
+        from osmosis_ai.rollout.server.app import _get_rollout_server_backend
+
+        mod = _load_rollout_module(
+            rollout, entrypoint, workspace_directory=workspace_directory
+        )
+        backend = _get_rollout_server_backend(vars(mod).get("app"))
+        return type(backend) if isinstance(backend, NativeHarborBackend) else None
+    except Exception:
+        return None
+
+
 def auto_discover_grader(module_name: str) -> tuple[type | None, Any]:
     """Discover a Grader subclass and its config from the entrypoint module.
 

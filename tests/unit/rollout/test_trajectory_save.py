@@ -163,3 +163,90 @@ async def test_multi_entry_report_is_preserved_not_guessed(
         "judge": {"llm_call_metrics": [{"prompt_tokens": 99}]},
     }
     assert any("preserving them under" in r.getMessage() for r in caplog.records)
+
+
+async def test_native_atif_is_preserved_and_enriched_without_message_roundtrip(
+    tmp_path: Path,
+) -> None:
+    native_document = {
+        "schema_version": "ATIF-v1.7",
+        "session_id": "harbor-session",
+        "trajectory_id": "harbor-trajectory",
+        "agent": {
+            "name": "terminus-2",
+            "version": "0.20.0",
+            "model_name": "agent-reported-model",
+            "extra": {"runtime": "native"},
+        },
+        "steps": [
+            {
+                "step_id": 1,
+                "source": "agent",
+                "message": "calling tool",
+                "reasoning_content": "native reasoning",
+                "tool_calls": [
+                    {
+                        "tool_call_id": "call-1",
+                        "function_name": "shell",
+                        "arguments": {"command": "true"},
+                    }
+                ],
+                "observation": {
+                    "results": [
+                        {"source_call_id": "call-1", "content": "native output"}
+                    ]
+                },
+                "metrics": {"prompt_tokens": 999},
+                "llm_call_count": 1,
+                "extra": {"native-step": True},
+            }
+        ],
+        "final_metrics": {"total_prompt_tokens": 999, "total_steps": 1},
+        "extra": {"harbor": {"preserved": True}},
+    }
+    result = ExecutionResult(
+        status=RolloutStatus.SUCCESS,
+        sample=RolloutSample(
+            label="expected",
+            reward=0.75,
+            trajectory_messages=None,
+        ),
+        trajectory_document=native_document,
+    )
+    report = TrajectoryReport(
+        model_name="controller-model",
+        samples={
+            "single": SampleReport(
+                llm_call_metrics=[LlmCallMetrics(prompt_tokens=11, completion_tokens=4)]
+            )
+        },
+    )
+
+    await save_trajectories(
+        rollout_id="r1",
+        result=result,
+        request_metadata={"harbor_task": "org/task"},
+        report=report,
+        artifact_root=tmp_path,
+    )
+
+    doc = json.loads((tmp_path / "r1" / "trajectory.json").read_text())
+    assert doc["session_id"] == "r1"
+    assert doc["trajectory_id"] == "r1"
+    assert doc["agent"]["model_name"] == "controller-model"
+    assert doc["agent"]["extra"] == {"runtime": "native"}
+    assert doc["steps"][0]["reasoning_content"] == "native reasoning"
+    assert doc["steps"][0]["tool_calls"][0]["arguments"] == {"command": "true"}
+    assert doc["steps"][0]["observation"]["results"][0]["content"] == ("native output")
+    assert doc["steps"][0]["extra"] == {"native-step": True}
+    assert doc["steps"][0]["metrics"]["prompt_tokens"] == 11
+    assert doc["final_metrics"] == {
+        "total_prompt_tokens": 11,
+        "total_completion_tokens": 4,
+        "total_steps": 1,
+    }
+    assert doc["extra"]["harbor"] == {"preserved": True}
+    assert doc["extra"]["osmosis"]["native_session_id"] == "harbor-session"
+    assert doc["extra"]["osmosis"]["native_trajectory_id"] == "harbor-trajectory"
+    assert doc["extra"]["osmosis"]["reward"] == 0.75
+    assert doc["extra"]["osmosis"]["request_metadata"] == {"harbor_task": "org/task"}

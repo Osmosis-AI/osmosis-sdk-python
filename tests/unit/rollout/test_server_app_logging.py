@@ -5,7 +5,10 @@ from __future__ import annotations
 import logging
 
 from osmosis_ai.rollout.backend.base import ExecutionBackend, ResultCallback
-from osmosis_ai.rollout.server.app import create_rollout_server
+from osmosis_ai.rollout.server.app import (
+    _get_rollout_server_backend,
+    create_rollout_server,
+)
 from osmosis_ai.rollout.types import ExecutionRequest
 
 
@@ -54,3 +57,11 @@ class TestConfigureLogging:
 
         assert root.handlers == []
         assert root.level == logging.WARNING
+
+
+def test_create_rollout_server_records_backend_marker() -> None:
+    backend = _Backend()
+
+    app = create_rollout_server(backend=backend, configure_logging=False)
+
+    assert _get_rollout_server_backend(app) is backend

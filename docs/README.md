@@ -27,6 +27,7 @@ The package (`osmosis_ai/`) is organized into top-level domains. See [architectu
 
 - [architecture.md](./architecture.md) — package layout, domain boundaries, import paths, lazy-loading rules, and the remote rollout protocol (controller <-> rollout server). Start here.
 - [rollout-sdk.md](./rollout-sdk.md) — the library API you implement against: `AgentWorkflow`, `Grader`, contexts, configs, `create_rollout_server`, execution backends, and framework integrations.
+- [native-harbor-backend.md](./native-harbor-backend.md) — the `NativeHarborBackend`: run a self-contained Harbor task (instruction + environment + verifier) as a rollout, no `AgentWorkflow` / `Grader` to write.
 - [eval.md](./eval.md) — the `osmosis eval submit` config contract (SDK-vs-backend validation, submit flow), plus a brief note on the `evaluate_rubric` / `osmosis eval rubric` LLM-as-judge API.
 - [datasets.md](./datasets.md) — the dataset row contract enforced by the SDK validator.
 - [troubleshooting.md](./troubleshooting.md) — engineering issues (rollout timeouts, event-loop blocking, concurrency tuning).

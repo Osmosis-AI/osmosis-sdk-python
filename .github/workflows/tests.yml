@@ -52,11 +52,16 @@ jobs:
           #     has no type stubs ("base class unknown").
           #   * convert_sample_to_trajectory: returns harbor's Trajectory which
           #     has no type stubs ("return type is unknown").
+          #   * NativeHarborBackend.__init__ and resolve_task: their public
+          #     parameters/return values are harbor config models, and harbor
+          #     currently ships no type stubs.
           unexpected=$(echo "$output" | awk '
             /^osmosis_ai\./ { sym = $0 }
             /error:/ {
               if (sym ~ /agent_adapter/) next
               if (sym ~ /convert_sample_to_trajectory/) next
+              if (sym ~ /native_harbor.*NativeHarborBackend.__init__/) next
+              if (sym ~ /native_harbor.*resolve_task/) next
               print $0
             }
           ')

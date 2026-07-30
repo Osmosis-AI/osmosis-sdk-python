@@ -80,5 +80,10 @@ class ExecutionRequest(BaseModel):
 class ExecutionResult(BaseModel):
     status: RolloutStatus
     sample: RolloutSample | None = None
+    # A backend-native ATIF document that is already richer than the SDK's
+    # chat-message normalization. It is process-local execution state: callback
+    # payloads are built explicitly by the server, and model serialization must
+    # never expose the document (which can be large and may contain agent config).
+    trajectory_document: dict[str, Any] | None = Field(default=None, exclude=True)
     err_message: str | None = None
     err_category: RolloutErrorCategory | None = None

@@ -185,7 +185,11 @@ def validate_rollout_backend(
     Returns warnings for checks that could not run. Raises :class:`CLIError`
     only when the rollout is genuinely invalid.
     """
-    from osmosis_ai.eval.common.cli import _resolve_grader, load_workflow
+    from osmosis_ai.eval.common.cli import (
+        _resolve_grader,
+        discover_native_backend,
+        load_workflow,
+    )
     from osmosis_ai.platform.cli.shared_config import validate_workspace_rollout_paths
     from osmosis_ai.rollout.validator import validate_backend
 
@@ -226,6 +230,17 @@ def validate_rollout_backend(
             "The server validates it after installing the rollout's dependencies."
         ]
     if workflow_error or workflow_cls is None or entrypoint_module is None:
+        # Native rollouts declare a NativeHarborBackend and have no Python Grader
+        # (reward comes from the harbor task's verifier); skip the Grader check.
+        if (
+            discover_native_backend(
+                rollout=rollout,
+                entrypoint=entrypoint,
+                workspace_directory=workspace_directory,
+            )
+            is not None
+        ):
+            return []
         raise CLIError(
             f"{command_label} preflight failed for `rollouts/{rollout}/{entrypoint}`.\n"
             f"  {workflow_error or 'Failed to load workflow.'}"

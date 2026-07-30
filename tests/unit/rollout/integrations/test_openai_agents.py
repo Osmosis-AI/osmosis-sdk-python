@@ -113,6 +113,9 @@ class TestOpenAIAgentsIntegration:
         await session.get_items()
         model = OsmosisLitellmModel()
 
+        # Routing identity now lives in the chat_completions_url, so no per-call
+        # rollout/sample headers are stamped. The merge must simply not raise
+        # once a session (sample source) is registered with the context.
         headers = model._merge_headers(ModelSettings())
 
         assert "x-rollout-id" not in headers

@@ -27,6 +27,8 @@ from osmosis_ai.rollout.utils.http import post_json_with_retry
 
 logger: logging.Logger = logging.getLogger(__name__)
 
+_ROLLOUT_BACKEND_STATE_ATTR = "_osmosis_execution_backend"
+
 
 def _configure_default_logging() -> None:
     if logging.getLogger().handlers:
@@ -52,6 +54,7 @@ def create_rollout_server(
     if configure_logging:
         _configure_default_logging()
     app = FastAPI(lifespan=lifespan)
+    setattr(app.state, _ROLLOUT_BACKEND_STATE_ATTR, backend)
 
     @app.get("/health")
     async def health() -> dict[str, Any]:
@@ -69,6 +72,13 @@ def create_rollout_server(
             raise HTTPException(status_code=500, detail=str(e)) from e
 
     return app
+
+
+def _get_rollout_server_backend(app: Any) -> ExecutionBackend | None:
+    """Return the backend recorded by ``create_rollout_server``, if any."""
+    state = getattr(app, "state", None)
+    backend = getattr(state, _ROLLOUT_BACKEND_STATE_ATTR, None)
+    return backend if isinstance(backend, ExecutionBackend) else None
 
 
 async def _handle_rollout(
