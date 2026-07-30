@@ -128,35 +128,88 @@ def _native_trajectory(*, api_key: str = "sk-test") -> dict[str, Any]:
 
 
 class TestResolveTask:
-    def test_local_path(self):
-        cfg = resolve_task(_request({"harbor_task": "/tmp/some/task"}))
+    @staticmethod
+    def _native_warnings(caplog: pytest.LogCaptureFixture) -> list[str]:
+        return [
+            record.getMessage()
+            for record in caplog.records
+            if record.name == bmod.__name__ and record.levelno >= logging.WARNING
+        ]
+
+    def test_local_path_does_not_warn(self, caplog: pytest.LogCaptureFixture):
+        with caplog.at_level(logging.WARNING, logger=bmod.__name__):
+            cfg = resolve_task(_request({"harbor_task": "/tmp/some/task"}))
         assert cfg.path == Path("/tmp/some/task")
         assert cfg.name is None
+        assert self._native_warnings(caplog) == []
 
-    def test_package_with_ref(self):
-        cfg = resolve_task(_request({"harbor_task": "harbor/hello-world@3"}))
+    @pytest.mark.parametrize(
+        "ref",
+        ["3", "sha256:0123456789abcdef"],
+    )
+    def test_package_with_pinned_ref_does_not_warn(
+        self, ref: str, caplog: pytest.LogCaptureFixture
+    ):
+        with caplog.at_level(logging.WARNING, logger=bmod.__name__):
+            cfg = resolve_task(_request({"harbor_task": f"harbor/hello-world@{ref}"}))
         assert cfg.name == "harbor/hello-world"
-        assert cfg.ref == "3"
+        assert cfg.ref == ref
         assert cfg.path is None
+        assert self._native_warnings(caplog) == []
 
-    def test_package_defaults_ref_latest(self):
-        cfg = resolve_task(_request({"harbor_task": "harbor/hello-world"}))
+    @pytest.mark.parametrize(
+        "task_ref",
+        ["harbor/hello-world", "harbor/hello-world@latest"],
+    )
+    def test_unpinned_package_warns_and_still_resolves_latest(
+        self, task_ref: str, caplog: pytest.LogCaptureFixture
+    ):
+        with caplog.at_level(logging.WARNING, logger=bmod.__name__):
+            cfg = resolve_task(_request({"harbor_task": task_ref}))
         assert cfg.ref == "latest"
+        warnings = self._native_warnings(caplog)
+        assert len(warnings) == 1
+        assert "mutable ref 'latest'" in warnings[0]
+        assert "sha256 digest" in warnings[0]
 
-    def test_git_form(self):
-        cfg = resolve_task(
-            _request(
-                {
-                    "harbor_task": "git",
-                    "git_url": "https://example.com/r.git",
-                    "task_path": "tasks/foo",
-                    "git_commit_id": "abc123",
-                }
+    def test_git_form_with_commit_does_not_warn(self, caplog: pytest.LogCaptureFixture):
+        with caplog.at_level(logging.WARNING, logger=bmod.__name__):
+            cfg = resolve_task(
+                _request(
+                    {
+                        "harbor_task": "git",
+                        "git_url": "https://example.com/r.git",
+                        "task_path": "tasks/foo",
+                        "git_commit_id": "abc123",
+                    }
+                )
             )
-        )
         assert cfg.git_url == "https://example.com/r.git"
         assert cfg.path == Path("tasks/foo")
         assert cfg.git_commit_id == "abc123"
+        assert self._native_warnings(caplog) == []
+
+    @pytest.mark.parametrize("commit", [None, "", "  \t"])
+    def test_unpinned_git_warns_without_logging_url(
+        self, commit: str | None, caplog: pytest.LogCaptureFixture
+    ):
+        git_url = "https://secret@example.com/private.git"
+        metadata = {
+            "harbor_task": "git",
+            "git_url": git_url,
+            "task_path": "tasks/foo",
+        }
+        if commit is not None:
+            metadata["git_commit_id"] = commit
+        with caplog.at_level(logging.WARNING, logger=bmod.__name__):
+            cfg = resolve_task(_request(metadata))
+
+        assert cfg.git_commit_id == commit
+        warnings = self._native_warnings(caplog)
+        assert len(warnings) == 1
+        assert "unpinned git task" in warnings[0]
+        assert "git_commit_id" in warnings[0]
+        assert git_url not in warnings[0]
 
     def test_missing_raises(self):
         with pytest.raises(ValueError, match="harbor_task"):

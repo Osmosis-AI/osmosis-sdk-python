@@ -111,7 +111,7 @@ Each row points at a Harbor task through a first-class `metadata` key. The datas
 { "system_prompt": "", "user_prompt": "", "metadata": { "harbor_task": "./tasks/foo" } }
 
 // Package — "org/name[@ref]" (must contain a "/"); resolved via Harbor's registry + cache.
-{ "system_prompt": "", "user_prompt": "", "metadata": { "harbor_task": "org/name@latest" } }
+{ "system_prompt": "", "user_prompt": "", "metadata": { "harbor_task": "org/name@sha256:9f2c..." } }
 
 // Git — set git_url; harbor_task can be any non-path marker (e.g. "git").
 { "system_prompt": "", "user_prompt": "",
@@ -120,9 +120,27 @@ Each row points at a Harbor task through a first-class `metadata` key. The datas
 
 `metadata["harbor_task"]` is **required** — a missing value raises `ValueError`. Keep its shape consistent across all rows (the dataset validator gates on a uniform `metadata` shape). Resolution, download, and the `~/.cache/harbor` content-hash cache are all handled by Harbor's `Trial.create()`; the backend never writes a loader.
 
+Pin network-resolved tasks so every rollout in a long run executes the same
+bytes. Package references without an `@ref`, or with explicit `@latest`, still
+resolve as before but log a warning; use the package's immutable `sha256:`
+digest. Git tasks without a non-blank `metadata["git_commit_id"]` likewise log
+an actionable warning; set it to the desired commit SHA. These are warnings,
+not validation errors, and warning logs never include the git URL.
+
 `metadata["harbor_model"]` (optional) overrides the backend's `model_name` for that single row. The selected binding still validates the provider prefix: Chat Completions bindings require `openai/...` so a row cannot silently switch the agent to a different wire protocol.
 
 > **v1 recommendation: local-path tasks.** Ship the task directories with the rollout server (baked into the image or mounted). It is offline, needs no registry auth, and matches the "everything lives on the rollout server" model. Package/git forms work but need network access (and, for packages, Harbor credentials) on the rollout host.
+
+Dataset construction has a few controller-owned constraints:
+
+- Platform datasets require `system_prompt` and `user_prompt` columns and at
+  least four rows, even though Native ignores the prompt columns at execution.
+- Eval samples 10% of rows with seed 42 when no limit is set. Set an explicit
+  limit that covers the whole task set when full coverage matters.
+- For training, one dataset row becomes one GRPO group (eight rollouts per row
+  by default).
+- As an acceptance check, run eval with the `oracle` binding; every valid task
+  should receive reward `1.0`.
 
 ## Constructor reference
 
