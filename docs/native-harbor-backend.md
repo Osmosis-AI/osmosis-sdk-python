@@ -66,8 +66,8 @@ The plain Harbor `Trial` path used here does not invoke Harbor's telemetry
 reporting call sites. Managed images should nevertheless set
 `HARBOR_TELEMETRY=0` as a belt-and-suspenders opt-out.
 
-Codex and Claude Code are eval-only bindings that need protocol translation.
-For either one, also pass `gateway_base_url` as the fixed, externally reachable
+Codex, OpenCode, and Claude Code are eval-only bindings that need protocol
+translation. For any of them, also pass `gateway_base_url` as the fixed, externally reachable
 origin of this same rollout server. `create_rollout_server` then mounts the
 translation routes automatically. The URL must not include a path; the backend
 adds the binding-specific `/v1` prefix where needed.
@@ -219,7 +219,7 @@ All arguments are keyword-only ([backend.py](../osmosis_ai/rollout/backend/nativ
 | `agent_setup_timeout_sec` | `None` | Compatibility overlay for `AgentConfig.override_setup_timeout_sec`; prefer setting the field on `agent`. |
 | `binding` | agent name | Validated wire/identity binding. Import-path agents must select `custom-chat-completions` explicitly. |
 | `allow_unverified_agent` | `False` | Explicit eval-only opt-in for bindings that have not passed the real-infrastructure E2E checklist. |
-| `gateway_base_url` | `None` | Fixed HTTP(S) origin of this rollout server's translation gateway. Required by the `codex` and `claude-code` bindings; `create_rollout_server` mounts `/v1/responses` and `/v1/messages` on the same app. |
+| `gateway_base_url` | `None` | Fixed HTTP(S) origin of this rollout server's translation gateway. Required by the `codex`, `opencode`, and `claude-code` bindings; `create_rollout_server` mounts `/v1/responses` and `/v1/messages` on the same app. |
 | `model_name` | `agent.model_name`, else `"openai/osmosis-rollout"` | Compatibility/default overlay. Per-row `metadata["harbor_model"]` wins, subject to the binding's provider restriction. |
 | `reward_key` | `"reward"` | Which named verifier channel becomes the scalar reward (see [Reward mapping](#reward-mapping)). |
 | `trials_dir` | `Path("native_trials")` | Where Harbor writes trial directories. |
@@ -268,7 +268,7 @@ named in the error.
 |---|---|---:|---:|---|
 | `terminus-2` | Chat Completions via `kwargs["api_base"]` and `kwargs["llm_kwargs"]["api_key"]` | ✓ | ✓ | Summarization is off by default. |
 | `oracle` | No model endpoint | ✓ | ✗ | Emits a construction warning; use it to validate datasets and verifiers. |
-| `opencode` | Chat Completions via binding-owned `provider.openai.options.baseURL` plus `OPENAI_BASE_URL` / `OPENAI_API_KEY`; CLI `1.18.9` | opt-in | ✗ | Requires `allow_unverified_agent=True` and an `openai/...` model; trajectory linearity still needs E2E validation. |
+| `opencode` | OpenAI Responses at `/v1/responses`, translated to Chat Completions; binding-owned `provider.openai.options.baseURL`, bearer route token; CLI `1.18.9` | opt-in | ✗ | Requires `allow_unverified_agent=True`, `gateway_base_url`, and an `openai/...` model; trajectory linearity still needs E2E validation. |
 | `codex` | OpenAI Responses at `/v1/responses`, translated to Chat Completions; bearer route token; CLI `0.146.0` | ✓ | ✗ | Requires `gateway_base_url`; emits an eval-only warning. Real-infrastructure streaming, tools, accounting, and append-only behavior remain E2E dependencies. |
 | `claude-code` | Anthropic Messages at `/v1/messages`, translated to Chat Completions; `x-api-key` route token; CLI `2.1.220` | ✓ | ✗ | Requires `gateway_base_url`; emits an eval-only warning and masks Anthropic/OAuth plus Bedrock, Vertex, and Foundry selectors. Active host Bedrock mode is rejected so it cannot bypass the gateway. The same E2E dependencies remain. |
 | `custom-chat-completions` | Chat Completions kwargs for `AgentConfig.import_path` | opt-in | ✗ | Explicit binding plus `allow_unverified_agent=True`; emits an eval-only warning. |
@@ -289,13 +289,11 @@ remains the separate agent **run** timeout and overlays
 
 Endpoint and key come from the ambient `RolloutContext` ([context.py](../osmosis_ai/rollout/context.py)) — `chat_completions_url` and `api_key` — which the controller supplies per rollout (read from `OSMOSIS_CHAT_COMPLETIONS_URL` / `OSMOSIS_API_KEY` on a container host).
 
-Chat Completions bindings receive that endpoint directly. OpenCode also receives
-the endpoint in its binding-owned `provider.openai.options.baseURL` config because
-Harbor 0.20 generates `opencode.json` from host environment state that cannot see
-the rollout-scoped `AgentConfig.env`. For Codex and Claude Code, the backend
-instead registers an opaque route token for the duration of
-`execute()` and gives the agent the configured gateway origin. Codex sends the
-token as bearer auth to `/v1/responses`; Claude Code sends it as `x-api-key` to
+Chat Completions bindings receive that endpoint directly. For OpenCode, Codex,
+and Claude Code, the backend instead registers an opaque route token for the
+duration of `execute()` and gives the agent the configured gateway origin.
+OpenCode and Codex send the token as bearer auth to `/v1/responses`; Claude Code
+sends it as `x-api-key` to
 `/v1/messages`. The same FastAPI app resolves the token, uses LiteLLM to
 translate Responses or Messages into Chat Completions, replaces the gateway
 credential with the real controller key, and forwards to that rollout's raw
@@ -303,6 +301,10 @@ credential with the real controller key, and forwards to that rollout's raw
 internal non-secret sentinel because LiteLLM requires a non-empty key; that
 sentinel is never used for routing. Route state is removed on success or
 failure, and an expired token receives `401` without reaching an upstream.
+
+Harbor 0.20 generates `opencode.json` from host environment state that cannot
+see the rollout-scoped `AgentConfig.env`, so the backend also writes the gateway
+URL to the binding-owned `provider.openai.options.baseURL` config.
 
 The configured gateway URL is an origin only (no path, query, or fragment) and
 must be reachable by the Harbor environment. Local-Docker URL rewriting applies
