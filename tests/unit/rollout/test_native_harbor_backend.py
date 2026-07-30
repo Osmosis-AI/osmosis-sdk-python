@@ -286,10 +286,13 @@ class TestAgentConfig:
                 agent_name="opencode",
                 agent_env={"FOO": "bar"},
                 allow_unverified_agent=True,
+                gateway_base_url="http://gateway.example:8000",
             )
-        ac = backend._build_agent_config(_request(), _ctx())
+        ac = backend._build_agent_config(
+            _request(), _ctx(), gateway_token="route-token"
+        )
         assert ac.env["FOO"] == "bar"
-        assert ac.env["OPENAI_BASE_URL"] == "http://ctrl:8080"
+        assert ac.env["OPENAI_BASE_URL"] == "http://gateway.example:8000/v1"
 
     @pytest.mark.parametrize("identity_key", ["OPENAI_BASE_URL", "OPENAI_API_KEY"])
     def test_agent_identity_env_is_rejected(self, identity_key: str):
@@ -325,16 +328,22 @@ class TestAgentConfig:
     def test_opencode_binding_wired_via_env_and_version_pinned(self):
         with pytest.warns(UserWarning, match="opencode.*eval-only"):
             backend = NativeHarborBackend(
-                agent_name="opencode", allow_unverified_agent=True
+                agent_name="opencode",
+                allow_unverified_agent=True,
+                gateway_base_url="http://gateway.example:8000",
             )
-        ac = backend._build_agent_config(_request(), _ctx())
+        ac = backend._build_agent_config(
+            _request(), _ctx(), gateway_token="route-token"
+        )
         assert ac.env == {
-            "OPENAI_BASE_URL": "http://ctrl:8080",
-            "OPENAI_API_KEY": "sk-test",
+            "OPENAI_BASE_URL": "http://gateway.example:8000/v1",
+            "OPENAI_API_KEY": "route-token",
         }
         assert ac.kwargs == {
             "opencode_config": {
-                "provider": {"openai": {"options": {"baseURL": "http://ctrl:8080"}}}
+                "provider": {
+                    "openai": {"options": {"baseURL": "http://gateway.example:8000/v1"}}
+                }
             },
             "version": "1.18.9",
         }
@@ -356,14 +365,17 @@ class TestAgentConfig:
                     },
                 ),
                 allow_unverified_agent=True,
+                gateway_base_url="http://gateway.example:8000",
             )
 
-        config = backend._build_agent_config(_request(), _ctx())
+        config = backend._build_agent_config(
+            _request(), _ctx(), gateway_token="route-token"
+        )
         agent = AgentFactory.create_agent_from_config(config, logs_dir=tmp_path)
         command = agent._build_register_config_command()  # type: ignore[attr-defined]
 
         assert command is not None
-        assert '"baseURL": "http://ctrl:8080"' in command
+        assert '"baseURL": "http://gateway.example:8000/v1"' in command
         assert '"continue_loop_on_deny": true' in command
 
     def test_agent_kwargs_passthrough_for_installed(self):
@@ -372,14 +384,19 @@ class TestAgentConfig:
                 agent_name="opencode",
                 agent_kwargs={"reasoning_effort": "high"},
                 allow_unverified_agent=True,
+                gateway_base_url="http://gateway.example:8000",
             )
 
-        ac = backend._build_agent_config(_request(), _ctx())
+        ac = backend._build_agent_config(
+            _request(), _ctx(), gateway_token="route-token"
+        )
 
         assert ac.kwargs == {
             "reasoning_effort": "high",
             "opencode_config": {
-                "provider": {"openai": {"options": {"baseURL": "http://ctrl:8080"}}}
+                "provider": {
+                    "openai": {"options": {"baseURL": "http://gateway.example:8000/v1"}}
+                }
             },
             "version": "1.18.9",
         }
@@ -387,6 +404,13 @@ class TestAgentConfig:
     def test_opencode_requires_explicit_opt_in(self):
         with pytest.raises(ValueError, match="allow_unverified_agent=True"):
             NativeHarborBackend(agent_name="opencode")
+
+    def test_opencode_requires_gateway_base_url_after_opt_in(self):
+        with pytest.raises(ValueError, match=r"OpenAI Responses.*translation gateway"):
+            NativeHarborBackend(
+                agent_name="opencode",
+                allow_unverified_agent=True,
+            )
 
     def test_conflicting_cli_version_rejected(self):
         with pytest.raises(ValueError, match=r"pins CLI version 1\.18\.9"):

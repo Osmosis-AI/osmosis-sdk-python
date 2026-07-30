@@ -146,7 +146,7 @@ _AGENT_BINDINGS: dict[str, _AgentBinding] = {
     ),
     "opencode": _AgentBinding(
         name="opencode",
-        protocol=_AgentProtocol.CHAT_COMPLETIONS,
+        protocol=_AgentProtocol.OPENAI_RESPONSES,
         identity_channel=_IdentityChannel.OPENAI_ENV,
         eval_supported=True,
         training_supported=False,
@@ -155,8 +155,9 @@ _AGENT_BINDINGS: dict[str, _AgentBinding] = {
         allowed_model_providers=frozenset({"openai"}),
         warning=(
             "The native Harbor opencode binding is unverified and eval-only: "
-            "Harbor's baseURL injection and append-only behavior still require E2E "
-            "validation. Do not use it for training."
+            "its Responses traffic is translated to Chat Completions, but its "
+            "opaque context management has not passed the append-only training "
+            "E2E. Do not use it for training."
         ),
     ),
     "codex": _AgentBinding(
