@@ -91,7 +91,7 @@ class NativeHarborTranslationGateway:
     """Fixed-base gateway with opaque per-rollout header-token routing."""
 
     def __init__(self, base_url: str) -> None:
-        self.base_url = _normalize_gateway_base_url(base_url)
+        self.base_url: str = _normalize_gateway_base_url(base_url)
         self._routes: dict[str, NativeHarborGatewayRoute] = {}
         self._lock = threading.RLock()
 

@@ -858,6 +858,272 @@ class TestFullConfigConstructor:
         assert backend.agent_name == "oracle"
 
 
+class TestPrewarm:
+    async def test_builds_install_only_configs_without_rollout_context(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        task = TaskConfig(
+            path=Path("/tmp/prewarm-task"),
+            overwrite=True,
+            source="prewarm-test",
+        )
+        agent = AgentConfig(
+            name="terminus-2",
+            model_name="openai/prewarm-model",
+            skills=["org/skill@sha256:" + "a" * 64],
+            kwargs={"nested": {"items": ["original"]}},
+            env={"CUSTOM_TOKEN": "agent-secret"},
+            override_setup_timeout_sec=31.0,
+        )
+        environment = EnvironmentConfig(
+            type=EnvironmentType.DAYTONA,
+            delete=False,
+            kwargs={"nested": {"region": "us-west"}},
+        )
+        verifier = VerifierConfig(
+            env={"VERIFIER_TOKEN": "verifier-secret"},
+            kwargs={"nested": {"threshold": 0.75}},
+        )
+        captured: list[Any] = []
+        queues: list[Any] = []
+
+        async def _submit(queue: Any, trial_config: Any) -> Any:
+            queues.append(queue)
+            captured.append(trial_config)
+            return _trial_result()
+
+        monkeypatch.setattr(bmod.TrialQueue, "submit", _submit)
+        backend = NativeHarborBackend(
+            agent=agent,
+            environment=environment,
+            verifier=verifier,
+            trials_dir=tmp_path,
+            cleanup_successful_trials=False,
+        )
+
+        # No RolloutContext, controller URL, API key, or callback is needed.
+        await backend.prewarm([task, task])
+
+        assert queues == [backend._queue, backend._queue]
+        assert backend._queue._retry_config.max_retries == 0
+        assert len(captured) == 2
+        assert len({config.trial_name for config in captured}) == 2
+        for config in captured:
+            assert config.trial_name.startswith("native-prewarm-")
+            assert config.install_only is True
+            assert config.verifier.disable is True
+            assert config.task is not task
+            assert config.task.source == "prewarm-test"
+            assert config.agent is not agent
+            assert config.environment is not environment
+            assert config.verifier is not verifier
+            assert config.agent.model_name == "openai/prewarm-model"
+            assert config.agent.skills == ["org/skill@sha256:" + "a" * 64]
+            assert config.agent.env == {"CUSTOM_TOKEN": "agent-secret"}
+            assert config.agent.override_setup_timeout_sec == 31.0
+            assert "api_base" not in config.agent.kwargs
+            assert "llm_kwargs" not in config.agent.kwargs
+            assert config.environment.type == EnvironmentType.DAYTONA
+            assert config.environment.delete is False
+            assert config.verifier.env == {"VERIFIER_TOKEN": "verifier-secret"}
+
+        captured[0].task.path = Path("/tmp/mutated")
+        captured[0].agent.kwargs["nested"]["items"].append("mutated")
+        captured[0].environment.kwargs["nested"]["region"] = "mutated"
+        captured[0].verifier.kwargs["nested"]["threshold"] = 0.0
+
+        assert task.path == Path("/tmp/prewarm-task")
+        assert agent.kwargs == {"nested": {"items": ["original"]}}
+        assert environment.kwargs == {"nested": {"region": "us-west"}}
+        assert verifier.kwargs == {"nested": {"threshold": 0.75}}
+        assert verifier.disable is False
+        assert backend._verifier_config.disable is False
+        assert captured[1].task.path == Path("/tmp/prewarm-task")
+        assert captured[1].agent.kwargs["nested"] == {"items": ["original"]}
+        assert captured[1].environment.kwargs == {"nested": {"region": "us-west"}}
+        assert captured[1].verifier.kwargs == {"nested": {"threshold": 0.75}}
+
+    async def test_installed_agent_prewarm_uses_binding_cli_pin_without_identity(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        captured: dict[str, Any] = {}
+
+        async def _submit(_queue: Any, trial_config: Any) -> Any:
+            captured["config"] = trial_config
+            return _trial_result()
+
+        monkeypatch.setattr(bmod.TrialQueue, "submit", _submit)
+        with pytest.warns(UserWarning, match="codex.*eval-only"):
+            backend = NativeHarborBackend(
+                agent_name="codex",
+                gateway_base_url="http://gateway.example:8000",
+                cleanup_successful_trials=False,
+            )
+
+        await backend.prewarm([TaskConfig(path=Path("/tmp/task"))])
+
+        config = captured["config"]
+        assert config.agent.kwargs["version"] == "0.146.0"
+        assert "OPENAI_BASE_URL" not in config.agent.env
+        assert "OPENAI_API_KEY" not in config.agent.env
+
+    async def test_attempts_all_tasks_aggregates_failures_and_cleans_only_successes(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        tasks = [
+            TaskConfig(path=Path("/tmp/success")),
+            TaskConfig(path=Path("/tmp/raised")),
+            TaskConfig(path=Path("/tmp/reported")),
+        ]
+        attempted: list[str] = []
+        configs: dict[str, Any] = {}
+
+        async def _submit(_queue: Any, trial_config: Any) -> Any:
+            task_name = trial_config.task.path.name
+            attempted.append(task_name)
+            configs[task_name] = trial_config
+            (tmp_path / trial_config.trial_name).mkdir()
+            if task_name == "raised":
+                raise OSError("image builder unavailable")
+            if task_name == "reported":
+                return _trial_result(
+                    exc_message="agent install failed",
+                    exc_type="AgentSetupError",
+                )
+            return _trial_result()
+
+        monkeypatch.setattr(bmod.TrialQueue, "submit", _submit)
+        backend = NativeHarborBackend(trials_dir=tmp_path)
+
+        with pytest.raises(RuntimeError) as exc_info:
+            await backend.prewarm(tasks)
+
+        assert sorted(attempted) == ["raised", "reported", "success"]
+        message = str(exc_info.value)
+        assert "failed for 2 of 3 task(s)" in message
+        assert "/tmp/raised [OSError]; inspect preserved trial" in message
+        assert "/tmp/reported [AgentSetupError]; inspect preserved trial" in message
+        assert "image builder unavailable" not in message
+        assert "agent install failed" not in message
+        assert not (tmp_path / configs["success"].trial_name).exists()
+        assert (tmp_path / configs["raised"].trial_name).is_dir()
+        assert (tmp_path / configs["reported"].trial_name).is_dir()
+
+    async def test_rejects_empty_task_list(self) -> None:
+        backend = NativeHarborBackend()
+
+        with pytest.raises(ValueError, match="at least one Harbor TaskConfig"):
+            await backend.prewarm([])
+        with pytest.raises(ValueError, match="at least one Harbor TaskConfig"):
+            backend.prewarm_lifespan([])
+
+    async def test_failure_aggregate_omits_raw_setup_output_and_credentials(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        raised_url = "https://raised:secret@example.com/private.git"
+        reported_url = "https://reported:secret@example.com/private.git"
+        tasks = [
+            TaskConfig(
+                git_url=raised_url,
+                path=Path("tasks/raised"),
+                git_commit_id="abc123",
+            ),
+            TaskConfig(
+                git_url=reported_url,
+                path=Path("tasks/reported"),
+                git_commit_id="def456",
+            ),
+        ]
+
+        agent_env_secret = "agent-env-secret"
+        agent_kwarg_secret = "agent-kwarg-secret"
+
+        async def _submit(_queue: Any, trial_config: Any) -> Any:
+            if trial_config.task.path.name == "raised":
+                raise OSError(f"clone of {raised_url} failed with {agent_env_secret}")
+            return _trial_result(
+                exc_message=(
+                    f"download of {reported_url} failed with {agent_kwarg_secret}"
+                ),
+                exc_type="TaskDownloadError",
+            )
+
+        monkeypatch.setattr(bmod.TrialQueue, "submit", _submit)
+        backend = NativeHarborBackend(
+            agent_env={"CUSTOM_TOKEN": agent_env_secret},
+            agent_kwargs={"llm_kwargs": {"api_key": agent_kwarg_secret}},
+        )
+
+        with caplog.at_level(logging.ERROR):
+            with pytest.raises(RuntimeError) as exc_info:
+                await backend.prewarm(tasks)
+
+        message = str(exc_info.value)
+        assert "git:tasks/raised@abc123 [OSError]" in message
+        assert "git:tasks/reported@def456 [TaskDownloadError]" in message
+        assert message.count("no trial directory was created") == 2
+        for secret in (
+            "raised:secret",
+            "reported:secret",
+            agent_env_secret,
+            agent_kwarg_secret,
+        ):
+            assert secret not in message
+            assert secret not in caplog.text
+
+    async def test_lifespan_clones_tasks_and_awaits_prewarm_before_serving(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from osmosis_ai.rollout.server import create_rollout_server
+
+        backend = NativeHarborBackend()
+        task = TaskConfig(path=Path("/tmp/original"))
+        events: list[str] = []
+        received: list[TaskConfig] = []
+
+        async def _prewarm(tasks: Any) -> None:
+            events.append("prewarm")
+            received.extend(tasks)
+
+        monkeypatch.setattr(backend, "prewarm", _prewarm)
+        app = create_rollout_server(
+            backend=backend,
+            lifespan=backend.prewarm_lifespan([task]),
+        )
+        task.path = Path("/tmp/mutated-after-app-creation")
+
+        assert events == []
+        async with app.router.lifespan_context(app):
+            assert events == ["prewarm"]
+            assert received[0].path == Path("/tmp/original")
+            events.append("serving")
+        assert events == ["prewarm", "serving"]
+
+    async def test_lifespan_failure_aborts_startup(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from osmosis_ai.rollout.server import create_rollout_server
+
+        backend = NativeHarborBackend()
+
+        async def _prewarm(_tasks: Any) -> None:
+            raise RuntimeError("prewarm failed")
+
+        monkeypatch.setattr(backend, "prewarm", _prewarm)
+        app = create_rollout_server(
+            backend=backend,
+            lifespan=backend.prewarm_lifespan([TaskConfig(path=Path("/tmp/task"))]),
+        )
+        entered = False
+
+        with pytest.raises(RuntimeError, match="prewarm failed"):
+            async with app.router.lifespan_context(app):
+                entered = True
+        assert entered is False
+
+
 class TestRewardPicking:
     def test_named_channel(self):
         assert NativeHarborBackend()._pick_reward({"reward": 1}) == 1

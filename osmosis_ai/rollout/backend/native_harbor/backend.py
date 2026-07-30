@@ -2,6 +2,7 @@
 its verifier reward onto the rollout's single sample. The agent is fixed per
 backend; only the task and model vary per rollout via metadata."""
 
+import asyncio
 import copy
 import importlib
 import json
@@ -11,12 +12,14 @@ import os
 import shutil
 import traceback
 import warnings
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable, Sequence
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
 from time import monotonic
 from typing import Any
+from uuid import uuid4
 
 from harbor.agents.factory import AgentFactory
 from harbor.models.agent.name import AgentName
@@ -76,6 +79,7 @@ DEFAULT_MODEL_NAME = "openai/osmosis-rollout"
 DEFAULT_REWARD_KEY = "reward"
 DEFAULT_MAX_CONCURRENT = 8
 TRIAL_NAME_PREFIX = "native-"
+PREWARM_TRIAL_NAME_PREFIX = "native-prewarm-"
 _BACKEND_DIAGNOSTIC_NAME = "native_harbor"
 
 # terminus-2 summarizes mid-run, breaking training's append-only trajectory; default
@@ -335,6 +339,27 @@ def _redact_agent_extra(value: Any, *, api_key: str | None) -> Any:
     if api_key and isinstance(value, str) and api_key in value:
         return _REDACTED
     return value
+
+
+def _prewarm_task_label(task: TaskConfig) -> str:
+    """Stable, human-readable task identity for aggregate startup failures."""
+    if task.name is not None:
+        return f"{task.name}@{task.ref}" if task.ref is not None else task.name
+    if task.git_url is not None:
+        commit = task.git_commit_id or "<unpinned>"
+        path = str(task.path) if task.path is not None else "<unknown-path>"
+        # Repository URLs may embed credentials. A task path plus immutable commit
+        # is sufficient to identify the failed prewarm without leaking the URL.
+        return f"git:{path}@{commit}"
+    return str(task.path)
+
+
+def _prewarm_failure_location(config: TrialConfig) -> str:
+    """Describe retained details without promising a directory was created."""
+    trial_path = config.trials_dir / config.trial_name
+    if trial_path.exists():
+        return f"inspect preserved trial {trial_path}"
+    return "no trial directory was created"
 
 
 def _canonical_agent_name_for_import_path(import_path: str) -> str | None:
@@ -669,7 +694,7 @@ class NativeHarborBackend(ExecutionBackend):
         self.agent_setup_timeout_sec = agent_setup_timeout_sec
         if resolved_binding.warning is not None:
             warnings.warn(resolved_binding.warning, UserWarning, stacklevel=2)
-        self.model_name = effective_model_name
+        self.model_name: str = effective_model_name
         self.reward_key = reward_key
         self.trials_dir: Path = Path(trials_dir)
         self.task_resolver: TaskResolver = task_resolver or resolve_task
@@ -763,6 +788,81 @@ class NativeHarborBackend(ExecutionBackend):
             "max_concurrency": self._max_concurrency,
             "max_queue_depth": self._max_queue_depth,
         }
+
+    async def prewarm(self, tasks: Sequence[TaskConfig]) -> None:
+        """Run setup-only Harbor trials for ``tasks`` before serving rollouts.
+
+        Prewarm trials share the backend's bounded, zero-retry ``TrialQueue`` but
+        never enter the rollout callback or model-routing path. Every task is
+        attempted so one startup failure cannot hide compatibility failures in the
+        rest of the configured task list.
+        """
+        if not tasks:
+            raise ValueError("prewarm requires at least one Harbor TaskConfig")
+
+        configs = [self._build_prewarm_trial_config(task) for task in tasks]
+        logger.info("Prewarming %d native Harbor task(s)", len(configs))
+        outcomes = await asyncio.gather(
+            *self._queue.submit_batch(configs),
+            return_exceptions=True,
+        )
+
+        failures: list[str] = []
+        for config, outcome in zip(configs, outcomes, strict=True):
+            label = _prewarm_task_label(config.task)
+            if isinstance(outcome, BaseException):
+                # A cancelled server startup must remain cancellation, not be
+                # converted into a compatibility failure after sibling tasks end.
+                if not isinstance(outcome, Exception):
+                    raise outcome
+                failures.append(
+                    f"{label} [{type(outcome).__name__}]; "
+                    f"{_prewarm_failure_location(config)}"
+                )
+                continue
+
+            exception_info = getattr(outcome, "exception_info", None)
+            if exception_info is not None:
+                exception_type = (
+                    getattr(exception_info, "exception_type", None) or "HarborError"
+                )
+                failures.append(
+                    f"{label} [{exception_type}]; {_prewarm_failure_location(config)}"
+                )
+                continue
+
+            if self.cleanup_successful_trials:
+                self._cleanup_trial(config.trial_name)
+
+        if failures:
+            message = (
+                f"Native Harbor prewarm failed for {len(failures)} of "
+                f"{len(configs)} task(s):\n"
+                + "\n".join(f"  - {failure}" for failure in failures)
+            )
+            logger.error(message)
+            raise RuntimeError(message)
+
+        logger.info("Prewarmed %d native Harbor task(s)", len(configs))
+
+    def prewarm_lifespan(
+        self, tasks: Sequence[TaskConfig]
+    ) -> Callable[[object], AbstractAsyncContextManager[None]]:
+        """Return an ASGI lifespan that completes ``prewarm`` before startup.
+
+        The task list is cloned when the lifespan is built, so later caller
+        mutations cannot change which setup checks a configured server performs.
+        """
+        if not tasks:
+            raise ValueError("prewarm requires at least one Harbor TaskConfig")
+        frozen_tasks = tuple(task.model_copy(deep=True) for task in tasks)
+
+        @asynccontextmanager
+        async def lifespan(_app: object) -> AsyncIterator[None]:
+            await self.prewarm(frozen_tasks)
+            yield
+
+        return lifespan
 
     async def execute(
         self,
@@ -1279,6 +1379,37 @@ class NativeHarborBackend(ExecutionBackend):
 
     def _cleanup_trial(self, trial_name: str) -> None:
         shutil.rmtree(self.trials_dir / trial_name, ignore_errors=True)
+
+    def _build_prewarm_trial_config(self, task_cfg: TaskConfig) -> TrialConfig:
+        """Clone constructor templates into one setup-only Harbor TrialConfig."""
+        agent_cfg = self._agent_config.model_copy(deep=True)
+        _validate_agent_config(agent_cfg)
+        _validate_agent_kwargs(self._binding, agent_cfg.kwargs)
+        _validate_agent_env(self._binding, agent_cfg.env)
+
+        # Installation must use the same binding-owned CLI pin as a real rollout,
+        # while deliberately omitting per-rollout endpoint and credential identity.
+        if self._binding.cli_version is not None:
+            agent_cfg.kwargs["version"] = self._binding.cli_version
+        if agent_cfg.name == DEFAULT_AGENT_NAME:
+            agent_cfg.kwargs = {
+                **_TERMINUS_2_DEFAULT_KWARGS,
+                **agent_cfg.kwargs,
+            }
+        if self.agent_setup_timeout_sec is not None:
+            agent_cfg.override_setup_timeout_sec = self.agent_setup_timeout_sec
+
+        verifier_cfg = self._verifier_config.model_copy(deep=True)
+        verifier_cfg.disable = False
+        return TrialConfig(
+            task=task_cfg.model_copy(deep=True),
+            trial_name=f"{PREWARM_TRIAL_NAME_PREFIX}{uuid4().hex}",
+            trials_dir=self.trials_dir,
+            install_only=True,
+            agent=agent_cfg,
+            verifier=verifier_cfg,
+            environment=self._environment_config.model_copy(deep=True),
+        )
 
     def _build_trial_config(
         self,
