@@ -180,7 +180,9 @@ def build_bundle(
 
     project = tomllib.loads(pyproject_path.read_text()).get("project", {})
     name = project.get("name") or f"osmosis-bundle-{package}"
-    bundle_key = content_hash(code_dir, extra=pyproject_path.read_text() + shim)
+    bundle_key = content_hash(
+        code_dir, extra=pyproject_path.read_text() + shim + repr(deps or [])
+    )
     bundles_dir.mkdir(parents=True, exist_ok=True)
     wheel_glob = f"{name.replace('-', '_')}-*.whl"
     marker = bundles_dir / f"{name}-{bundle_key}.key"
