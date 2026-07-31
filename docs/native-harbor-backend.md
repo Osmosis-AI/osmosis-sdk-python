@@ -66,11 +66,11 @@ The plain Harbor `Trial` path used here does not invoke Harbor's telemetry
 reporting call sites. Managed images should nevertheless set
 `HARBOR_TELEMETRY=0` as a belt-and-suspenders opt-out.
 
-Codex, OpenCode, and Claude Code are eval-only bindings that need protocol
-translation. For any of them, also pass `gateway_base_url` as the fixed, externally reachable
-origin of this same rollout server. `create_rollout_server` then mounts the
-translation routes automatically. The URL must not include a path; the backend
-adds the binding-specific `/v1` prefix where needed.
+Only agents the training path can consume are registered. The train and eval
+controllers each expose exactly one model-facing route per rollout,
+`POST /sessions/{id}/v1/chat/completions`, so an agent that speaks a different
+wire protocol (OpenAI Responses, Anthropic Messages) is not reachable and is not
+admitted. The SDK does not translate between protocols; see [Agents](#agents).
 
 ### Supplying full Harbor configuration
 
@@ -217,9 +217,7 @@ All arguments are keyword-only ([backend.py](../osmosis_ai/rollout/backend/nativ
 | `environment` | `EnvironmentConfig()` | Complete Harbor environment configuration (Docker, Daytona, SkyPilot, or a custom import). |
 | `verifier` | `VerifierConfig()` | Complete Harbor verifier configuration. Native always enables it because it is the reward source. |
 | `agent_setup_timeout_sec` | `None` | Compatibility overlay for `AgentConfig.override_setup_timeout_sec`; prefer setting the field on `agent`. |
-| `binding` | agent name | Validated wire/identity binding. Import-path agents must select `custom-chat-completions` explicitly. |
-| `allow_unverified_agent` | `False` | Explicit eval-only opt-in for bindings that have not passed the real-infrastructure E2E checklist. |
-| `gateway_base_url` | `None` | Fixed HTTP(S) origin of this rollout server's translation gateway. Required by the `codex`, `opencode`, and `claude-code` bindings; `create_rollout_server` mounts `/v1/responses` and `/v1/messages` on the same app. |
+| `binding` | agent name | Validated wire/identity binding. Must match the agent name for built-ins; import-path agents must select a custom binding explicitly (see [Bringing your own agent loop](#bringing-your-own-agent-loop)). |
 | `model_name` | `agent.model_name`, else `"openai/osmosis-rollout"` | Compatibility/default overlay. Per-row `metadata["harbor_model"]` wins, subject to the binding's provider restriction. |
 | `reward_key` | `"reward"` | Which named verifier channel becomes the scalar reward (see [Reward mapping](#reward-mapping)). |
 | `trials_dir` | `Path("native_trials")` | Where Harbor writes trial directories. |
@@ -240,10 +238,10 @@ sensitive environment values.
 
 | Configuration field | Native policy |
 |---|---|
-| `AgentConfig.name` / `import_path` | Preserve; they select the binding. Setting both is rejected. |
+| `AgentConfig.name` / `import_path` | Preserve; they select the binding. Setting both is rejected, and an `import_path` resolving to any Harbor built-in is rejected. |
 | `model_name` | Overlay: dataset row `harbor_model` > explicit constructor `model_name` > `agent.model_name` > SDK default. |
-| `kwargs` | Preserve, then overlay binding-owned `api_base`, `llm_kwargs.api_key`, `extra_body.stream=False`, OpenCode `provider.openai.options.baseURL`, and pinned CLI version where applicable. |
-| `env` | Preserve non-identity variables. User-supplied binding identity/auth-selection keys are rejected rather than silently overwritten. Direct bindings receive the controller endpoint/key; translated bindings receive the gateway origin plus an opaque, short-lived route token. |
+| `kwargs` | Preserve, then overlay binding-owned `api_base`, `llm_kwargs.api_key`, and `extra_body.stream=False`. |
+| `env` | Preserve, except that an environment-wired binding owns `OPENAI_BASE_URL` and `OPENAI_API_KEY`; setting either is rejected rather than silently overwritten. All other variables, including other providers' credentials, pass through untouched. |
 | `skills`, `mcp_servers`, `include_logs`, `exclude_logs`, `extra_allowed_hosts` | Preserve. |
 | `override_setup_timeout_sec` | Preserve unless `agent_setup_timeout_sec` explicitly overlays it. |
 | `override_timeout_sec` | Preserve unless the rollout request supplies `agent_timeout_sec`. |
@@ -258,26 +256,77 @@ sensitive environment values.
 ## Agents
 
 Agent support is binding-specific. A binding records the wire protocol, identity
-channel, eval/training status, and an exact CLI version for installed agents.
-Unknown built-ins fail at construction instead of inheriting generic `OPENAI_*`
-wiring. Translated bindings require `gateway_base_url`; protocols without an
-implemented binding still fail at construction with the missing capability
-named in the error.
+channel, training status, and an exact CLI version for installed agents.
 
-| Binding | Protocol / identity | Eval | Train | Status |
-|---|---|---:|---:|---|
-| `terminus-2` | Chat Completions via `kwargs["api_base"]` and `kwargs["llm_kwargs"]["api_key"]` | ✓ | ✓ | Summarization is off by default. |
-| `oracle` | No model endpoint | ✓ | ✗ | Emits a construction warning; use it to validate datasets and verifiers. |
-| `opencode` | OpenAI Responses at `/v1/responses`, translated to Chat Completions; binding-owned `provider.openai.options.baseURL`, bearer route token; CLI `1.18.9` | opt-in | ✗ | Requires `allow_unverified_agent=True`, `gateway_base_url`, and an `openai/...` model; trajectory linearity still needs E2E validation. |
-| `codex` | OpenAI Responses at `/v1/responses`, translated to Chat Completions; bearer route token; CLI `0.146.0` | ✓ | ✗ | Requires `gateway_base_url`; emits an eval-only warning. Real-infrastructure streaming, tools, accounting, and append-only behavior remain E2E dependencies. |
-| `claude-code` | Anthropic Messages at `/v1/messages`, translated to Chat Completions; `x-api-key` route token; CLI `2.1.220` | ✓ | ✗ | Requires `gateway_base_url`; emits an eval-only warning and masks Anthropic/OAuth plus Bedrock, Vertex, and Foundry selectors. Active host Bedrock mode is rejected so it cannot bypass the gateway. The same E2E dependencies remain. |
-| `custom-chat-completions` | Chat Completions kwargs for `AgentConfig.import_path` | opt-in | ✗ | Explicit binding plus `allow_unverified_agent=True`; emits an eval-only warning. |
+**Admission is training-parity.** A binding is registered only when the training
+path supports it. Eval deliberately does not get a wider agent set: widening it
+would mean carrying protocol support the trainer cannot use, for agents that
+could never graduate to training anyway. Anything not in the table below —
+including Harbor built-ins such as `codex`, `opencode`, and `claude-code` —
+fails at construction rather than inheriting generic `OPENAI_*` wiring.
+
+| Binding | Protocol / identity | Train | Status |
+|---|---|---:|---|
+| `terminus-2` | Chat Completions via `kwargs["api_base"]` and `kwargs["llm_kwargs"]["api_key"]` | ✓ | Summarization is off by default. |
+| `oracle` | No model endpoint | ✗ | Drives no model at all, so the training-parity gate does not apply. Emits a construction warning; use it to validate datasets and verifiers. |
+| `custom-chat-completions` | Chat Completions via `kwargs["api_base"]` / `kwargs["llm_kwargs"]["api_key"]`, for your own in-process `AgentConfig.import_path` agent | ✓ | Bring your own agent. |
+| `custom-installed-chat-completions` | Chat Completions via `env["OPENAI_BASE_URL"]` / `env["OPENAI_API_KEY"]`, for your own container-side `AgentConfig.import_path` agent | ✓ | Bring your own agent loop — the shape a Harbor `BaseInstalledAgent` subclass takes. |
+
+### Bringing your own agent loop
+
+Harbor lets you run an agent you wrote instead of one of its built-ins, and
+Native supports that. Select it with `AgentConfig.import_path` plus the custom
+binding whose identity channel your agent actually accepts:
+
+- **`custom-installed-chat-completions`** — your agent subclasses Harbor's
+  `BaseInstalledAgent` and runs inside the task container. It receives
+  `OPENAI_BASE_URL` and `OPENAI_API_KEY` through the rollout-scoped
+  `AgentConfig.env`, which Harbor's environment resolution prefers over host
+  state. This is the usual shape for a custom loop.
+- **`custom-chat-completions`** — your agent runs in the rollout server process
+  and takes `api_base` / `llm_kwargs` constructor arguments, like `terminus-2`.
+
+Pick by how your agent takes configuration: an installed agent never sees
+constructor kwargs, and an in-process agent never sees the container
+environment, so the wrong binding silently delivers nothing.
+
+Both bindings own exactly two environment slots, `OPENAI_BASE_URL` and
+`OPENAI_API_KEY` (setting either yourself is rejected rather than silently
+overwritten). **Everything else in `agent.env` passes through untouched**,
+including other providers' credentials: a custom loop commonly routes only its
+policy model to the rollout endpoint and calls other providers directly for
+sub-agents, planners, or judges.
+
+Rollout identity is carried in the endpoint URL itself, so your agent does not
+need to stamp `x-rollout-id` / `x-sample-id` headers — pointing an
+OpenAI-compatible client at `OPENAI_BASE_URL` is enough. (Older Osmosis
+integrations sent those headers; they are no longer required.)
+
+Neither binding claims training safety on your behalf. Both warn at
+construction: the SDK wires identity into an agent it cannot inspect, so
+confirming the loop keeps one append-only trajectory is yours to do.
+
+Two reasons a Harbor **built-in** agent is absent:
+
+- **Unreachable protocol.** `codex` and `opencode` speak OpenAI Responses;
+  `claude-code` speaks Anthropic Messages. The controller serves only
+  `/v1/chat/completions`, so these cannot reach it without protocol
+  translation, and translation would only ever buy eval.
+- **Opaque context management.** Compaction, subagents, and session rewriting
+  fork the token trajectory. That is a training blocker independent of protocol,
+  so making these agents reachable would not make them trainable — see
+  [Append-only trajectories](#append-only-trajectories-training-caveat).
+
+`import_path` cannot reintroduce them. The guard resolves the class against
+Harbor's own agent registry rather than the table above, so naming
+`harbor.agents.installed.codex:Codex` through a custom binding is rejected.
+Registered built-ins are likewise rejected by import path so their binding and
+CLI pin cannot be bypassed; select those with `agent_name`.
 
 Installed-agent versions are binding-owned and cannot be overridden through
 `agent.kwargs`. This prevents Harbor's default `@latest` installs from silently
-changing behavior during a long run. Binding identity is also owned: OpenCode
-configuration cannot override `provider.openai.options.baseURL`, and Chat
-Completions bindings reject model prefixes for other providers.
+changing behavior during a long run. Chat Completions bindings also reject model
+prefixes for other providers.
 
 `AgentConfig.override_setup_timeout_sec` controls only Harbor's setup/install
 phase for each Trial. The controller-provided `ExecutionRequest.agent_timeout_sec`
@@ -289,56 +338,33 @@ remains the separate agent **run** timeout and overlays
 
 Endpoint and key come from the ambient `RolloutContext` ([context.py](../osmosis_ai/rollout/context.py)) — `chat_completions_url` and `api_key` — which the controller supplies per rollout (read from `OSMOSIS_CHAT_COMPLETIONS_URL` / `OSMOSIS_API_KEY` on a container host).
 
-Chat Completions bindings receive that endpoint directly. For OpenCode, Codex,
-and Claude Code, the backend instead registers an opaque route token for the
-duration of `execute()` and gives the agent the configured gateway origin.
-OpenCode and Codex send the token as bearer auth to `/v1/responses`; Claude Code
-sends it as `x-api-key` to
-`/v1/messages`. The same FastAPI app resolves the token, uses LiteLLM to
-translate Responses or Messages into Chat Completions, replaces the gateway
-credential with the real controller key, and forwards to that rollout's raw
-`chat_completions_url`. If the controller supplied no key, the gateway sends an
-internal non-secret sentinel because LiteLLM requires a non-empty key; that
-sentinel is never used for routing. Route state is removed on success or
-failure, and an expired token receives `401` without reaching an upstream.
+Every registered binding reaches that endpoint directly; the SDK performs no
+protocol translation. The endpoint must be reachable by the Harbor environment,
+and local-Docker URL rewriting is applied to it.
 
-Harbor 0.20 generates `opencode.json` from host environment state that cannot
-see the rollout-scoped `AgentConfig.env`, so the backend also writes the gateway
-URL to the binding-owned `provider.openai.options.baseURL` config.
-The Responses stream adapter also normalizes response and output-item IDs so
-every lifecycle event refers to the same objects after Chat Completions
-translation.
-
-The configured gateway URL is an origin only (no path, query, or fragment) and
-must be reachable by the Harbor environment. Local-Docker URL rewriting applies
-to the agent-facing gateway URL, not the controller URL used by the server.
-Streaming SSE and tool-call translation are covered by local round-trip unit
-tests; validation against real Miles/eval infrastructure, including controller
-token accounting, is still required by the E2E checklist and is not claimed
-here.
-
-The backend overlays the selected binding's identity slots and rejects
-user-set identity keys in `agent.env`, so configuration cannot redirect model
-traffic. It also masks Codex auth-file and Claude subscription/OAuth or alternate
-cloud-provider selectors; active host Bedrock mode causes Claude Code
-construction or execution to fail. For
-kwargs-wired agents, `extra_body.stream=False` is pinned until the controllers
-support that streaming path. The `oracle` binding is the exception: it invokes
-the task's reference solution and needs no model endpoint.
+The backend overlays the selected binding's identity slots, so configuration
+cannot redirect model traffic. Kwargs-wired bindings have `agent.kwargs["api_base"]`
+overwritten with the rollout's endpoint even when the caller set it, and pin
+`extra_body.stream=False` until the controllers support that streaming path.
+Environment-wired bindings receive the endpoint and key in `agent.env` and reject
+a caller-set value for those two slots. The `oracle` binding is the exception: it
+invokes the task's reference solution and needs no model endpoint.
 
 ## Append-only trajectories (training caveat)
 
 RL training needs a single, linear, **append-only** token trajectory. Anything that rewrites the running context mid-run — summarization, compaction, subagents — forks that trajectory and corrupts the training signal. The backend does **not** gate or police this; it only sets a safe default for the built-in default agent and otherwise stays out of the way ([backend.py](../osmosis_ai/rollout/backend/native_harbor/backend.py)):
 
 - **`terminus-2` (the default agent)** summarizes mid-run, so the backend defaults `enable_summarize=False` + `proactive_summarization_threshold=0` on it. These are *overridable defaults* — `agent.kwargs` wins — so set `AgentConfig(kwargs={"enable_summarize": True})` to get summarization back (e.g. for long-context eval).
-- **Every other binding is not training-safe.** Eval-only bindings warn when constructed, and unverified bindings additionally require an explicit opt-in. Protocol reachability alone cannot prove that an opaque installed CLI keeps one append-only trajectory.
+- **`oracle` is not training-safe** and warns when constructed: it emits no model trajectory at all.
+- **A custom agent loop's linearity is yours to verify.** The SDK wires identity into it but cannot inspect how it manages context, so both custom bindings warn rather than claim safety.
+- **Harbor's installed coding CLIs are not registered.** Protocol reachability alone cannot prove that an opaque installed CLI keeps one append-only trajectory, so making them reachable would not make them trainable. This is why admission is training-parity rather than protocol-parity.
 
 | Agent | Run (eval — reward only) | Train (needs a linear token trajectory) |
 |---|---|---|
 | `terminus-2` (summarize off by default) | ✓ | ✓ |
 | `oracle` | ✓ | ✗ (no model trajectory) |
-| `opencode` / custom Chat Completions | opt-in, pending E2E | ✗ |
-| `codex` / `claude-code` | ✓ through the SDK gateway; real-infrastructure E2E pending | ✗ |
+| your own agent loop (either custom binding) | ✓ | ✓ once you have verified it is append-only |
+| `codex` / `opencode` / `claude-code` | ✗ (not registered) | ✗ |
 
 ## Reward mapping
 
@@ -421,26 +447,21 @@ Admission accounting is process-local; run one rollout-server worker per
 configured capacity, or budget each worker's limits independently.
 
 The server's `/health` response preserves the backend fields and adds a live
-capacity snapshot. Protocol fields describe this configured server instance:
-Chat Completions is always reachable; Responses and Messages appear only when
-the translation gateway is mounted. For example, an idle Codex eval server
-configured with eight running and eight queued slots reports:
+capacity snapshot. Protocol fields describe this configured server instance;
+Chat Completions is the only reachable protocol. For example, an idle default
+server configured with eight running and eight queued slots reports:
 
 ```json
 {
   "status": "ok",
   "backend": "native_harbor",
-  "agent": "codex",
-  "binding": "codex",
-  "binding_protocol": "OpenAI Responses",
+  "agent": "terminus-2",
+  "binding": "terminus-2",
+  "binding_protocol": "OpenAI Chat Completions",
   "protocol_capabilities": [
-    "OpenAI Chat Completions",
-    "OpenAI Responses",
-    "Anthropic Messages"
+    "OpenAI Chat Completions"
   ],
-  "gateway_routing": "header_token",
-  "evaluation_supported": true,
-  "training_supported": false,
+  "training_supported": true,
   "max_concurrency": 8,
   "max_queue_depth": 8,
   "capacity": {

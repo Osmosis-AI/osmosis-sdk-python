@@ -28,7 +28,9 @@ from harbor.models.trial.config import (
 from osmosis_ai.rollout.backend.base import ExecutionBackend
 from osmosis_ai.rollout.backend.native_harbor import backend as bmod
 from osmosis_ai.rollout.backend.native_harbor.backend import (
+    _AGENT_BINDINGS,
     NativeHarborBackend,
+    _AgentProtocol,
     resolve_task,
 )
 from osmosis_ai.rollout.context import RolloutContext
@@ -278,45 +280,11 @@ class TestAgentConfig:
         ac = backend._build_agent_config(_request(), _ctx())
         assert ac.kwargs["llm_kwargs"]["extra_body"]["stream"] is False
 
-    def test_agent_env_passthrough_for_installed(self):
-        # Non-identity environment survives alongside binding-owned identity.
-        with pytest.warns(UserWarning, match="opencode.*eval-only"):
-            backend = NativeHarborBackend(
-                agent_name="opencode",
-                agent_env={"FOO": "bar"},
-                allow_unverified_agent=True,
-                gateway_base_url="http://gateway.example:8000",
-            )
-        ac = backend._build_agent_config(
-            _request(), _ctx(), gateway_token="route-token"
-        )
-        assert ac.env["FOO"] == "bar"
-        assert ac.env["OPENAI_BASE_URL"] == "http://gateway.example:8000/v1"
-
-    @pytest.mark.parametrize("identity_key", ["OPENAI_BASE_URL", "OPENAI_API_KEY"])
-    def test_agent_identity_env_is_rejected(self, identity_key: str):
-        with pytest.raises(ValueError, match=r"owns agent\.env identity keys"):
-            NativeHarborBackend(
-                agent=AgentConfig(
-                    name="opencode",
-                    env={identity_key: "user-owned"},
-                ),
-                allow_unverified_agent=True,
-            )
-
-    def test_custom_agent_not_injected(self):
-        # An import_path agent (name=None) gets identity wiring only -- no defaults.
-        with pytest.warns(UserWarning, match="custom Chat Completions"):
-            backend = NativeHarborBackend(
-                agent_import_path="my.custom.pkg:CustomAgent",
-                binding="custom-chat-completions",
-                allow_unverified_agent=True,
-            )
+    def test_agent_env_passthrough(self):
+        # Non-identity environment survives; the KWARGS channel owns no env key.
+        backend = NativeHarborBackend(agent_env={"FOO": "bar"})
         ac = backend._build_agent_config(_request(), _ctx())
-        assert ac.import_path == "my.custom.pkg:CustomAgent"
-        assert ac.name is None
-        assert ac.kwargs["api_base"] == "http://ctrl:8080"  # wired, not rejected
-        assert "enable_summarize" not in ac.kwargs  # not injected
+        assert ac.env == {"FOO": "bar"}
 
     def test_agent_name_and_import_path_mutually_exclusive(self):
         with pytest.raises(ValueError, match="not both"):
@@ -324,238 +292,139 @@ class TestAgentConfig:
                 agent_name="terminus-2", agent_import_path="my.pkg:MyAgent"
             )
 
-    def test_opencode_binding_wired_via_env_and_version_pinned(self):
-        with pytest.warns(UserWarning, match="opencode.*eval-only"):
-            backend = NativeHarborBackend(
-                agent_name="opencode",
-                allow_unverified_agent=True,
-                gateway_base_url="http://gateway.example:8000",
-            )
-        ac = backend._build_agent_config(
-            _request(), _ctx(), gateway_token="route-token"
-        )
-        assert ac.env == {
-            "OPENAI_BASE_URL": "http://gateway.example:8000/v1",
-            "OPENAI_API_KEY": "route-token",
-        }
-        assert ac.kwargs == {
-            "opencode_config": {
-                "provider": {
-                    "openai": {"options": {"baseURL": "http://gateway.example:8000/v1"}}
-                }
-            },
-            "version": "1.18.9",
-        }
-
-    def test_opencode_config_merges_scoped_controller_url(self):
-        with pytest.warns(UserWarning, match="opencode.*eval-only"):
-            backend = NativeHarborBackend(
-                agent=AgentConfig(
-                    name="opencode",
-                    kwargs={
-                        "opencode_config": {
-                            "experimental": {"continue_loop_on_deny": True}
-                        }
-                    },
-                ),
-                allow_unverified_agent=True,
-                gateway_base_url="http://gateway.example:8000",
-            )
-
-        config = backend._build_agent_config(
-            _request(), _ctx(), gateway_token="route-token"
-        )
-        assert config.kwargs["opencode_config"] == {
-            "experimental": {"continue_loop_on_deny": True},
-            "provider": {
-                "openai": {"options": {"baseURL": "http://gateway.example:8000/v1"}}
-            },
-        }
-
-    def test_agent_kwargs_passthrough_for_installed(self):
-        with pytest.warns(UserWarning, match="opencode.*eval-only"):
-            backend = NativeHarborBackend(
-                agent_name="opencode",
-                agent_kwargs={"reasoning_effort": "high"},
-                allow_unverified_agent=True,
-                gateway_base_url="http://gateway.example:8000",
-            )
-
-        ac = backend._build_agent_config(
-            _request(), _ctx(), gateway_token="route-token"
-        )
-
-        assert ac.kwargs == {
-            "reasoning_effort": "high",
-            "opencode_config": {
-                "provider": {
-                    "openai": {"options": {"baseURL": "http://gateway.example:8000/v1"}}
-                }
-            },
-            "version": "1.18.9",
-        }
-
-    def test_opencode_requires_explicit_opt_in(self):
-        with pytest.raises(ValueError, match="allow_unverified_agent=True"):
-            NativeHarborBackend(agent_name="opencode")
-
-    def test_opencode_requires_gateway_base_url_after_opt_in(self):
-        with pytest.raises(ValueError, match=r"OpenAI Responses.*translation gateway"):
-            NativeHarborBackend(
-                agent_name="opencode",
-                allow_unverified_agent=True,
-            )
-
-    def test_conflicting_cli_version_rejected(self):
-        with pytest.raises(ValueError, match=r"pins CLI version 1\.18\.9"):
-            NativeHarborBackend(
-                agent_name="opencode",
-                agent_kwargs={"version": "latest"},
-                allow_unverified_agent=True,
-            )
-
-    def test_claude_code_requires_gateway_base_url(self):
-        with pytest.raises(
-            ValueError, match=r"Anthropic Messages.*translation gateway"
-        ):
-            NativeHarborBackend(agent_name="claude-code")
-
-    def test_codex_requires_gateway_base_url(self):
-        with pytest.raises(ValueError, match=r"OpenAI Responses.*translation gateway"):
-            NativeHarborBackend(agent_name="codex")
-
-    def test_claude_code_gateway_binding_is_eval_only_and_uses_api_key_header(self):
-        with pytest.warns(UserWarning, match="claude-code.*eval-only"):
-            backend = NativeHarborBackend(
-                agent_name="claude-code",
-                gateway_base_url="http://gateway.example:8000/",
-            )
-
-        built = backend._build_agent_config(
-            _request(),
-            _ctx(),
-            gateway_token="route-token",
-        )
-
-        assert built.env == {
-            "ANTHROPIC_API_KEY": "route-token",
-            "ANTHROPIC_AUTH_TOKEN": "",
-            "ANTHROPIC_BASE_URL": "http://gateway.example:8000",
-            "ANTHROPIC_FOUNDRY_API_KEY": "",
-            "ANTHROPIC_FOUNDRY_BASE_URL": "",
-            "ANTHROPIC_FOUNDRY_RESOURCE": "",
-            "ANTHROPIC_SMALL_FAST_MODEL_AWS_REGION": "",
-            "ANTHROPIC_VERTEX_BASE_URL": "",
-            "ANTHROPIC_VERTEX_PROJECT_ID": "",
-            "AWS_ACCESS_KEY_ID": "",
-            "AWS_BEARER_TOKEN_BEDROCK": "",
-            "AWS_PROFILE": "",
-            "AWS_REGION": "",
-            "AWS_SECRET_ACCESS_KEY": "",
-            "AWS_SESSION_TOKEN": "",
-            "CLAUDE_CODE_OAUTH_TOKEN": "",
-            "CLAUDE_CODE_USE_BEDROCK": "",
-            "CLAUDE_CODE_USE_FOUNDRY": "",
-            "CLAUDE_CODE_USE_VERTEX": "",
-            "CLAUDE_FORCE_OAUTH": "0",
-            "CLOUD_ML_REGION": "",
-            "GOOGLE_APPLICATION_CREDENTIALS": "",
-            "GOOGLE_CLOUD_PROJECT": "",
-        }
-        assert built.kwargs == {"version": "2.1.220"}
-        assert "sk-test" not in built.env.values()
-
-    def test_codex_gateway_binding_is_eval_only_and_uses_bearer_token(self):
-        with pytest.warns(UserWarning, match="codex.*eval-only"):
-            backend = NativeHarborBackend(
-                agent_name="codex",
-                gateway_base_url="http://gateway.example:8000",
-            )
-
-        built = backend._build_agent_config(
-            _request(),
-            _ctx(),
-            gateway_token="route-token",
-        )
-
-        assert built.env == {
-            "CODEX_AUTH_JSON_PATH": "",
-            "CODEX_FORCE_AUTH_JSON": "0",
-            "OPENAI_API_KEY": "route-token",
-            "OPENAI_BASE_URL": "http://gateway.example:8000/v1",
-        }
-        assert built.kwargs == {"version": "0.146.0"}
-        assert "sk-test" not in built.env.values()
-
     @pytest.mark.parametrize(
-        ("name", "value"),
-        [
-            ("CLAUDE_CODE_USE_BEDROCK", "1"),
-            ("AWS_BEARER_TOKEN_BEDROCK", "host-bedrock-token"),
-        ],
+        "agent_name",
+        ["codex", "opencode", "claude-code"],
     )
-    def test_claude_code_rejects_host_bedrock_bypass(
-        self,
-        monkeypatch: pytest.MonkeyPatch,
-        name: str,
-        value: str,
-    ) -> None:
-        monkeypatch.setenv(name, value)
+    def test_agents_the_trainer_cannot_use_are_not_registered(self, agent_name: str):
+        # Admission is training-parity. Agents whose wire protocol the controller
+        # does not serve are absent from the table entirely rather than admitted
+        # for eval behind an opt-in flag.
+        with pytest.raises(ValueError, match="no validated Native Harbor binding"):
+            NativeHarborBackend(agent_name=agent_name)
 
-        with pytest.raises(ValueError, match=r"host Bedrock mode.*bypass"):
-            NativeHarborBackend(
-                agent_name="claude-code",
-                gateway_base_url="http://gateway.example:8000",
+    def test_registered_bindings_are_exactly_the_training_parity_set(self):
+        assert sorted(_AGENT_BINDINGS) == [
+            "custom-chat-completions",
+            "custom-installed-chat-completions",
+            "oracle",
+            "terminus-2",
+        ]
+
+    def test_every_registered_binding_speaks_a_reachable_protocol(self):
+        # The controller exposes only Chat Completions. A binding may speak that,
+        # or drive no model at all (oracle); nothing else can be registered.
+        for binding in _AGENT_BINDINGS.values():
+            assert binding.protocol in {
+                _AgentProtocol.CHAT_COMPLETIONS,
+                _AgentProtocol.NONE,
+            }
+
+    def test_every_model_driving_binding_is_training_supported(self):
+        # The admission gate's invariant: eval never admits an agent training
+        # cannot use. `oracle` is exempt because it drives no model.
+        for binding in _AGENT_BINDINGS.values():
+            if binding.emits_model_traffic:
+                assert binding.training_supported, binding.name
+
+    def test_custom_agent_is_wired_but_not_injected(self):
+        # A caller's own agent gets identity wiring only -- no terminus defaults.
+        with pytest.warns(UserWarning, match="custom Chat Completions"):
+            backend = NativeHarborBackend(
+                agent_import_path="my.custom.pkg:CustomAgent",
+                binding="custom-chat-completions",
             )
+        ac = backend._build_agent_config(_request(), _ctx())
+        assert ac.import_path == "my.custom.pkg:CustomAgent"
+        assert ac.name is None
+        assert ac.kwargs["api_base"] == "http://ctrl:8080"
+        assert ac.kwargs["llm_kwargs"]["api_key"] == "sk-test"
+        assert "enable_summarize" not in ac.kwargs
 
-    @pytest.mark.parametrize(
-        "identity_key",
-        [
-            "CLAUDE_CODE_USE_BEDROCK",
-            "AWS_BEARER_TOKEN_BEDROCK",
-            "AWS_ACCESS_KEY_ID",
-            "AWS_SECRET_ACCESS_KEY",
-            "AWS_SESSION_TOKEN",
-            "AWS_PROFILE",
-            "CLAUDE_CODE_USE_VERTEX",
-            "ANTHROPIC_VERTEX_BASE_URL",
-            "GOOGLE_APPLICATION_CREDENTIALS",
-            "CLAUDE_CODE_USE_FOUNDRY",
-            "ANTHROPIC_FOUNDRY_BASE_URL",
-            "ANTHROPIC_FOUNDRY_API_KEY",
-        ],
-    )
-    def test_claude_code_rejects_scoped_bedrock_identity(
-        self, identity_key: str
-    ) -> None:
+    def test_custom_installed_agent_is_wired_through_env(self):
+        # A container-side custom agent loop (the shape a Harbor
+        # BaseInstalledAgent subclass takes) reads identity from its process
+        # environment, not from constructor kwargs.
+        with pytest.warns(UserWarning, match="custom installed Chat Completions"):
+            backend = NativeHarborBackend(
+                agent_import_path="my.custom.pkg:CustomInstalledAgent",
+                binding="custom-installed-chat-completions",
+            )
+        ac = backend._build_agent_config(_request(), _ctx())
+        assert ac.import_path == "my.custom.pkg:CustomInstalledAgent"
+        assert ac.env["OPENAI_BASE_URL"] == "http://ctrl:8080"
+        assert ac.env["OPENAI_API_KEY"] == "sk-test"
+        # The kwargs channel is not also used, so an installed agent's
+        # constructor never sees an argument it does not accept.
+        assert ac.kwargs == {}
+
+    def test_custom_installed_agent_passes_other_provider_credentials_through(self):
+        # A custom loop may route only part of its work to the rollout endpoint
+        # and call other providers directly, so its own credentials survive.
+        with pytest.warns(UserWarning, match="custom installed Chat Completions"):
+            backend = NativeHarborBackend(
+                agent_import_path="my.custom.pkg:CustomInstalledAgent",
+                binding="custom-installed-chat-completions",
+                agent_env={
+                    "ANTHROPIC_API_KEY": "user-anthropic",
+                    "GEMINI_API_KEY": "user-gemini",
+                    "EMAIL_SUBAGENT_MODEL": "anthropic:claude",
+                },
+            )
+        ac = backend._build_agent_config(_request(), _ctx())
+        assert ac.env["ANTHROPIC_API_KEY"] == "user-anthropic"
+        assert ac.env["GEMINI_API_KEY"] == "user-gemini"
+        assert ac.env["EMAIL_SUBAGENT_MODEL"] == "anthropic:claude"
+        assert ac.env["OPENAI_BASE_URL"] == "http://ctrl:8080"
+
+    @pytest.mark.parametrize("identity_key", ["OPENAI_BASE_URL", "OPENAI_API_KEY"])
+    def test_custom_installed_agent_rejects_owned_identity_env(self, identity_key: str):
         with pytest.raises(ValueError, match=r"owns agent\.env identity keys"):
             NativeHarborBackend(
-                agent=AgentConfig(
-                    name="claude-code",
-                    env={identity_key: "user-owned"},
-                ),
-                gateway_base_url="http://gateway.example:8000",
+                agent_import_path="my.custom.pkg:CustomInstalledAgent",
+                binding="custom-installed-chat-completions",
+                agent_env={identity_key: "user-owned"},
             )
 
-    def test_claude_code_rechecks_host_bedrock_mode_per_rollout(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        with pytest.warns(UserWarning, match="claude-code.*eval-only"):
-            backend = NativeHarborBackend(
-                agent_name="claude-code",
-                gateway_base_url="http://gateway.example:8000",
-            )
-        monkeypatch.setenv("CLAUDE_CODE_USE_BEDROCK", "1")
+    def test_custom_agent_requires_an_explicit_custom_binding(self):
+        with pytest.raises(ValueError, match="requires an explicit custom binding"):
+            NativeHarborBackend(agent_import_path="my.custom.pkg:CustomAgent")
 
-        with pytest.raises(ValueError, match=r"host Bedrock mode.*bypass"):
-            backend._build_agent_config(
-                _request(),
-                _ctx(),
-                gateway_token="route-token",
+    def test_custom_agent_rejects_a_builtin_binding_name(self):
+        with pytest.raises(ValueError, match="only supports the custom bindings"):
+            NativeHarborBackend(
+                agent_import_path="my.custom.pkg:CustomAgent",
+                binding="terminus-2",
             )
 
-    def test_oracle_is_eval_only_and_needs_no_model_endpoint(self):
-        with pytest.warns(UserWarning, match="oracle.*eval-only"):
+    @pytest.mark.parametrize(
+        ("import_path", "agent_name"),
+        [
+            ("harbor.agents.installed.opencode:OpenCode", "opencode"),
+            ("harbor.agents.installed.codex:Codex", "codex"),
+            ("harbor.agents.installed.claude_code:ClaudeCode", "claude-code"),
+        ],
+    )
+    def test_import_path_cannot_reintroduce_an_unregistered_builtin(
+        self, import_path: str, agent_name: str
+    ):
+        # The guard resolves against Harbor's registry, not our binding table,
+        # so de-registering an agent cannot make it reachable by class path.
+        with pytest.raises(ValueError, match=rf"built-in '{agent_name}'.*no Native"):
+            NativeHarborBackend(
+                agent_import_path=import_path,
+                binding="custom-chat-completions",
+            )
+
+    def test_import_path_cannot_bypass_a_registered_builtin_binding(self):
+        with pytest.raises(ValueError, match=r"built-in 'oracle'.*agent_name"):
+            NativeHarborBackend(
+                agent_import_path="harbor.agents.oracle:OracleAgent",
+                binding="custom-chat-completions",
+            )
+
+    def test_oracle_is_admitted_as_a_non_model_binding(self):
+        with pytest.warns(UserWarning, match="oracle.*not training-safe"):
             backend = NativeHarborBackend(agent_name="oracle")
 
         ac = backend._build_agent_config(
@@ -565,36 +434,7 @@ class TestAgentConfig:
         assert ac.name == "oracle"
         assert ac.kwargs == {}
         assert ac.env == {}
-
-    def test_custom_agent_requires_explicit_binding_and_opt_in(self):
-        with pytest.raises(ValueError, match="requires binding"):
-            NativeHarborBackend(agent_import_path="my.custom.pkg:CustomAgent")
-        with pytest.raises(ValueError, match="allow_unverified_agent=True"):
-            NativeHarborBackend(
-                agent_import_path="my.custom.pkg:CustomAgent",
-                binding="custom-chat-completions",
-            )
-
-    @pytest.mark.parametrize(
-        ("import_path", "agent_name"),
-        [
-            ("harbor.agents.installed.opencode:OpenCode", "opencode"),
-            ("harbor.agents.installed.codex:Codex", "codex"),
-            (
-                "harbor.agents.installed.claude_code:ClaudeCode",
-                "claude-code",
-            ),
-        ],
-    )
-    def test_builtin_import_path_cannot_bypass_binding(
-        self, import_path: str, agent_name: str
-    ):
-        with pytest.raises(ValueError, match=rf"built-in '{agent_name}'.*agent_name"):
-            NativeHarborBackend(
-                agent_import_path=import_path,
-                binding="custom-chat-completions",
-                allow_unverified_agent=True,
-            )
+        assert backend.health()["training_supported"] is False
 
     def test_resolved_agent_identity_is_read_only(self):
         backend = NativeHarborBackend()
@@ -612,20 +452,6 @@ class TestAgentConfig:
 
         with pytest.raises(ValueError, match=r"requires a model prefixed.*openai"):
             backend._build_agent_config(request, _ctx())
-
-    def test_opencode_rejects_nested_base_url_override(self):
-        with pytest.raises(ValueError, match=r"opencode_config.*baseURL"):
-            NativeHarborBackend(
-                agent_name="opencode",
-                agent_kwargs={
-                    "opencode_config": {
-                        "provider": {
-                            "openai": {"options": {"baseURL": "https://evil.example"}}
-                        }
-                    }
-                },
-                allow_unverified_agent=True,
-            )
 
     def test_missing_endpoint_raises(self, monkeypatch: pytest.MonkeyPatch):
         # No endpoint -> fail closed instead of silently hitting api.openai.com.
@@ -903,7 +729,7 @@ class TestFullConfigConstructor:
 
     def test_explicit_empty_agent_config_preserves_oracle_default(self):
         agent = AgentConfig()
-        with pytest.warns(UserWarning, match="oracle.*eval-only"):
+        with pytest.warns(UserWarning, match="oracle.*not training-safe"):
             backend = NativeHarborBackend(agent=agent)
 
         built = backend._build_agent_config(
@@ -1000,7 +826,7 @@ class TestPrewarm:
         assert captured[1].environment.kwargs == {"nested": {"region": "us-west"}}
         assert captured[1].verifier.kwargs == {"nested": {"threshold": 0.75}}
 
-    async def test_installed_agent_prewarm_uses_binding_cli_pin_without_identity(
+    async def test_prewarm_installs_agent_without_per_rollout_identity(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         captured: dict[str, Any] = {}
@@ -1010,19 +836,17 @@ class TestPrewarm:
             return _trial_result()
 
         monkeypatch.setattr(bmod.TrialQueue, "submit", _submit)
-        with pytest.warns(UserWarning, match="codex.*eval-only"):
-            backend = NativeHarborBackend(
-                agent_name="codex",
-                gateway_base_url="http://gateway.example:8000",
-                cleanup_successful_trials=False,
-            )
+        backend = NativeHarborBackend(cleanup_successful_trials=False)
 
         await backend.prewarm([TaskConfig(path=Path("/tmp/task"))])
 
         config = captured["config"]
-        assert config.agent.kwargs["version"] == "0.146.0"
-        assert "OPENAI_BASE_URL" not in config.agent.env
-        assert "OPENAI_API_KEY" not in config.agent.env
+        # Setup-only trials get the agent's defaults but never the rollout's
+        # endpoint or controller credential.
+        assert config.agent.kwargs["enable_summarize"] is False
+        assert "api_base" not in config.agent.kwargs
+        assert "llm_kwargs" not in config.agent.kwargs
+        assert config.agent.env == {}
 
     async def test_attempts_all_tasks_aggregates_failures_and_cleans_only_successes(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
@@ -1277,23 +1101,19 @@ class TestExecute:
         assert on_gr.call_args.args[0].status == RolloutStatus.FAILURE
 
     @pytest.mark.parametrize("queue_fails", [False, True])
-    async def test_gateway_route_is_active_only_for_trial_execution(
+    async def test_controller_identity_is_wired_per_rollout(
         self,
         monkeypatch: pytest.MonkeyPatch,
         queue_fails: bool,
     ) -> None:
-        with pytest.warns(UserWarning, match="codex.*eval-only"):
-            backend = NativeHarborBackend(
-                agent_name="codex",
-                gateway_base_url="http://gateway.example:8000",
-            )
-        gateway = backend.translation_gateway
-        assert gateway is not None
+        # The rollout's endpoint and credential come from the ambient
+        # RolloutContext, never from backend construction, so each rollout can be
+        # routed to its own controller session.
+        backend = NativeHarborBackend()
         captured: dict[str, Any] = {}
 
         async def _submit(queue: Any, trial_config: Any) -> Any:
             captured["agent"] = trial_config.agent
-            captured["active_routes"] = gateway.active_routes
             if queue_fails:
                 raise RuntimeError("trial failed")
             return _trial_result(rewards={"reward": 1.0})
@@ -1302,9 +1122,9 @@ class TestExecute:
         with _ctx():
             await backend.execute(_request(), AsyncMock(), AsyncMock())
 
-        assert captured["active_routes"] == 1
-        assert captured["agent"].env["OPENAI_API_KEY"] != "sk-test"
-        assert gateway.active_routes == 0
+        agent = captured["agent"]
+        assert agent.kwargs["api_base"] == "http://ctrl:8080"
+        assert agent.kwargs["llm_kwargs"]["api_key"] == "sk-test"
 
     async def test_missing_task_is_validation_error(self, monkeypatch):
         _patch_trial(monkeypatch)
@@ -1654,7 +1474,7 @@ class TestConcurrencyAndLifecycle:
         with pytest.raises(ValueError, match="max_queue_depth must be >= 0"):
             NativeHarborBackend(max_queue_depth=-1)
 
-    def test_health_reports_capacity_and_direct_binding_capabilities(self):
+    def test_health_reports_capacity_and_binding_capabilities(self):
         backend = NativeHarborBackend(max_concurrent=3)
         assert backend.max_concurrency == 3
         assert backend.max_queue_depth == 3
@@ -1665,37 +1485,9 @@ class TestConcurrencyAndLifecycle:
             "binding": "terminus-2",
             "binding_protocol": "OpenAI Chat Completions",
             "protocol_capabilities": ["OpenAI Chat Completions"],
-            "gateway_routing": None,
-            "evaluation_supported": True,
             "training_supported": True,
             "max_concurrency": 3,
             "max_queue_depth": 3,
-        }
-
-    def test_health_reports_mounted_gateway_capabilities(self):
-        with pytest.warns(UserWarning, match="codex.*eval-only"):
-            backend = NativeHarborBackend(
-                agent_name="codex",
-                gateway_base_url="http://gateway.example:8000",
-                max_queue_depth=0,
-            )
-
-        assert backend.health() == {
-            "status": "ok",
-            "backend": "native_harbor",
-            "agent": "codex",
-            "binding": "codex",
-            "binding_protocol": "OpenAI Responses",
-            "protocol_capabilities": [
-                "OpenAI Chat Completions",
-                "OpenAI Responses",
-                "Anthropic Messages",
-            ],
-            "gateway_routing": "header_token",
-            "evaluation_supported": True,
-            "training_supported": False,
-            "max_concurrency": 8,
-            "max_queue_depth": 0,
         }
 
     async def test_successful_trial_dir_cleaned_up(self, monkeypatch, tmp_path):
