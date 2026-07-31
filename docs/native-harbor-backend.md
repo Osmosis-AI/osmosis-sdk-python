@@ -62,22 +62,13 @@ if __name__ == "__main__":
 
 The model endpoint and key are **not** configured here — they arrive per rollout from the ambient `RolloutContext` (see [Model endpoint injection](#model-endpoint-injection)). To exercise the server locally, set the same env vars a training controller would: `OSMOSIS_CHAT_COMPLETIONS_URL`, `OSMOSIS_API_KEY`, `OSMOSIS_ROLLOUT_ID` ([context.py](../osmosis_ai/rollout/context.py)).
 
-The plain Harbor `Trial` path used here does not invoke Harbor's telemetry
-reporting call sites. Managed images should nevertheless set
-`HARBOR_TELEMETRY=0` as a belt-and-suspenders opt-out.
+The plain Harbor `Trial` path used here does not invoke Harbor's telemetry reporting call sites. Managed images should nevertheless set `HARBOR_TELEMETRY=0` as a belt-and-suspenders opt-out.
 
-Only agents the training path can consume are registered. The train and eval
-controllers each expose exactly one model-facing route per rollout,
-`POST /sessions/{id}/v1/chat/completions`, so an agent that speaks a different
-wire protocol (OpenAI Responses, Anthropic Messages) is not reachable and is not
-admitted. The SDK does not translate between protocols; see [Agents](#agents).
+Only agents the training path can consume are registered. The train and eval controllers each expose exactly one model-facing route per rollout, `POST /sessions/{id}/v1/chat/completions`, so an agent that speaks a different wire protocol (OpenAI Responses, Anthropic Messages) is not reachable and is not admitted. The SDK does not translate between protocols; see [Agents](#agents).
 
 ### Supplying full Harbor configuration
 
-The Quickstart leaves `environment` and `verifier` at their defaults. The
-canonical constructor accepts Harbor's complete `AgentConfig`,
-`EnvironmentConfig`, and `VerifierConfig`, including skills, MCP servers, log
-filters, network settings, mounts, resource controls, and custom verifier fields:
+The Quickstart leaves `environment` and `verifier` at their defaults. The canonical constructor accepts Harbor's complete `AgentConfig`, `EnvironmentConfig`, and `VerifierConfig`, including skills, MCP servers, log filters, network settings, mounts, resource controls, and custom verifier fields:
 
 ```python
 from harbor.models.environment_type import EnvironmentType
@@ -107,9 +98,7 @@ Each Trial is one environment instance, so keep `max_concurrent` aligned with th
 
 ### Prewarm setup before the server becomes ready
 
-`NativeHarborBackend.prewarm()` runs one Harbor `TrialConfig(install_only=True)`
-per supplied `TaskConfig`. The convenience `prewarm_lifespan()` turns that into
-a startup gate for the same FastAPI server:
+`NativeHarborBackend.prewarm()` runs one Harbor `TrialConfig(install_only=True)` per supplied `TaskConfig`. The convenience `prewarm_lifespan()` turns that into a startup gate for the same FastAPI server:
 
 ```python
 from pathlib import Path
@@ -133,38 +122,11 @@ app = create_rollout_server(
 )
 ```
 
-The lifespan finishes prewarming before FastAPI accepts health checks or rollout
-requests. For an existing custom lifespan, call `await backend.prewarm(tasks)`
-before yielding. The backend clones the task list and its full
-agent/environment/verifier templates, assigns unique `native-prewarm-*` trial
-names, and uses the same `max_concurrent` queue with Harbor retries pinned to
-zero. It needs no `RolloutContext`, controller URL/key, or callbacks. Harbor
-resolves the task, starts and health-checks the environment, uploads configured
-skills, and runs agent setup/install; it skips the agent run and verification,
-so it makes no model call and produces no reward.
+The lifespan finishes prewarming before FastAPI accepts health checks or rollout requests. For an existing custom lifespan, call `await backend.prewarm(tasks)` before yielding. The backend clones the task list and its full agent/environment/verifier templates, assigns unique `native-prewarm-*` trial names, and uses the same `max_concurrent` queue with Harbor retries pinned to zero. It needs no `RolloutContext`, controller URL/key, or callbacks. Harbor resolves the task, starts and health-checks the environment, uploads configured skills, and runs agent setup/install; it skips the agent run and verification, so it makes no model call and produces no reward.
 
-Every configured task is attempted. Raised setup exceptions and Harbor
-`result.exception_info` failures are reported together, and any failure aborts
-server startup. The aggregate names each task and exception type, but keeps raw
-setup output out of startup logs because it may contain configured credentials.
-When Harbor got far enough to create a failed trial directory, the aggregate
-points to it for details; earlier resolution failures explicitly say that no
-directory was created. Successful prewarm trial directories follow
-`cleanup_successful_trials`; failed directories that exist are retained for
-inspection.
-Use immutable package digests and git commits in this startup list just as in
-dataset metadata.
+Every configured task is attempted. Raised setup exceptions and Harbor `result.exception_info` failures are reported together, and any failure aborts server startup. The aggregate names each task and exception type, but keeps raw setup output out of startup logs because it may contain configured credentials. When Harbor got far enough to create a failed trial directory, the aggregate points to it for details; earlier resolution failures explicitly say that no directory was created. Successful prewarm trial directories follow `cleanup_successful_trials`; failed directories that exist are retained for inspection. Use immutable package digests and git commits in this startup list just as in dataset metadata.
 
-This list is a one-shot startup preparation plan, **not** a rollout-server work
-list: it does not sample, retry, grade, or schedule controller rollouts. Miles or
-eval still owns all real work. Harbor describes `install_only` as a fast setup
-compatibility check, and durable cache benefit depends on the environment
-provider and its lifecycle configuration. In particular, default local Docker
-uses `EnvironmentConfig.delete=True`; finalization removes the container, local
-image, and volumes, so an installed CLI is not guaranteed to survive into a
-later Trial. Prewarming can prime only the task/package/image caches that the
-chosen provider actually retains. It also does not run the real Miles/eval
-closed loop and makes no new training-safety or E2E claim.
+This list is a one-shot startup preparation plan, **not** a rollout-server work list: it does not sample, retry, grade, or schedule controller rollouts. Miles or eval still owns all real work. Harbor describes `install_only` as a fast setup compatibility check, and durable cache benefit depends on the environment provider and its lifecycle configuration. In particular, default local Docker uses `EnvironmentConfig.delete=True`; finalization removes the container, local image, and volumes, so an installed CLI is not guaranteed to survive into a later Trial. Prewarming can prime only the task/package/image caches that the chosen provider actually retains. It also does not run the real Miles/eval closed loop and makes no new training-safety or E2E claim.
 
 ## Dataset contract
 
@@ -185,12 +147,7 @@ Each row points at a Harbor task through a first-class `metadata` key. The datas
 
 `metadata["harbor_task"]` is **required** — a missing value raises `ValueError`. Keep its shape consistent across all rows (the dataset validator gates on a uniform `metadata` shape). Resolution, download, and the `~/.cache/harbor` content-hash cache are all handled by Harbor's `Trial.create()`; the backend never writes a loader.
 
-Pin network-resolved tasks so every rollout in a long run executes the same
-bytes. Package references without an `@ref`, or with explicit `@latest`, still
-resolve as before but log a warning; use the package's immutable `sha256:`
-digest. Git tasks without a non-blank `metadata["git_commit_id"]` likewise log
-an actionable warning; set it to the desired commit SHA. These are warnings,
-not validation errors, and warning logs never include the git URL.
+Pin network-resolved tasks so every rollout in a long run executes the same bytes. Package references without an `@ref`, or with explicit `@latest`, still resolve as before but log a warning; use the package's immutable `sha256:` digest. Git tasks without a non-blank `metadata["git_commit_id"]` likewise log an actionable warning; set it to the desired commit SHA. These are warnings, not validation errors, and warning logs never include the git URL.
 
 `metadata["harbor_model"]` (optional) overrides the backend's `model_name` for that single row. The selected binding still validates the provider prefix: Chat Completions bindings require `openai/...` so a row cannot silently switch the agent to a different wire protocol.
 
@@ -198,14 +155,10 @@ not validation errors, and warning logs never include the git URL.
 
 Dataset construction has a few controller-owned constraints:
 
-- Platform datasets require `system_prompt` and `user_prompt` columns and at
-  least four rows, even though Native ignores the prompt columns at execution.
-- Eval samples 10% of rows with seed 42 when no limit is set. Set an explicit
-  limit that covers the whole task set when full coverage matters.
-- For training, one dataset row becomes one GRPO group (eight rollouts per row
-  by default).
-- As an acceptance check, run eval with the `oracle` binding; every valid task
-  should receive reward `1.0`.
+- Platform datasets require `system_prompt` and `user_prompt` columns and at least four rows, even though Native ignores the prompt columns at execution.
+- Eval samples 10% of rows with seed 42 when no limit is set. Set an explicit limit that covers the whole task set when full coverage matters.
+- For training, one dataset row becomes one GRPO group (eight rollouts per row by default).
+- As an acceptance check, run eval with the `oracle` binding; every valid task should receive reward `1.0`.
 
 ## Constructor reference
 
@@ -229,12 +182,7 @@ All arguments are keyword-only ([backend.py](../osmosis_ai/rollout/backend/nativ
 
 ### Configuration ownership and cloning
 
-The constructor deep-clones all three Harbor objects immediately and again for
-every rollout. Harbor may resolve agent skills in place, so no rollout can mutate
-the caller's objects or another rollout's nested dictionaries, lists, env, skills,
-or MCP definitions. Cloning uses Pydantic's `model_copy(deep=True)` rather than a
-serialization round trip; Harbor's serializers intentionally redact or templatize
-sensitive environment values.
+The constructor deep-clones all three Harbor objects immediately and again for every rollout. Harbor may resolve agent skills in place, so no rollout can mutate the caller's objects or another rollout's nested dictionaries, lists, env, skills, or MCP definitions. Cloning uses Pydantic's `model_copy(deep=True)` rather than a serialization round trip; Harbor's serializers intentionally redact or templatize sensitive environment values.
 
 | Configuration field | Native policy |
 |---|---|
@@ -255,15 +203,9 @@ sensitive environment values.
 
 ## Agents
 
-Agent support is binding-specific. A binding records the wire protocol, identity
-channel, training status, and an exact CLI version for installed agents.
+Agent support is binding-specific. A binding records the wire protocol, identity channel, training status, and an exact CLI version for installed agents.
 
-**Admission is training-parity.** A binding is registered only when the training
-path supports it. Eval deliberately does not get a wider agent set: widening it
-would mean carrying protocol support the trainer cannot use, for agents that
-could never graduate to training anyway. Anything not in the table below —
-including Harbor built-ins such as `codex`, `opencode`, and `claude-code` —
-fails at construction rather than inheriting generic `OPENAI_*` wiring.
+**Admission is training-parity.** A binding is registered only when the training path supports it. Eval deliberately does not get a wider agent set: widening it would mean carrying protocol support the trainer cannot use, for agents that could never graduate to training anyway. Anything not in the table below — including Harbor built-ins such as `codex`, `opencode`, and `claude-code` — fails at construction rather than inheriting generic `OPENAI_*` wiring.
 
 | Binding | Protocol / identity | Train | Status |
 |---|---|---:|---|
@@ -274,81 +216,37 @@ fails at construction rather than inheriting generic `OPENAI_*` wiring.
 
 ### Bringing your own agent loop
 
-Harbor lets you run an agent you wrote instead of one of its built-ins, and
-Native supports that. Select it with `AgentConfig.import_path` plus the custom
-binding whose identity channel your agent actually accepts:
+Harbor lets you run an agent you wrote instead of one of its built-ins, and Native supports that. Select it with `AgentConfig.import_path` plus the custom binding whose identity channel your agent actually accepts:
 
-- **`custom-installed-chat-completions`** — your agent subclasses Harbor's
-  `BaseInstalledAgent` and runs inside the task container. It receives
-  `OPENAI_BASE_URL` and `OPENAI_API_KEY` through the rollout-scoped
-  `AgentConfig.env`, which Harbor's environment resolution prefers over host
-  state. This is the usual shape for a custom loop.
-- **`custom-chat-completions`** — your agent runs in the rollout server process
-  and takes `api_base` / `llm_kwargs` constructor arguments, like `terminus-2`.
+- **`custom-installed-chat-completions`** — your agent subclasses Harbor's `BaseInstalledAgent` and runs inside the task container. It receives `OPENAI_BASE_URL` and `OPENAI_API_KEY` through the rollout-scoped `AgentConfig.env`, which Harbor's environment resolution prefers over host state. This is the usual shape for a custom loop.
+- **`custom-chat-completions`** — your agent runs in the rollout server process and takes `api_base` / `llm_kwargs` constructor arguments, like `terminus-2`.
 
-Pick by how your agent takes configuration: an installed agent never sees
-constructor kwargs, and an in-process agent never sees the container
-environment, so the wrong binding silently delivers nothing.
+Pick by how your agent takes configuration: an installed agent never sees constructor kwargs, and an in-process agent never sees the container environment, so the wrong binding silently delivers nothing.
 
-Both bindings own exactly two environment slots, `OPENAI_BASE_URL` and
-`OPENAI_API_KEY` (setting either yourself is rejected rather than silently
-overwritten). **Everything else in `agent.env` passes through untouched**,
-including other providers' credentials: a custom loop commonly routes only its
-policy model to the rollout endpoint and calls other providers directly for
-sub-agents, planners, or judges.
+Both bindings own exactly two environment slots, `OPENAI_BASE_URL` and `OPENAI_API_KEY` (setting either yourself is rejected rather than silently overwritten). **Everything else in `agent.env` passes through untouched**, including other providers' credentials: a custom loop commonly routes only its policy model to the rollout endpoint and calls other providers directly for sub-agents, planners, or judges.
 
-Rollout identity is carried in the endpoint URL itself, so your agent does not
-need to stamp `x-rollout-id` / `x-sample-id` headers — pointing an
-OpenAI-compatible client at `OPENAI_BASE_URL` is enough. (Older Osmosis
-integrations sent those headers; they are no longer required.)
+Rollout identity is carried in the endpoint URL itself, so your agent does not need to stamp `x-rollout-id` / `x-sample-id` headers — pointing an OpenAI-compatible client at `OPENAI_BASE_URL` is enough. (Older Osmosis integrations sent those headers; they are no longer required.)
 
-Neither binding claims training safety on your behalf. Both warn at
-construction: the SDK wires identity into an agent it cannot inspect, so
-confirming the loop keeps one append-only trajectory is yours to do.
+Neither binding claims training safety on your behalf. Both warn at construction: the SDK wires identity into an agent it cannot inspect, so confirming the loop keeps one append-only trajectory is yours to do.
 
 Two reasons a Harbor **built-in** agent is absent:
 
-- **Unreachable protocol.** `codex` and `opencode` speak OpenAI Responses;
-  `claude-code` speaks Anthropic Messages. The controller serves only
-  `/v1/chat/completions`, so these cannot reach it without protocol
-  translation, and translation would only ever buy eval.
-- **Opaque context management.** Compaction, subagents, and session rewriting
-  fork the token trajectory. That is a training blocker independent of protocol,
-  so making these agents reachable would not make them trainable — see
-  [Append-only trajectories](#append-only-trajectories-training-caveat).
+- **Unreachable protocol.** `codex` and `opencode` speak OpenAI Responses; `claude-code` speaks Anthropic Messages. The controller serves only `/v1/chat/completions`, so these cannot reach it without protocol translation, and translation would only ever buy eval.
+- **Opaque context management.** Compaction, subagents, and session rewriting fork the token trajectory. That is a training blocker independent of protocol, so making these agents reachable would not make them trainable — see [Append-only trajectories](#append-only-trajectories-training-caveat).
 
-`import_path` cannot reintroduce them. The guard resolves the class against
-Harbor's own agent registry rather than the table above, so naming
-`harbor.agents.installed.codex:Codex` through a custom binding is rejected.
-Registered built-ins are likewise rejected by import path so their binding and
-CLI pin cannot be bypassed; select those with `agent_name`.
+`import_path` cannot reintroduce them. The guard resolves the class against Harbor's own agent registry rather than the table above, so naming `harbor.agents.installed.codex:Codex` through a custom binding is rejected. Registered built-ins are likewise rejected by import path so their binding and CLI pin cannot be bypassed; select those with `agent_name`.
 
-Installed-agent versions are binding-owned and cannot be overridden through
-`agent.kwargs`. This prevents Harbor's default `@latest` installs from silently
-changing behavior during a long run. Chat Completions bindings also reject model
-prefixes for other providers.
+Installed-agent versions are binding-owned and cannot be overridden through `agent.kwargs`. This prevents Harbor's default `@latest` installs from silently changing behavior during a long run. Chat Completions bindings also reject model prefixes for other providers.
 
-`AgentConfig.override_setup_timeout_sec` controls only Harbor's setup/install
-phase for each Trial. The controller-provided `ExecutionRequest.agent_timeout_sec`
-remains the separate agent **run** timeout and overlays
-`AgentConfig.override_timeout_sec` for that rollout. The compatibility
-`agent_setup_timeout_sec` argument can still overlay the setup value.
+`AgentConfig.override_setup_timeout_sec` controls only Harbor's setup/install phase for each Trial. The controller-provided `ExecutionRequest.agent_timeout_sec` remains the separate agent **run** timeout and overlays `AgentConfig.override_timeout_sec` for that rollout. The compatibility `agent_setup_timeout_sec` argument can still overlay the setup value.
 
 ### Model endpoint injection
 
 Endpoint and key come from the ambient `RolloutContext` ([context.py](../osmosis_ai/rollout/context.py)) — `chat_completions_url` and `api_key` — which the controller supplies per rollout (read from `OSMOSIS_CHAT_COMPLETIONS_URL` / `OSMOSIS_API_KEY` on a container host).
 
-Every registered binding reaches that endpoint directly; the SDK performs no
-protocol translation. The endpoint must be reachable by the Harbor environment,
-and local-Docker URL rewriting is applied to it.
+Every registered binding reaches that endpoint directly; the SDK performs no protocol translation. The endpoint must be reachable by the Harbor environment, and local-Docker URL rewriting is applied to it.
 
-The backend overlays the selected binding's identity slots, so configuration
-cannot redirect model traffic. Kwargs-wired bindings have `agent.kwargs["api_base"]`
-overwritten with the rollout's endpoint even when the caller set it, and pin
-`extra_body.stream=False` until the controllers support that streaming path.
-Environment-wired bindings receive the endpoint and key in `agent.env` and reject
-a caller-set value for those two slots. The `oracle` binding is the exception: it
-invokes the task's reference solution and needs no model endpoint.
+The backend overlays the selected binding's identity slots, so configuration cannot redirect model traffic. Kwargs-wired bindings have `agent.kwargs["api_base"]` overwritten with the rollout's endpoint even when the caller set it, and pin `extra_body.stream=False` until the controllers support that streaming path. Environment-wired bindings receive the endpoint and key in `agent.env` and reject a caller-set value for those two slots. The `oracle` binding is the exception: it invokes the task's reference solution and needs no model endpoint.
 
 ## Append-only trajectories (training caveat)
 
@@ -370,20 +268,13 @@ RL training needs a single, linear, **append-only** token trajectory. Anything t
 
 Harbor verifiers emit a **named-channel** dict (`dict[str, float]`, e.g. `{"reward": 1.0}`), not a scalar. `_pick_reward` ([backend.py](../osmosis_ai/rollout/backend/native_harbor/backend.py)) collapses it: it takes the `reward_key` channel if present, else the sole value when there is exactly one channel. If multiple channels exist and none matches `reward_key`, the reward is left unset and the sample fails grading with a logged warning — set `reward_key` to the channel you want. The reward is read from the in-memory trial-level `TrialResult`, so no `reward.json` parsing is needed. A defensive legacy step-result fallback remains internal; it does not make multi-step tasks supported.
 
-A Harbor `TrialResult.exception_info` is authoritative: both callbacks report
-failure and the sample reward remains unset, even if a verifier emitted a numeric
-reward before the trial failed in a later phase. Failed trials can never be revived
-into trainable or successful eval samples by a partial reward.
+A Harbor `TrialResult.exception_info` is authoritative: both callbacks report failure and the sample reward remains unset, even if a verifier emitted a numeric reward before the trial failed in a later phase. Failed trials can never be revived into trainable or successful eval samples by a partial reward.
 
 The dataset row's `ground_truth` is **not** required for native tasks — the Harbor task's verifier is self-contained.
 
 ## Structured diagnostics
 
-Native results carry an emit-only diagnostics object in callback `extra_fields`
-(`RolloutCompleteRequest` and, for failures discovered after agent completion,
-`GraderCompleteRequest`). Existing controllers ignore this unknown field, so it
-does not change callback handling, but it makes failures attributable without
-parsing Harbor log text:
+Native results carry an emit-only diagnostics object in callback `extra_fields` (`RolloutCompleteRequest` and, for failures discovered after agent completion, `GraderCompleteRequest`). Existing controllers ignore this unknown field, so it does not change callback handling, but it makes failures attributable without parsing Harbor log text:
 
 ```json
 {
@@ -402,22 +293,9 @@ parsing Harbor log text:
 }
 ```
 
-The backend advances phase state from Harbor's `TrialQueue` lifecycle hooks.
-Possible phases are `setup`, `trial_setup`, `environment_setup`, `agent_setup`,
-`agent`, `verification`, `grading`, and `cancelled`. Hook durations cover the
-pre-trial intervals; when Harbor supplies its own `TimingInfo`, the exact
-environment, agent-setup, agent, verifier, and total-trial durations win. Values
-are non-negative seconds. Successful results use the same shape with
-`harbor_exception_type` and `category` set to `null`.
+The backend advances phase state from Harbor's `TrialQueue` lifecycle hooks. Possible phases are `setup`, `trial_setup`, `environment_setup`, `agent_setup`, `agent`, `verification`, `grading`, and `cancelled`. Hook durations cover the pre-trial intervals; when Harbor supplies its own `TimingInfo`, the exact environment, agent-setup, agent, verifier, and total-trial durations win. Values are non-negative seconds. Successful results use the same shape with `harbor_exception_type` and `category` set to `null`.
 
-On failure, the exact object sent to the callback is also written to the SDK log
-and archived as `~/.osmosis/<rollout-id>/diagnostics.json`. When a trajectory
-exists, the same object is additionally embedded at
-`trajectory.json.extra.osmosis.result_extra_fields`. The sidecar means setup or
-agent failures remain inspectable even when no valid ATIF document exists.
-Grader-only failures that happen after the workflow callback (for example a
-verifier timeout) cannot alter the already-sent completion callback; they still
-retain the structured payload in the log and final archive.
+On failure, the exact object sent to the callback is also written to the SDK log and archived as `~/.osmosis/<rollout-id>/diagnostics.json`. When a trajectory exists, the same object is additionally embedded at `trajectory.json.extra.osmosis.result_extra_fields`. The sidecar means setup or agent failures remain inspectable even when no valid ATIF document exists. Grader-only failures that happen after the workflow callback (for example a verifier timeout) cannot alter the already-sent completion callback; they still retain the structured payload in the log and final archive.
 
 ## Native ATIF trajectories
 
@@ -433,23 +311,9 @@ The SDK does not scan the sandbox or decide which task files are artifacts. User
 
 ## Concurrency and trial directories
 
-`max_concurrent` bounds running Trials through Harbor's `TrialQueue` semaphore;
-because each Trial is typically a container, `max_concurrent < 1` is rejected.
-`max_queue_depth` separately bounds requests already accepted by `POST /rollout`
-but waiting beyond those running slots. It defaults to `max_concurrent`, so the
-default backend accepts at most 16 rollouts: 8 running and 8 queued. Once that
-bound is full, `/rollout` returns HTTP 429 immediately instead of spending the
-controller's agent deadline in an unbounded SDK queue. Set `max_queue_depth=0`
-to admit no work beyond the current in-flight cap. The reservation is held
-through callbacks and trajectory persistence, then released on success,
-failure, or cancellation.
-Admission accounting is process-local; run one rollout-server worker per
-configured capacity, or budget each worker's limits independently.
+`max_concurrent` bounds running Trials through Harbor's `TrialQueue` semaphore; because each Trial is typically a container, `max_concurrent < 1` is rejected. `max_queue_depth` separately bounds requests already accepted by `POST /rollout` but waiting beyond those running slots. It defaults to `max_concurrent`, so the default backend accepts at most 16 rollouts: 8 running and 8 queued. Once that bound is full, `/rollout` returns HTTP 429 immediately instead of spending the controller's agent deadline in an unbounded SDK queue. Set `max_queue_depth=0` to admit no work beyond the current in-flight cap. The reservation is held through callbacks and trajectory persistence, then released on success, failure, or cancellation. Admission accounting is process-local; run one rollout-server worker per configured capacity, or budget each worker's limits independently.
 
-The server's `/health` response preserves the backend fields and adds a live
-capacity snapshot. Protocol fields describe this configured server instance;
-Chat Completions is the only reachable protocol. For example, an idle default
-server configured with eight running and eight queued slots reports:
+The server's `/health` response preserves the backend fields and adds a live capacity snapshot. Protocol fields describe this configured server instance; Chat Completions is the only reachable protocol. For example, an idle default server configured with eight running and eight queued slots reports:
 
 ```json
 {
@@ -475,21 +339,9 @@ server configured with eight running and eight queued slots reports:
 }
 ```
 
-Controllers currently ignore the additional health fields, so capacity and
-protocol surfacing are forward-compatible rather than full negotiation. The
-real Miles/eval capacity-mismatch measurement remains an E2E dependency.
+Controllers currently ignore the additional health fields, so capacity and protocol surfacing are forward-compatible rather than full negotiation. The real Miles/eval capacity-mismatch measurement remains an E2E dependency.
 
-Native is explicitly single-step and single-agent; a task with scripted Harbor
-steps is unsupported rather than deferred. Harbor trial retries are hard-disabled:
-each rollout id owns exactly one Trial attempt and its linear model session. A
-single-step trial fires the workflow callback when verification starts and the
-grader callback when the trial finishes. Successful trials are removed only
-after artifact relocation and durable provisional ATIF persistence; failed
-trials and successful trials whose outputs could not be safely preserved are
-kept for inspection. Harbor reports in-trial failures via
-`result.exception_info` rather than by raising, and the backend always fires the
-grader callback even on failure so the trainer never hangs waiting on a missing
-reward.
+Native is explicitly single-step and single-agent; a task with scripted Harbor steps is unsupported rather than deferred. Harbor trial retries are hard-disabled: each rollout id owns exactly one Trial attempt and its linear model session. A single-step trial fires the workflow callback when verification starts and the grader callback when the trial finishes. Successful trials are removed only after artifact relocation and durable provisional ATIF persistence; failed trials and successful trials whose outputs could not be safely preserved are kept for inspection. Harbor reports in-trial failures via `result.exception_info` rather than by raising, and the backend always fires the grader callback even on failure so the trainer never hangs waiting on a missing reward.
 
 ## Submit preflight
 

@@ -297,14 +297,9 @@ def discover_native_backend(
     *,
     workspace_directory: Path | None = None,
 ) -> type | None:
-    """Return the native backend class exposed by the entrypoint's ASGI app.
+    """Return the native backend bound to the entrypoint's ASGI app, if any.
 
-    Native rollouts carry no Python Grader, so submit preflight uses this to skip
-    the Grader requirement. The entrypoint must expose a module-level ``app`` built
-    by ``create_rollout_server`` with a ``NativeHarborBackend`` instance. Inspecting
-    that runtime marker proves the actual app wiring without interpreting Python
-    source. A load or inspection failure returns ``None`` and is surfaced by the
-    normal workflow preflight path.
+    Native submit preflight inspects the module-level app because native tasks have no Python workflow or grader. Load and inspection failures return ``None`` for the normal preflight path to report.
     """
     try:
         from osmosis_ai.rollout.backend.native_harbor.backend import (

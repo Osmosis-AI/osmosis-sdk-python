@@ -1,6 +1,7 @@
-"""Native Harbor execution backend: drive one harbor Trial per rollout and map
-its verifier reward onto the rollout's single sample. The agent is fixed per
-backend; only the task and model vary per rollout via metadata."""
+"""Native Harbor execution backend.
+
+Run one Harbor Trial per rollout and map its verifier output to a single sample. The backend fixes the agent while the task and model may vary through metadata.
+"""
 
 import asyncio
 import copy
@@ -78,8 +79,7 @@ TRIAL_NAME_PREFIX = "native-"
 PREWARM_TRIAL_NAME_PREFIX = "native-prewarm-"
 _BACKEND_DIAGNOSTIC_NAME = "native_harbor"
 
-# terminus-2 summarizes mid-run, breaking training's append-only trajectory; default
-# it off (agent_kwargs override). Default agent only -- other agents are the caller's job.
+# Disable summarization to preserve append-only trajectories.
 _TERMINUS_2_DEFAULT_KWARGS: dict[str, Any] = {
     "enable_summarize": False,
     "proactive_summarization_threshold": 0,
@@ -87,12 +87,9 @@ _TERMINUS_2_DEFAULT_KWARGS: dict[str, Any] = {
 
 
 class _AgentProtocol(StrEnum):
-    """Wire protocol an agent speaks to reach the rollout controller.
+    """Wire protocol used to reach the rollout controller.
 
-    The train and eval controllers each expose exactly one model-facing route
-    per rollout, ``POST /sessions/{id}/v1/chat/completions``.  An agent whose
-    protocol is not reachable there is not admitted; the SDK does not translate
-    between protocols.
+    Only protocols exposed by the train and eval session routes can be admitted.
     """
 
     CHAT_COMPLETIONS = "OpenAI Chat Completions"
@@ -100,12 +97,9 @@ class _AgentProtocol(StrEnum):
 
 
 class _IdentityChannel(StrEnum):
-    """How a binding's agent accepts the rollout's endpoint and credential.
+    """How an agent receives controller credentials.
 
-    ``KWARGS`` suits an in-process agent that takes ``api_base``/``llm_kwargs``
-    constructor arguments.  ``OPENAI_ENV`` suits an installed agent that runs in
-    the task container and reads ``OPENAI_BASE_URL``/``OPENAI_API_KEY`` from its
-    process environment, which is how a custom Harbor agent loop is wired.
+    In-process agents use constructor kwargs; installed agents use scoped OpenAI environment variables.
     """
 
     KWARGS = "kwargs"
@@ -119,22 +113,15 @@ class _AgentBinding:
     protocol: _AgentProtocol
     identity_channel: _IdentityChannel
     training_supported: bool
-    # False only for a binding that drives no model traffic at all (``oracle``
-    # runs the task's reference solution).  Such a binding can never be
-    # training-supported because it emits no trajectory, so the training-parity
-    # admission gate does not apply to it.
+    # ``oracle`` emits no model traffic or trajectory.
     emits_model_traffic: bool = True
     warning: str | None = None
     allowed_model_providers: frozenset[str] | None = None
 
 
-# Admission is training-parity: a binding is registered here only when the
-# training path supports it.  Eval deliberately does not get a wider agent set,
-# because an eval-only agent would need protocol support the trainer cannot use.
-# `oracle` is the one exception and is not an agent in the model sense.
+# Keep eval admission aligned with training; ``oracle`` is model-free.
 _CUSTOM_CHAT_BINDING = "custom-chat-completions"
 _CUSTOM_INSTALLED_CHAT_BINDING = "custom-installed-chat-completions"
-# Bindings for an agent the caller supplies through AgentConfig.import_path.
 _CUSTOM_BINDINGS = frozenset({_CUSTOM_CHAT_BINDING, _CUSTOM_INSTALLED_CHAT_BINDING})
 _AGENT_BINDINGS: dict[str, _AgentBinding] = {
     DEFAULT_AGENT_NAME: _AgentBinding(
@@ -156,11 +143,7 @@ _AGENT_BINDINGS: dict[str, _AgentBinding] = {
             "validate datasets and verifiers."
         ),
     ),
-    # A caller's own agent loop, selected by AgentConfig.import_path. Both are
-    # registered because they speak the one protocol the controller serves. The
-    # SDK cannot inspect a custom agent's context management, so append-only
-    # verification is the caller's responsibility rather than something claimed
-    # here. The two differ only in how the agent accepts rollout identity.
+    # Caller-provided agents must preserve append-only trajectories themselves.
     _CUSTOM_CHAT_BINDING: _AgentBinding(
         name=_CUSTOM_CHAT_BINDING,
         protocol=_AgentProtocol.CHAT_COMPLETIONS,
@@ -327,14 +310,13 @@ def _redact_agent_extra(value: Any, *, api_key: str | None) -> Any:
 
 
 def _prewarm_task_label(task: TaskConfig) -> str:
-    """Stable, human-readable task identity for aggregate startup failures."""
+    """Return a safe task label for startup errors."""
     if task.name is not None:
         return f"{task.name}@{task.ref}" if task.ref is not None else task.name
     if task.git_url is not None:
         commit = task.git_commit_id or "<unpinned>"
         path = str(task.path) if task.path is not None else "<unknown-path>"
-        # Repository URLs may embed credentials. A task path plus immutable commit
-        # is sufficient to identify the failed prewarm without leaking the URL.
+        # Avoid logging credential-bearing repository URLs.
         return f"git:{path}@{commit}"
     return str(task.path)
 
@@ -348,13 +330,7 @@ def _prewarm_failure_location(config: TrialConfig) -> str:
 
 
 def _harbor_builtin_name_for_import_path(import_path: str) -> str | None:
-    """Return the Harbor agent name when an import path resolves to a built-in.
-
-    Checked against Harbor's own registry rather than ``_AGENT_BINDINGS``: an
-    agent that was deliberately left out of the binding table (because the
-    controller cannot serve its wire protocol) must not become reachable again
-    by naming its class through ``import_path``.
-    """
+    """Resolve an import path against Harbor's built-in registry."""
     if ":" not in import_path:
         return None
     module_path, _, class_name = import_path.partition(":")
@@ -374,13 +350,7 @@ def _harbor_builtin_name_for_import_path(import_path: str) -> str | None:
 
 
 def _identity_env_keys(binding: _AgentBinding) -> frozenset[str]:
-    """Environment slots the binding owns, which the caller must not set.
-
-    Deliberately narrow. A custom agent legitimately carries other providers'
-    credentials in ``agent.env`` -- it may route only part of its work to the
-    rollout's model endpoint -- so only the two slots that select that endpoint
-    are owned; everything else passes through untouched.
-    """
+    """Return environment keys reserved by the binding."""
     if binding.identity_channel == _IdentityChannel.OPENAI_ENV:
         return frozenset({"OPENAI_BASE_URL", "OPENAI_API_KEY"})
     return frozenset()
@@ -478,11 +448,6 @@ def _resolve_binding(
             f"bindings: {', '.join(sorted(_AGENT_BINDINGS))}"
         )
 
-    # Training-parity admission: eval does not get a wider agent set than
-    # training. `oracle` drives no model at all, so the gate does not apply to
-    # it; every other binding must be one the trainer can consume. There is
-    # deliberately no opt-in flag to wave this through -- an escape hatch here is
-    # how eval-only agents accumulate.
     if selected.emits_model_traffic and not selected.training_supported:
         raise ValueError(
             f"Native Harbor binding {selected.name!r} is not supported for "
@@ -494,7 +459,10 @@ def _resolve_binding(
 
 
 class NativeHarborBackend(ExecutionBackend):
-    """Drive a harbor Trial per rollout and map its verifier reward."""
+    """Execute one native Harbor Trial per rollout.
+
+    The Harbor task owns the instruction, environment, and verifier; its reward maps to the rollout's single sample.
+    """
 
     model_name: str
 
@@ -641,8 +609,7 @@ class NativeHarborBackend(ExecutionBackend):
 
     @property
     def capture_final_result(self) -> bool:
-        # Harbor verification always runs as part of the Trial. Capture its final
-        # outcome for diagnostics/archive even when no remote grader URL was given.
+        # Harbor verification supplies the final reward.
         return True
 
     @property
@@ -671,12 +638,9 @@ class NativeHarborBackend(ExecutionBackend):
         }
 
     async def prewarm(self, tasks: Sequence[TaskConfig]) -> None:
-        """Run setup-only Harbor trials for ``tasks`` before serving rollouts.
+        """Run setup-only trials for every task before serving rollouts.
 
-        Prewarm trials share the backend's bounded, zero-retry ``TrialQueue`` but
-        never enter the rollout callback or model-routing path. Every task is
-        attempted so one startup failure cannot hide compatibility failures in the
-        rest of the configured task list.
+        Prewarm uses the backend's bounded zero-retry queue, attempts every task, and reports all setup failures together.
         """
         if not tasks:
             raise ValueError("prewarm requires at least one Harbor TaskConfig")
@@ -692,8 +656,7 @@ class NativeHarborBackend(ExecutionBackend):
         for config, outcome in zip(configs, outcomes, strict=True):
             label = _prewarm_task_label(config.task)
             if isinstance(outcome, BaseException):
-                # A cancelled server startup must remain cancellation, not be
-                # converted into a compatibility failure after sibling tasks end.
+                # Preserve startup cancellation.
                 if not isinstance(outcome, Exception):
                     raise outcome
                 failures.append(
@@ -729,10 +692,9 @@ class NativeHarborBackend(ExecutionBackend):
     def prewarm_lifespan(
         self, tasks: Sequence[TaskConfig]
     ) -> Callable[[object], AbstractAsyncContextManager[None]]:
-        """Return an ASGI lifespan that completes ``prewarm`` before startup.
+        """Return an ASGI lifespan that prewarms before startup.
 
-        The task list is cloned when the lifespan is built, so later caller
-        mutations cannot change which setup checks a configured server performs.
+        The task list is cloned when the lifespan is built so later caller mutations cannot change the startup plan.
         """
         if not tasks:
             raise ValueError("prewarm requires at least one Harbor TaskConfig")
@@ -769,7 +731,6 @@ class NativeHarborBackend(ExecutionBackend):
                 trial_cfg = self._build_trial_config(
                     request, task_cfg, agent_cfg, trial_name
                 )
-                # submit() = Trial.create + run under the queue's semaphore.
                 trial_result = await self._queue.submit(trial_cfg)
             except Exception as exc:
                 setup_error = exc
@@ -779,9 +740,7 @@ class NativeHarborBackend(ExecutionBackend):
                     traceback.format_exc(),
                 )
 
-            # Single-step Harbor trials fire the workflow callback at verification
-            # start. Multi-step verification is interleaved with agent work, so its
-            # workflow callback intentionally waits for the final trial result.
+            # Multi-step trials defer completion until the final result.
             if not pending.workflow_complete_called:
                 workflow_result = (
                     pending.workflow_result
@@ -831,9 +790,7 @@ class NativeHarborBackend(ExecutionBackend):
                 and getattr(trial_result, "exception_info", None) is None
             )
             if result_to_persist.extra_fields is not None:
-                # Persist diagnostics for every outcome, even when the agent emitted
-                # no ATIF document. The server later overlays controller metrics on
-                # any trajectory and rewrites the same diagnostics sidecar.
+                # Persist diagnostics even without an ATIF document.
                 persisted = await _save_trajectories_with_status(
                     rollout_id=request.id,
                     result=result_to_persist,
@@ -842,8 +799,7 @@ class NativeHarborBackend(ExecutionBackend):
                     artifact_root=self.artifact_root,
                 )
                 if successful and not persisted:
-                    # Never delete the source trial after losing the only durable
-                    # diagnostics/trajectory archive for a successful rollout.
+                    # Retain the source when archival fails.
                     pending.preserve_trial = True
 
             relocated = self._relocate_trial_artifacts(request.id)
@@ -855,9 +811,7 @@ class NativeHarborBackend(ExecutionBackend):
             ):
                 self._cleanup_trial(trial_name)
             if callback_error is not None:
-                # The server owns the final failure-notification path. Raising only
-                # after outputs are safe avoids aborting Harbor mid-trial while still
-                # guaranteeing that an unacknowledged callback is not silently lost.
+                # Let the server perform final failure notification after archival.
                 raise callback_error
         finally:
             self._pending.pop(trial_name, None)
@@ -866,11 +820,9 @@ class NativeHarborBackend(ExecutionBackend):
     async def _try_callback(
         callback: ResultCallback, result: ExecutionResult, rollout_id: str, label: str
     ) -> Exception | None:
-        """Attempt a controller callback without aborting an in-flight Harbor trial.
+        """Attempt an idempotent callback without aborting the trial.
 
-        Traingate callbacks are idempotent by rollout id. A failed hook delivery can
-        therefore be retried after the trial, and a final failure must escape to the
-        server's fallback instead of leaving the controller waiting forever.
+        Delivery failures are retained until trial outputs are safe, then raised so the server can perform final notification fallback.
         """
         try:
             await callback(result)
@@ -928,15 +880,13 @@ class NativeHarborBackend(ExecutionBackend):
         pending = self._pending.get(event.trial_name)
         if pending is None:
             return
-        # Single-step Harbor may continue into verification after recording an
-        # agent failure. Capture that failure's phase before advancing the hook state.
+        # Preserve an agent failure before verification advances the phase.
         self._capture_error_phase(pending, event.result)
         pending.transition_phase("verification")
         if pending.workflow_complete_called:
             return
         if event.result.step_results is not None:
-            # Multi-step trials verify after every agent step. Firing here would
-            # incorrectly announce workflow completion after the first step.
+            # Multi-step verification is not workflow completion.
             return
 
         result = self._build_workflow_result(pending, event.result)
@@ -958,11 +908,9 @@ class NativeHarborBackend(ExecutionBackend):
         harbor_exception_type: str | None = None,
         phase: str | None = None,
     ) -> dict[str, Any]:
-        """Build the callback/archive diagnostics for one native result.
+        """Build stable callback and archive diagnostics.
 
-        Failure payloads are cached so the callback, SDK log, grader result, and
-        trajectory archive all carry identical content even if later hooks advance
-        the timing state.
+        Failure payloads are cached so callbacks, logs, grader results, and archives keep identical content as later hooks update timing state.
         """
         if category is not None and pending.error_payload is not None:
             return pending.error_payload
@@ -996,8 +944,7 @@ class NativeHarborBackend(ExecutionBackend):
         if trial_result is None:
             return phase
 
-        # Agent setup has no Harbor queue hook. Its TimingInfo is the only precise
-        # signal separating it from the broader environment/setup interval.
+        # Harbor exposes agent setup only through TimingInfo.
         if (
             phase == "environment_setup"
             and getattr(trial_result, "agent_setup", None) is not None
@@ -1006,8 +953,7 @@ class NativeHarborBackend(ExecutionBackend):
         if phase != "setup":
             return phase
 
-        # Older/duck-typed queue integrations may not invoke hooks. Recover the
-        # furthest entered phase from Harbor's result timing slots.
+        # Recover phase when older integrations omit hooks.
         for attr, inferred in (
             ("verifier", "verification"),
             ("agent_execution", "agent"),
@@ -1138,7 +1084,7 @@ class NativeHarborBackend(ExecutionBackend):
                 trial_result.compute_token_cost_totals()
             )
         except AttributeError:
-            # Some integrators and unit tests provide a duck-typed older result.
+            # Support older duck-typed results.
             return {}
         except Exception:
             logger.warning("Failed to read native Harbor token totals", exc_info=True)
@@ -1248,13 +1194,15 @@ class NativeHarborBackend(ExecutionBackend):
         shutil.rmtree(self.trials_dir / trial_name, ignore_errors=True)
 
     def _build_prewarm_trial_config(self, task_cfg: TaskConfig) -> TrialConfig:
-        """Clone constructor templates into one setup-only Harbor TrialConfig."""
+        """Clone constructor templates into one setup-only Harbor TrialConfig.
+
+        Prewarm omits rollout credentials and disables verification while retaining agent setup defaults.
+        """
         agent_cfg = self._agent_config.model_copy(deep=True)
         _validate_agent_config(agent_cfg)
         _validate_agent_env(self._binding, agent_cfg.env)
 
-        # Installation deliberately omits per-rollout endpoint and credential
-        # identity; only the agent's own defaults apply.
+        # Prewarm must not receive rollout credentials.
         if agent_cfg.name == DEFAULT_AGENT_NAME:
             agent_cfg.kwargs = {
                 **_TERMINUS_2_DEFAULT_KWARGS,
@@ -1283,7 +1231,6 @@ class NativeHarborBackend(ExecutionBackend):
         trial_name: str,
     ) -> TrialConfig:
         verifier_cfg = self._verifier_config.model_copy(deep=True)
-        # The Harbor verifier is the sole reward source for native rollouts.
         verifier_cfg.disable = False
         if request.grader_timeout_sec is not None:
             verifier_cfg.override_timeout_sec = request.grader_timeout_sec
@@ -1313,7 +1260,6 @@ class NativeHarborBackend(ExecutionBackend):
             )
         _validate_model_for_binding(self._binding, model_name)
         _validate_agent_env(self._binding, agent_cfg.env)
-        # User passthrough is the base layer; SDK-wired values below overlay it.
         kwargs = agent_cfg.kwargs
         env = agent_cfg.env
 
@@ -1328,25 +1274,19 @@ class NativeHarborBackend(ExecutionBackend):
 
         if self._binding.identity_channel == _IdentityChannel.OPENAI_ENV:
             assert endpoint is not None
-            # Scoped AgentConfig.env has the highest Harbor merge precedence, so
-            # an installed agent reading these through Harbor's env resolution
-            # sees this rollout's endpoint rather than host state. Any other
-            # variable the caller set, including other providers' credentials,
-            # is left exactly as supplied.
+            # AgentConfig.env overrides host credentials for this rollout.
             env["OPENAI_BASE_URL"] = endpoint
             if api_key:
                 env["OPENAI_API_KEY"] = api_key
         elif self._binding.identity_channel == _IdentityChannel.KWARGS:
             assert endpoint is not None
-            # Precedence low -> high: default-agent kwargs, user kwargs, SDK wiring.
             defaults = _TERMINUS_2_DEFAULT_KWARGS if name == DEFAULT_AGENT_NAME else {}
             kwargs = {**defaults, **kwargs}
-            # Identity: api_base kwarg + api_key in llm_kwargs (deep-merged).
             kwargs["api_base"] = endpoint
             llm_kwargs: dict[str, Any] = dict(kwargs.get("llm_kwargs") or {})
             if api_key:
                 llm_kwargs["api_key"] = api_key
-            # Controllers require JSON for this path, so stream=False is binding-owned.
+            # Controllers require a non-streaming JSON response.
             extra_body: dict[str, Any] = dict(llm_kwargs.get("extra_body") or {})
             extra_body["stream"] = False
             llm_kwargs["extra_body"] = extra_body
@@ -1367,8 +1307,10 @@ class NativeHarborBackend(ExecutionBackend):
         workflow_result: ExecutionResult,
         trial_result: TrialResult | None,
     ) -> ExecutionResult:
-        """Grade the rollout's single sample from the harbor verifier's in-memory
-        result. On setup failure (no trial result) the workflow error is propagated."""
+        """Build the single-sample result from Harbor verification.
+
+        Setup failures propagate the workflow error, and any Harbor exception invalidates a partial verifier reward.
+        """
         request = pending.request
         sample = (
             workflow_result.sample.model_copy(deep=True)
@@ -1387,9 +1329,7 @@ class NativeHarborBackend(ExecutionBackend):
 
         err = getattr(trial_result, "exception_info", None)
         if err is not None:
-            # A Harbor failure is authoritative even when verification emitted a
-            # numeric reward before a later phase failed. Never let that reward
-            # revive the rollout for either eval or training.
+            # A later Harbor failure invalidates any partial reward.
             sample.reward = None
             return ExecutionResult(
                 status=RolloutStatus.FAILURE,
@@ -1436,8 +1376,7 @@ class NativeHarborBackend(ExecutionBackend):
 
     @staticmethod
     def _extract_rewards(trial_result: TrialResult) -> dict[str, float | int] | None:
-        """Verifier rewards, or None. Harbor rewards are a named-channel dict (not a
-        scalar); take the trial-level one if present, else the first step's."""
+        """Return trial-level rewards, falling back to the first step."""
         top = trial_result.verifier_result
         if top is not None and top.rewards:
             return top.rewards
@@ -1450,7 +1389,6 @@ class NativeHarborBackend(ExecutionBackend):
     def _pick_reward(
         self, rewards: dict[str, float | int] | None
     ) -> float | int | None:
-        # Collapse named-channel rewards to one float: the 'reward' key, else the sole value.
         if not rewards:
             return None
         if self.reward_key in rewards:

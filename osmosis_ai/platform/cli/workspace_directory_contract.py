@@ -230,8 +230,7 @@ def validate_rollout_backend(
             "The server validates it after installing the rollout's dependencies."
         ]
     if workflow_error or workflow_cls is None or entrypoint_module is None:
-        # Native rollouts declare a NativeHarborBackend and have no Python Grader
-        # (reward comes from the harbor task's verifier); skip the Grader check.
+        # Native Harbor tasks use verifier rewards instead of a Python Grader.
         if (
             discover_native_backend(
                 rollout=rollout,

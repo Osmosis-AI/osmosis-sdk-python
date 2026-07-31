@@ -24,11 +24,9 @@ class ExecutionBackend(ABC):
 
     @property
     def max_queue_depth(self) -> int | None:
-        """Max accepted executions waiting beyond ``max_concurrency``.
+        """Max queued executions beyond ``max_concurrency``.
 
-        ``None`` leaves server admission unbounded. Backends that own a finite
-        execution pool can override this to make ``POST /rollout`` fail fast
-        instead of letting controller deadlines expire in an unbounded queue.
+        ``None`` is unbounded. Finite backends override this to reject excess work before controller deadlines expire.
         """
         return None
 

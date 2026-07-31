@@ -1,8 +1,6 @@
-"""Submit-preflight support for module-level native rollout apps.
+"""Tests for native Harbor submit preflight.
 
-Native rollouts have no Python ``AgentWorkflow`` or ``Grader``. Their entrypoint
-therefore exposes an ``app`` built by ``create_rollout_server`` so preflight can
-inspect the backend actually bound to that ASGI app without interpreting source.
+Native entrypoints expose a module-level ASGI app instead of a Python workflow and grader, so preflight validates the backend bound to that app.
 """
 
 from __future__ import annotations

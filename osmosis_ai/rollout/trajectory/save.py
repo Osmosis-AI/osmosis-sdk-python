@@ -57,12 +57,9 @@ def _prepare_native_trajectory(
     request_extra_fields: dict[str, Any] | None,
     report: TrajectoryReport | None,
 ) -> Trajectory:
-    """Validate and minimally enrich a backend-native ATIF trajectory.
+    """Enrich a native ATIF trajectory without rebuilding its steps.
 
-    Native Harbor agents already emit ATIF with agent/tool/observation structure
-    that cannot be losslessly round-tripped through OpenAI chat messages. Keep
-    those steps authoritative while applying the same controller metrics and
-    Osmosis rollout metadata as SDK-normalized trajectories.
+    Native agent, tool, and observation structure remains authoritative while controller metrics and Osmosis rollout metadata are overlaid.
     """
     trajectory = Trajectory.model_validate(document)
     native_session_id = trajectory.session_id
@@ -86,8 +83,7 @@ def _prepare_native_trajectory(
     if reported_model:
         trajectory.agent.model_name = reported_model
 
-    # The platform joins outputs on rollout_id. Preserve Harbor's native ids in
-    # metadata before normalizing the document identity.
+    # Preserve Harbor IDs before normalizing them for platform joins.
     trajectory.session_id = rollout_id
     trajectory.trajectory_id = rollout_id
 
@@ -159,10 +155,9 @@ async def _save_trajectories_with_status(
     report: TrajectoryReport | None = None,
     artifact_root: Path | None = None,
 ) -> bool:
-    """Save a trajectory and report success without propagating failures.
+    """Save a trajectory without raising and report success.
 
-    Native Harbor uses the status to decide whether its source trial is safe to
-    delete. Other backends keep the public best-effort ``save_trajectories`` API.
+    Native Harbor uses the result to decide whether the source trial is safe to delete; the public save API remains best effort.
     """
     try:
         await _save(
