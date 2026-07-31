@@ -2,7 +2,7 @@
 
 > The library API you implement against. Anchored to [../osmosis_ai/rollout/__init__.py](../osmosis_ai/rollout/__init__.py). For how rollouts run end to end see [architecture.md](./architecture.md); for usage and the `osmosis rollout` CLI see [docs.osmosis.ai](https://docs.osmosis.ai/cli/rollout/overview).
 
-A rollout has two halves you provide: an `AgentWorkflow` (the agent loop) and a `Grader` (turns the trajectory into rewards). The SDK runs them behind an execution backend and the FastAPI server.
+A rollout has two halves you provide: an `AgentWorkflow` (the agent loop) and a `Grader` (turns the trajectory into one reward). The SDK runs them behind an execution backend and the FastAPI server.
 
 ## Public surface
 
@@ -14,7 +14,7 @@ Everything below is re-exported from `osmosis_ai.rollout` unless noted.
 | `Grader` | [grader.py](../osmosis_ai/rollout/grader.py) | ABC you subclass; implement `async grade(ctx)` |
 | `AgentWorkflowContext`, `HarborAgentWorkflowContext`, `GraderContext`, `RolloutContext`, `get_rollout_context` | [context.py](../osmosis_ai/rollout/context.py) | Execution context passed to `run` / `grade` |
 | `AgentWorkflowConfig`, `GraderConfig`, `ConcurrencyConfig` | [types/config.py](../osmosis_ai/rollout/types/config.py) | Pydantic config models |
-| `RolloutSample`, `RolloutStatus`, `RolloutErrorCategory`, `MultiTurnMode` | [types/sample.py](../osmosis_ai/rollout/types/sample.py) | Sample + status types |
+| `RolloutSample`, `RolloutStatus`, `RolloutErrorCategory` | [types/sample.py](../osmosis_ai/rollout/types/sample.py) | Sample + status types |
 | `create_rollout_server`, `ControllerAuth` | [server/](../osmosis_ai/rollout/server/) | FastAPI factory + bearer auth |
 | `ExecutionBackend`, `LocalBackend` | [backend/](../osmosis_ai/rollout/backend/) | Execution backends |
 | `OsmosisStrandsAgent`, `OsmosisRolloutModel` | [integrations/agents/strands.py](../osmosis_ai/rollout/integrations/agents/strands.py) | Strands integration |
@@ -32,7 +32,7 @@ class AgentWorkflow[TConfig: AgentWorkflowConfig](ABC):
 
 - `run` is **async** (enforced by [validator.py](../osmosis_ai/rollout/validator.py)).
 - `ctx.prompt` is the initial message list; `ctx.config` is your typed config.
-- The return value is not the trajectory. Samples are collected from the active `RolloutContext` (see [Samples](#samples)); the integrations register sources for you.
+- The return value is not the trajectory. The rollout's single sample is collected from the active `RolloutContext` (see [Sample](#sample)); the integrations register its source for you.
 
 ## Grader
 
@@ -45,8 +45,8 @@ class Grader(ABC):
 
 [../osmosis_ai/rollout/grader.py](../osmosis_ai/rollout/grader.py)
 
-- `ctx.get_samples()` returns the collected `dict[str, RolloutSample]` (**sync**).
-- Attach rewards with `ctx.set_sample_reward(sample_id, reward)` — it raises `ValueError` for an unknown `sample_id` ([context.py](../osmosis_ai/rollout/context.py)).
+- `ctx.sample` is the rollout's `RolloutSample`, or `None` if the workflow produced no sample.
+- Attach the reward with `ctx.set_reward(reward)` — it raises `ValueError` when `ctx.sample` is `None` ([context.py](../osmosis_ai/rollout/context.py)).
 - `ctx.label` carries the dataset row's label (the ground-truth string).
 - `ctx.metadata` is the read-only input-side dataset row metadata.
 
@@ -56,24 +56,24 @@ class Grader(ABC):
 
 - `AgentWorkflowContext` — `prompt: list[dict]`, `config`.
 - `HarborAgentWorkflowContext` — adds `environment` (Harbor `BaseEnvironment`) for `environment.exec()`, `environment.upload_file()`, etc. under `HarborBackend`.
-- `GraderContext` — `label`, `samples`, `metadata` (input-side, read-only), plus `get_samples()` / `set_sample_reward()` (output-side).
+- `GraderContext` — `label`, `sample`, `metadata`, `artifacts_dir`, plus `set_reward()` for the sample's output reward.
 - `RolloutContext` — ambient per-rollout context (chat completions URL, API key, rollout id). It is a context manager; the server enters it around execution. Local backends pass connection info directly; container runners read it from `OSMOSIS_CHAT_COMPLETIONS_URL` / `OSMOSIS_API_KEY` / `OSMOSIS_ROLLOUT_ID`. Fetch the current one with `get_rollout_context()`.
 
-### Samples
+### Sample
 
-The workflow does not return samples; instead a `SampleSource` is registered on the **ambient** `RolloutContext` (fetched with `get_rollout_context()`, not the `ctx` passed to `run`) and called lazily at collection time:
+The workflow does not return its sample; instead one `SampleSource` is registered on the **ambient** `RolloutContext` (fetched with `get_rollout_context()`, not the `ctx` passed to `run`) and called lazily at collection time:
 
 ```python
 from osmosis_ai.rollout import get_rollout_context
 
-rollout_ctx = get_rollout_context()                  # the active RolloutContext
-rollout_ctx.register_sample_source(name, source)     # name must be unique per rollout
-samples = await rollout_ctx.get_samples()            # async -> {name: RolloutSample}
+rollout_ctx = get_rollout_context()              # the active RolloutContext
+rollout_ctx.set_sample_source(source)             # exactly one source per rollout
+sample = await rollout_ctx.get_sample()           # async -> RolloutSample | None
 ```
 
-`OsmosisStrandsAgent` registers a source automatically (keyed by the agent `name`/`agent_id`), so most workflows never call `register_sample_source` directly.
+Registering a second source raises `ValueError`: one rollout is one agent execution, one sample, and one reward. `OsmosisStrandsAgent` registers its source automatically, so most workflows never call `set_sample_source` directly.
 
-`RolloutSample` ([types/sample.py](../osmosis_ai/rollout/types/sample.py)) fields: `id`, `messages`, `label`, `reward`, `remove_sample`, `metrics`, `extra_fields`.
+`RolloutSample` ([types/sample.py](../osmosis_ai/rollout/types/sample.py)) fields: `messages`, `label`, `reward`, `remove_sample`, `metrics`, `extra_fields`. It has no sample id; rollout identity comes from rollout-scoped URLs. The internal `trajectory_messages` field holds the normalized copy used for persistence.
 
 ## Artifacts
 
@@ -91,8 +91,7 @@ async def grade(self, ctx: GraderContext) -> Any:
         (ctx.artifacts_dir / "trace.json").write_text(
             json.dumps({"score_reason": "matched rubric"})
         )
-    for sample_id in ctx.get_samples():
-        ctx.set_sample_reward(sample_id, 1.0)
+    ctx.set_reward(1.0)
 ```
 
 After each rollout the artifacts land on the host under `~/.osmosis/<rollout_id>/artifacts/`. `LocalBackend` writes your files at that root. Harbor mirrors its collected-trial layout, so the `/logs/artifacts/` convention dir lands at `.../artifacts/logs/artifacts/<file>`, next to any paths you declare in the task's `artifacts` config.
@@ -109,13 +108,11 @@ Layout per rollout, keyed by `rollout_id` (callers that need position semantics 
 
 ```
 ~/.osmosis/<rollout_id>/
-├── trajectory.json          # the rollout's ATIF document
-│                            # (trajectory-<sample_id>.json per sample while the
-│                            # transitional multi-sample protocol is still in use)
+├── trajectory.json          # the rollout's single ATIF document
 └── artifacts/...            # file artifacts (see above)
 ```
 
-Each document carries a normalized, controller-compatible transcript as ATIF steps (tool calls fold into agent-step observations) and namespaces platform context under `extra.osmosis`: `rollout_id`, `sample_id`, `label`, `reward`, sample `metrics`/`extra_fields`, and the request's `metadata`/`extra_fields` (the natural channel for run identity such as an eval run id).
+Each document carries a normalized, controller-compatible transcript as ATIF steps (tool calls fold into agent-step observations) and namespaces platform context under `extra.osmosis`: `rollout_id`, `label`, `reward`, sample `metrics`/`extra_fields`, and the request's `metadata`/`extra_fields` (the natural channel for run identity such as an eval run id).
 
 Built-in sample sources keep their framework-native `RolloutSample.messages` for graders and callbacks and prepare a separate `trajectory_messages` copy through the framework converter used for OpenAI-compatible `/chat/completions` traffic. `trajectory_messages` is SDK-internal: it crosses backend boundaries for persistence but is omitted from grader callbacks. This is not an exact wire replay because call-specific conversion arguments and separately supplied system instructions are not retained. Framework-native items omitted by the framework converter are outside the persisted transcript contract. Custom sample sources whose native history is already OpenAI chat-completions-shaped get the same behavior by default. A source with another native shape sets `RolloutSample.trajectory_messages` itself from `get_sample` (an explicit `None` marks conversion as unavailable and skips trajectory persistence for that sample). Like artifacts, conversion and saving are best-effort: failures are logged and never affect rewards, callbacks, or rollout status.
 
@@ -126,7 +123,7 @@ ATIF has first-class slots for LLM operational data (`Step.metrics`, `Step.model
 1. **Controller report (callback ack)** — the controller may attach a `trajectory` object to the JSON body of its completion/grader callback response ([report.py](../osmosis_ai/rollout/trajectory/report.py) defines the shape). Its LLM bridge serves every completion, so it is the party that has per-call usage.
    - **When to report**: snapshot the agent-phase calls into the **completion** ack, before resolving any internal future that triggers controller-side cleanup. Omit `trajectory` from the grader ack — an ack without a report keeps the earlier one, and grader-phase LLM calls (an LLM judge) would skew call counts and totals. A grader ack that does carry a report replaces the completion one entirely (no merge).
    - **Attribution**: `llm_call_metrics` map onto agent steps in dispatch order only when the counts match exactly; on a mismatch they are preserved under `extra.osmosis.unmatched_llm_call_metrics` instead of being mis-attributed, and totals still aggregate into `final_metrics`. The SDK always fills `final_metrics.total_steps` from the emitted ATIF steps.
-   - **Sample keys**: use the rollout's sample ids (the SDK integrations send them as the `x-sample-id` header on every completion). A controller that cannot know them may key its only entry arbitrarily — with exactly one sample and one entry they match regardless of key. Other unmatched entries are logged and, for single-sample rollouts, preserved under `extra.osmosis.unmatched_sample_reports`.
+   - **Report entry key**: `TrajectoryReport` retains a `samples` map for controller compatibility, but the SDK sample has no id. When the map contains exactly one entry, the SDK applies it to the rollout's sample regardless of the key. Multiple entries cannot be attributed and are preserved under `extra.osmosis.unmatched_sample_reports`. The SDK integrations do not stamp `x-rollout-id` or `x-sample-id` headers.
 
 ```jsonc
 // response body of POST <completion_callback_url> or <grader_callback_url>
@@ -135,7 +132,7 @@ ATIF has first-class slots for LLM operational data (`Step.metrics`, `Step.model
   "trajectory": {
     "model_name": "openai/gpt-5-mini",
     "samples": {
-      "<sample_id>": {
+      "<opaque-key>": {
         "llm_call_metrics": [
           {"prompt_tokens": 120, "completion_tokens": 40, "cached_tokens": 0,
            "cost_usd": 0.0003, "logprobs": [-0.1], "model_name": "...",
@@ -186,10 +183,12 @@ app = create_rollout_server(backend=backend)   # FastAPI: POST /rollout, GET /he
 ```
 
 - `create_rollout_server` ([server/app.py](../osmosis_ai/rollout/server/app.py)) wires the protocol: it runs the backend in a background task and posts the completion + grader callbacks.
+- The controller supplies rollout-scoped `chat_completions_url`, `completion_callback_url`, and `grader_callback_url` values. Routing identity lives in those URLs; `rollout_id` in request and callback bodies is optional correlation metadata, and integrations do not add per-call rollout/sample routing headers.
 - `ControllerAuth` ([server/auth.py](../osmosis_ai/rollout/server/auth.py)) supplies the bearer headers for callbacks.
 - `ExecutionBackend` ([backend/base.py](../osmosis_ai/rollout/backend/base.py)) is the ABC; pick one:
   - `LocalBackend` ([backend/local/](../osmosis_ai/rollout/backend/local/)) — runs workflow + grader in-process. Re-exported from `osmosis_ai.rollout`. Used by the scaffold and eval.
   - `HarborBackend` ([backend/harbor/backend.py](../osmosis_ai/rollout/backend/harbor/backend.py)) — runs the agent inside a Harbor container; pairs with `HarborAgentWorkflowContext`. It is **not** re-exported (import `from osmosis_ai.rollout.backend.harbor.backend import HarborBackend`) and requires the external `harbor` dependency.
+  - `NativeHarborBackend` ([backend/native_harbor/backend.py](../osmosis_ai/rollout/backend/native_harbor/backend.py)) — turns one self-contained Harbor task into one rollout, one sample, and one verifier reward. Import it from `osmosis_ai.rollout.backend.native_harbor`; see [native-harbor-backend.md](./native-harbor-backend.md).
 
 ### Running a server
 
@@ -227,9 +226,10 @@ class MyWorkflow(AgentWorkflow[MyConfig]):
 
 class MyGrader(Grader):
     async def grade(self, ctx: GraderContext) -> Any:
-        for sample_id, sample in ctx.get_samples().items():
-            reward = 1.0 if str(ctx.label) in str(sample.messages[-1]) else 0.0
-            ctx.set_sample_reward(sample_id, reward)
+        if ctx.sample is None:
+            raise ValueError("workflow produced no sample")
+        reward = 1.0 if str(ctx.label) in str(ctx.sample.messages[-1]) else 0.0
+        ctx.set_reward(reward)
 ```
 
 For complete, runnable rollouts (local Strands, local OpenAI Agents, Harbor) see the [Osmosis-AI/workspace-template](https://github.com/Osmosis-AI/workspace-template) `rollouts/` directory.

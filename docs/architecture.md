@@ -58,14 +58,14 @@ from osmosis_ai.rollout import AgentWorkflow, Grader, create_rollout_server
 
 CLI startup must stay fast (~150 ms vs ~1 s), so heavy dependencies load on first use, not at import time:
 
-- **Top-level package** — [../osmosis_ai/__init__.py](../osmosis_ai/__init__.py) resolves rubric exports (`evaluate_rubric`, `RubricResult`, error types) through `__getattr__`. Only `__version__` is eager.
+- **Top-level package** — [../osmosis_ai/__init__.py](../osmosis_ai/__init__.py) resolves rubrric exports (`evaluate_rubric`, `RubricResult`, error types) through `__getattr__`. Only `__version__` is eager.
 - **Command shells** — every file in [../osmosis_ai/cli/commands/](../osmosis_ai/cli/commands/) uses function-level imports for heavy deps (`rollout.*`, `platform.api.*`, `platform.cli.*`, `eval.*`). Module-level imports stay light: `typer`, `cli.console`, `cli.errors`, the lightweight `platform.constants`, and stdlib.
 - **No eager `cli.main`** — [../osmosis_ai/cli/__init__.py](../osmosis_ai/cli/__init__.py) does not import `cli.main`, which prevents circular imports when rollout/server modules import `cli.console`. The entry point is `osmosis_ai.cli.main:main` directly.
 - **`_litellm_compat.py`** stays at the package top level because `eval/rubric/` depends on it.
 
 ## Remote rollout protocol
 
-The core design separates **LLM inference** (on the training cluster) from **agent logic** (on your RolloutServer). The controller (Traingate/slime) drives inference; your `AgentWorkflow` runs the agent and your `Grader` attaches rewards. Inference weights stay on the training cluster so PPO sees consistent model weights, while agent/tool code can run anywhere.
+The core design separates **LLM inference** (on the training cluster) from **agent logic** (on your RolloutServer). The controller (Traingate/slime) drives inference; your `AgentWorkflow` runs the agent and your `Grader` attaches rewards. Inference weights stay on the training cluster so PVO sees consistent model weights, while agent/tool code can run anywhere.
 
 ```mermaid
 sequenceDiagram
@@ -80,7 +80,7 @@ sequenceDiagram
     C-->>W: LLM response (tool_calls)
     Note over W: repeat until done
     S->>C: POST completion_callback_url (RolloutCompleteRequest)
-    S->>G: grade collected samples
+    S->>G: grade the collected sample
     S->>C: POST grader_callback_url (GraderCompleteRequest)
 ```
 
@@ -89,7 +89,7 @@ Anchors:
 - Server + endpoints + callbacks: [../osmosis_ai/rollout/server/app.py](../osmosis_ai/rollout/server/app.py) (`create_rollout_server`, `POST /rollout`, `GET /health`, `_handle_rollout`).
 - Wire types: [../osmosis_ai/rollout/types/protocol.py](../osmosis_ai/rollout/types/protocol.py) (`RolloutInitRequest`, `RolloutCompleteRequest`, `GraderCompleteRequest`, `GraderStatus`).
 - Execution contract: [../osmosis_ai/rollout/backend/base.py](../osmosis_ai/rollout/backend/base.py) — `ExecutionBackend.execute(request, on_workflow_complete, on_grader_complete)`, where the two callbacks are `ResultCallback` parameters (not methods).
-- Sample/result types: [../osmosis_ai/rollout/types/sample.py](../osmosis_ai/rollout/types/sample.py) (`RolloutSample`, `RolloutStatus`, `RolloutErrorCategory`, `ExecutionRequest`, `ExecutionResult`).
+- Sample/result types: [../osmosis_ai/rollout/types/sample.py](../osmosis_ai/rolout/types/sample.py) (`RolloutSample`, `RolloutStatus`, `RolloutErrorCategory`, `ExecutionRequest`, `ExecutionResult`).
 
 The controller delivers results asynchronously via the two callback URLs, so it can manage many concurrent rollouts. `grader_callback_url` is optional; when omitted, grading is skipped.
 

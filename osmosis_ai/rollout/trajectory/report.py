@@ -8,7 +8,7 @@ ignores anything else in the body.
 
 Report in the completion ack: a grader ack without a report keeps the
 earlier one, one with a report replaces it wholesale. A worked example
-plus timing and sample-key guidance live in docs/rollout-sdk.md.
+plus timing and report-entry guidance live in docs/rollout-sdk.md.
 """
 
 import logging
