@@ -71,11 +71,11 @@ _HLE_PARITY_WARNING = (
 )
 
 _BENCHMARK_COLUMNS = [
-    ListColumn(key="name", label="Name", ratio=4, overflow="fold"),
+    ListColumn(key="name", label="Name", ratio=3, overflow="fold"),
+    ListColumn(key="key", label="Key", no_wrap=True, min_width=20),
     ListColumn(key="task_count", label="Tasks", no_wrap=True, ratio=1),
     ListColumn(key="category_count", label="Categories", no_wrap=True, ratio=1),
     ListColumn(key="task_sets", label="Named Task Sets", ratio=2, overflow="fold"),
-    ListColumn(key="source", label="Source", no_wrap=True, ratio=1),
 ]
 
 
@@ -94,6 +94,7 @@ def _benchmark_resource(
     return {
         "id": benchmark.id,
         "name": benchmark.name,
+        "key": benchmark.source_ref,
         "description": benchmark.description,
         "source_type": benchmark.source_type,
         "source_ref": benchmark.source_ref,
@@ -156,7 +157,7 @@ def list_benchmarks(*, limit: int, all_: bool) -> ListResult:
             for benchmark in benchmarks
         ],
         display_hints=[
-            "Use osmosis benchmark catalog info <name> for task sets, "
+            "Use osmosis benchmark catalog info <key> for task sets, "
             "categories, and tasks."
         ],
     )
@@ -194,6 +195,7 @@ def catalog_info(name_or_id: str) -> DetailResult:
     )
     rows = [
         ("Name", console.escape(benchmark.name)),
+        ("Key", console.escape(benchmark.source_ref)),
         ("Description", console.escape(benchmark.description or "–")),
         ("Source", f"{benchmark.source_type}: {benchmark.source_ref}"),
         ("Runner", benchmark.runner_family),
@@ -229,7 +231,7 @@ def catalog_info(name_or_id: str) -> DetailResult:
     display_hints = [
         f"Omit [tasks] to select all {benchmark.task_count:,} tasks.",
         "Use task_names or categories under [tasks] for a custom subset.",
-        "Use osmosis --json benchmark catalog info <name> to inspect the full "
+        "Use osmosis --json benchmark catalog info <key> to inspect the full "
         "task list.",
     ]
     for task_set in benchmark.task_sets:

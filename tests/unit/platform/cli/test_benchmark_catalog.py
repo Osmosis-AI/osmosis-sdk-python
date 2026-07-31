@@ -74,6 +74,7 @@ def test_list_benchmarks_returns_catalog_and_git_context(
     assert isinstance(result, ListResult)
     assert result.total_count == 1
     assert result.items[0]["name"] == "HLE"
+    assert result.items[0]["key"] == "hle"
     assert result.items[0]["task_sets"] == [
         {
             "name": "parity",
@@ -82,7 +83,17 @@ def test_list_benchmarks_returns_catalog_and_git_context(
             "description": "Published comparison sample.",
         }
     ]
+    assert result.display_items[0]["key"] == "hle"
     assert result.display_items[0]["task_sets"] == "parity (249, recommended)"
+    assert [column.key for column in result.columns] == [
+        "name",
+        "key",
+        "task_count",
+        "category_count",
+        "task_sets",
+    ]
+    assert result.columns[1].no_wrap is True
+    assert result.columns[1].min_width == 20
     assert result.extra["git"]["identity"] == GIT_IDENTITY
     assert calls == [
         {
@@ -157,6 +168,7 @@ def test_info_exposes_selection_metadata_and_full_task_list(
     result = benchmark_module.catalog_info("HLE")
 
     assert isinstance(result, DetailResult)
+    assert result.data["benchmark"]["key"] == "hle"
     assert result.data["benchmark"]["tasks"] == [
         {"name": "hle__math", "category": "math", "difficulty": None},
         {"name": "hle__science", "category": "science", "difficulty": None},
@@ -167,6 +179,7 @@ def test_info_exposes_selection_metadata_and_full_task_list(
     ]
     assert result.data["benchmark"]["required_secret_names"] == ["HF_TOKEN"]
     fields = {field.label: field.value for field in result.fields}
+    assert fields["Key"] == "hle"
     assert fields["Required Secret Records"] == "HF_TOKEN"
     assert 'task_set = "parity"' in result.display_hints[0]
     assert "Omit [tasks]" in result.display_hints[1]

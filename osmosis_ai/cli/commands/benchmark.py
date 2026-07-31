@@ -43,7 +43,7 @@ def benchmark_catalog_list(
 
 @catalog_app.command("info")
 def benchmark_catalog_info(
-    name_or_id: str = typer.Argument(..., help="Benchmark name or ID."),
+    name_or_id: str = typer.Argument(..., help="Benchmark key, name, or ID."),
 ) -> Any:
     """Show benchmark metadata and task-selection options."""
     from osmosis_ai.platform.cli.benchmark import catalog_info as _info

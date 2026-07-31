@@ -24,6 +24,10 @@ Module-level imports in `commands/` are kept light: `typer`, `cli.console`, `cli
 discovery is a separate nested namespace, `benchmark catalog list|info`, so
 top-level `list` and `info` always refer to submitted runs.
 
+Catalog output includes a shell-safe benchmark `Key`, such as
+`terminal-bench-2-1`. Pass that key to `osmosis benchmark catalog info <key>`;
+exact display names and UUIDs remain supported for compatibility.
+
 ## Commands return results; they don't print
 
 The Typer app is created with `result_callback=render_command_result` ([../osmosis_ai/cli/main.py](../osmosis_ai/cli/main.py)). A command function **returns** a `CommandResult`; the callback renders it in the active format. Do not `print()` from a command — return a typed result instead.
