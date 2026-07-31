@@ -177,7 +177,7 @@ class TestBundleBackend:
             bundle=bundle,
         )
 
-    def test_trial_config_wires_bundle_agent(self, backend, template_task, tmp_path):
+    def test_trial_config_wires_harness_agent(self, backend, template_task, tmp_path):
         prompt = [{"role": "user", "content": "x"}]
         request = request_for(prompt)
         task_dir = backend.select_task(request).materialize(
@@ -187,7 +187,7 @@ class TestBundleBackend:
         )
         config = backend.build_trial_config(task_dir, request)
 
-        assert config.agent.import_path.endswith(":BundleAgent")
+        assert config.agent.import_path.endswith(":OsmosisHarnessInstalledAgent")
         assert config.agent.kwargs["agent_script"] == "bench-agent"
         assert config.agent.kwargs["bundle_path"] == str(backend.bundle.wheel)
         assert config.verifier.disable is False  # generated test.sh enables it

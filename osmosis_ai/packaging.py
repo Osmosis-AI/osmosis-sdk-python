@@ -179,7 +179,7 @@ def build_bundle(
         scripts[grader_script_name(package)] = f"{package}.bundle_main:grader_main"
 
     project = tomllib.loads(pyproject_path.read_text()).get("project", {})
-    name = project.get("name") or f"osmosis-bundle-{package}"
+    name = project.get("name") or f"osmosis-harness-{package}"
     bundle_key = content_hash(
         code_dir, extra=pyproject_path.read_text() + shim + repr(deps or [])
     )
