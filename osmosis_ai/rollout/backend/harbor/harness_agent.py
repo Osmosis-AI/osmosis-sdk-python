@@ -1,8 +1,9 @@
 """Harbor installed agent that runs a bundled workflow.
 
-install() pip-installs the bundle wheel, so any task image with python works
-unmodified. run() ships the ContainerInput into the container and executes the
-bundle's agent console script; results come back through the ContainerResult file.
+install() bootstraps uv if the image lacks it, then installs the bundle wheel,
+so any task image with python works unmodified. run() ships the ContainerInput
+into the container and executes the bundle's agent console script; results come
+back through the ContainerResult file.
 """
 
 from __future__ import annotations
@@ -46,7 +47,8 @@ class OsmosisHarnessInstalledAgent(BaseInstalledAgent):
         await environment.upload_file(self.bundle_path, wheel)
         await self.exec_as_agent(
             environment,
-            f"uv pip install --system {wheel} || python3 -m pip install {wheel}",
+            f"command -v uv >/dev/null || python3 -m pip install --quiet uv; "
+            f"uv pip install --system {wheel}",
         )
 
     async def run(self, instruction: Any, environment: Any, context: Any) -> None:
