@@ -177,15 +177,19 @@ class TestBundleBackend:
             bundle=bundle,
         )
 
-    def test_trial_config_wires_harness_agent(self, backend, template_task, tmp_path):
-        prompt = [{"role": "user", "content": "x"}]
-        request = request_for(prompt)
+    def prepare(self, backend, request):
+        container_input = backend.build_input(request)
         task_dir = backend.select_task(request).materialize(
             backend.rollouts_dir / request.id,
-            backend.build_input(request),
-            backend.bundle.grader_script,
+            container_input,
+            grader_script=backend.bundle.grader_script if backend.bundle else None,
         )
-        config = backend.build_trial_config(task_dir, request)
+        return task_dir, container_input
+
+    def test_trial_config_wires_harness_agent(self, backend):
+        request = request_for([{"role": "user", "content": "x"}])
+        task_dir, container_input = self.prepare(backend, request)
+        config = backend.build_trial_config(task_dir, request, container_input)
 
         assert config.agent.import_path.endswith(":OsmosisHarnessInstalledAgent")
         assert config.agent.kwargs["agent_script"] == "bench-agent"
@@ -198,14 +202,15 @@ class TestBundleBackend:
             tasks_dir=template_task,
             bundle=bundle,
         )
-        prompt = [{"role": "user", "content": "x"}]
-        request = request_for(prompt)
+        request = request_for([{"role": "user", "content": "x"}])
+        container_input = backend.build_input(request)
         task_dir = backend.select_task(request).materialize(
-            backend.rollouts_dir / request.id, backend.build_input(request)
+            backend.rollouts_dir / request.id, container_input
         )
-        assert backend.build_trial_config(task_dir, request).verifier.disable is True
+        config = backend.build_trial_config(task_dir, request, container_input)
+        assert config.verifier.disable is True
 
-    def test_build_spec_carries_request_fields(self, backend):
+    def test_build_input_carries_request_fields(self, backend):
         request = ExecutionRequest(
             id="r9",
             prompt=[{"role": "user", "content": "q"}],
@@ -216,3 +221,95 @@ class TestBundleBackend:
         assert container_input.rollout_id == "r9"
         assert container_input.label == "42"
         assert container_input.metadata == {"harbor_task_id": "t"}
+
+    def test_environment_config_cloned_per_trial(self, backend):
+        request = request_for([{"role": "user", "content": "x"}])
+        task_dir, container_input = self.prepare(backend, request)
+        first = backend.build_trial_config(task_dir, request, container_input)
+        second = backend.build_trial_config(task_dir, request, container_input)
+        assert first.environment is not second.environment
+        assert first.environment is not backend.environment_config
+
+
+class TestNativeAgents:
+    def backend_for(self, agent, template_task, **kwargs):
+        return HarborBackendV2(
+            orchestrator=TrialQueue(n_concurrent=1),
+            tasks_dir=template_task,
+            agent=agent,
+            **kwargs,
+        )
+
+    def test_unknown_native_agent_rejected(self, template_task):
+        with pytest.raises(ValueError, match="unknown native agent"):
+            self.backend_for("claude-code", template_task)
+
+    def test_env_wired_agent_receives_endpoint(self, template_task):
+        backend = self.backend_for("mini-swe-agent", template_task)
+        container_input = ContainerInput(
+            rollout_id="r1",
+            chat_completions_url="http://trainer:30000/sessions/abc/v1",
+            api_key="k",
+        )
+        config = backend.build_agent_config(template_task, container_input)
+
+        assert config.name == "mini-swe-agent"
+        assert config.env["OPENAI_API_BASE"] == "http://trainer:30000/sessions/abc/v1"
+        assert config.env["OPENAI_API_KEY"] == "k"
+        assert config.env["MSWEA_COST_TRACKING"] == "ignore_errors"
+
+    def test_kwargs_wired_agent_receives_endpoint(self, template_task):
+        backend = self.backend_for("terminus-2", template_task, model_name="openai/m")
+        container_input = ContainerInput(
+            rollout_id="r1", chat_completions_url="http://t/v1"
+        )
+        config = backend.build_agent_config(template_task, container_input)
+
+        assert config.name == "terminus-2"
+        assert config.model_name == "openai/m"
+        assert config.kwargs["api_base"] == "http://t/v1"
+        assert config.kwargs["enable_summarize"] is False
+
+    def test_native_without_grader_needs_no_bundle(self, template_task):
+        backend = self.backend_for("mini-swe-agent", template_task)
+        assert backend.bundle is None
+
+    def test_dataset_mode_keeps_task_instruction(self, tmp_path, bundle):
+        root = tmp_path / "dataset"
+        task = root / "task-a"
+        (task / "environment").mkdir(parents=True)
+        (task / "instruction.md").write_text("real instruction")
+        backend = HarborBackendV2(
+            orchestrator=TrialQueue(n_concurrent=1),
+            tasks_dir=root,
+            task_mode=TaskMode.DATASET,
+            bundle=bundle,
+        )
+        request = request_for(
+            [{"role": "user", "content": "row prompt"}],
+            metadata={"harbor_task_id": "task-a"},
+        )
+        container_input = backend.build_input(request)
+        assert container_input.prompt == []
+
+        task_dir = backend.select_task(request).materialize(
+            backend.rollouts_dir / request.id, container_input
+        )
+        assert (task_dir / "instruction.md").read_text() == "real instruction"
+
+    def test_grader_wheel_ships_in_tests_dir(self, template_task, tmp_path, bundle):
+        from osmosis_ai.packaging import inspect_bundle
+
+        info = inspect_bundle(bundle)
+        prompt = [{"role": "user", "content": "x"}]
+        task_dir = HarborTask(template_task).materialize(
+            tmp_path / "r1",
+            ContainerInput(rollout_id="r1", prompt=prompt),
+            grader_script=info.grader_script,
+            grader_wheel=info.wheel,
+        )
+        test_sh = (task_dir / "tests" / "test.sh").read_text()
+        assert f"pip install /tests/{info.wheel.name}" in test_sh
+        assert test_sh.rstrip().endswith(info.grader_script)
+        assert (task_dir / "tests" / info.wheel.name).exists()
+        assert (task_dir / "tests" / "container_input.json").exists()
