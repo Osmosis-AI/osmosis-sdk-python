@@ -10,7 +10,7 @@ from harbor.models.trial.config import AgentConfig as HarborAgentConfig
 
 @dataclass(frozen=True)
 class NativeAgentBinding:
-    wiring: Literal["env", "kwargs"]
+    wiring: Literal["env", "kwargs", "none"]
     trainable: bool = True
     env: dict[str, str] = field(default_factory=dict)
     kwargs: dict[str, Any] = field(default_factory=dict)
@@ -27,6 +27,9 @@ NATIVE_AGENTS: dict[str, NativeAgentBinding] = {
         wiring="env",
         env={"MSWEA_COST_TRACKING": "ignore_errors"},
     ),
+    # Runs the task's reference solution with no model traffic; validates
+    # datasets and verifiers, never produces training data.
+    "oracle": NativeAgentBinding(wiring="none", trainable=False),
 }
 
 
@@ -49,6 +52,10 @@ def native_agent_config(
     url: str,
     api_key: str,
 ) -> HarborAgentConfig:
+    if binding.wiring == "none":
+        return HarborAgentConfig(
+            name=name, model_name=model_name, env=dict(binding.env), kwargs=dict(binding.kwargs)
+        )
     if binding.wiring == "env":
         env = {**binding.env, "OPENAI_API_BASE": url, "OPENAI_API_KEY": api_key}
         return HarborAgentConfig(
