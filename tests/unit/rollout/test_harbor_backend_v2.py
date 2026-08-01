@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 from harbor.trial.queue import TrialQueue
 
-from osmosis_ai.packaging import build_bundle, bundle_requirements
+from osmosis_ai.packaging import build_bundle, inspect_bundle
 from osmosis_ai.rollout.backend.harbor.backend_v2 import HarborBackendV2
 from osmosis_ai.rollout.backend.harbor.tasks import (
     SDK_REQUIREMENTS_FILENAME,
@@ -223,7 +223,7 @@ class TestPatchDockerfileWithSdk:
         assert "uv venv" not in (template_task / "environment" / "Dockerfile").read_text()
 
     def test_bundle_requirements_skips_extras(self, bundle):
-        assert bundle_requirements(bundle) == []
+        assert inspect_bundle(bundle).requirements == []
 
     def test_backend_flag_requires_bundle(self, template_task):
         with pytest.raises(ValueError, match="requires a bundle"):

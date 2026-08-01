@@ -72,6 +72,39 @@ def test_deps_override_same_named_pyproject_entries(project, tmp_path):
     assert "Requires-Dist: httpx @ https://example.com/httpx.tar.gz" in metadata
 
 
+def test_requirements_keep_markers_drop_extras(tmp_path):
+    code_dir = tmp_path / "harness"
+    package = code_dir / "my_harness"
+    package.mkdir(parents=True)
+    (package / "__init__.py").touch()
+    (package / "solver.py").write_text("class W: pass\n")
+    (code_dir / "pyproject.toml").write_text(
+        """\
+[project]
+name = "my-harness"
+version = "0.1.0"
+dependencies = ["httpx>=0.27", "tomli; python_version < '3.11'"]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["my_harness*"]
+"""
+    )
+    wheel = build_bundle(
+        code_dir, workflow="my_harness.solver:W", bundles_dir=tmp_path / "bundles"
+    )
+    requirements = inspect_bundle(wheel).requirements
+    assert "httpx>=0.27" in requirements
+    assert any(r.startswith("tomli") for r in requirements)
+    assert not any("pytest" in r for r in requirements)
+
+
 def test_grader_optional(project, tmp_path):
     wheel = build_bundle(
         project,
