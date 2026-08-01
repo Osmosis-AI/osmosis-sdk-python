@@ -5,8 +5,10 @@
 an AgentWorkflow class (or "module:Class" path) is packaged into a wheel and
 installed in the task container at trial start. ``grader=None`` makes the
 task's own tests the reward source; a Grader class is delivered as the
-verifier instead. Task images stay pure task environments either way, so
-Harbor's content-addressed image cache applies unchanged.
+verifier instead. Task images stay pure task environments either way; with
+the pinned harbor 0.20.0 each trial builds its own compose-named tag (fast
+via docker's layer cache, removed at trial teardown), and newer harbor
+releases share one content-addressed hb__ image across trials.
 """
 
 from __future__ import annotations

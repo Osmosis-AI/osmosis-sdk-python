@@ -19,6 +19,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import toml
+from packaging.requirements import Requirement
+from packaging.utils import canonicalize_name
 
 BUNDLES_DIR = Path.home() / ".osmosis" / "bundles"
 
@@ -88,6 +90,10 @@ def find_package(code_dir: Path) -> str:
     return packages[0]
 
 
+def requirement_name(spec: str) -> str:
+    return canonicalize_name(Requirement(spec).name)
+
+
 def split_ref(ref: str, label: str) -> tuple[str, str]:
     if ":" not in ref:
         raise ValueError(f"{label} must be 'module:attr', got {ref!r}")
@@ -146,7 +152,8 @@ def build_bundle(
 
     workflow/grader are 'module:Class' refs; the config refs point at
     module-level instances and are passed to the runner as-is. Grader-only
-    bundles (workflow=None) carry just the grading script.
+    bundles (workflow=None) carry just the grading script. Entries in *deps*
+    replace same-named dependencies from the project's pyproject.toml.
     """
     code_dir = code_dir.resolve()
     pyproject_path = code_dir / "pyproject.toml"
@@ -211,10 +218,12 @@ def build_bundle(
         (stage / package / "bundle_main.py").write_text(shim)
         staged = tomllib.loads((stage / "pyproject.toml").read_text())
         staged_project = staged.setdefault("project", {})
+        overridden = {requirement_name(d) for d in deps or []}
         staged_project["dependencies"] = [
-            *staged_project.get("dependencies", []),
-            *(deps or []),
-        ]
+            d
+            for d in staged_project.get("dependencies", [])
+            if requirement_name(d) not in overridden
+        ] + list(deps or [])
         staged_project["scripts"] = {**staged_project.get("scripts", {}), **scripts}
         (stage / "pyproject.toml").write_text(toml.dumps(staged))
         subprocess.run(

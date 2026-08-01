@@ -57,6 +57,21 @@ def test_build_produces_scripts_and_keeps_deps(project, tmp_path):
     assert info.grader_script == "my-harness-grade"
 
 
+def test_deps_override_same_named_pyproject_entries(project, tmp_path):
+    wheel = build_bundle(
+        project,
+        workflow="my_harness.solver:MyWorkflow",
+        deps=["httpx @ https://example.com/httpx.tar.gz"],
+        bundles_dir=tmp_path / "bundles",
+    )
+    with zipfile.ZipFile(wheel) as archive:
+        metadata = archive.read(
+            next(n for n in archive.namelist() if n.endswith("METADATA"))
+        ).decode()
+    assert "Requires-Dist: httpx>=0.27" not in metadata
+    assert "Requires-Dist: httpx @ https://example.com/httpx.tar.gz" in metadata
+
+
 def test_grader_optional(project, tmp_path):
     wheel = build_bundle(
         project,
