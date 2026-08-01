@@ -82,3 +82,5 @@ class ExecutionResult(BaseModel):
     sample: RolloutSample | None = None
     err_message: str | None = None
     err_category: RolloutErrorCategory | None = None
+    # Backend diagnostics (failure phase, timings); not part of the wire protocol.
+    extra_fields: dict[str, Any] | None = None
