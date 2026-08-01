@@ -16,6 +16,11 @@ from harbor.agents.installed.base import BaseInstalledAgent
 from harbor.models.agent.context import AgentContext
 from harbor.models.trial.paths import EnvironmentPaths
 
+from osmosis_ai.rollout.backend.harbor.tasks import (
+    SDK_UV,
+    SDK_VENV,
+    venv_or_fallback_script,
+)
 from osmosis_ai.rollout.container.files import (
     INPUT_FILENAME,
     RESULT_FILENAME,
@@ -47,8 +52,10 @@ class OsmosisHarnessInstalledAgent(BaseInstalledAgent):
         await environment.upload_file(self.bundle_path, wheel)
         await self.exec_as_agent(
             environment,
-            f"command -v uv >/dev/null || python3 -m pip install --quiet uv; "
-            f"uv pip install --system {wheel}",
+            f"if [ -x {SDK_VENV}/bin/python ]; then "
+            f"{SDK_UV} pip install --python {SDK_VENV}/bin/python --no-deps {wheel}; "
+            f"else command -v uv >/dev/null || python3 -m pip install --quiet uv; "
+            f"uv pip install --system {wheel}; fi",
         )
 
     async def run(self, instruction: Any, environment: Any, context: Any) -> None:
@@ -64,7 +71,7 @@ class OsmosisHarnessInstalledAgent(BaseInstalledAgent):
                 host_input, (agent_dir / INPUT_FILENAME).as_posix()
             )
 
-        await self.exec_as_agent(environment, self.agent_script)
+        await self.exec_as_agent(environment, venv_or_fallback_script(self.agent_script))
 
     def populate_context_post_run(self, context: AgentContext) -> None:
         result_path = self.logs_dir / RESULT_FILENAME
