@@ -171,9 +171,10 @@ def _validate_secret_references(config: BenchmarkSubmitConfig, path: Path) -> No
     Collisions are scoped per agent: one agent's secret name may still be
     another agent's literal env var. Model secrets also cannot use names the
     runner removes before model-key aliasing. Harness credentials travel
-    through a separate reserved channel; known credentialed harnesses must
-    reference a secret record and cannot also set their platform-managed
-    destination env. ``HF_TOKEN`` is always runner-reserved as a literal env.
+    through a separate reserved channel; a credentialed harness must reference
+    a secret record named exactly for the variable it reads, and cannot also
+    set that name as a literal env var. ``HF_TOKEN`` is always runner-reserved
+    as a literal env.
     """
     for name in config.required_secrets:
         if not SECRET_NAME_RE.match(name):
@@ -237,6 +238,14 @@ def _validate_secret_references(config: BenchmarkSubmitConfig, path: Path) -> No
                 f"Agent {index}'s {agent.harness} harness requires "
                 f"harness_api_key_secret in {path}. Set it to the name of a "
                 f"Platform secret record containing {harness_env_name}."
+            )
+        if harness_env_name and agent.harness_api_key_secret != harness_env_name:
+            raise CLIError(
+                f"Agent {index}'s harness_api_key_secret "
+                f"'{agent.harness_api_key_secret}' in {path} does not match "
+                f"the variable the {agent.harness} harness reads. Store the "
+                f"credential in a Platform secret record named exactly "
+                f"{harness_env_name} and reference that name."
             )
 
 

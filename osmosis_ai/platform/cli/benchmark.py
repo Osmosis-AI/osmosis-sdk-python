@@ -101,7 +101,42 @@ def _benchmark_resource(
         "task_count": benchmark.task_count,
         "category_count": benchmark.category_count,
         "task_sets": [_task_set_resource(task_set) for task_set in benchmark.task_sets],
+        "sync_status": benchmark.sync_status,
+        "synced_task_count": benchmark.synced_task_count,
+        "sync_error": benchmark.sync_error,
+        "platform_url": benchmark.platform_url,
     }
+
+
+def _task_count_display(
+    benchmark: BenchmarkCatalogEntry | BenchmarkCatalogDetail,
+) -> str:
+    """Task total, or sync progress while the registry manifest pages in."""
+    if benchmark.is_ready:
+        return f"{benchmark.task_count:,}"
+    if benchmark.sync_status == "failed":
+        return "unavailable"
+    return f"{benchmark.synced_task_count:,} / {benchmark.task_count:,} syncing"
+
+
+def _sync_hints(
+    benchmark: BenchmarkCatalogEntry | BenchmarkCatalogDetail,
+) -> list[str]:
+    if benchmark.is_ready:
+        return []
+    location = (
+        f" Retry its sync at {benchmark.platform_url}."
+        if benchmark.platform_url
+        else ""
+    )
+    if benchmark.sync_status == "failed":
+        reason = benchmark.sync_error or "Its task list failed to sync."
+        return [f"{benchmark.name} is not runnable: {reason}{location}"]
+    return [
+        f"{benchmark.name} is still syncing its task list "
+        f"({benchmark.synced_task_count:,} of {benchmark.task_count:,} tasks); "
+        "submit once it is ready."
+    ]
 
 
 def _task_set_display(task_sets: list[BenchmarkTaskSet]) -> str:
@@ -145,7 +180,7 @@ def list_benchmarks(*, limit: int, all_: bool) -> ListResult:
         display_items=[
             {
                 **_benchmark_resource(benchmark),
-                "task_count": f"{benchmark.task_count:,}",
+                "task_count": _task_count_display(benchmark),
                 "category_count": f"{benchmark.category_count:,}",
                 "task_sets": _task_set_display(benchmark.task_sets),
                 "source": (
@@ -158,7 +193,8 @@ def list_benchmarks(*, limit: int, all_: bool) -> ListResult:
         ],
         display_hints=[
             "Use osmosis benchmark catalog info <key> for task sets, "
-            "categories, and tasks."
+            "categories, and tasks.",
+            *[hint for benchmark in benchmarks for hint in _sync_hints(benchmark)],
         ],
     )
 
@@ -183,6 +219,8 @@ def catalog_info(name_or_id: str) -> DetailResult:
         if benchmark.supports_harness
         else "Not supported"
     )
+    if benchmark.default_harness:
+        harness += f" (default: {benchmark.default_harness})"
     judge = "Not required"
     if benchmark.requires_judge_model:
         judge = "Required"
@@ -199,7 +237,7 @@ def catalog_info(name_or_id: str) -> DetailResult:
         ("Description", console.escape(benchmark.description or "–")),
         ("Source", f"{benchmark.source_type}: {benchmark.source_ref}"),
         ("Runner", benchmark.runner_family),
-        ("Tasks", f"{benchmark.task_count:,}"),
+        ("Tasks", _task_count_display(benchmark)),
         ("Categories", category_display or "–"),
         ("Named Task Sets", _task_set_display(benchmark.task_sets)),
         ("Harness", harness),
@@ -216,6 +254,7 @@ def catalog_info(name_or_id: str) -> DetailResult:
         "runner_family": benchmark.runner_family,
         "supports_harness": benchmark.supports_harness,
         "requires_harness": benchmark.requires_harness,
+        "default_harness": benchmark.default_harness,
         "requires_judge_model": benchmark.requires_judge_model,
         "judge_model_default": benchmark.judge_model_default,
         "required_secret_names": benchmark.required_secret_names,
@@ -233,7 +272,15 @@ def catalog_info(name_or_id: str) -> DetailResult:
         "Use task_names or categories under [tasks] for a custom subset.",
         "Use osmosis --json benchmark catalog info <key> to inspect the full "
         "task list.",
+        *_sync_hints(benchmark),
     ]
+    if benchmark.default_harness:
+        display_hints.insert(
+            0,
+            f"{benchmark.name}'s published scores were measured on "
+            f'harness = "{benchmark.default_harness}"; another harness is '
+            "not comparable with them.",
+        )
     for task_set in benchmark.task_sets:
         if task_set.recommended:
             display_hints.insert(

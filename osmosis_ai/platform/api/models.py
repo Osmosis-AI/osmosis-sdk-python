@@ -446,6 +446,15 @@ class BenchmarkCatalogEntry:
     task_count: int
     category_count: int
     task_sets: list[BenchmarkTaskSet]
+    sync_status: str = "ready"
+    synced_task_count: int = 0
+    sync_error: str | None = None
+    platform_url: str | None = None
+
+    @property
+    def is_ready(self) -> bool:
+        """Whether the task list has finished paging in from the registry."""
+        return self.sync_status == "ready"
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> BenchmarkCatalogEntry:
@@ -460,6 +469,10 @@ class BenchmarkCatalogEntry:
             task_sets=[
                 BenchmarkTaskSet.from_dict(item) for item in data.get("task_sets", [])
             ],
+            sync_status=data.get("sync_status", "ready"),
+            synced_task_count=int(data.get("synced_task_count") or 0),
+            sync_error=data.get("sync_error"),
+            platform_url=data.get("platform_url"),
         )
 
 
@@ -507,6 +520,16 @@ class BenchmarkCatalogDetail:
     tasks: list[BenchmarkCatalogTask]
     unavailable_tasks: dict[str, Any] | None
     required_secret_names: list[str] = field(default_factory=list)
+    default_harness: str | None = None
+    sync_status: str = "ready"
+    synced_task_count: int = 0
+    sync_error: str | None = None
+    platform_url: str | None = None
+
+    @property
+    def is_ready(self) -> bool:
+        """Whether the task list has finished paging in from the registry."""
+        return self.sync_status == "ready"
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> BenchmarkCatalogDetail:
@@ -541,6 +564,11 @@ class BenchmarkCatalogDetail:
                 benchmark.get("unavailable_tasks")
             ),
             required_secret_names=list(benchmark.get("required_secret_names", [])),
+            default_harness=benchmark.get("default_harness"),
+            sync_status=benchmark.get("sync_status", "ready"),
+            synced_task_count=int(benchmark.get("synced_task_count") or 0),
+            sync_error=benchmark.get("sync_error"),
+            platform_url=benchmark.get("platform_url"),
         )
 
 

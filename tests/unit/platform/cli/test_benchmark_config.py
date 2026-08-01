@@ -539,47 +539,16 @@ api_key_secret = "OPENAI_API_KEY"
         load_benchmark_submit_config(path)
 
 
-def test_load_benchmark_submit_config_allows_harness_secret_record_name_as_env(
-    tmp_path: Path,
-) -> None:
-    """The record name is separate from the harness's destination env name."""
-    path = _write_config(
-        tmp_path / "benchmark.toml",
-        """
-[experiment]
-benchmark = "DeepSWE"
-
-[[agents]]
-harness = "cursor-cli"
-harness_api_key_secret = "MY_CURSOR_TOKEN"
-
-[agents.model]
-type = "provider"
-model = "openai/gpt-5"
-api_key_secret = "OPENAI_API_KEY"
-
-[agents.env]
-MY_CURSOR_TOKEN = "literal-for-the-agent"
-""",
-    )
-
-    config = load_benchmark_submit_config(path)
-
-    assert config.required_secrets == ["OPENAI_API_KEY", "MY_CURSOR_TOKEN"]
-    assert config.agents[0].env == {"MY_CURSOR_TOKEN": "literal-for-the-agent"}
-
-
 @pytest.mark.parametrize(
-    "harness, harness_secret, destination_env",
+    "harness, destination_env",
     [
-        ("cursor-cli", "MY_CURSOR_TOKEN", "CURSOR_API_KEY"),
-        ("mini-swe-agent", "MY_MSWEA_TOKEN", "MSWEA_API_KEY"),
+        ("cursor-cli", "CURSOR_API_KEY"),
+        ("mini-swe-agent", "MSWEA_API_KEY"),
     ],
 )
-def test_load_benchmark_submit_config_rejects_harness_destination_env_collision(
+def test_load_benchmark_submit_config_accepts_pinned_harness_secret_name(
     tmp_path: Path,
     harness: str,
-    harness_secret: str,
     destination_env: str,
 ) -> None:
     path = _write_config(
@@ -590,7 +559,75 @@ benchmark = "DeepSWE"
 
 [[agents]]
 harness = "{harness}"
-harness_api_key_secret = "{harness_secret}"
+harness_api_key_secret = "{destination_env}"
+
+[agents.model]
+type = "provider"
+model = "openai/gpt-5"
+api_key_secret = "OPENAI_API_KEY"
+""",
+    )
+
+    config = load_benchmark_submit_config(path)
+
+    assert config.required_secrets == ["OPENAI_API_KEY", destination_env]
+
+
+@pytest.mark.parametrize(
+    "harness, destination_env",
+    [
+        ("cursor-cli", "CURSOR_API_KEY"),
+        ("mini-swe-agent", "MSWEA_API_KEY"),
+    ],
+)
+def test_load_benchmark_submit_config_rejects_unpinned_harness_secret_name(
+    tmp_path: Path,
+    harness: str,
+    destination_env: str,
+) -> None:
+    """The record must be named for the variable the harness actually reads."""
+    path = _write_config(
+        tmp_path / "benchmark.toml",
+        f"""
+[experiment]
+benchmark = "DeepSWE"
+
+[[agents]]
+harness = "{harness}"
+harness_api_key_secret = "MY_HARNESS_TOKEN"
+
+[agents.model]
+type = "provider"
+model = "openai/gpt-5"
+api_key_secret = "OPENAI_API_KEY"
+""",
+    )
+
+    with pytest.raises(CLIError, match=rf"named exactly {destination_env}"):
+        load_benchmark_submit_config(path)
+
+
+@pytest.mark.parametrize(
+    "harness, destination_env",
+    [
+        ("cursor-cli", "CURSOR_API_KEY"),
+        ("mini-swe-agent", "MSWEA_API_KEY"),
+    ],
+)
+def test_load_benchmark_submit_config_rejects_harness_destination_env_collision(
+    tmp_path: Path,
+    harness: str,
+    destination_env: str,
+) -> None:
+    path = _write_config(
+        tmp_path / "benchmark.toml",
+        f"""
+[experiment]
+benchmark = "DeepSWE"
+
+[[agents]]
+harness = "{harness}"
+harness_api_key_secret = "{destination_env}"
 
 [agents.model]
 type = "hosted"

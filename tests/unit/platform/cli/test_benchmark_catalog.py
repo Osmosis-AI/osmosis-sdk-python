@@ -214,3 +214,113 @@ def test_catalog_detail_defaults_required_secret_names() -> None:
     )
 
     assert detail.required_secret_names == []
+
+
+def _syncing_entry(**overrides: Any) -> BenchmarkCatalogEntry:
+    return BenchmarkCatalogEntry(
+        id="benchmark-2",
+        name="acme/suite",
+        description=None,
+        source_type="harbor_registry",
+        source_ref="acme/suite@3",
+        task_count=4_000,
+        category_count=0,
+        task_sets=[],
+        platform_url="https://platform.example/Acme/benchmarks",
+        **overrides,
+    )
+
+
+def _list_with(
+    monkeypatch: pytest.MonkeyPatch, entry: BenchmarkCatalogEntry
+) -> ListResult:
+    class FakeClient:
+        def list_benchmarks(self, **_: Any) -> PaginatedBenchmarks:
+            return PaginatedBenchmarks(
+                benchmarks=[entry],
+                total_count=1,
+                has_more=False,
+                next_offset=None,
+            )
+
+    monkeypatch.setattr(
+        benchmark_module,
+        "require_git_workspace_directory_context",
+        _context,
+    )
+    monkeypatch.setattr(benchmark_module, "OsmosisClient", FakeClient)
+    return benchmark_module.list_benchmarks(limit=50, all_=False)
+
+
+def test_list_benchmarks_shows_registry_sync_progress(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    result = _list_with(
+        monkeypatch,
+        _syncing_entry(sync_status="syncing", synced_task_count=1_000),
+    )
+
+    assert result.display_items[0]["task_count"] == "1,000 / 4,000 syncing"
+    assert result.items[0]["sync_status"] == "syncing"
+    assert any("still syncing" in hint for hint in result.display_hints)
+
+
+def test_list_benchmarks_surfaces_failed_sync_and_platform_url(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    result = _list_with(
+        monkeypatch,
+        _syncing_entry(
+            sync_status="failed",
+            sync_error="Task list unavailable.",
+        ),
+    )
+
+    assert result.display_items[0]["task_count"] == "unavailable"
+    assert result.items[0]["sync_error"] == "Task list unavailable."
+    assert any(
+        "Task list unavailable." in hint
+        and "https://platform.example/Acme/benchmarks" in hint
+        for hint in result.display_hints
+    )
+
+
+def test_catalog_info_surfaces_the_default_harness(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeClient:
+        def get_benchmark(self, *_: Any, **__: Any) -> BenchmarkCatalogDetail:
+            return BenchmarkCatalogDetail(
+                id="benchmark-1",
+                name="Terminal-Bench 2.1",
+                description=None,
+                source_type="osmosis_managed",
+                source_ref="terminal-bench-2-1",
+                task_count=89,
+                category_count=1,
+                task_sets=[],
+                runner_family="harbor",
+                supports_harness=True,
+                requires_harness=True,
+                requires_judge_model=False,
+                judge_model_default=None,
+                pass_threshold=1,
+                categories=[],
+                tasks=[],
+                unavailable_tasks=None,
+                default_harness="terminus-2",
+            )
+
+    monkeypatch.setattr(
+        benchmark_module,
+        "require_git_workspace_directory_context",
+        _context,
+    )
+    monkeypatch.setattr(benchmark_module, "OsmosisClient", FakeClient)
+
+    result = benchmark_module.catalog_info("terminal-bench-2-1")
+
+    assert result.data["benchmark"]["default_harness"] == "terminus-2"
+    fields = {field.label: field.value for field in result.fields}
+    assert fields["Harness"] == "Required (default: terminus-2)"
+    assert 'harness = "terminus-2"' in result.display_hints[0]
