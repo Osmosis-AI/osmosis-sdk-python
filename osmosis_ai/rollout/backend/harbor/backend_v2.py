@@ -212,7 +212,9 @@ class HarborBackendV2(ExecutionBackend):
             rollout_id=request.id,
             # Dataset tasks carry their own instruction.md; row prompts only
             # drive template mode.
-            prompt=(request.prompt or []) if self.task_mode == TaskMode.TEMPLATE else [],
+            prompt=(request.prompt or [])
+            if self.task_mode == TaskMode.TEMPLATE
+            else [],
             label=request.label,
             metadata=request.metadata,
         )
@@ -229,7 +231,9 @@ class HarborBackendV2(ExecutionBackend):
         self, task_dir: Path, container_input: ContainerInput
     ) -> HarborAgentConfig:
         if self.native is not None:
-            model = (container_input.metadata or {}).get("harbor_model") or self.model_name
+            model = (container_input.metadata or {}).get(
+                "harbor_model"
+            ) or self.model_name
             return native_agent_config(
                 self.agent,
                 self.native,
@@ -376,7 +380,11 @@ class HarborBackendV2(ExecutionBackend):
         return lifespan
 
     async def try_callback(
-        self, callback: ResultCallback, result: ExecutionResult, rollout_id: str, label: str
+        self,
+        callback: ResultCallback,
+        result: ExecutionResult,
+        rollout_id: str,
+        label: str,
     ) -> bool:
         """Callback delivery failures must never abort trial archival."""
         try:
@@ -551,7 +559,9 @@ class HarborBackendV2(ExecutionBackend):
         return ExecutionResult(
             status=RolloutStatus.FAILURE,
             sample=sample,
-            extra_fields=self.event_diagnostics(event, RolloutErrorCategory.AGENT_ERROR),
+            extra_fields=self.event_diagnostics(
+                event, RolloutErrorCategory.AGENT_ERROR
+            ),
         )
 
     async def on_trial_end(self, event: TrialHookEvent) -> None:

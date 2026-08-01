@@ -14,7 +14,16 @@ logger: logging.Logger = logging.getLogger(__name__)
 
 REDACTED = "[REDACTED]"
 SENSITIVE_KEYS = frozenset(
-    {"api_key", "apikey", "authorization", "credential", "credentials", "password", "secret", "token"}
+    {
+        "api_key",
+        "apikey",
+        "authorization",
+        "credential",
+        "credentials",
+        "password",
+        "secret",
+        "token",
+    }
 )
 
 

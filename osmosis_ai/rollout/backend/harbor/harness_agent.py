@@ -71,7 +71,9 @@ class OsmosisHarnessInstalledAgent(BaseInstalledAgent):
                 host_input, (agent_dir / INPUT_FILENAME).as_posix()
             )
 
-        await self.exec_as_agent(environment, venv_or_fallback_script(self.agent_script))
+        await self.exec_as_agent(
+            environment, venv_or_fallback_script(self.agent_script)
+        )
 
     def populate_context_post_run(self, context: AgentContext) -> None:
         result_path = self.logs_dir / RESULT_FILENAME

@@ -109,7 +109,9 @@ def read_container_input() -> ContainerInput:
         path = directory / INPUT_FILENAME
         if path.exists():
             return ContainerInput.read(path)
-    raise FileNotFoundError(f"{INPUT_FILENAME} not found in {AGENT_LOGS_DIR} or {TESTS_DIR}")
+    raise FileNotFoundError(
+        f"{INPUT_FILENAME} not found in {AGENT_LOGS_DIR} or {TESTS_DIR}"
+    )
 
 
 def load_messages() -> tuple[list[dict[str, Any]] | None, dict[str, float]]:

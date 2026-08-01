@@ -106,7 +106,9 @@ def project_dir_for(obj: object) -> Path:
     """Locate the project dir (containing pyproject.toml) of *obj*'s package."""
     import inspect
 
-    package_dir = Path(inspect.getfile(type(obj) if not isinstance(obj, type) else obj)).parent
+    package_dir = Path(
+        inspect.getfile(type(obj) if not isinstance(obj, type) else obj)
+    ).parent
     while (package_dir.parent / "__init__.py").exists():
         package_dir = package_dir.parent
     project_dir = package_dir.parent

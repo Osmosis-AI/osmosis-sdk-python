@@ -41,7 +41,9 @@ def resolve_backend_bundle(
         code_dir or project_dir_for(anchor),
         workflow=None if native else ensure_import_path(agent),
         grader=ensure_import_path(grader) if grader else None,
-        workflow_config=ensure_import_path(workflow_config) if workflow_config else None,
+        workflow_config=ensure_import_path(workflow_config)
+        if workflow_config
+        else None,
         grader_config=ensure_import_path(grader_config) if grader_config else None,
     )
     return inspect_bundle(wheel)

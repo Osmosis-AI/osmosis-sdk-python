@@ -143,7 +143,10 @@ def test_project_dir_for_locates_bench_harness():
     from osmosis_ai.packaging import project_dir_for
 
     harness_dir = (
-        Path(__file__).parents[2] / "benchmarks" / "container_lifecycle" / "bench_harness"
+        Path(__file__).parents[2]
+        / "benchmarks"
+        / "container_lifecycle"
+        / "bench_harness"
     )
     sys.path.insert(0, str(harness_dir))
     try:

@@ -172,7 +172,9 @@ async def run_series(
     patch_dockerfile_with_sdk: bool = True,
 ) -> dict:
     setup_start = time.monotonic()
-    backend = make_backend(task_dir, concurrency, keep_trials, patch_dockerfile_with_sdk)
+    backend = make_backend(
+        task_dir, concurrency, keep_trials, patch_dockerfile_with_sdk
+    )
     setup = time.monotonic() - setup_start
 
     controller_port, rollout_port = free_port(), free_port()
@@ -198,7 +200,9 @@ async def run_series(
                 start = time.monotonic()
                 outcomes = await asyncio.gather(
                     *(
-                        controller.submit(client, f"bench-{nonce}-run{run}-{i}", timeout)
+                        controller.submit(
+                            client, f"bench-{nonce}-run{run}-{i}", timeout
+                        )
                         for i in range(concurrency)
                     )
                 )
@@ -206,7 +210,9 @@ async def run_series(
                 walls.append(wall)
                 if run > 1:
                     warm_latencies.extend(latency for status, latency in outcomes)
-                succeeded = sum(1 for status, latency in outcomes if status == "success")
+                succeeded = sum(
+                    1 for status, latency in outcomes if status == "success"
+                )
                 failures += concurrency - succeeded
                 print(
                     f"run {run}: {wall:.1f}s, {succeeded}/{concurrency} ok, "

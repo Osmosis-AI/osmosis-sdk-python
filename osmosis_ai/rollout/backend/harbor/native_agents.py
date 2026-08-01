@@ -54,7 +54,10 @@ def native_agent_config(
 ) -> HarborAgentConfig:
     if binding.wiring == "none":
         return HarborAgentConfig(
-            name=name, model_name=model_name, env=dict(binding.env), kwargs=dict(binding.kwargs)
+            name=name,
+            model_name=model_name,
+            env=dict(binding.env),
+            kwargs=dict(binding.kwargs),
         )
     if binding.wiring == "env":
         env = {**binding.env, "OPENAI_API_BASE": url, "OPENAI_API_KEY": api_key}

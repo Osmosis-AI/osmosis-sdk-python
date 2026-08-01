@@ -123,7 +123,9 @@ class TestHarborTask:
         prompt = [{"role": "user", "content": "solve"}]
         container_input = ContainerInput(rollout_id="r1", prompt=prompt)
 
-        task_dir = HarborTask(template_task).materialize(tmp_path / "r1", container_input)
+        task_dir = HarborTask(template_task).materialize(
+            tmp_path / "r1", container_input
+        )
 
         assert json.loads((task_dir / "instruction.md").read_text()) == prompt
         assert ContainerInput.read(task_dir / "container_input.json") == container_input
@@ -181,7 +183,7 @@ class TestPatchDockerfileWithSdk:
         env.mkdir()
         (env / "Dockerfile").write_text(
             "FROM builder AS build\nRUN make\n"
-            "FROM python:3.12-slim\nUSER agent\nCMD [\"bash\"]\n"
+            'FROM python:3.12-slim\nUSER agent\nCMD ["bash"]\n'
         )
         patch_dockerfile_with_sdk(env, ["pydantic>=2", "httpx"])
 
@@ -220,7 +222,9 @@ class TestPatchDockerfileWithSdk:
         )
         assert "uv venv" in (task_dir / "environment" / "Dockerfile").read_text()
         # the source task stays pristine
-        assert "uv venv" not in (template_task / "environment" / "Dockerfile").read_text()
+        assert (
+            "uv venv" not in (template_task / "environment" / "Dockerfile").read_text()
+        )
 
     def test_bundle_requirements_skips_extras(self, bundle):
         assert inspect_bundle(bundle).requirements == []
@@ -410,14 +414,17 @@ class TestNativeAgents:
     def test_oracle_binding_gets_no_endpoint(self, template_task):
         backend = self.backend_for("oracle", template_task)
         config = backend.build_agent_config(
-            template_task, ContainerInput(rollout_id="r1", chat_completions_url="http://t/v1")
+            template_task,
+            ContainerInput(rollout_id="r1", chat_completions_url="http://t/v1"),
         )
         assert config.name == "oracle"
         assert "OPENAI_API_BASE" not in config.env
         assert "api_base" not in config.kwargs
 
     def test_harbor_model_metadata_overrides_model(self, template_task):
-        backend = self.backend_for("terminus-2", template_task, model_name="openai/default")
+        backend = self.backend_for(
+            "terminus-2", template_task, model_name="openai/default"
+        )
         config = backend.build_agent_config(
             template_task,
             ContainerInput(

@@ -78,7 +78,7 @@ def venv_or_fallback_install(wheel: str) -> str:
 def venv_or_fallback_script(script: str) -> str:
     """Shell command running *script* from the SDK venv when present."""
     return (
-        f'if [ -x {SDK_VENV}/bin/{script} ]; then {SDK_VENV}/bin/{script}; '
+        f"if [ -x {SDK_VENV}/bin/{script} ]; then {SDK_VENV}/bin/{script}; "
         f"else {script}; fi"
     )
 
