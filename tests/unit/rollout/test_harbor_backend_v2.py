@@ -1,16 +1,23 @@
 """Bundle backend: contract round-trip, task materialization, trial config."""
 
 import json
+from pathlib import Path
 
 import pytest
 from harbor.trial.queue import TrialQueue
 
-from osmosis_ai.packaging import build_bundle
+from osmosis_ai.packaging import build_bundle, bundle_requirements
 from osmosis_ai.rollout.backend.harbor.backend_v2 import HarborBackendV2
-from osmosis_ai.rollout.backend.harbor.tasks import HarborTask, TaskMode
+from osmosis_ai.rollout.backend.harbor.tasks import (
+    SDK_REQUIREMENTS_FILENAME,
+    HarborTask,
+    TaskMode,
+    patch_dockerfile_with_sdk,
+    venv_or_fallback_script,
+)
 from osmosis_ai.rollout.container.files import ContainerInput, ContainerResult
+from osmosis_ai.rollout.types import ExecutionRequest, RolloutStatus
 from osmosis_ai.rollout.types.output import AgentWorkflowOutput, coerce_output
-from osmosis_ai.rollout.types import ExecutionRequest, RolloutSample, RolloutStatus
 
 PYPROJECT = """\
 [project]
@@ -168,6 +175,91 @@ class TestHarborTask:
             HarborTask.from_dataset(root, "nope")
 
 
+class TestPatchDockerfileWithSdk:
+    def test_patch_appends_isolated_venv(self, tmp_path):
+        env = tmp_path / "environment"
+        env.mkdir()
+        (env / "Dockerfile").write_text(
+            "FROM builder AS build\nRUN make\n"
+            "FROM python:3.12-slim\nUSER agent\nCMD [\"bash\"]\n"
+        )
+        patch_dockerfile_with_sdk(env, ["pydantic>=2", "httpx"])
+
+        dockerfile = (env / "Dockerfile").read_text()
+        reqs = (env / SDK_REQUIREMENTS_FILENAME).read_text()
+        assert reqs == "pydantic>=2\nhttpx\n"
+        assert "uv venv /opt/osmosis/venv" in dockerfile
+        # USER root is scoped to the install; the stage's user is restored last
+        assert dockerfile.rstrip().endswith("USER agent")
+        assert dockerfile.index("USER root") < dockerfile.index("uv venv")
+
+    def test_patch_without_final_user_adds_no_restore(self, tmp_path):
+        env = tmp_path / "environment"
+        env.mkdir()
+        (env / "Dockerfile").write_text("FROM python:3.12-slim\n")
+        patch_dockerfile_with_sdk(env, ["httpx"])
+        assert (env / "Dockerfile").read_text().count("USER") == 1
+
+    def test_patch_negates_dockerignore(self, tmp_path):
+        env = tmp_path / "environment"
+        env.mkdir()
+        (env / "Dockerfile").write_text("FROM python:3.12-slim\n")
+        (env / ".dockerignore").write_text("*\n")
+        patch_dockerfile_with_sdk(env, ["httpx"])
+        assert f"!{SDK_REQUIREMENTS_FILENAME}" in (env / ".dockerignore").read_text()
+
+    def test_patch_requires_dockerfile(self, tmp_path):
+        with pytest.raises(ValueError, match="cannot patch Dockerfile"):
+            patch_dockerfile_with_sdk(tmp_path, ["httpx"])
+
+    def test_materialize_patches_dockerfile(self, template_task, tmp_path):
+        task_dir = HarborTask(template_task).materialize(
+            tmp_path / "r1",
+            ContainerInput(rollout_id="r1", prompt=[{"role": "user", "content": "x"}]),
+            sdk_requirements=["httpx"],
+        )
+        assert "uv venv" in (task_dir / "environment" / "Dockerfile").read_text()
+        # the source task stays pristine
+        assert "uv venv" not in (template_task / "environment" / "Dockerfile").read_text()
+
+    def test_bundle_requirements_skips_extras(self, bundle):
+        assert bundle_requirements(bundle) == []
+
+    def test_backend_flag_requires_bundle(self, template_task):
+        with pytest.raises(ValueError, match="requires a bundle"):
+            HarborBackendV2(
+                orchestrator=TrialQueue(n_concurrent=1),
+                tasks_dir=template_task,
+                agent="mini-swe-agent",
+                patch_dockerfile_with_sdk=True,
+            )
+
+    def test_patch_defaults_on_with_bundle(self, bundle, template_task):
+        backend = HarborBackendV2(
+            orchestrator=TrialQueue(n_concurrent=1),
+            tasks_dir=template_task,
+            bundle=bundle,
+        )
+        assert backend.sdk_requirements is not None
+
+    def test_patch_defaults_off_without_bundle(self, template_task):
+        backend = HarborBackendV2(
+            orchestrator=TrialQueue(n_concurrent=1),
+            tasks_dir=template_task,
+            agent="mini-swe-agent",
+        )
+        assert backend.sdk_requirements is None
+
+    def test_patch_opt_out(self, bundle, template_task):
+        backend = HarborBackendV2(
+            orchestrator=TrialQueue(n_concurrent=1),
+            tasks_dir=template_task,
+            bundle=bundle,
+            patch_dockerfile_with_sdk=False,
+        )
+        assert backend.sdk_requirements is None
+
+
 class TestBundleBackend:
     @pytest.fixture
     def backend(self, bundle, template_task):
@@ -310,6 +402,165 @@ class TestNativeAgents:
         )
         test_sh = (task_dir / "tests" / "test.sh").read_text()
         assert f"pip install /tests/{info.wheel.name}" in test_sh
-        assert test_sh.rstrip().endswith(info.grader_script)
+        # the grader script runs from the SDK venv when the image has one
+        assert test_sh.rstrip().endswith(venv_or_fallback_script(info.grader_script))
         assert (task_dir / "tests" / info.wheel.name).exists()
         assert (task_dir / "tests" / "container_input.json").exists()
+
+    def test_oracle_binding_gets_no_endpoint(self, template_task):
+        backend = self.backend_for("oracle", template_task)
+        config = backend.build_agent_config(
+            template_task, ContainerInput(rollout_id="r1", chat_completions_url="http://t/v1")
+        )
+        assert config.name == "oracle"
+        assert "OPENAI_API_BASE" not in config.env
+        assert "api_base" not in config.kwargs
+
+    def test_harbor_model_metadata_overrides_model(self, template_task):
+        backend = self.backend_for("terminus-2", template_task, model_name="openai/default")
+        config = backend.build_agent_config(
+            template_task,
+            ContainerInput(
+                rollout_id="r1",
+                chat_completions_url="http://t/v1",
+                metadata={"harbor_model": "openai/override"},
+            ),
+        )
+        assert config.model_name == "openai/override"
+
+
+class TestDiagnostics:
+    def result_with_timings(self):
+        from datetime import UTC, datetime, timedelta
+        from types import SimpleNamespace
+
+        from harbor.models.trial.result import TimingInfo
+
+        start = datetime(2026, 1, 1, tzinfo=UTC)
+
+        def span(offset, seconds):
+            return TimingInfo(
+                started_at=start + timedelta(seconds=offset),
+                finished_at=start + timedelta(seconds=offset + seconds),
+            )
+
+        return SimpleNamespace(
+            started_at=start,
+            finished_at=start + timedelta(seconds=100),
+            environment_setup=span(0, 80),
+            agent_setup=span(80, 10),
+            agent_execution=span(90, 6),
+            verifier=span(96, 4),
+        )
+
+    def test_trial_timings_reads_harbor_spans(self):
+        from osmosis_ai.rollout.backend.harbor.diagnostics import trial_timings
+
+        assert trial_timings(self.result_with_timings()) == {
+            "environment_setup": 80.0,
+            "agent_setup": 10.0,
+            "agent": 6.0,
+            "verifier": 4.0,
+            "total": 100.0,
+        }
+
+    def test_failure_phase_is_furthest_span_reached(self):
+        from osmosis_ai.rollout.backend.harbor.diagnostics import failure_phase
+
+        result = self.result_with_timings()
+        assert failure_phase(result) == "verifier"
+        result.verifier = None
+        result.agent_execution = None
+        assert failure_phase(result) == "agent_setup"
+        assert failure_phase(None) == "setup"
+
+    def test_redact_secrets_scrubs_keys_and_api_key(self):
+        from osmosis_ai.rollout.backend.harbor.diagnostics import redact_secrets
+
+        redacted = redact_secrets(
+            {
+                "llm_kwargs": {"api_key": "sk-1", "extra": ["Bearer sk-1", "safe"]},
+                "model": "gpt",
+                "session_token": "t0",
+            },
+            api_key="sk-1",
+        )
+        assert redacted == {
+            "llm_kwargs": {"api_key": "[REDACTED]", "extra": ["[REDACTED]", "safe"]},
+            "model": "gpt",
+            "session_token": "[REDACTED]",
+        }
+
+
+class TestTaskRefs:
+    def test_local_path_ref(self):
+        from harbor.models.task.id import LocalTaskId
+
+        from osmosis_ai.rollout.backend.harbor.tasks import parse_task_ref
+
+        assert parse_task_ref("./tasks/t1", {}) == LocalTaskId(path=Path("./tasks/t1"))
+
+    def test_package_ref_with_version(self):
+        from harbor.models.task.id import PackageTaskId
+
+        from osmosis_ai.rollout.backend.harbor.tasks import parse_task_ref
+
+        assert parse_task_ref("laude/swe-bench@sha256:abc", {}) == PackageTaskId(
+            org="laude", name="swe-bench", ref="sha256:abc"
+        )
+
+    def test_git_ref_uses_metadata(self):
+        from harbor.models.task.id import GitTaskId
+
+        from osmosis_ai.rollout.backend.harbor.tasks import parse_task_ref
+
+        task_id = parse_task_ref(
+            "tasks/t1",
+            {"git_url": "https://github.com/org/tasks.git", "git_commit_id": "abc123"},
+        )
+        assert task_id == GitTaskId(
+            git_url="https://github.com/org/tasks.git",
+            git_commit_id="abc123",
+            path=Path("tasks/t1"),
+        )
+
+    def test_bare_name_rejected(self):
+        from osmosis_ai.rollout.backend.harbor.tasks import parse_task_ref
+
+        with pytest.raises(ValueError, match="must be a local path"):
+            parse_task_ref("not-a-ref", {})
+
+
+class TestPrewarm:
+    def test_prewarm_config_is_install_only_without_credentials(
+        self, bundle, template_task
+    ):
+        backend = HarborBackendV2(
+            orchestrator=TrialQueue(n_concurrent=1),
+            tasks_dir=template_task,
+            bundle=bundle,
+            agent_setup_timeout_sec=120,
+        )
+        config = backend.prewarm_trial_config(HarborTask(template_task))
+
+        assert config.install_only is True
+        assert config.verifier.disable is True
+        assert config.trial_name.startswith("trial-prewarm-")
+        assert config.agent.override_setup_timeout_sec == 120
+        container_input = ContainerInput.read(
+            Path(config.task.path) / "container_input.json"
+        )
+        assert container_input.api_key is None
+        assert container_input.chat_completions_url in ("", None)
+
+    async def test_dataset_prewarm_requires_task_ids(self, bundle, tmp_path):
+        root = tmp_path / "dataset"
+        root.mkdir()
+        backend = HarborBackendV2(
+            orchestrator=TrialQueue(n_concurrent=1),
+            tasks_dir=root,
+            task_mode=TaskMode.DATASET,
+            bundle=bundle,
+        )
+        with pytest.raises(ValueError, match="requires task ids"):
+            await backend.prewarm()

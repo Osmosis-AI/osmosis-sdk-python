@@ -99,7 +99,7 @@ def test_cache_hits_until_source_changes(project, tmp_path):
 def test_rejects_bad_refs_and_missing_pyproject(project, tmp_path):
     with pytest.raises(ValueError, match="module:attr"):
         build_bundle(project, workflow="not-a-ref", bundles_dir=tmp_path / "b")
-    with pytest.raises(ValueError, match="pyproject.toml"):
+    with pytest.raises(ValueError, match=r"pyproject\.toml"):
         build_bundle(tmp_path / "nowhere", workflow="a:B", bundles_dir=tmp_path / "b")
 
 
