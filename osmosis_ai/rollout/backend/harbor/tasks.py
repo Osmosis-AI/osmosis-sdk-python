@@ -15,12 +15,6 @@ from pathlib import Path
 
 from osmosis_ai.rollout.container.files import INPUT_FILENAME, ContainerInput
 
-TEST_SH_TEMPLATE = """\
-#!/bin/bash
-set -e
-{grader_script}
-"""
-
 
 class TaskMode(StrEnum):
     TEMPLATE = "template"
@@ -47,8 +41,14 @@ class HarborTask:
         out_dir: Path,
         container_input: ContainerInput,
         grader_script: str | None = None,
+        grader_wheel: Path | None = None,
     ) -> Path:
-        """Copy this task into *out_dir* and stage one rollout's files."""
+        """Copy this task into *out_dir* and stage one rollout's files.
+
+        With grader_wheel the generated test.sh installs the wheel first, so
+        grading works even when the agent phase installed nothing (native
+        Harbor agents); the container input ships in tests/ for the same reason.
+        """
         task_dir = out_dir / self.path.name
         shutil.rmtree(task_dir, ignore_errors=True)
         shutil.copytree(self.path, task_dir)
@@ -65,7 +65,16 @@ class HarborTask:
         test_sh = task_dir / "tests" / "test.sh"
         if grader_script and not test_sh.exists():
             test_sh.parent.mkdir(parents=True, exist_ok=True)
-            test_sh.write_text(TEST_SH_TEMPLATE.format(grader_script=grader_script))
+            lines = ["#!/bin/bash", "set -e"]
+            if grader_wheel is not None:
+                shutil.copy2(grader_wheel, test_sh.parent / grader_wheel.name)
+                container_input.write(test_sh.parent / INPUT_FILENAME)
+                lines.append(
+                    f"uv pip install --system /tests/{grader_wheel.name} "
+                    f"|| python3 -m pip install /tests/{grader_wheel.name}"
+                )
+            lines.append(grader_script)
+            test_sh.write_text("\n".join(lines) + "\n")
             test_sh.chmod(0o755)
 
         return task_dir

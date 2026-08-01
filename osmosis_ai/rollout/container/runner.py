@@ -10,9 +10,11 @@ ContainerResult.
 from __future__ import annotations
 
 import asyncio
+import json
 import shutil
 import sys
 import traceback
+from pathlib import Path
 from typing import Any
 
 from osmosis_ai.rollout.container.files import (
@@ -24,6 +26,7 @@ from osmosis_ai.rollout.container.files import (
     ContainerResult,
     write_reward,
 )
+from osmosis_ai.rollout.container.trajectories import messages_from_trajectory
 from osmosis_ai.rollout.context import (
     AgentWorkflowContext,
     GraderContext,
@@ -98,19 +101,43 @@ def snapshot_grader_artifacts(baseline: ArtifactFileState) -> None:
         print(f"Failed to stage grader artifacts (best-effort): {e}", file=sys.stderr)
 
 
-def grader_main(grader_cls: Any, grader_config: Any = None) -> None:
-    container_input = ContainerInput.read(AGENT_LOGS_DIR / INPUT_FILENAME)
-    result_path = AGENT_LOGS_DIR / RESULT_FILENAME
-    result = ContainerResult.read(result_path) if result_path.exists() else None
+TESTS_DIR = Path("/tests")
 
-    output = result.output if result else None
-    messages = output.primary_messages() if output else None
+
+def read_container_input() -> ContainerInput:
+    for directory in (AGENT_LOGS_DIR, TESTS_DIR):
+        path = directory / INPUT_FILENAME
+        if path.exists():
+            return ContainerInput.read(path)
+    raise FileNotFoundError(f"{INPUT_FILENAME} not found in {AGENT_LOGS_DIR} or {TESTS_DIR}")
+
+
+def load_messages() -> tuple[list[dict[str, Any]] | None, dict[str, float]]:
+    """Messages from the workflow result, else from the agent's trajectory."""
+    result_path = AGENT_LOGS_DIR / RESULT_FILENAME
+    if result_path.exists():
+        output = ContainerResult.read(result_path).output
+        if output is not None:
+            return output.primary_messages(), output.metrics
+    for name in sorted(AGENT_LOGS_DIR.glob("*trajectory*.json")):
+        try:
+            messages = messages_from_trajectory(json.loads(name.read_text()))
+        except (ValueError, OSError):
+            continue
+        if messages:
+            return messages, {}
+    return None, {}
+
+
+def grader_main(grader_cls: Any, grader_config: Any = None) -> None:
+    container_input = read_container_input()
+    messages, metrics = load_messages()
     if messages is None:
-        print("No transcript from the agent phase, skipping grading")
+        print("No messages from the agent phase, skipping grading")
         write_reward(0.0)
         return
 
-    sample = RolloutSample(id="default", messages=messages, metrics=output.metrics)
+    sample = RolloutSample(id="default", messages=messages, metrics=metrics)
     try:
         baseline = artifact_tree_state(HARBOR_ARTIFACTS_DIR)
     except Exception:

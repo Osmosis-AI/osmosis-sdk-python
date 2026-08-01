@@ -22,13 +22,14 @@ import toml
 
 BUNDLES_DIR = Path.home() / ".osmosis" / "bundles"
 
-SHIM_TEMPLATE = """\
-{imports}
-from osmosis_ai.rollout.container import runner
+AGENT_MAIN_TEMPLATE = """\
 
 
 def agent_main():
     runner.agent_main({workflow_class}, {workflow_config})
+"""
+
+GRADER_MAIN_TEMPLATE = """\
 
 
 def grader_main():
@@ -51,7 +52,7 @@ EXCLUDE_DIRS = {
 @dataclass(frozen=True)
 class BundleInfo:
     wheel: Path
-    agent_script: str
+    agent_script: str | None
     grader_script: str | None
 
 
@@ -125,15 +126,15 @@ def inspect_bundle(wheel: Path) -> BundleInfo:
     grader = next(
         (n for n, t in scripts.items() if t.endswith(".bundle_main:grader_main")), None
     )
-    if agent is None:
-        raise ValueError(f"{wheel.name} is not an osmosis bundle (no agent script)")
+    if agent is None and grader is None:
+        raise ValueError(f"{wheel.name} is not an osmosis bundle (no runner scripts)")
     return BundleInfo(wheel=wheel, agent_script=agent, grader_script=grader)
 
 
 def build_bundle(
     code_dir: Path,
     *,
-    workflow: str,
+    workflow: str | None = None,
     grader: str | None = None,
     workflow_config: str | None = None,
     grader_config: str | None = None,
@@ -144,12 +145,15 @@ def build_bundle(
     """Package the project at *code_dir* into a wheel; rebuild only on change.
 
     workflow/grader are 'module:Class' refs; the config refs point at
-    module-level instances and are passed to the runner as-is.
+    module-level instances and are passed to the runner as-is. Grader-only
+    bundles (workflow=None) carry just the grading script.
     """
     code_dir = code_dir.resolve()
     pyproject_path = code_dir / "pyproject.toml"
     if not pyproject_path.is_file():
         raise ValueError(f"project dir must contain pyproject.toml: {code_dir}")
+    if workflow is None and grader is None:
+        raise ValueError("pass workflow and/or grader")
     package = package or find_package(code_dir)
 
     imports = []
@@ -166,16 +170,20 @@ def build_bundle(
         module, attr = split_ref(ref, label)
         imports.append(f"from {module} import {attr}")
         references[label] = attr
-    shim = SHIM_TEMPLATE.format(
-        imports="\n".join(imports),
-        workflow_class=references["workflow"],
-        workflow_config=references["workflow_config"],
-        grader_class=references["grader"],
-        grader_config=references["grader_config"],
-    )
 
-    scripts = {agent_script_name(package): f"{package}.bundle_main:agent_main"}
+    shim = "\n".join(imports) + "\nfrom osmosis_ai.rollout.container import runner\n"
+    scripts = {}
+    if workflow:
+        shim += AGENT_MAIN_TEMPLATE.format(
+            workflow_class=references["workflow"],
+            workflow_config=references["workflow_config"],
+        )
+        scripts[agent_script_name(package)] = f"{package}.bundle_main:agent_main"
     if grader:
+        shim += GRADER_MAIN_TEMPLATE.format(
+            grader_class=references["grader"],
+            grader_config=references["grader_config"],
+        )
         scripts[grader_script_name(package)] = f"{package}.bundle_main:grader_main"
 
     project = tomllib.loads(pyproject_path.read_text()).get("project", {})

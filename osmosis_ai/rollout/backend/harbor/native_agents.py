@@ -1,0 +1,58 @@
+"""Registered native Harbor agents and how each receives the model endpoint."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Any, Literal
+
+from harbor.models.trial.config import AgentConfig as HarborAgentConfig
+
+
+@dataclass(frozen=True)
+class NativeAgentBinding:
+    wiring: Literal["env", "kwargs"]
+    trainable: bool = True
+    env: dict[str, str] = field(default_factory=dict)
+    kwargs: dict[str, Any] = field(default_factory=dict)
+
+
+NATIVE_AGENTS: dict[str, NativeAgentBinding] = {
+    "terminus-2": NativeAgentBinding(
+        wiring="kwargs",
+        # Summarization rewrites the running context, which forks the token
+        # trajectory RL training needs to stay append-only.
+        kwargs={"enable_summarize": False},
+    ),
+    "mini-swe-agent": NativeAgentBinding(
+        wiring="env",
+        env={"MSWEA_COST_TRACKING": "ignore_errors"},
+    ),
+}
+
+
+def native_binding(agent: Any) -> NativeAgentBinding | None:
+    """The binding for a registered native agent name; None for workflow agents."""
+    if not isinstance(agent, str) or ":" in agent:
+        return None
+    binding = NATIVE_AGENTS.get(agent)
+    if binding is None:
+        raise ValueError(
+            f"unknown native agent {agent!r}; registered: {sorted(NATIVE_AGENTS)}"
+        )
+    return binding
+
+
+def native_agent_config(
+    name: str,
+    binding: NativeAgentBinding,
+    model_name: str,
+    url: str,
+    api_key: str,
+) -> HarborAgentConfig:
+    if binding.wiring == "env":
+        env = {**binding.env, "OPENAI_API_BASE": url, "OPENAI_API_KEY": api_key}
+        return HarborAgentConfig(
+            name=name, model_name=model_name, env=env, kwargs=dict(binding.kwargs)
+        )
+    kwargs = {**binding.kwargs, "api_base": url, "api_key": api_key}
+    return HarborAgentConfig(name=name, model_name=model_name, kwargs=kwargs)
