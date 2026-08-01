@@ -5,7 +5,12 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from osmosis_ai.packaging import BundleInfo, build_bundle, inspect_bundle, project_dir_for
+from osmosis_ai.packaging import (
+    BundleInfo,
+    build_bundle,
+    inspect_bundle,
+    project_dir_for,
+)
 from osmosis_ai.rollout.backend.harbor.backend import ensure_import_path
 from osmosis_ai.rollout.utils.imports import resolve_object
 
