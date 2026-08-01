@@ -47,7 +47,7 @@ dependencies = [
     # litellm, but declared because the CLI imports it directly.
     "packaging>=24.0",
     # CLI framework. <0.27: cli/_click_compat.py imports typer._click internals.
-    "typer>=0.26,<0.27",
+    "typer>=0.26,<0.28",
     # Do not directly constrain typer-slim: versions <0.22 shared typer/* with
     # typer, and upgrading that legacy distribution can delete Typer's files.
     "rich>=14.2.0",
