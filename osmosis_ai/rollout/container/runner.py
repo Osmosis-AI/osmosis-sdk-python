@@ -64,7 +64,7 @@ async def run_agent(workflow_cls: Any, workflow_config: Any) -> ContainerResult:
             sample = await rollout_ctx.get_sample()
             if sample is not None:
                 output = AgentWorkflowOutput(
-                    samples={"default": sample.messages},
+                    samples={"default": [dict(m) for m in sample.messages]},
                     metrics=sample.metrics or {},
                 )
             else:
@@ -139,7 +139,7 @@ def grader_main(grader_cls: Any, grader_config: Any = None) -> None:
         write_reward(0.0)
         return
 
-    sample = RolloutSample(id="default", messages=messages, metrics=metrics)
+    sample = RolloutSample(messages=messages, metrics=metrics)
     try:
         baseline = artifact_tree_state(HARBOR_ARTIFACTS_DIR)
     except Exception:

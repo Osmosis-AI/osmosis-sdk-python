@@ -154,7 +154,9 @@ class HarborBackendV2(ExecutionBackend):
         # The bundle's declared dependencies (stable) are pre-installed into the
         # task image; the bundle itself (volatile user code) installs per trial.
         self.sdk_requirements = (
-            self.bundle.requirements if patch_dockerfile_with_sdk else None
+            self.bundle.requirements
+            if patch_dockerfile_with_sdk and self.bundle
+            else None
         )
 
         root = Path(f"/tmp/osmosis-harbor-{self.tasks_dir.name}")
@@ -230,7 +232,7 @@ class HarborBackendV2(ExecutionBackend):
     def build_agent_config(
         self, task_dir: Path, container_input: ContainerInput
     ) -> HarborAgentConfig:
-        if self.native is not None:
+        if self.native is not None and isinstance(self.agent, str):
             model = (container_input.metadata or {}).get(
                 "harbor_model"
             ) or self.model_name
@@ -241,6 +243,8 @@ class HarborBackendV2(ExecutionBackend):
                 container_input.chat_completions_url,
                 container_input.api_key or "dummy",
             )
+        if self.bundle is None:
+            raise ValueError("workflow agents require a bundle")
         return HarborAgentConfig(
             import_path=HARNESS_AGENT_IMPORT_PATH,
             kwargs={
@@ -339,11 +343,11 @@ class HarborBackendV2(ExecutionBackend):
 
         failures = []
         for config, outcome in zip(configs, outcomes, strict=True):
-            label = config.task.path.name
+            label = config.task.path.name if config.task.path else config.trial_name
             if isinstance(outcome, BaseException):
                 failures.append(f"{label}: {type(outcome).__name__}: {outcome}")
-            elif getattr(outcome, "exception_info", None) is not None:
-                failures.append(f"{label}: {outcome.exception_info.exception_type}")
+            elif (err := getattr(outcome, "exception_info", None)) is not None:
+                failures.append(f"{label}: {err.exception_type}")
         if failures:
             raise RuntimeError(
                 f"prewarm failed for {len(failures)} of {len(configs)} task(s):\n"
@@ -465,7 +469,9 @@ class HarborBackendV2(ExecutionBackend):
             return self.native_sample(event, rollout_id, pending)
         result = self.container_result(event)
         output = result.output if result else None
-        messages = output.primary_messages() if output else None
+        if output is None:
+            return None
+        messages = output.primary_messages()
         if messages is None:
             return None
         return RolloutSample(
@@ -619,7 +625,7 @@ class HarborBackendV2(ExecutionBackend):
                     "workflow",
                 )
 
-            if grader_result is not None:
+            if pending.on_grader_complete and grader_result is not None:
                 await self.try_callback(
                     pending.on_grader_complete, grader_result, rollout_id, "grader"
                 )
