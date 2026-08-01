@@ -1,41 +1,33 @@
-"""Benchmark the Harbor rollout backends end to end on local Docker.
+"""Benchmark the Harbor rollout backend end to end on local Docker.
 
 Starts a stub OpenAI endpoint, a controller that receives the protocol
 callbacks, and a real rollout server, then drives concurrent rollouts through
 the full container pipeline for several consecutive runs.
 
-Backends:
-    new — HarborBackendV2: pure task image, bundle wheel pip-installed
-          per trial, Harbor's content-addressed image cache.
-    old — HarborBackend: harness code and SDK baked into the image at
-          backend construction, no per-trial install.
-
 Usage:
     uv run benchmarks/container_lifecycle/container_lifecycle_bench.py \\
-        --backend both --runs 5 --concurrency 20
+        --runs 5 --concurrency 20
 
 Point it at any Harbor task folder instead of the generated one:
 
     uv run benchmarks/container_lifecycle/container_lifecycle_bench.py \\
-        --tasks-dir path/to/task --backend new
+        --tasks-dir path/to/task
 
 The bench harness declares its SDK source in bench_harness/pyproject.toml,
 so any image with python3 and pip works; the bundle install pulls the SDK.
-Arbitrary tasks run on the new backend only: the old backend requires a
-Dockerfile that COPYs /workspace, which normal Harbor tasks don't have.
 """
 
 from __future__ import annotations
 
 import argparse
 import asyncio
-import shutil
 import socket
 import statistics
 import subprocess
 import sys
 import tempfile
 import time
+import uuid
 from pathlib import Path
 
 import httpx
@@ -43,26 +35,16 @@ import uvicorn
 from fastapi import FastAPI, Request
 from harbor.trial.queue import TrialQueue
 
-from osmosis_ai.packaging import build_bundle
-from osmosis_ai.rollout.backend.harbor import HarborBackendV2, HarborBackend
+from osmosis_ai.rollout.backend.harbor import HarborBackendV2
 from osmosis_ai.rollout.server import create_rollout_server
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
 HARNESS_DIR = Path(__file__).resolve().parent / "bench_harness"
 sys.path.insert(0, str(HARNESS_DIR))  # a real server runs inside its own project
 WORKFLOW = "bench_harness.solver:BenchWorkflow"
 GRADER = "bench_harness.grade:BenchGrader"
 
-NEW_DOCKERFILE = """\
+DOCKERFILE = """\
 FROM python:3.12-slim
-"""
-
-OLD_DOCKERFILE = """\
-FROM python:3.12-slim
-COPY {wheel} /tmp/{wheel}
-RUN pip install --no-cache-dir /tmp/{wheel}
-COPY workspace /workspace
-CMD ["sleep", "infinity"]
 """
 
 
@@ -140,7 +122,7 @@ class Controller:
         response.raise_for_status()
         try:
             status = await asyncio.wait_for(self.outcomes[rollout_id], timeout)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             status = "timeout"
         return status, time.monotonic() - start
 
@@ -155,73 +137,42 @@ async def serve(app: FastAPI, port: int) -> tuple[uvicorn.Server, asyncio.Task]:
     return server, task
 
 
-def build_sdk_wheel(work_dir: Path) -> Path:
-    print("building osmosis-ai wheel...")
-    subprocess.run(
-        ["uv", "build", "--wheel", "--out-dir", str(work_dir), str(REPO_ROOT)],
-        check=True,
-        capture_output=True,
-    )
-    return next(work_dir.glob("osmosis_ai-*.whl"))
-
-
-def prepare_task(work_dir: Path, wheel: Path, kind: str) -> Path:
-    task_dir = work_dir / f"bench-task-{kind}"
+def prepare_task(work_dir: Path) -> Path:
+    task_dir = work_dir / "bench-task"
     env_dir = task_dir / "environment"
     env_dir.mkdir(parents=True)
-    if kind == "new":
-        (env_dir / "Dockerfile").write_text(NEW_DOCKERFILE)
-    else:
-        shutil.copy2(wheel, env_dir / wheel.name)
-        (env_dir / "Dockerfile").write_text(OLD_DOCKERFILE.format(wheel=wheel.name))
-    (task_dir / "task.toml").write_text(f'[task]\nname = "osmosis/bench-{kind}"\n')
+    (env_dir / "Dockerfile").write_text(DOCKERFILE)
+    (task_dir / "task.toml").write_text('[task]\nname = "osmosis/bench"\n')
     return task_dir
 
 
 def make_backend(
-    kind: str,
     task_dir: Path,
     concurrency: int,
     keep_trials: bool,
-    custom_sdk_pip_package: str | None = None,
+    patch_dockerfile_with_sdk: bool = True,
 ):
-    orchestrator = TrialQueue(n_concurrent=concurrency)
-    if kind == "new":
-        bundle = (
-            build_bundle(HARNESS_DIR, workflow=WORKFLOW, grader=GRADER, deps=[custom_sdk_pip_package])
-            if custom_sdk_pip_package
-            else None
-        )
-        return HarborBackendV2(
-            orchestrator=orchestrator,
-            tasks_dir=task_dir,
-            agent=WORKFLOW,
-            grader=GRADER,
-            bundle=bundle,
-            cleanup_successful_trials=not keep_trials,
-        )
-    return HarborBackend(
-        orchestrator=orchestrator,
-        task_dir=task_dir,
-        user_code_dir=HARNESS_DIR / "bench_harness",
-        workflow=WORKFLOW,
+    return HarborBackendV2(
+        orchestrator=TrialQueue(n_concurrent=concurrency),
+        tasks_dir=task_dir,
+        agent=WORKFLOW,
         grader=GRADER,
         cleanup_successful_trials=not keep_trials,
+        patch_dockerfile_with_sdk=patch_dockerfile_with_sdk,
     )
 
 
 async def run_series(
-    kind: str,
     task_dir: Path,
     stub_url: str,
     runs: int,
     concurrency: int,
     timeout: float,
     keep_trials: bool,
-    custom_sdk_pip_package: str | None = None,
+    patch_dockerfile_with_sdk: bool = True,
 ) -> dict:
     setup_start = time.monotonic()
-    backend = make_backend(kind, task_dir, concurrency, keep_trials, custom_sdk_pip_package)
+    backend = make_backend(task_dir, concurrency, keep_trials, patch_dockerfile_with_sdk)
     setup = time.monotonic() - setup_start
 
     controller_port, rollout_port = free_port(), free_port()
@@ -238,13 +189,16 @@ async def run_series(
     walls: list[float] = []
     warm_latencies: list[float] = []
     failures = 0
+    # Unique per invocation: rollout ids become docker compose project names
+    # and trial dirs, so two overlapping bench runs must never share them.
+    nonce = uuid.uuid4().hex[:6]
     try:
         async with httpx.AsyncClient(timeout=30) as client:
             for run in range(1, runs + 1):
                 start = time.monotonic()
                 outcomes = await asyncio.gather(
                     *(
-                        controller.submit(client, f"{kind}-run{run}-{i}", timeout)
+                        controller.submit(client, f"bench-{nonce}-run{run}-{i}", timeout)
                         for i in range(concurrency)
                     )
                 )
@@ -255,16 +209,15 @@ async def run_series(
                 succeeded = sum(1 for status, latency in outcomes if status == "success")
                 failures += concurrency - succeeded
                 print(
-                    f"[{kind}] run {run}: {wall:.1f}s, {succeeded}/{concurrency} ok, "
+                    f"run {run}: {wall:.1f}s, {succeeded}/{concurrency} ok, "
                     f"{concurrency / wall:.2f} rollouts/s"
                 )
     finally:
-        for server, task in servers:
+        for server, _task in servers:
             server.should_exit = True
         await asyncio.gather(*(task for server, task in servers))
 
     return {
-        "kind": kind,
         "setup": setup,
         "walls": walls,
         "warm_latencies": warm_latencies,
@@ -277,70 +230,53 @@ def percentile(values: list[float], fraction: float) -> float:
     return ordered[round(fraction * (len(ordered) - 1))]
 
 
-def report(results: list[dict], concurrency: int) -> None:
+def report(result: dict, concurrency: int) -> None:
     header = (
-        f"{'backend':<8} {'setup':>7} {'cold':>7} "
+        f"{'setup':>7} {'cold':>7} "
         f"{'warm mean':>10} {'warm max':>9} {'warm rps':>9} "
         f"{'lat p50':>8} {'lat p95':>8} {'lat max':>8}"
     )
     print(f"\nwarm = runs 2+; lat = per-rollout submit->graded seconds\n{header}")
-    for r in results:
-        warm = r["walls"][1:]
-        latencies = r["warm_latencies"]
-        if not warm:
-            print(f"{r['kind']:<8} {r['setup']:>6.1f}s {r['walls'][0]:>6.1f}s  (single run)")
-            continue
+    warm = result["walls"][1:]
+    latencies = result["warm_latencies"]
+    if not warm:
+        print(f"{result['setup']:>6.1f}s {result['walls'][0]:>6.1f}s  (single run)")
+    else:
         mean = statistics.mean(warm)
         print(
-            f"{r['kind']:<8} {r['setup']:>6.1f}s {r['walls'][0]:>6.1f}s "
+            f"{result['setup']:>6.1f}s {result['walls'][0]:>6.1f}s "
             f"{mean:>9.1f}s {max(warm):>8.1f}s {concurrency / mean:>9.2f} "
             f"{percentile(latencies, 0.5):>7.1f}s "
             f"{percentile(latencies, 0.95):>7.1f}s "
             f"{max(latencies):>7.1f}s"
         )
-    if any(r["failures"] for r in results):
-        raise SystemExit(
-            f"failures: {({r['kind']: r['failures'] for r in results})}"
-        )
+    if result["failures"]:
+        raise SystemExit(f"failures: {result['failures']}")
 
 
 async def bench(args: argparse.Namespace) -> None:
-    kinds = ["old", "new"] if args.backend == "both" else [args.backend]
-    if args.tasks_dir and kinds != ["new"]:
-        raise SystemExit(
-            "--tasks-dir requires --backend new: the old backend needs a "
-            "Dockerfile that COPYs /workspace, which normal Harbor tasks lack"
-        )
-
     work_dir = Path(tempfile.mkdtemp(prefix="harbor-bench-"))
     print(f"work dir: {work_dir}")
-    wheel = build_sdk_wheel(work_dir) if "old" in kinds else None
 
     stub_port = free_port()
     stub_server, stub_task = await serve(stub_llm(args.latency), stub_port)
     stub_url = f"http://127.0.0.1:{stub_port}"
 
-    results = []
     try:
-        for kind in kinds:
-            task_dir = args.tasks_dir or prepare_task(work_dir, wheel, kind)
-            results.append(
-                await run_series(
-                    kind,
-                    task_dir,
-                    stub_url,
-                    args.runs,
-                    args.concurrency,
-                    args.timeout,
-                    args.keep_trials,
-                    args.custom_sdk_pip_package,
-                )
-            )
+        result = await run_series(
+            args.tasks_dir or prepare_task(work_dir),
+            stub_url,
+            args.runs,
+            args.concurrency,
+            args.timeout,
+            args.keep_trials,
+            args.patch_dockerfile_with_sdk,
+        )
     finally:
         stub_server.should_exit = True
         await stub_task
 
-    report(results, args.concurrency)
+    report(result, args.concurrency)
 
 
 def main() -> None:
@@ -355,15 +291,13 @@ def main() -> None:
         "generated default (see module docstring for image requirements)",
     )
     parser.add_argument(
-        "--custom-sdk-pip-package",
-        default=None,
-        help="extra pip requirement added to the bundle, overriding the SDK "
-        "source declared in bench_harness/pyproject.toml (edit that file "
-        "instead for a persistent change). Example: 'osmosis-ai @ https://"
-        "github.com/Osmosis-AI/osmosis-sdk-python/archive/refs/heads/"
-        "<branch>.tar.gz'",
+        "--no-patch-dockerfile-with-sdk",
+        dest="patch_dockerfile_with_sdk",
+        action="store_false",
+        help="disable the default Dockerfile patch that pre-installs the "
+        "harness's dependencies into the task image; dependencies then "
+        "download inside every trial container",
     )
-    parser.add_argument("--backend", choices=["new", "old", "both"], default="both")
     parser.add_argument("--runs", type=int, default=5)
     parser.add_argument("--concurrency", type=int, default=20)
     parser.add_argument("--latency", type=float, default=0.2)
