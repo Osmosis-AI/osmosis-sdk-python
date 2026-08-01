@@ -8,7 +8,6 @@ anywhere with one ``pip install`` — a rollout container or a user's own box.
 
 from __future__ import annotations
 
-import configparser
 import hashlib
 import shutil
 import subprocess
@@ -16,6 +15,7 @@ import tempfile
 import tomllib
 import zipfile
 from dataclasses import dataclass
+from importlib.metadata import PathDistribution
 from pathlib import Path
 
 import toml
@@ -56,6 +56,7 @@ class BundleInfo:
     wheel: Path
     agent_script: str | None
     grader_script: str | None
+    requirements: list[str]
 
 
 def agent_script_name(package: str) -> str:
@@ -117,15 +118,27 @@ def project_dir_for(obj: object) -> Path:
     return project_dir
 
 
+def extra_gated(spec: str) -> bool:
+    marker = Requirement(spec).marker
+    return marker is not None and "extra ==" in str(marker)
+
+
 def inspect_bundle(wheel: Path) -> BundleInfo:
-    """Read the bundle's console script names from its wheel metadata."""
-    with zipfile.ZipFile(wheel) as archive:
-        entry = next(
-            name for name in archive.namelist() if name.endswith("entry_points.txt")
-        )
-        parser = configparser.ConfigParser()
-        parser.read_string(archive.read(entry).decode())
-    scripts = dict(parser.items("console_scripts"))
+    """Read the bundle's console scripts and dependencies from wheel metadata.
+
+    Extra-gated dependencies are dropped; environment markers (python_version,
+    sys_platform, …) ship verbatim since pip evaluates them inside the
+    container, where they may resolve differently than on this host.
+    """
+    dist_info = next(
+        entry
+        for entry in zipfile.Path(wheel).iterdir()
+        if entry.name.endswith(".dist-info")
+    )
+    dist = PathDistribution(dist_info)
+    scripts = {
+        ep.name: ep.value for ep in dist.entry_points if ep.group == "console_scripts"
+    }
     agent = next(
         (n for n, t in scripts.items() if t.endswith(".bundle_main:agent_main")), None
     )
@@ -134,7 +147,12 @@ def inspect_bundle(wheel: Path) -> BundleInfo:
     )
     if agent is None and grader is None:
         raise ValueError(f"{wheel.name} is not an osmosis bundle (no runner scripts)")
-    return BundleInfo(wheel=wheel, agent_script=agent, grader_script=grader)
+    return BundleInfo(
+        wheel=wheel,
+        agent_script=agent,
+        grader_script=grader,
+        requirements=[spec for spec in dist.requires or [] if not extra_gated(spec)],
+    )
 
 
 def build_bundle(
