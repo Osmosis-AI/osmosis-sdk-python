@@ -12,8 +12,9 @@ repos:
       - id: detect-private-key
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.15.20
+    rev: v0.16.0
     hooks:
       - id: ruff
         args: [--fix]
       - id: ruff-format
+        types_or: [python, pyi, jupyter, markdown]
