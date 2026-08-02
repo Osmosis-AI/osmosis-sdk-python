@@ -1,8 +1,9 @@
 """Single import point for Typer's vendored Click internals.
 
 Typer 0.26+ vendors Click but does not re-export these symbols publicly yet
-(fastapi/typer#1868); the <0.27 pin in pyproject.toml keeps the private paths
-stable. Delete this module once upstream exports them.
+(fastapi/typer#1868). Typer 0.27 retains these private paths; the <0.28 pin in
+pyproject.toml keeps that dependency explicit. Delete this module once upstream
+exports them.
 
 Never import the external ``click`` package in CLI code: Typer raises the
 vendored classes, so external ``click`` types silently never match.
