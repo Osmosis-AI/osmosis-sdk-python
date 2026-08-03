@@ -106,10 +106,10 @@ def test_integration_namespaces_do_not_select_a_framework() -> None:
         """
         import sys
         import osmosis_ai.rollout.integrations as integrations
-        import osmosis_ai.rollout.integrations.agents as legacy_integrations
+        import osmosis_ai.rollout.integrations.agents as agent_integrations
 
         assert integrations.__all__ == []
-        assert legacy_integrations.__all__ == []
+        assert agent_integrations.__all__ == []
         optional_roots = {"agents", "litellm", "strands"}
         loaded_roots = {name.partition(".")[0] for name in sys.modules}
         assert not (optional_roots & loaded_roots)
@@ -165,15 +165,21 @@ def test_facades_resolve_each_symbol_from_its_leaf_module() -> None:
             "server",
         ),
         (
-            "osmosis_ai.rollout.integrations.strands",
+            "osmosis_ai.rollout.integrations.agents.strands",
             "OsmosisStrandsAgent",
             "strands",
             "strands",
         ),
         (
-            "osmosis_ai.rollout.integrations.openai_agents",
+            "osmosis_ai.rollout.integrations.agents.openai_agents",
             "OsmosisAgent",
             "agents",
+            "openai-agents",
+        ),
+        (
+            "osmosis_ai.rollout.integrations.agents.openai_agents",
+            "OsmosisAgent",
+            "litellm",
             "openai-agents",
         ),
         (
@@ -238,15 +244,15 @@ def test_cli_main_from_package_remains_a_module() -> None:
     assert isinstance(main, ModuleType)
 
 
-def test_canonical_integration_modules_reexport_implementations() -> None:
-    from osmosis_ai.rollout.integrations.agents.openai_agents import (
-        OsmosisAgent as LegacyOsmosisAgent,
-    )
-    from osmosis_ai.rollout.integrations.agents.strands import (
-        OsmosisStrandsAgent as LegacyOsmosisStrandsAgent,
-    )
-    from osmosis_ai.rollout.integrations.openai_agents import OsmosisAgent
-    from osmosis_ai.rollout.integrations.strands import OsmosisStrandsAgent
+def test_agent_integration_classes_use_canonical_module_paths() -> None:
+    from osmosis_ai.rollout.integrations.agents.openai_agents import OsmosisAgent
+    from osmosis_ai.rollout.integrations.agents.strands import OsmosisStrandsAgent
 
-    assert OsmosisAgent is LegacyOsmosisAgent
-    assert OsmosisStrandsAgent is LegacyOsmosisStrandsAgent
+    assert (
+        OsmosisAgent.__module__
+        == "osmosis_ai.rollout.integrations.agents.openai_agents"
+    )
+    assert (
+        OsmosisStrandsAgent.__module__
+        == "osmosis_ai.rollout.integrations.agents.strands"
+    )

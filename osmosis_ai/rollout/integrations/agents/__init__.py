@@ -1,6 +1,7 @@
-"""Legacy namespace for framework-specific agent integrations.
+"""Framework-specific agent integrations.
 
-Prefer the shorter modules under :mod:`osmosis_ai.rollout.integrations`.
+Import each framework explicitly so one agent framework does not become a
+dependency of every integration.
 """
 
 __all__: list[str] = []

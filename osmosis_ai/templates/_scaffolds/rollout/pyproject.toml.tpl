@@ -4,7 +4,7 @@ description = "Placeholder rollout scaffolded by `osmosis rollout init`."
 version = "0.1.0"
 requires-python = ">=3.12"
 dependencies = [
-    "osmosis-ai[server]>=0.3.0rc1",
+    "osmosis-ai[server]>=0.3.0rc1,<0.4",
 ]
 
 [build-system]

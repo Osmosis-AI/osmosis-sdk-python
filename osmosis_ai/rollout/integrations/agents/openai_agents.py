@@ -1,3 +1,8 @@
+"""OpenAI Agents SDK adapter for Osmosis rollouts.
+
+Install ``osmosis-ai[openai-agents]`` before importing this module.
+"""
+
 import logging
 import uuid
 from collections.abc import AsyncIterator, Mapping, Sequence
@@ -18,6 +23,19 @@ except ModuleNotFoundError as _exc:
         _exc,
         extra="openai-agents",
         expected_modules=frozenset({"agents", "litellm"}),
+        feature="The OpenAI Agents integration",
+    )
+except ImportError as _exc:
+    # openai-agents converts a missing LiteLLM extra into ImportError. Recover
+    # the original ModuleNotFoundError so users get the Osmosis installation
+    # command without masking unrelated import incompatibilities.
+    _cause = _exc.__cause__
+    if not isinstance(_cause, ModuleNotFoundError) or _cause.name != "litellm":
+        raise
+    raise_optional_dependency_error(
+        _cause,
+        extra="openai-agents",
+        expected_modules=frozenset({"litellm"}),
         feature="The OpenAI Agents integration",
     )
 

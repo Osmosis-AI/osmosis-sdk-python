@@ -123,6 +123,7 @@ def _assert_dependency_metadata(
 
     actual_base: set[str] = set()
     actual_extras = {extra: set() for extra in EXTRA_REQUIREMENTS}
+    full_self_references: list[Requirement] = []
     for raw_requirement in distribution.requires or []:
         requirement = Requirement(raw_requirement)
         name = _normalize_distribution(requirement.name)
@@ -141,6 +142,8 @@ def _assert_dependency_metadata(
             "A marked requirement is not owned by any declared extra: "
             f"{raw_requirement}"
         )
+        if name == "osmosis-ai" and "full" in matched_extras:
+            full_self_references.append(requirement)
 
     assert actual_base == BASE_REQUIREMENTS, (
         "Unexpected base dependency metadata: "
@@ -149,6 +152,17 @@ def _assert_dependency_metadata(
     assert actual_extras == EXTRA_REQUIREMENTS, (
         "Unexpected extra dependency metadata: "
         f"expected={EXTRA_REQUIREMENTS}, actual={actual_extras}"
+    )
+    assert len(full_self_references) == 1, (
+        "The full extra must contain exactly one osmosis-ai self-reference"
+    )
+    full_members = {
+        _normalize_distribution(extra) for extra in full_self_references[0].extras
+    }
+    expected_full_members = set(EXTRA_REQUIREMENTS) - {"full"}
+    assert full_members == expected_full_members, (
+        "Unexpected full-extra members: "
+        f"expected={sorted(expected_full_members)}, actual={sorted(full_members)}"
     )
 
 
@@ -192,14 +206,14 @@ def _smoke_server() -> None:
 
 def _smoke_strands() -> None:
     _assert_public_exports(
-        "osmosis_ai.rollout.integrations.strands",
+        "osmosis_ai.rollout.integrations.agents.strands",
         ("OsmosisRolloutModel", "OsmosisStrandsAgent"),
     )
 
 
 def _smoke_openai_agents() -> None:
     _assert_public_exports(
-        "osmosis_ai.rollout.integrations.openai_agents",
+        "osmosis_ai.rollout.integrations.agents.openai_agents",
         (
             "OsmosisAgent",
             "OsmosisLitellmModel",
@@ -340,16 +354,24 @@ def _assert_clean_import_state() -> None:
     """Ensure importing rollout core did not initialize optional/CLI modules."""
     forbidden_prefixes = (
         "agents",
+        "aiohttp",
+        "click",
+        "dockerfile_parse",
         "dotenv",
         "fastapi",
         "harbor",
         "keyring",
         "litellm",
+        "mcp",
+        "openai",
+        "orjson",
         "prompt_toolkit",
         "pyarrow",
         "questionary",
         "rich",
         "strands",
+        "toml",
+        "tqdm",
         "typer",
         "uvicorn",
         "osmosis_ai.cli",

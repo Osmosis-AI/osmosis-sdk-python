@@ -23,8 +23,8 @@ Optional features use these canonical modules:
 |-------|--------|---------|
 | `server` | `from osmosis_ai.rollout.server import create_rollout_server, ControllerAuth` | Generic FastAPI rollout server |
 | `harbor` | `from osmosis_ai.rollout.backend.harbor import HarborBackend` | Harbor execution backend |
-| `strands` | `from osmosis_ai.rollout.integrations.strands import OsmosisStrandsAgent, OsmosisRolloutModel` | Strands integration |
-| `openai-agents` | `from osmosis_ai.rollout.integrations.openai_agents import OsmosisAgent` | OpenAI Agents integration |
+| `strands` | `from osmosis_ai.rollout.integrations.agents.strands import OsmosisStrandsAgent, OsmosisRolloutModel` | Strands integration |
+| `openai-agents` | `from osmosis_ai.rollout.integrations.agents.openai_agents import OsmosisAgent` | OpenAI Agents integration |
 
 The `harbor` extra installs plain Harbor for an externally provided SkyPilot runtime. Daytona is retired, and do not install Harbor's `skypilot` extra.
 
@@ -210,13 +210,13 @@ There is no `osmosis rollout serve` command. Scaffold a server with `osmosis rol
 
 ## Integrations
 
-[../osmosis_ai/rollout/integrations/](../osmosis_ai/rollout/integrations/)
+[../osmosis_ai/rollout/integrations/agents/](../osmosis_ai/rollout/integrations/agents/)
 
-- **Strands** — with `pip install "osmosis-ai[strands]"`, import `OsmosisStrandsAgent` and `OsmosisRolloutModel` from `osmosis_ai.rollout.integrations.strands`. `OsmosisStrandsAgent` is a drop-in for `strands.Agent`: it swaps in the rollout model from the active `RolloutContext` and auto-registers a sample source.
+- **Strands** — with `pip install "osmosis-ai[strands]"`, import `OsmosisStrandsAgent` and `OsmosisRolloutModel` from `osmosis_ai.rollout.integrations.agents.strands`. `OsmosisStrandsAgent` is a drop-in for `strands.Agent`: it swaps in the rollout model from the active `RolloutContext` and auto-registers a sample source.
 - **OpenAI Agents** — with `pip install "osmosis-ai[openai-agents]"`, import `OsmosisAgent` from the canonical integration module:
 
   ```python
-  from osmosis_ai.rollout.integrations.openai_agents import OsmosisAgent
+  from osmosis_ai.rollout.integrations.agents.openai_agents import OsmosisAgent
   ```
 
 ## Minimal example
@@ -231,7 +231,7 @@ from osmosis_ai.rollout import (
     GraderConfig,
     GraderContext,
 )
-from osmosis_ai.rollout.integrations.strands import (
+from osmosis_ai.rollout.integrations.agents.strands import (
     OsmosisRolloutModel,
     OsmosisStrandsAgent,
 )

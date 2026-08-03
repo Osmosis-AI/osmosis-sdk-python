@@ -29,8 +29,7 @@ async def test_sample_source_keeps_native_messages_when_conversion_fails(
 
     messages = [{"role": "user", "content": [{"text": "hello"}]}]
     with patch(
-        "osmosis_ai.rollout.integrations.agents.strands."
-        "LiteLLMModel.format_request_messages",
+        "osmosis_ai.rollout.integrations.agents.strands.LiteLLMModel.format_request_messages",
         side_effect=RuntimeError("boom"),
     ):
         sample = await StrandsAgentSampleSource(

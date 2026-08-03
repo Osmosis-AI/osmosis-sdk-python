@@ -2,6 +2,21 @@
 
 This file records changes to `osmosis-ai`. For earlier versions, see [GitHub Releases](https://github.com/Osmosis-AI/osmosis-sdk-python/releases).
 
+## Unreleased
+
+### Breaking Changes
+
+- Runtime features now use independent installation extras: `server`, `strands`, `openai-agents`, `harbor`, `rubric`, and `parquet`; `full` installs all of them. The former `platform` extra is replaced by `parquet`.
+- Development tools are no longer published through the `dev` extra. From a source checkout, install the PEP 735 dependency group with `uv sync --all-extras --group dev` or `python -m pip install -e ".[full]" --group dev`.
+- Rollout feature imports moved out of `osmosis_ai.rollout`:
+  - Server: `from osmosis_ai.rollout.server import create_rollout_server, ControllerAuth`
+  - Strands: `from osmosis_ai.rollout.integrations.agents.strands import OsmosisStrandsAgent, OsmosisRolloutModel`
+  - OpenAI Agents: `from osmosis_ai.rollout.integrations.agents.openai_agents import OsmosisAgent`
+  - Harbor: `from osmosis_ai.rollout.backend.harbor import HarborBackend`
+  - Harbor workflow context: `from osmosis_ai.rollout.context import HarborAgentWorkflowContext`
+- `evaluate_rubric` is no longer included by `from osmosis_ai import *`. Import it explicitly from `osmosis_ai.eval.rubric` and install the `rubric` extra.
+- The Harbor extra no longer installs Daytona or SkyPilot. Daytona support is retired; the rollout runtime must provide SkyPilot when it is used.
+
 ## 0.3.0rc1 - 2026-07-28
 
 ### Breaking Changes

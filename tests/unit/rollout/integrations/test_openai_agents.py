@@ -52,8 +52,7 @@ class TestOpenAIAgentsIntegration:
         await session.add_items(items)
 
         with patch(
-            "osmosis_ai.rollout.integrations.agents.openai_agents."
-            "Converter.items_to_messages",
+            "osmosis_ai.rollout.integrations.agents.openai_agents.Converter.items_to_messages",
             side_effect=RuntimeError("boom"),
         ):
             sample = await rollout_context.get_sample()

@@ -25,7 +25,7 @@ osmosis_ai/
 │   ├── server/            # optional generic FastAPI server (`[server]`)
 │   ├── backend/           # ExecutionBackend ABC + Local / optional Harbor backend
 │   ├── types/             # protocol.py, config.py, sample.py
-│   └── integrations/      # Strands / OpenAI Agents adapters
+│   └── integrations/agents/  # Strands / OpenAI Agents adapters
 ├── eval/              # Eval helpers
 │   ├── rubric/        # evaluate_rubric() LLM-as-judge engine
 │   └── common/cli.py  # Workflow + grader loader (used by cloud submit preflight)
@@ -52,8 +52,8 @@ from osmosis_ai.eval.rubric import evaluate_rubric, RubricResult
 from osmosis_ai.rollout import AgentWorkflow, Grader, LocalBackend, SampleSource
 from osmosis_ai.rollout.server import create_rollout_server
 from osmosis_ai.rollout.backend.harbor import HarborBackend
-from osmosis_ai.rollout.integrations.strands import OsmosisStrandsAgent
-from osmosis_ai.rollout.integrations.openai_agents import OsmosisAgent
+from osmosis_ai.rollout.integrations.agents.strands import OsmosisStrandsAgent
+from osmosis_ai.rollout.integrations.agents.openai_agents import OsmosisAgent
 ```
 
 `osmosis_ai.rollout` is **not** re-exported at the package top level — import it directly. Its public surface is framework-neutral core only; it does not export the server or Strands integration. `server`, `harbor`, `strands`, and `openai-agents` each require their matching installation extra. The generic server has no Harbor dependency.

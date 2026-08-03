@@ -1,3 +1,8 @@
+"""Strands agent adapter for Osmosis rollouts.
+
+Install ``osmosis-ai[strands]`` before importing this module.
+"""
+
 import logging
 from collections.abc import Mapping, Sequence
 from typing import Any, cast
