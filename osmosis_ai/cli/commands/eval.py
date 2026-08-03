@@ -138,7 +138,7 @@ def eval_info(
         None,
         "--output",
         "-o",
-        help="Run output root (default in rich mode: .osmosis/evals/<name>/).",
+        help="Run output root (default in rich mode: .osmosis/evals/<run-name>/).",
     ),
 ) -> Any:
     """Show evaluation run details, results, and metrics."""
@@ -154,7 +154,7 @@ def eval_download(
         None,
         "--output",
         "-o",
-        help="Run output root (default: .osmosis/evals/<name>/).",
+        help="Run output root (default: .osmosis/evals/<run-name>/).",
     ),
     types: str = typer.Option(
         "metrics,trajectories",

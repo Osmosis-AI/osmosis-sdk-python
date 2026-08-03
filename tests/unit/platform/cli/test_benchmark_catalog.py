@@ -134,7 +134,7 @@ def test_info_exposes_selection_metadata_and_full_task_list(
                 task_sets=[parity],
                 runner_family="harbor",
                 supports_harness=True,
-                requires_harness=False,
+                requires_harness=True,
                 requires_judge_model=True,
                 judge_model_default="openai/gpt-5",
                 pass_threshold=1,
@@ -324,3 +324,84 @@ def test_catalog_info_surfaces_the_default_harness(
     fields = {field.label: field.value for field in result.fields}
     assert fields["Harness"] == "Required (default: terminus-2)"
     assert 'harness = "terminus-2"' in result.display_hints[0]
+
+
+def test_catalog_info_names_the_official_scaffold_as_the_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A benchmark that allows but does not require a harness defaults to its own scaffold."""
+
+    class FakeClient:
+        def get_benchmark(self, *_: Any, **__: Any) -> BenchmarkCatalogDetail:
+            return BenchmarkCatalogDetail(
+                id="benchmark-3",
+                name="BrowseComp",
+                description=None,
+                source_type="osmosis_managed",
+                source_ref="browsecomp",
+                task_count=10,
+                category_count=1,
+                task_sets=[],
+                runner_family="harbor",
+                supports_harness=True,
+                requires_harness=False,
+                requires_judge_model=False,
+                judge_model_default=None,
+                pass_threshold=1,
+                categories=[],
+                tasks=[],
+                unavailable_tasks=None,
+            )
+
+    monkeypatch.setattr(
+        benchmark_module,
+        "require_git_workspace_directory_context",
+        _context,
+    )
+    monkeypatch.setattr(benchmark_module, "OsmosisClient", FakeClient)
+
+    result = benchmark_module.catalog_info("browsecomp")
+
+    fields = {field.label: field.value for field in result.fields}
+    assert fields["Harness"] == "Optional (default: official scaffold)"
+    assert "[[agents]] entry" in result.display_hints[0]
+
+
+def test_catalog_info_reports_a_scaffold_only_benchmark(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A benchmark with no harness support runs its own scaffold, not "nothing"."""
+
+    class FakeClient:
+        def get_benchmark(self, *_: Any, **__: Any) -> BenchmarkCatalogDetail:
+            return BenchmarkCatalogDetail(
+                id="benchmark-4",
+                name="Toolathlon-Verified",
+                description=None,
+                source_type="osmosis_managed",
+                source_ref="toolathlon-verified",
+                task_count=5,
+                category_count=1,
+                task_sets=[],
+                runner_family="toolathlon",
+                supports_harness=False,
+                requires_harness=False,
+                requires_judge_model=False,
+                judge_model_default=None,
+                pass_threshold=1,
+                categories=[],
+                tasks=[],
+                unavailable_tasks=None,
+            )
+
+    monkeypatch.setattr(
+        benchmark_module,
+        "require_git_workspace_directory_context",
+        _context,
+    )
+    monkeypatch.setattr(benchmark_module, "OsmosisClient", FakeClient)
+
+    result = benchmark_module.catalog_info("toolathlon-verified")
+
+    fields = {field.label: field.value for field in result.fields}
+    assert fields["Harness"] == "Official scaffold only"

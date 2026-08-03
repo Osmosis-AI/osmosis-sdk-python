@@ -217,10 +217,12 @@ def catalog_info(name_or_id: str) -> DetailResult:
         if benchmark.requires_harness
         else "Optional"
         if benchmark.supports_harness
-        else "Not supported"
+        else "Official scaffold only"
     )
     if benchmark.default_harness:
         harness += f" (default: {benchmark.default_harness})"
+    elif benchmark.supports_harness and not benchmark.requires_harness:
+        harness += " (default: official scaffold)"
     judge = "Not required"
     if benchmark.requires_judge_model:
         judge = "Required"
@@ -280,6 +282,13 @@ def catalog_info(name_or_id: str) -> DetailResult:
             f"{benchmark.name}'s published scores were measured on "
             f'harness = "{benchmark.default_harness}"; another harness is '
             "not comparable with them.",
+        )
+    elif benchmark.supports_harness and not benchmark.requires_harness:
+        display_hints.insert(
+            0,
+            "Every agent needs a [[agents]] entry. Omit its harness to run "
+            f"{benchmark.name}'s official scaffold, or name one to compare "
+            "scaffolds in the same run.",
         )
     for task_set in benchmark.task_sets:
         if task_set.recommended:
@@ -358,7 +367,7 @@ def list_benchmark_runs(*, limit: int, all_: bool) -> ListResult:
             }
             for run in runs
         ],
-        display_hints=["Use osmosis benchmark info <name-or-id> for details."],
+        display_hints=["Use osmosis benchmark info <run-name> for details."],
     )
 
 

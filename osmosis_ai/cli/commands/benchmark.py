@@ -137,7 +137,7 @@ def benchmark_download(
         None,
         "--output",
         "-o",
-        help="Run output root (default: .osmosis/benchmarks/<name>/).",
+        help="Run output root (default: .osmosis/benchmarks/<run-name>/).",
     ),
     types: str = typer.Option(
         "summary,results",
@@ -159,7 +159,7 @@ def benchmark_download(
         help="Skip size confirmation.",
     ),
 ) -> Any:
-    """Download benchmark summary, results, artifacts, or logs."""
+    """Download benchmark run summary, results, artifacts, or logs."""
     from osmosis_ai.platform.cli.benchmark import download as _download
 
     return _download(
