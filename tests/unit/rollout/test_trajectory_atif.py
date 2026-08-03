@@ -254,6 +254,32 @@ def test_multimodal_and_subagent_contract_validation() -> None:
         _trajectory(subagent_trajectories=[subagent, subagent.model_copy(deep=True)])
 
 
+@pytest.mark.parametrize(
+    "value",
+    [float("nan"), float("inf"), float("-inf")],
+    ids=["nan", "positive-infinity", "negative-infinity"],
+)
+def test_models_reject_non_finite_floats(value: float) -> None:
+    with pytest.raises(ValidationError, match="finite number"):
+        Metrics(cost_usd=value)
+    with pytest.raises(ValidationError, match="finite number"):
+        Metrics(logprobs=[value])
+    with pytest.raises(ValidationError, match="finite number"):
+        FinalMetrics(total_cost_usd=value)
+    with pytest.raises(ValidationError, match="finite number"):
+        Step(
+            step_id=1,
+            source="agent",
+            message="x",
+            reasoning_effort=value,
+        )
+
+
+def test_formatter_rejects_non_finite_values_in_extra_data() -> None:
+    with pytest.raises(ValueError, match="Out of range float values"):
+        format_trajectory_json({"extra": {"score": float("nan")}})
+
+
 def test_formatter_pretty_prints_with_compact_numeric_arrays() -> None:
     formatted = format_trajectory_json(
         {

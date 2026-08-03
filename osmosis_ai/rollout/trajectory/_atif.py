@@ -35,7 +35,10 @@ ATIFSchemaVersion = Literal[
 class _ATIFModel(BaseModel):
     """Base configuration shared by all ATIF document objects."""
 
-    model_config: ClassVar[ConfigDict] = ConfigDict(extra="forbid")
+    model_config: ClassVar[ConfigDict] = ConfigDict(
+        extra="forbid",
+        allow_inf_nan=False,
+    )
 
 
 class ImageSource(_ATIFModel):
@@ -306,5 +309,5 @@ def format_trajectory_json(data: dict[str, Any]) -> str:
 
     return _NUMERIC_ARRAY_PATTERN.sub(
         compact_numeric_array,
-        json.dumps(data, indent=2),
+        json.dumps(data, indent=2, allow_nan=False),
     )
