@@ -155,7 +155,7 @@ harness = "codex"
 [agents.model]
 type = "hosted"
 base_model = "Qwen/Qwen3-8B"
-checkpoint_name = "terminal-agent"
+lora_model_name = "terminal-agent"
 """,
     )
 
@@ -187,7 +187,7 @@ harness = "codex"
 [agents.model]
 type = "hosted"
 base_model = "Qwen/Qwen3-8B"
-checkpoint_name = "hle-agent"
+lora_model_name = "hle-agent"
 
 [execution]
 judge_model = "openai/gpt-5"
@@ -223,7 +223,7 @@ harness = "codex"
 [agents.model]
 type = "hosted"
 base_model = "Qwen/Qwen3-8B"
-checkpoint_name = "hle-agent"
+lora_model_name = "hle-agent"
 """,
     )
 
@@ -262,7 +262,7 @@ harness = "codex"
 [agents.model]
 type = "hosted"
 base_model = "Qwen/Qwen3-8B"
-checkpoint_name = "hle-agent"
+lora_model_name = "hle-agent"
 """,
     )
 
@@ -425,7 +425,7 @@ benchmark = "DeepSWE"
 [agents.model]
 type = "hosted"
 base_model = "Qwen/Qwen3-8B"
-checkpoint_name = "deep-swe-agent"
+lora_model_name = "deep-swe-agent"
 
 [execution]
 judge_api_key_secret = 42
@@ -505,7 +505,7 @@ harness = "codex"
 [agents.model]
 type = "hosted"
 base_model = "Qwen/Qwen3-8B"
-checkpoint_name = "benchmark-agent"
+lora_model_name = "benchmark-agent"
 
 {env_section}
 """,
@@ -632,7 +632,7 @@ harness_api_key_secret = "{destination_env}"
 [agents.model]
 type = "hosted"
 base_model = "Qwen/Qwen3-8B"
-checkpoint_name = "deep-swe-agent"
+lora_model_name = "deep-swe-agent"
 
 [agents.env]
 {destination_env} = "literal-for-the-agent"
@@ -658,7 +658,7 @@ harness = "cursor-cli"
 [agents.model]
 type = "hosted"
 base_model = "Qwen/Qwen3-8B"
-checkpoint_name = "deep-swe-agent"
+lora_model_name = "deep-swe-agent"
 
 [agents.env]
 CURSOR_API_KEY = "literal-for-the-agent"
@@ -684,7 +684,7 @@ harness = "mini-swe-agent"
 [agents.model]
 type = "hosted"
 base_model = "Qwen/Qwen3-8B"
-checkpoint_name = "deep-swe-agent"
+lora_model_name = "deep-swe-agent"
 """,
     )
 
@@ -717,7 +717,7 @@ harness = "cursor-cli"
 [agents.model]
 type = "hosted"
 base_model = "Qwen/Qwen3-8B"
-checkpoint_name = "deep-swe-agent"
+lora_model_name = "deep-swe-agent"
 
 {section}
 """,

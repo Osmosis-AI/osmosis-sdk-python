@@ -81,7 +81,7 @@ class BenchmarkEndpointModel(_StrictSection):
 class BenchmarkHostedModel(_StrictSection):
     type: Literal["hosted"]
     base_model: str
-    checkpoint_name: str
+    lora_model_name: str
 
 
 BenchmarkModel = Annotated[

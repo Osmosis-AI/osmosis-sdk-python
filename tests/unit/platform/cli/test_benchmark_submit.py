@@ -67,7 +67,7 @@ harness = "codex"
 [agents.model]
 type = "hosted"
 base_model = "Qwen/Qwen3-8B"
-checkpoint_name = "benchmark-agent"
+lora_model_name = "benchmark-agent"
 
 [execution]
 judge_model = "openai/gpt-5"

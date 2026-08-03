@@ -662,7 +662,7 @@ def stop(name_or_id: str, *, yes: bool) -> OperationResult:
 def _agent_model_label(agent: dict[str, Any]) -> str:
     model = agent["model"]
     if model["type"] == "hosted":
-        return f"{model['base_model']}:{model['checkpoint_name']}"
+        return f"{model['base_model']}:{model['lora_model_name']}"
     return str(model["model"])
 
 
