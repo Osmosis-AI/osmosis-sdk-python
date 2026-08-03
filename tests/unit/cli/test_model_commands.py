@@ -285,7 +285,9 @@ class TestListModels:
         assert lora_section.display_items[0]["reward"] == "0.85"
         assert base_section.total_count == 1
         assert lora_section.total_count == 1
-        assert result.display_hints == ["Use osmosis model info <lora-model-name> for details."]
+        assert result.display_hints == [
+            "Use osmosis model info <lora-model-name> for details."
+        ]
 
     def test_list_items_carry_no_type_discriminator(
         self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
@@ -518,7 +520,9 @@ class TestListModels:
         assert all("type" not in item for item in result.items)
         assert [c.key for c in result.columns] == _LORA_COLUMN_KEYS
         assert result.next_offset == 1
-        assert result.display_hints == ["Use osmosis model info <lora-model-name> for details."]
+        assert result.display_hints == [
+            "Use osmosis model info <lora-model-name> for details."
+        ]
         assert_git_context(result.extra)
 
     def test_list_rejects_invalid_type(self) -> None:
@@ -602,7 +606,9 @@ class TestListModels:
         result = platform_model_module.list_models(limit=30, all_=False)
 
         assert isinstance(result, SectionedListResult)
-        assert result.display_hints == ["Use osmosis model info <lora-model-name> for details."]
+        assert result.display_hints == [
+            "Use osmosis model info <lora-model-name> for details."
+        ]
 
     def test_list_all_captures_quota_from_first_page(
         self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
