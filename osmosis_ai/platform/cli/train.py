@@ -385,7 +385,7 @@ def info(name: str, *, output: str | None) -> DetailResult:
         from rich.text import Text
 
         table = Table(show_header=True, header_style="bold", expand=False)
-        table.add_column("LoRA Model", overflow="fold")
+        table.add_column("Checkpoint", overflow="fold")
         table.add_column("Step", no_wrap=True)
         table.add_column("Status", no_wrap=True)
         if run.is_internal_user:
@@ -395,7 +395,7 @@ def info(name: str, *, output: str | None) -> DetailResult:
             cp_name = cp.checkpoint_name or "(unnamed)"
             cells = [Text(cp_name), str(cp.checkpoint_step), cp.status]
             plain_line = (
-                f"LoRA Model: {cp_name} step {cp.checkpoint_step} [{cp.status}]"
+                f"Checkpoint: {cp_name} step {cp.checkpoint_step} [{cp.status}]"
             )
             if run.is_internal_user:
                 cells.append(cp.id[:8])

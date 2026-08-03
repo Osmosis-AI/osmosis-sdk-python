@@ -737,7 +737,7 @@ class TestStatus:
         assert result.sections
         section = result.sections[0]
         assert [column.header for column in section.rich.columns] == [
-            "LoRA Model",
+            "Checkpoint",
             "Step",
             "Status",
         ]

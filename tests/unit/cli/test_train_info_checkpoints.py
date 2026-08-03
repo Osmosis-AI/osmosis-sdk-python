@@ -299,7 +299,7 @@ class TestStatusCheckpoints:
         assert result.sections
         section = result.sections[0]
         assert [column.header for column in section.rich.columns] == [
-            "LoRA Model",
+            "Checkpoint",
             "Step",
             "Status",
             "ID",
@@ -335,7 +335,7 @@ class TestStatusCheckpoints:
         assert isinstance(result, DetailResult)
         assert result.data["checkpoints"] == []
         assert all(
-            field.label not in {"LoRA Model", "Deploy"} for field in result.fields
+            field.label not in {"Checkpoint", "Deploy"} for field in result.fields
         )
         assert result.sections == []
         expected_url = "https://platform.osmosis.ai/ws/training/run_1"
