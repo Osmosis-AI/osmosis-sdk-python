@@ -278,73 +278,215 @@ def _format_tokens(value: Any) -> str | None:
     if not isinstance(value, int | float) or isinstance(value, bool):
         return None
     if value >= 1_000_000:
-        return f"{value / 1_000_000:.1f}M tokens"
+        return f"{value / 1_000_000:.1f}M"
     if value >= 1_000:
-        return f"{value / 1_000:.1f}k tokens"
-    return f"{round(value):,} tokens"
+        return f"{value / 1_000:.1f}k"
+    return f"{round(value):,}"
 
 
-def _metric_parts(entry: dict[str, Any]) -> list[str]:
-    """The platform's metric set, in the order its leaderboard ranks by."""
-    parts = [f"pass@1 {_format_rate_interval(entry.get('pass_at_1'))}"]
+def _agent_label(entry: dict[str, Any]) -> str:
+    model = str(entry.get("model") or "–")
+    harness = entry.get("harness")
+    name = f"{model} ({harness})" if harness else model
+    tags = [
+        tag
+        for tag, present in (
+            ("tied for first", bool(entry.get("tied"))),
+            ("parity", entry.get("task_set") == "parity"),
+        )
+        if present
+    ]
+    return name + (f" [{', '.join(tags)}]" if tags else "")
+
+
+def _deepest_pass_at_k(entry: dict[str, Any]) -> dict[str, Any] | None:
     points = entry.get("pass_at_k") or []
     deepest = points[-1] if points else None
     if isinstance(deepest, dict) and deepest.get("value") is not None:
-        parts.append(f"pass@{deepest.get('k')} {float(deepest['value']):.1%}")
-    cost = entry.get("cost_per_task")
-    if isinstance(cost, int | float):
-        parts.append(f"${cost:,.2f}/task")
-    seconds = entry.get("mean_duration_seconds")
-    if isinstance(seconds, int | float):
-        parts.append(f"{seconds:,.0f}s/task")
-    tokens = _format_tokens(entry.get("tokens_per_task"))
-    if tokens is not None:
-        parts.append(f"{tokens}/task")
-    return parts
+        return deepest
+    return None
 
 
-def _leaderboard_rows(entries: list[dict[str, Any]]) -> list[tuple[str, str]]:
-    rows: list[tuple[str, str]] = []
+def _format_pass_at_k(point: dict[str, Any] | None) -> str:
+    if point is None or point.get("value") is None:
+        return "–"
+    return f"{float(point['value']):.1%}"
+
+
+def _format_cost_per_task(cost: Any) -> str:
+    if not isinstance(cost, int | float) or isinstance(cost, bool):
+        return "–"
+    return f"${cost:,.2f}"
+
+
+def _format_seconds_per_task(seconds: Any) -> str:
+    if not isinstance(seconds, int | float) or isinstance(seconds, bool):
+        return "–"
+    return f"{seconds:,.0f}s"
+
+
+def _leaderboard_section(entries: list[dict[str, Any]]) -> DetailSection | None:
+    """Multi-column standings; drops metric columns that are empty for everyone."""
+    if not entries:
+        return None
+
+    from rich import box
+    from rich.table import Table
+    from rich.text import Text
+
+    show_pass_k = any(_deepest_pass_at_k(entry) for entry in entries)
+    show_cost = any(
+        isinstance(entry.get("cost_per_task"), int | float)
+        and not isinstance(entry.get("cost_per_task"), bool)
+        for entry in entries
+    )
+    show_time = any(
+        isinstance(entry.get("mean_duration_seconds"), int | float)
+        and not isinstance(entry.get("mean_duration_seconds"), bool)
+        for entry in entries
+    )
+    show_tokens = any(_format_tokens(entry.get("tokens_per_task")) for entry in entries)
+    show_run = any(
+        isinstance(entry.get("run"), dict) and entry["run"].get("name")
+        for entry in entries
+    )
+
+    max_k: int | None = None
+    if show_pass_k:
+        for entry in entries:
+            point = _deepest_pass_at_k(entry)
+            k = point.get("k") if point else None
+            if isinstance(k, int):
+                max_k = k if max_k is None else max(max_k, k)
+    pass_k_header = f"Pass@{max_k}" if max_k is not None else "Pass@k"
+
+    table = Table(
+        title="Leaderboard",
+        box=box.ROUNDED,
+        show_header=True,
+        header_style="bold",
+        title_justify="left",
+        expand=False,
+    )
+    table.add_column("Rank", style="cyan", no_wrap=True)
+    table.add_column("Agent", overflow="fold")
+    table.add_column("Pass@1", no_wrap=True)
+    if show_pass_k:
+        table.add_column(pass_k_header, no_wrap=True)
+    if show_cost:
+        table.add_column("Cost/task", no_wrap=True)
+    if show_time:
+        table.add_column("Time/task", no_wrap=True)
+    if show_tokens:
+        table.add_column("Tokens/task", no_wrap=True)
+    if show_run:
+        table.add_column("Run", no_wrap=True, overflow="ellipsis")
+
+    plain_lines = ["Leaderboard:"]
     for entry in entries:
         rank = entry.get("rank")
-        label = f"#{rank}" if isinstance(rank, int) else "–"
-        model = str(entry.get("model") or "–")
-        harness = entry.get("harness")
-        name = f"{model} ({harness})" if harness else model
-        tags = [
-            tag
-            for tag, present in (
-                ("tied for first", bool(entry.get("tied"))),
-                ("parity", entry.get("task_set") == "parity"),
+        rank_label = f"#{rank}" if isinstance(rank, int) else "–"
+        agent = _agent_label(entry)
+        pass_at_1 = _format_rate_interval(entry.get("pass_at_1"))
+        cells: list[Any] = [rank_label, Text(agent), pass_at_1]
+        plain_parts = [rank_label, agent, f"pass@1 {pass_at_1}"]
+
+        if show_pass_k:
+            point = _deepest_pass_at_k(entry)
+            pass_at_k = _format_pass_at_k(point)
+            cells.append(pass_at_k)
+            if pass_at_k != "–" and point is not None:
+                plain_parts.append(f"pass@{point.get('k')} {pass_at_k}")
+
+        if show_cost:
+            cost = _format_cost_per_task(entry.get("cost_per_task"))
+            cells.append(cost)
+            if cost != "–":
+                plain_parts.append(f"{cost}/task")
+
+        if show_time:
+            duration = _format_seconds_per_task(entry.get("mean_duration_seconds"))
+            cells.append(duration)
+            if duration != "–":
+                plain_parts.append(f"{duration}/task")
+
+        if show_tokens:
+            tokens = _format_tokens(entry.get("tokens_per_task")) or "–"
+            cells.append(tokens)
+            if tokens != "–":
+                plain_parts.append(f"{tokens} tokens/task")
+
+        if show_run:
+            run = entry.get("run")
+            run_name = (
+                str(run["name"])
+                if isinstance(run, dict) and run.get("name")
+                else "–"
             )
-            if present
-        ]
-        parts = [
-            name + (f" [{', '.join(tags)}]" if tags else ""),
-            *_metric_parts(entry),
-        ]
-        run = entry.get("run")
-        if isinstance(run, dict) and run.get("name"):
-            parts.append(f"run {run['name']}")
-        rows.append((label, " · ".join(parts)))
-    return rows
+            cells.append(Text(run_name))
+            if run_name != "–":
+                plain_parts.append(f"run {run_name}")
+
+        table.add_row(*cells)
+        plain_lines.append(" · ".join(plain_parts))
+
+    return DetailSection(rich=table, plain_lines=plain_lines)
 
 
-def _benchmark_run_rows(runs: list[BenchmarkRun]) -> list[tuple[str, str]]:
-    return [
-        (
-            run.name,
+def _benchmark_runs_section(
+    runs: list[BenchmarkRun],
+    *,
+    shown: int,
+    total: int,
+) -> DetailSection | None:
+    if not runs:
+        return None
+
+    from rich import box
+    from rich.table import Table
+    from rich.text import Text
+
+    title = f"Runs ({shown:,} of {total:,})"
+    table = Table(
+        title=title,
+        box=box.ROUNDED,
+        show_header=True,
+        header_style="bold",
+        title_justify="left",
+        expand=False,
+    )
+    table.add_column("Name", overflow="fold")
+    table.add_column("Status", no_wrap=True)
+    table.add_column("Progress", no_wrap=True)
+    table.add_column("Best Pass@1", no_wrap=True)
+    table.add_column("Submitted", no_wrap=True)
+
+    plain_lines = [f"{title}:"]
+    for run in runs:
+        progress = format_progress(_benchmark_progress(run)) or "–"
+        best = _format_pass_at_1(run.best_pass_at_1)
+        submitted = format_local_date(run.created_at)
+        # Markup string so Rich paints the status; Text() would show raw tags.
+        table.add_row(
+            Text(run.name),
+            format_benchmark_status(run),
+            progress,
+            best,
+            submitted,
+        )
+        plain_lines.append(
             " · ".join(
                 [
-                    format_benchmark_status(run),
-                    format_progress(_benchmark_progress(run)) or "–",
-                    f"best pass@1 {_format_pass_at_1(run.best_pass_at_1)}",
-                    format_local_date(run.created_at),
+                    run.name,
+                    f"[{run.status}]",
+                    progress,
+                    f"best pass@1 {best}",
+                    submitted,
                 ]
-            ),
+            )
         )
-        for run in runs
-    ]
+
+    return DetailSection(rich=table, plain_lines=plain_lines)
 
 
 def benchmark_info(name_or_id: str, *, limit: int, all_: bool) -> DetailResult:
@@ -468,10 +610,11 @@ def benchmark_info(name_or_id: str, *, limit: int, all_: bool) -> DetailResult:
 
     sections: list[DetailSection] = []
     for section in (
-        kv_section("Leaderboard", _leaderboard_rows(benchmark.leaderboard)),
-        kv_section(
-            f"Runs ({len(runs):,} of {runs_total_count:,})",
-            _benchmark_run_rows(runs),
+        _leaderboard_section(benchmark.leaderboard),
+        _benchmark_runs_section(
+            runs,
+            shown=len(runs),
+            total=runs_total_count,
         ),
     ):
         if section is not None:

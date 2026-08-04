@@ -555,8 +555,8 @@ def test_benchmark_info_renders_leaderboard_and_runs(
     )
 
 
-def test_leaderboard_rows_format_and_tolerate_sparse_entries() -> None:
-    full, sparse = benchmark_module._leaderboard_rows(
+def test_leaderboard_section_format_and_tolerate_sparse_entries() -> None:
+    section = benchmark_module._leaderboard_section(
         [
             {
                 "rank": 1,
@@ -588,20 +588,22 @@ def test_leaderboard_rows_format_and_tolerate_sparse_entries() -> None:
         ]
     )
 
-    label, value = full
-    assert label == "#1"
-    assert "GPT-5.5 (codex) [parity]" in value
-    assert "pass@1 75.0% (71.9–78.1)" in value
-    assert "pass@2 81.2%" in value
-    assert "$4.20/task" in value
-    assert "54s/task" in value
-    assert "1.1M tokens/task" in value
-    assert "run warm-gull" in value
+    assert section is not None
+    assert section.plain_lines[0] == "Leaderboard:"
+    full = section.plain_lines[1]
+    assert full.startswith("#1 · GPT-5.5 (codex) [parity]")
+    assert "pass@1 75.0% (71.9–78.1)" in full
+    assert "pass@2 81.2%" in full
+    assert "$4.20/task" in full
+    assert "54s/task" in full
+    assert "1.1M tokens/task" in full
+    assert "run warm-gull" in full
 
-    label, value = sparse
-    assert label == "–"
-    assert value.startswith("– [tied for first]")
-    assert "pass@1 –" in value
+    sparse = section.plain_lines[2]
+    assert sparse.startswith("– · – [tied for first]")
+    assert "pass@1 –" in sparse
+    # Rich table should expose the dynamic Pass@k header.
+    assert any(getattr(col, "header", None) == "Pass@2" for col in section.rich.columns)
 
 
 def test_last_run_cell_shows_sync_state_before_run_history() -> None:
@@ -647,7 +649,7 @@ def test_last_run_cell_shows_sync_state_before_run_history() -> None:
     assert ran.endswith("calm-yak")
 
 
-def test_benchmark_run_rows_render_status_progress_and_date() -> None:
+def test_benchmark_runs_section_render_status_progress_and_date() -> None:
     run = BenchmarkRun.from_dict(
         {
             "id": "run-1",
@@ -661,8 +663,23 @@ def test_benchmark_run_rows_render_status_progress_and_date() -> None:
         }
     )
 
-    [(label, value)] = benchmark_module._benchmark_run_rows([run])
+    section = benchmark_module._benchmark_runs_section(
+        [run],
+        shown=1,
+        total=12,
+    )
 
-    assert label == "warm-gull"
-    assert "best pass@1 75.0%" in value
-    assert "498" in value
+    assert section is not None
+    assert section.plain_lines[0] == "Runs (1 of 12):"
+    line = section.plain_lines[1]
+    assert line.startswith("warm-gull · ")
+    assert "[finished]" in line
+    assert "best pass@1 75.0%" in line
+    assert "498" in line
+    assert [col.header for col in section.rich.columns] == [
+        "Name",
+        "Status",
+        "Progress",
+        "Best Pass@1",
+        "Submitted",
+    ]
