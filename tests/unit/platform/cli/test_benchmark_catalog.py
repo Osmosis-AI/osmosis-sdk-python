@@ -598,13 +598,20 @@ def test_leaderboard_section_format_and_tolerate_sparse_entries() -> None:
     assert "54s/task" in full
     assert "1.1M tokens/task" in full
     assert "run warm-gull" not in full
-    assert "[tied for first]" not in full  # full row is not tied
+    assert not full.startswith("#1*")  # leader is not marked tied
 
     sparse = section.plain_lines[2]
-    assert sparse.startswith("– [tied for first] · –")
+    assert sparse.startswith("–* · –")
     assert "pass@1 –" in sparse
-    # Rich table should expose the dynamic Pass@k header.
+    assert (
+        plain_lines[-1]
+        if (plain_lines := section.plain_lines)
+        else ""
+    ).startswith("* tied for first")
+    # Rich table should expose the dynamic Pass@k header + caption.
     assert any(getattr(col, "header", None) == "Pass@2" for col in section.rich.columns)
+    assert section.rich.caption is not None
+    assert "tied for first" in str(section.rich.caption)
 
 
 def test_last_run_cell_shows_sync_state_before_run_history() -> None:

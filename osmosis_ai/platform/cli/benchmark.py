@@ -285,11 +285,26 @@ def _format_tokens(value: Any) -> str | None:
 
 
 def _rank_label(entry: dict[str, Any]) -> str:
+    """Plain-text rank; ties live on rank (not the agent name)."""
     rank = entry.get("rank")
     label = f"#{rank}" if isinstance(rank, int) else "–"
     if entry.get("tied"):
-        label += " [tied for first]"
+        # Asterisk keeps the column narrow; full wording is in the section note.
+        label += "*"
     return label
+
+
+def _rank_cell(entry: dict[str, Any]) -> Any:
+    """Rich rank cell. `*` = tied for first (see section note under the table)."""
+    from rich.text import Text
+
+    rank = entry.get("rank")
+    label = f"#{rank}" if isinstance(rank, int) else "–"
+    if not entry.get("tied"):
+        return Text(label)
+    cell = Text(label)
+    cell.append("*", style="dim")
+    return cell
 
 
 def _agent_label(entry: dict[str, Any]) -> str:
@@ -358,16 +373,30 @@ def _leaderboard_section(entries: list[dict[str, Any]]) -> DetailSection | None:
                 max_k = k if max_k is None else max(max_k, k)
     pass_k_header = f"Pass@{max_k}" if max_k is not None else "Pass@k"
 
+    any_tied = any(bool(entry.get("tied")) for entry in entries)
     table = Table(
         title="Leaderboard",
         box=box.ROUNDED,
         show_header=True,
         header_style="bold",
         title_justify="left",
-        expand=False,
+        expand=True,
+        caption=(
+            "* tied for first (not distinguishable from the leader)"
+            if any_tied
+            else None
+        ),
+        caption_justify="left",
     )
-    table.add_column("Rank", style="cyan", no_wrap=True)
-    table.add_column("Agent", overflow="fold")
+    table.add_column("Rank", style="cyan", no_wrap=True, min_width=4)
+    # no_wrap + ellipsis: fold collapses Agent when many metric cols compete.
+    table.add_column(
+        "Agent",
+        no_wrap=True,
+        overflow="ellipsis",
+        min_width=16,
+        ratio=2,
+    )
     table.add_column("Pass@1", no_wrap=True)
     if show_pass_k:
         table.add_column(pass_k_header, no_wrap=True)
@@ -383,8 +412,7 @@ def _leaderboard_section(entries: list[dict[str, Any]]) -> DetailSection | None:
         rank_label = _rank_label(entry)
         agent = _agent_label(entry)
         pass_at_1 = _format_rate_interval(entry.get("pass_at_1"))
-        # Text() so "[tied for first]" is literal, not Rich markup.
-        cells: list[Any] = [Text(rank_label), Text(agent), pass_at_1]
+        cells: list[Any] = [_rank_cell(entry), Text(agent), pass_at_1]
         plain_parts = [rank_label, agent, f"pass@1 {pass_at_1}"]
 
         if show_pass_k:
@@ -414,6 +442,11 @@ def _leaderboard_section(entries: list[dict[str, Any]]) -> DetailSection | None:
 
         table.add_row(*cells)
         plain_lines.append(" · ".join(plain_parts))
+
+    if any_tied:
+        plain_lines.append(
+            "* tied for first (not distinguishable from the leader)"
+        )
 
     return DetailSection(rich=table, plain_lines=plain_lines)
 
