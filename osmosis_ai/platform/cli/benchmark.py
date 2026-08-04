@@ -284,19 +284,21 @@ def _format_tokens(value: Any) -> str | None:
     return f"{round(value):,}"
 
 
+def _rank_label(entry: dict[str, Any]) -> str:
+    rank = entry.get("rank")
+    label = f"#{rank}" if isinstance(rank, int) else "–"
+    if entry.get("tied"):
+        label += " [tied for first]"
+    return label
+
+
 def _agent_label(entry: dict[str, Any]) -> str:
     model = str(entry.get("model") or "–")
     harness = entry.get("harness")
     name = f"{model} ({harness})" if harness else model
-    tags = [
-        tag
-        for tag, present in (
-            ("tied for first", bool(entry.get("tied"))),
-            ("parity", entry.get("task_set") == "parity"),
-        )
-        if present
-    ]
-    return name + (f" [{', '.join(tags)}]" if tags else "")
+    if entry.get("task_set") == "parity":
+        name += " [parity]"
+    return name
 
 
 def _deepest_pass_at_k(entry: dict[str, Any]) -> dict[str, Any] | None:
@@ -346,10 +348,6 @@ def _leaderboard_section(entries: list[dict[str, Any]]) -> DetailSection | None:
         for entry in entries
     )
     show_tokens = any(_format_tokens(entry.get("tokens_per_task")) for entry in entries)
-    show_run = any(
-        isinstance(entry.get("run"), dict) and entry["run"].get("name")
-        for entry in entries
-    )
 
     max_k: int | None = None
     if show_pass_k:
@@ -379,16 +377,14 @@ def _leaderboard_section(entries: list[dict[str, Any]]) -> DetailSection | None:
         table.add_column("Time/task", no_wrap=True)
     if show_tokens:
         table.add_column("Tokens/task", no_wrap=True)
-    if show_run:
-        table.add_column("Run", no_wrap=True, overflow="ellipsis")
 
     plain_lines = ["Leaderboard:"]
     for entry in entries:
-        rank = entry.get("rank")
-        rank_label = f"#{rank}" if isinstance(rank, int) else "–"
+        rank_label = _rank_label(entry)
         agent = _agent_label(entry)
         pass_at_1 = _format_rate_interval(entry.get("pass_at_1"))
-        cells: list[Any] = [rank_label, Text(agent), pass_at_1]
+        # Text() so "[tied for first]" is literal, not Rich markup.
+        cells: list[Any] = [Text(rank_label), Text(agent), pass_at_1]
         plain_parts = [rank_label, agent, f"pass@1 {pass_at_1}"]
 
         if show_pass_k:
@@ -415,17 +411,6 @@ def _leaderboard_section(entries: list[dict[str, Any]]) -> DetailSection | None:
             cells.append(tokens)
             if tokens != "–":
                 plain_parts.append(f"{tokens} tokens/task")
-
-        if show_run:
-            run = entry.get("run")
-            run_name = (
-                str(run["name"])
-                if isinstance(run, dict) and run.get("name")
-                else "–"
-            )
-            cells.append(Text(run_name))
-            if run_name != "–":
-                plain_parts.append(f"run {run_name}")
 
         table.add_row(*cells)
         plain_lines.append(" · ".join(plain_parts))

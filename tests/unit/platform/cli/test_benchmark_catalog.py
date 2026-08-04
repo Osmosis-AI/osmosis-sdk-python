@@ -597,10 +597,11 @@ def test_leaderboard_section_format_and_tolerate_sparse_entries() -> None:
     assert "$4.20/task" in full
     assert "54s/task" in full
     assert "1.1M tokens/task" in full
-    assert "run warm-gull" in full
+    assert "run warm-gull" not in full
+    assert "[tied for first]" not in full  # full row is not tied
 
     sparse = section.plain_lines[2]
-    assert sparse.startswith("– · – [tied for first]")
+    assert sparse.startswith("– [tied for first] · –")
     assert "pass@1 –" in sparse
     # Rich table should expose the dynamic Pass@k header.
     assert any(getattr(col, "header", None) == "Pass@2" for col in section.rich.columns)
