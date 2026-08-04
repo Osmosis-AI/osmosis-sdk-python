@@ -73,9 +73,10 @@ _HLE_PARITY_WARNING = (
 _BENCHMARK_COLUMNS = [
     ListColumn(key="name", label="Name", ratio=3, overflow="fold"),
     ListColumn(key="key", label="Key", no_wrap=True, min_width=20),
+    ListColumn(key="status", label="Status", no_wrap=True, ratio=1),
+    ListColumn(key="run_count", label="Runs", no_wrap=True, ratio=1),
+    ListColumn(key="last_run_at", label="Last Run", no_wrap=True, ratio=1),
     ListColumn(key="task_count", label="Tasks", no_wrap=True, ratio=1),
-    ListColumn(key="category_count", label="Categories", no_wrap=True, ratio=1),
-    ListColumn(key="task_sets", label="Named Task Sets", ratio=2, overflow="fold"),
 ]
 
 
@@ -105,6 +106,26 @@ def _benchmark_resource(
         "synced_task_count": benchmark.synced_task_count,
         "sync_error": benchmark.sync_error,
         "platform_url": benchmark.platform_url,
+    }
+
+
+def _catalog_status(benchmark: BenchmarkCatalogEntry) -> str:
+    """Activity beats sync state; a quiet benchmark is Ready, never blank."""
+    if benchmark.running_count > 0:
+        return f"Running ({benchmark.running_count})"
+    if benchmark.sync_status in ("pending", "syncing"):
+        return "Syncing"
+    if benchmark.sync_status == "failed":
+        return "Sync failed"
+    return "Ready"
+
+
+def _benchmark_list_resource(benchmark: BenchmarkCatalogEntry) -> dict[str, Any]:
+    return {
+        **_benchmark_resource(benchmark),
+        "run_count": benchmark.run_count,
+        "running_count": benchmark.running_count,
+        "last_run_at": benchmark.last_run_at,
     }
 
 
@@ -171,7 +192,7 @@ def list_benchmarks(*, limit: int, all_: bool) -> ListResult:
 
     return ListResult(
         title="Benchmarks",
-        items=[_benchmark_resource(benchmark) for benchmark in benchmarks],
+        items=[_benchmark_list_resource(benchmark) for benchmark in benchmarks],
         total_count=total_count,
         has_more=has_more,
         next_offset=next_offset,
@@ -179,10 +200,15 @@ def list_benchmarks(*, limit: int, all_: bool) -> ListResult:
         columns=_BENCHMARK_COLUMNS,
         display_items=[
             {
-                **_benchmark_resource(benchmark),
+                **_benchmark_list_resource(benchmark),
+                "status": _catalog_status(benchmark),
+                "run_count": f"{benchmark.run_count:,}",
+                "last_run_at": (
+                    format_local_date(benchmark.last_run_at)
+                    if benchmark.last_run_at
+                    else "–"
+                ),
                 "task_count": _task_count_display(benchmark),
-                "category_count": f"{benchmark.category_count:,}",
-                "task_sets": _task_set_display(benchmark.task_sets),
                 "source": (
                     "Managed"
                     if benchmark.source_type == "osmosis_managed"
@@ -192,15 +218,81 @@ def list_benchmarks(*, limit: int, all_: bool) -> ListResult:
             for benchmark in benchmarks
         ],
         display_hints=[
-            "Use osmosis benchmark catalog info <key> for task sets, "
-            "categories, and tasks.",
+            "Use osmosis benchmark info <key> for its leaderboard, runs, "
+            "task sets, and tasks.",
             *[hint for benchmark in benchmarks for hint in _sync_hints(benchmark)],
         ],
     )
 
 
-def catalog_info(name_or_id: str) -> DetailResult:
-    """Show benchmark metadata and task-selection options."""
+def _format_rate_interval(rate: Any) -> str:
+    if not isinstance(rate, dict) or rate.get("value") is None:
+        return "–"
+    value = float(rate["value"])
+    low, high = rate.get("ci_low"), rate.get("ci_high")
+    if isinstance(low, int | float) and isinstance(high, int | float):
+        margin = max(value - low, high - value)
+        return f"{value:.1%} ± {margin:.1%}"
+    return f"{value:.1%}"
+
+
+def _leaderboard_rows(entries: list[dict[str, Any]]) -> list[tuple[str, str]]:
+    rows: list[tuple[str, str]] = []
+    for entry in entries:
+        rank = entry.get("rank")
+        label = f"#{rank}" if isinstance(rank, int) else "–"
+        model = str(entry.get("model") or "–")
+        harness = entry.get("harness")
+        name = f"{model} ({harness})" if harness else model
+        tags = [
+            tag
+            for tag, present in (
+                ("tied", bool(entry.get("tied"))),
+                ("parity", entry.get("task_set") == "parity"),
+            )
+            if present
+        ]
+        parts = [
+            name + (f" [{', '.join(tags)}]" if tags else ""),
+            f"pass@1 {_format_rate_interval(entry.get('pass_at_1'))}",
+        ]
+        points = entry.get("pass_at_k") or []
+        deepest = points[-1] if points else None
+        if isinstance(deepest, dict) and deepest.get("value") is not None:
+            parts.append(f"pass@{deepest.get('k')} {float(deepest['value']):.1%}")
+        cost = entry.get("reported_cost_usd")
+        if isinstance(cost, int | float):
+            parts.append(f"${cost:,.2f}")
+        seconds = entry.get("mean_duration_seconds")
+        if isinstance(seconds, int | float):
+            parts.append(f"{seconds:,.0f}s/task")
+        run = entry.get("run")
+        if isinstance(run, dict) and run.get("name"):
+            parts.append(f"run {run['name']}")
+        rows.append((label, " · ".join(parts)))
+    return rows
+
+
+def _benchmark_run_rows(runs: list[BenchmarkRun]) -> list[tuple[str, str]]:
+    return [
+        (
+            run.name,
+            " · ".join(
+                [
+                    format_benchmark_status(run),
+                    format_progress(_benchmark_progress(run)) or "–",
+                    f"best pass@1 {_format_pass_at_1(run.best_pass_at_1)}",
+                    format_local_date(run.created_at),
+                ]
+            ),
+        )
+        for run in runs
+    ]
+
+
+def benchmark_info(name_or_id: str, *, limit: int, all_: bool) -> DetailResult:
+    """Show a benchmark: metadata, task options, leaderboard, and runs."""
+    effective_limit, fetch_all = validate_list_options(limit=limit, all_=all_)
     context = require_git_workspace_directory_context()
     client = OsmosisClient()
     output = get_output_context()
@@ -210,6 +302,18 @@ def catalog_info(name_or_id: str) -> DetailResult:
             name_or_id,
             credentials=context.credentials,
             git_identity=context.git_identity,
+        )
+        runs, runs_total_count, _runs_have_more, _runs_next_offset = paginated_fetch(
+            lambda lim, off: client.list_benchmark_runs(
+                limit=lim,
+                offset=off,
+                benchmark=benchmark.id,
+                credentials=context.credentials,
+                git_identity=context.git_identity,
+            ),
+            items_attr="benchmark_runs",
+            limit=effective_limit,
+            fetch_all=fetch_all,
         )
 
     harness = (
@@ -249,6 +353,7 @@ def catalog_info(name_or_id: str) -> DetailResult:
             ", ".join(benchmark.required_secret_names) or "–",
         ),
         ("Pass Threshold", f"{benchmark.pass_threshold:g}"),
+        ("Runs", f"{runs_total_count:,}"),
     ]
 
     benchmark_data = {
@@ -272,10 +377,16 @@ def catalog_info(name_or_id: str) -> DetailResult:
     display_hints = [
         f"Omit [tasks] to select all {benchmark.task_count:,} tasks.",
         "Use task_names or categories under [tasks] for a custom subset.",
-        "Use osmosis --json benchmark catalog info <key> to inspect the full "
-        "task list.",
+        "Use osmosis --json benchmark info <key> to inspect the full task list.",
+        "Use osmosis benchmark runs info <run-name> for a run's details.",
         *_sync_hints(benchmark),
     ]
+    if not benchmark.leaderboard:
+        display_hints.insert(
+            0,
+            "No leaderboard entries yet: finished runs on the full task set "
+            "with scores rank here.",
+        )
     if benchmark.default_harness:
         display_hints.insert(
             0,
@@ -298,10 +409,34 @@ def catalog_info(name_or_id: str) -> DetailResult:
                 f'"{task_set.name}" ({task_set.task_count:,} tasks).',
             )
 
+    sections: list[DetailSection] = []
+    for section in (
+        kv_section("Leaderboard", _leaderboard_rows(benchmark.leaderboard)),
+        kv_section(
+            f"Runs ({len(runs):,} of {runs_total_count:,})",
+            _benchmark_run_rows(runs),
+        ),
+    ):
+        if section is not None:
+            sections.append(section)
+
     return DetailResult(
         title="Benchmark Info",
-        data={"benchmark": benchmark_data, **git_result_context(context)},
+        data={
+            "benchmark": benchmark_data,
+            "leaderboard": benchmark.leaderboard,
+            "runs": [
+                {
+                    **serialize_benchmark_run(run),
+                    "progress": _benchmark_progress(run),
+                }
+                for run in runs
+            ],
+            "runs_total_count": runs_total_count,
+            **git_result_context(context),
+        },
         fields=detail_fields(rows),
+        sections=sections,
         display_hints=display_hints,
     )
 
@@ -367,7 +502,7 @@ def list_benchmark_runs(*, limit: int, all_: bool) -> ListResult:
             }
             for run in runs
         ],
-        display_hints=["Use osmosis benchmark info <run-name> for details."],
+        display_hints=["Use osmosis benchmark runs info <run-name> for details."],
     )
 
 
@@ -512,11 +647,13 @@ def run_info(name_or_id: str) -> DetailResult:
     if detail.platform_url:
         display_hints.append(f"View: {detail.platform_url}")
     if detail.status in BENCHMARK_RUN_STATUSES_ERROR:
-        display_hints.append(f"See logs with: osmosis benchmark logs {detail.name}")
+        display_hints.append(
+            f"See logs with: osmosis benchmark runs logs {detail.name}"
+        )
     if detail.status not in BENCHMARK_RUN_STATUSES_TERMINAL:
-        display_hints.append(f"Stop with: osmosis benchmark stop {detail.name}")
+        display_hints.append(f"Stop with: osmosis benchmark runs stop {detail.name}")
     display_hints.append(
-        f"Download outputs with: osmosis benchmark download {detail.name}"
+        f"Download outputs with: osmosis benchmark runs download {detail.name}"
     )
 
     return DetailResult(
@@ -553,7 +690,7 @@ def logs(name_or_id: str, *, limit: int, cursor: str | None = None) -> ListResul
         title=f"Benchmark Run Logs: {name_or_id}",
         page=page,
         context=context,
-        next_step_hint=f"Use osmosis benchmark info {name_or_id} for run details.",
+        next_step_hint=f"Use osmosis benchmark runs info {name_or_id} for run details.",
     )
 
 
@@ -833,7 +970,7 @@ def submit(config_path: Path, *, yes: bool) -> OperationResult:
     display_next_steps = [
         f"Status: {result.status}",
         f"Benchmark: {config.experiment.benchmark}",
-        f"Check status with: osmosis benchmark info {result.name}",
+        f"Check status with: osmosis benchmark runs info {result.name}",
     ]
     structured_next_steps: list[dict[str, Any]] = [
         {"action": "benchmark_info", "name": result.name},
@@ -870,7 +1007,7 @@ def submit(config_path: Path, *, yes: bool) -> OperationResult:
 
 
 __all__ = [
-    "catalog_info",
+    "benchmark_info",
     "download",
     "list_benchmark_runs",
     "list_benchmarks",

@@ -14,18 +14,18 @@ from osmosis_ai.platform.constants import (
 )
 
 app: typer.Typer = typer.Typer(
+    help="Manage benchmarks and their runs.",
+    no_args_is_help=True,
+)
+runs_app: typer.Typer = typer.Typer(
     help="Manage benchmark runs.",
     no_args_is_help=True,
 )
-catalog_app: typer.Typer = typer.Typer(
-    help="Discover available benchmarks and task-selection options.",
-    no_args_is_help=True,
-)
-app.add_typer(catalog_app, name="catalog")
+app.add_typer(runs_app, name="runs")
 
 
-@catalog_app.command("list")
-def benchmark_catalog_list(
+@app.command("list")
+def benchmark_list(
     limit: int = typer.Option(
         DEFAULT_PAGE_SIZE,
         "--limit",
@@ -41,14 +41,22 @@ def benchmark_catalog_list(
     return _list_benchmarks(limit=limit, all_=all_)
 
 
-@catalog_app.command("info")
-def benchmark_catalog_info(
+@app.command("info")
+def benchmark_info(
     name_or_id: str = typer.Argument(..., help="Benchmark key, name, or ID."),
+    limit: int = typer.Option(
+        DEFAULT_PAGE_SIZE,
+        "--limit",
+        min=1,
+        max=MAX_PAGE_SIZE,
+        help="Maximum number of runs to show in the runs section.",
+    ),
+    all_: bool = typer.Option(False, "--all", help="Show all of the benchmark's runs."),
 ) -> Any:
-    """Show benchmark metadata and task-selection options."""
-    from osmosis_ai.platform.cli.benchmark import catalog_info as _info
+    """Show a benchmark: metadata, task options, leaderboard, and runs."""
+    from osmosis_ai.platform.cli.benchmark import benchmark_info as _info
 
-    return _info(name_or_id)
+    return _info(name_or_id, limit=limit, all_=all_)
 
 
 @app.command("submit")
@@ -70,8 +78,8 @@ def benchmark_submit(
     return _submit(config_path, yes=yes)
 
 
-@app.command("list")
-def benchmark_list(
+@runs_app.command("list")
+def benchmark_runs_list(
     limit: int = typer.Option(
         DEFAULT_PAGE_SIZE,
         "--limit",
@@ -87,8 +95,8 @@ def benchmark_list(
     return _list(limit=limit, all_=all_)
 
 
-@app.command("info")
-def benchmark_info(
+@runs_app.command("info")
+def benchmark_runs_info(
     name_or_id: str = typer.Argument(..., help="Benchmark run name or ID."),
 ) -> Any:
     """Show benchmark run details, progress, and results."""
@@ -97,8 +105,8 @@ def benchmark_info(
     return _info(name_or_id)
 
 
-@app.command("logs")
-def benchmark_logs(
+@runs_app.command("logs")
+def benchmark_runs_logs(
     name_or_id: str = typer.Argument(..., help="Benchmark run name or ID."),
     limit: int = typer.Option(
         DEFAULT_PAGE_SIZE,
@@ -119,8 +127,8 @@ def benchmark_logs(
     return _logs(name_or_id, limit=limit, cursor=cursor)
 
 
-@app.command("stop")
-def benchmark_stop(
+@runs_app.command("stop")
+def benchmark_runs_stop(
     name_or_id: str = typer.Argument(..., help="Benchmark run name or ID."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt."),
 ) -> Any:
@@ -130,8 +138,8 @@ def benchmark_stop(
     return _stop(name_or_id, yes=yes)
 
 
-@app.command("download")
-def benchmark_download(
+@runs_app.command("download")
+def benchmark_runs_download(
     name_or_id: str = typer.Argument(..., help="Benchmark run name or ID."),
     output: str | None = typer.Option(
         None,

@@ -149,7 +149,7 @@ def test_benchmark_list_json_envelope(
     )
     monkeypatch.setattr(benchmark_module, "OsmosisClient", FakeClient)
 
-    exit_code = cli.main(["--json", "benchmark", "list"])
+    exit_code = cli.main(["--json", "benchmark", "runs", "list"])
     envelope = json.loads(capsys.readouterr().out)
 
     assert exit_code == 0
@@ -191,8 +191,8 @@ def test_run_info_returns_config_agents_results_and_next_steps(
         "Agents:",
         "Results:",
     ]
-    assert "osmosis benchmark stop hle-smoke" in result.display_hints[-2]
-    assert "osmosis benchmark download hle-smoke" in result.display_hints[-1]
+    assert "osmosis benchmark runs stop hle-smoke" in result.display_hints[-2]
+    assert "osmosis benchmark runs download hle-smoke" in result.display_hints[-1]
 
 
 def test_run_info_always_displays_canonical_id(

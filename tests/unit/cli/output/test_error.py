@@ -117,12 +117,12 @@ def test_command_path_falls_back_to_argv_when_no_context(monkeypatch) -> None:
     ("argv", "expected"),
     [
         (
-            ["osmosis", "--json", "benchmark", "download", "hle-smoke"],
-            "benchmark download",
+            ["osmosis", "--json", "benchmark", "info", "HLE"],
+            "benchmark info",
         ),
         (
-            ["osmosis", "--json", "benchmark", "catalog", "info", "HLE"],
-            "benchmark catalog info",
+            ["osmosis", "--json", "benchmark", "runs", "download", "hle-smoke"],
+            "benchmark runs download",
         ),
     ],
 )

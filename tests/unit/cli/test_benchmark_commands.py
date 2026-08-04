@@ -8,7 +8,7 @@ import osmosis_ai.cli.commands.benchmark as benchmark_commands
 import osmosis_ai.platform.cli.benchmark as benchmark_handler
 
 
-def test_benchmark_catalog_list_delegates_to_handler(
+def test_benchmark_list_delegates_to_handler(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     captured: dict[str, object] = {}
@@ -20,28 +20,34 @@ def test_benchmark_catalog_list_delegates_to_handler(
 
     monkeypatch.setattr(benchmark_handler, "list_benchmarks", fake_list_benchmarks)
 
-    result = benchmark_commands.benchmark_catalog_list(limit=25, all_=True)
+    result = benchmark_commands.benchmark_list(limit=25, all_=True)
 
     assert result is expected
     assert captured == {"limit": 25, "all_": True}
 
 
-def test_benchmark_catalog_info_delegates_to_handler(
+def test_benchmark_info_delegates_to_handler(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     captured: dict[str, object] = {}
     expected = object()
 
-    def fake_info(name_or_id: str) -> object:
-        captured["name_or_id"] = name_or_id
+    def fake_info(name_or_id: str, *, limit: int, all_: bool) -> object:
+        captured.update(name_or_id=name_or_id, limit=limit, all_=all_)
         return expected
 
-    monkeypatch.setattr(benchmark_handler, "catalog_info", fake_info)
+    monkeypatch.setattr(benchmark_handler, "benchmark_info", fake_info)
 
-    result = benchmark_commands.benchmark_catalog_info("Terminal-Bench 2.1")
+    result = benchmark_commands.benchmark_info(
+        "Terminal-Bench 2.1", limit=15, all_=False
+    )
 
     assert result is expected
-    assert captured == {"name_or_id": "Terminal-Bench 2.1"}
+    assert captured == {
+        "name_or_id": "Terminal-Bench 2.1",
+        "limit": 15,
+        "all_": False,
+    }
 
 
 def test_benchmark_submit_delegates_to_handler(
@@ -106,14 +112,15 @@ def test_benchmark_run_commands_delegate_to_handlers(
         ),
     )
 
-    assert benchmark_commands.benchmark_list(limit=10, all_=False) is expected
-    assert benchmark_commands.benchmark_info("run-1") is expected
+    assert benchmark_commands.benchmark_runs_list(limit=10, all_=False) is expected
+    assert benchmark_commands.benchmark_runs_info("run-1") is expected
     assert (
-        benchmark_commands.benchmark_logs("run-1", limit=25, cursor="older") is expected
+        benchmark_commands.benchmark_runs_logs("run-1", limit=25, cursor="older")
+        is expected
     )
-    assert benchmark_commands.benchmark_stop("run-1", yes=True) is expected
+    assert benchmark_commands.benchmark_runs_stop("run-1", yes=True) is expected
     assert (
-        benchmark_commands.benchmark_download(
+        benchmark_commands.benchmark_runs_download(
             "run-1",
             output="out",
             types="all",

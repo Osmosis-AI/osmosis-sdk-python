@@ -12,7 +12,7 @@ osmosis eval download NAME_OR_ID
   --overwrite
   -y, --yes
 
-osmosis benchmark download NAME_OR_ID
+osmosis benchmark runs download NAME_OR_ID
   --type summary,results|artifacts|logs|all
   -o, --output ROOT
   --overwrite

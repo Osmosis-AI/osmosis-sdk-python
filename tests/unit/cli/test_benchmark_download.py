@@ -133,7 +133,7 @@ def test_default_benchmark_download_uses_run_scoped_layout(
     monkeypatch.setattr(benchmark_module, "OsmosisClient", fake_client)
     _stub_download(monkeypatch)
 
-    exit_code = cli.main(["--json", "benchmark", "download", "hle-smoke"])
+    exit_code = cli.main(["--json", "benchmark", "runs", "download", "hle-smoke"])
     captured = capsys.readouterr()
 
     assert exit_code == 0
@@ -187,12 +187,12 @@ def test_benchmark_download_rejects_pending_statuses(
     monkeypatch.setattr(benchmark_module, "OsmosisClient", fake_client)
     _stub_download(monkeypatch)
 
-    exit_code = cli.main(["--json", "benchmark", "download", "hle-smoke"])
+    exit_code = cli.main(["--json", "benchmark", "runs", "download", "hle-smoke"])
     captured = capsys.readouterr()
 
     assert exit_code == 1
     envelope = json.loads(captured.err)
-    assert envelope["command"] == "benchmark download"
+    assert envelope["command"] == "benchmark runs download"
     assert envelope["error"]["code"] == "CONFLICT"
     assert envelope["error"]["message"] == (
         "Outputs are not yet available for pending or queued benchmark runs."
@@ -229,7 +229,7 @@ def test_benchmark_download_rejects_unknown_types(
     monkeypatch.setattr(benchmark_module, "OsmosisClient", _fake_client())
 
     exit_code = cli.main(
-        ["--json", "benchmark", "download", "hle-smoke", "--type", "metrics"]
+        ["--json", "benchmark", "runs", "download", "hle-smoke", "--type", "metrics"]
     )
 
     assert exit_code == 1

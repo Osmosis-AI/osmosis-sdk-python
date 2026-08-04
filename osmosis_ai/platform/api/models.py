@@ -450,6 +450,9 @@ class BenchmarkCatalogEntry:
     synced_task_count: int = 0
     sync_error: str | None = None
     platform_url: str | None = None
+    run_count: int = 0
+    running_count: int = 0
+    last_run_at: str | None = None
 
     @property
     def is_ready(self) -> bool:
@@ -473,6 +476,9 @@ class BenchmarkCatalogEntry:
             synced_task_count=int(data.get("synced_task_count") or 0),
             sync_error=data.get("sync_error"),
             platform_url=data.get("platform_url"),
+            run_count=int(data.get("run_count") or 0),
+            running_count=int(data.get("running_count") or 0),
+            last_run_at=data.get("last_run_at"),
         )
 
 
@@ -525,6 +531,9 @@ class BenchmarkCatalogDetail:
     synced_task_count: int = 0
     sync_error: str | None = None
     platform_url: str | None = None
+    # Server-computed standings; metric shapes travel verbatim like
+    # BenchmarkRunDetail.agent_metrics, so the estimator stays server-side.
+    leaderboard: list[dict[str, Any]] = field(default_factory=list)
 
     @property
     def is_ready(self) -> bool:
@@ -569,6 +578,9 @@ class BenchmarkCatalogDetail:
             synced_task_count=int(benchmark.get("synced_task_count") or 0),
             sync_error=benchmark.get("sync_error"),
             platform_url=benchmark.get("platform_url"),
+            leaderboard=[
+                item for item in data.get("leaderboard", []) if isinstance(item, dict)
+            ],
         )
 
 

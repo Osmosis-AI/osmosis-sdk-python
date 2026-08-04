@@ -13,8 +13,20 @@ from osmosis_ai.platform.api.models import (
     BenchmarkCatalogEntry,
     BenchmarkCategory,
     BenchmarkTaskSet,
+    PaginatedBenchmarkRuns,
     PaginatedBenchmarks,
 )
+from osmosis_ai.platform.constants import DEFAULT_PAGE_SIZE
+
+
+def _empty_runs_page(**kwargs: Any) -> PaginatedBenchmarkRuns:
+    return PaginatedBenchmarkRuns(
+        benchmark_runs=[],
+        total_count=0,
+        has_more=False,
+        next_offset=None,
+    )
+
 
 GIT_IDENTITY = "acme/workspace"
 REPO_URL = "https://github.com/acme/workspace.git"
@@ -84,13 +96,16 @@ def test_list_benchmarks_returns_catalog_and_git_context(
         }
     ]
     assert result.display_items[0]["key"] == "hle"
-    assert result.display_items[0]["task_sets"] == "parity (249, recommended)"
+    assert result.display_items[0]["status"] == "Ready"
+    assert result.display_items[0]["run_count"] == "0"
+    assert result.display_items[0]["last_run_at"] == "–"
     assert [column.key for column in result.columns] == [
         "name",
         "key",
+        "status",
+        "run_count",
+        "last_run_at",
         "task_count",
-        "category_count",
-        "task_sets",
     ]
     assert result.columns[1].no_wrap is True
     assert result.columns[1].min_width == 20
@@ -158,6 +173,8 @@ def test_info_exposes_selection_metadata_and_full_task_list(
                 required_secret_names=["HF_TOKEN"],
             )
 
+        list_benchmark_runs = staticmethod(_empty_runs_page)
+
     monkeypatch.setattr(
         benchmark_module,
         "require_git_workspace_directory_context",
@@ -165,7 +182,7 @@ def test_info_exposes_selection_metadata_and_full_task_list(
     )
     monkeypatch.setattr(benchmark_module, "OsmosisClient", FakeClient)
 
-    result = benchmark_module.catalog_info("HLE")
+    result = benchmark_module.benchmark_info("HLE", limit=DEFAULT_PAGE_SIZE, all_=False)
 
     assert isinstance(result, DetailResult)
     assert result.data["benchmark"]["key"] == "hle"
@@ -182,7 +199,8 @@ def test_info_exposes_selection_metadata_and_full_task_list(
     assert fields["Key"] == "hle"
     assert fields["Required Secret Records"] == "HF_TOKEN"
     assert 'task_set = "parity"' in result.display_hints[0]
-    assert "Omit [tasks]" in result.display_hints[1]
+    assert "No leaderboard entries yet" in result.display_hints[1]
+    assert any("Omit [tasks]" in hint for hint in result.display_hints)
     assert calls == [
         {
             "name_or_id": "HLE",
@@ -311,6 +329,8 @@ def test_catalog_info_surfaces_the_default_harness(
                 default_harness="terminus-2",
             )
 
+        list_benchmark_runs = staticmethod(_empty_runs_page)
+
     monkeypatch.setattr(
         benchmark_module,
         "require_git_workspace_directory_context",
@@ -318,7 +338,9 @@ def test_catalog_info_surfaces_the_default_harness(
     )
     monkeypatch.setattr(benchmark_module, "OsmosisClient", FakeClient)
 
-    result = benchmark_module.catalog_info("terminal-bench-2-1")
+    result = benchmark_module.benchmark_info(
+        "terminal-bench-2-1", limit=DEFAULT_PAGE_SIZE, all_=False
+    )
 
     assert result.data["benchmark"]["default_harness"] == "terminus-2"
     fields = {field.label: field.value for field in result.fields}
@@ -353,6 +375,8 @@ def test_catalog_info_names_the_official_scaffold_as_the_default(
                 unavailable_tasks=None,
             )
 
+        list_benchmark_runs = staticmethod(_empty_runs_page)
+
     monkeypatch.setattr(
         benchmark_module,
         "require_git_workspace_directory_context",
@@ -360,7 +384,9 @@ def test_catalog_info_names_the_official_scaffold_as_the_default(
     )
     monkeypatch.setattr(benchmark_module, "OsmosisClient", FakeClient)
 
-    result = benchmark_module.catalog_info("browsecomp")
+    result = benchmark_module.benchmark_info(
+        "browsecomp", limit=DEFAULT_PAGE_SIZE, all_=False
+    )
 
     fields = {field.label: field.value for field in result.fields}
     assert fields["Harness"] == "Optional (default: official scaffold)"
@@ -394,6 +420,8 @@ def test_catalog_info_reports_a_scaffold_only_benchmark(
                 unavailable_tasks=None,
             )
 
+        list_benchmark_runs = staticmethod(_empty_runs_page)
+
     monkeypatch.setattr(
         benchmark_module,
         "require_git_workspace_directory_context",
@@ -401,7 +429,9 @@ def test_catalog_info_reports_a_scaffold_only_benchmark(
     )
     monkeypatch.setattr(benchmark_module, "OsmosisClient", FakeClient)
 
-    result = benchmark_module.catalog_info("toolathlon-verified")
+    result = benchmark_module.benchmark_info(
+        "toolathlon-verified", limit=DEFAULT_PAGE_SIZE, all_=False
+    )
 
     fields = {field.label: field.value for field in result.fields}
     assert fields["Harness"] == "Official scaffold only"

@@ -710,11 +710,18 @@ class OsmosisClient:
         limit: int = DEFAULT_PAGE_SIZE,
         offset: int = 0,
         *,
+        benchmark: str | None = None,
         credentials: Credentials | None = None,
         git_identity: str,
     ) -> PaginatedBenchmarkRuns:
-        """List benchmark runs in the current workspace."""
-        qs = urlencode({"limit": limit, "offset": offset})
+        """List benchmark runs in the current workspace.
+
+        `benchmark` (a benchmark ID) scopes the list to one benchmark's runs.
+        """
+        params: dict[str, Any] = {"limit": limit, "offset": offset}
+        if benchmark is not None:
+            params["benchmark"] = benchmark
+        qs = urlencode(params)
         data = platform_request(
             f"/api/cli/benchmark-runs?{qs}",
             credentials=credentials,

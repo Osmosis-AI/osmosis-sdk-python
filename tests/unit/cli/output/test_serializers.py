@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 
 from osmosis_ai.cli.output.serializers import (
+    serialize_benchmark_run,
     serialize_checkpoint,
     serialize_dataset,
     serialize_lora_model,
@@ -15,6 +16,7 @@ from osmosis_ai.cli.output.serializers import (
 )
 from osmosis_ai.platform.api.models import (
     BaseModelInfo,
+    BenchmarkRun,
     DatasetFile,
     LoraCheckpointInfo,
     LoraModelInfo,
@@ -174,3 +176,28 @@ def test_serialize_rollout_keys() -> None:
     )
     payload = serialize_rollout(rollout)
     _assert_keys_match_golden(payload, "rollout_serializer.json")
+
+
+def test_serialize_benchmark_run_keys() -> None:
+    run = BenchmarkRun.from_dict(
+        {
+            "id": "run-1",
+            "name": "warm-gull",
+            "status": "finished",
+            "benchmark": {"id": "benchmark-1", "name": "HLE"},
+            "agent_count": 2,
+            "best_pass_at_1": 0.75,
+            "ingested_results": 216,
+            "expected_results": 216,
+            "creator_name": "Ada Lovelace",
+            "creator_email": "ada@example.com",
+            "created_at": "2026-08-01T00:00:00Z",
+            "started_at": "2026-08-01T00:01:00Z",
+            "completed_at": "2026-08-01T02:00:00Z",
+            "platform_url": "https://platform.example/Acme/benchmarks/runs/run-1",
+        }
+    )
+    payload = serialize_benchmark_run(run)
+    _assert_keys_match_golden(payload, "benchmark_run_serializer.json")
+    assert payload["benchmark_id"] == "benchmark-1"
+    assert payload["best_pass_at_1"] == 0.75

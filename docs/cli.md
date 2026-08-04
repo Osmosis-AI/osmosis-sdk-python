@@ -19,13 +19,14 @@ Files in [../osmosis_ai/cli/commands/](../osmosis_ai/cli/commands/) are thin Typ
 
 Module-level imports in `commands/` are kept light: `typer`, `cli.console`, `cli.errors`, the lightweight `osmosis_ai.platform.constants` (pagination limits), and stdlib. Everything heavy (`rollout.*`, `platform.api.*`, `platform.cli.*`, `eval.*`) must be imported **inside the function** to keep CLI startup fast — see the lazy-loading section of [architecture.md](./architecture.md).
 
-`osmosis benchmark` follows the same run-lifecycle surface as train/eval:
-`submit`, `list`, `info`, `logs`, `stop`, and `download`. Benchmark-definition
-discovery is a separate nested namespace, `benchmark catalog list|info`, so
-top-level `list` and `info` always refer to submitted runs.
+`osmosis benchmark` puts the benchmark first, mirroring the platform's
+Benchmarks pages: top-level `list` and `info` act on benchmarks (the catalog
+and one benchmark's page - `info` shows its metadata, leaderboard, and runs),
+`submit` starts a run, and run lifecycle lives under the nested `benchmark
+runs list|info|logs|stop|download` namespace.
 
 Catalog output includes a shell-safe benchmark `Key`, such as
-`terminal-bench-2-1`. Pass that key to `osmosis benchmark catalog info <key>`;
+`terminal-bench-2-1`. Pass that key to `osmosis benchmark info <key>`;
 exact display names and UUIDs remain supported for compatibility.
 
 ## Commands return results; they don't print

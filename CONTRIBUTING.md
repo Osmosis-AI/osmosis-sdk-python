@@ -44,10 +44,12 @@ The table below lists all development commands. If you installed with **pip**, d
 
 Coverage configuration is in `pyproject.toml` under `[tool.coverage.*]`. CI enforces a minimum coverage threshold of 70%.
 
-When changing remote run commands, preserve the lifecycle convention:
-`train`, `eval`, and `benchmark` use top-level `submit`, `list`, `info`,
-`logs`, and `stop` for run management. Benchmark-definition discovery lives
-under `osmosis benchmark catalog list|info`. Eval and benchmark downloads
+When changing remote run commands, preserve the naming convention: bare
+verbs act on a group's primary noun. `train` and `eval` manage runs with
+top-level `submit`, `list`, `info`, `logs`, and `stop` because the run is
+their noun; `benchmark list|info` act on benchmarks themselves (catalog and
+benchmark page), with run lifecycle nested under `osmosis benchmark runs
+list|info|logs|stop|download`. Eval and benchmark downloads
 share the manifest transfer engine in `osmosis_ai/platform/cli/run_download.py`;
 add domain-specific routes and fixed path classifiers instead of copying the
 transfer loop.
