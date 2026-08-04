@@ -1,5 +1,6 @@
 """Bundle backend: contract round-trip, task materialization, trial config."""
 
+import asyncio
 import json
 from pathlib import Path
 
@@ -7,6 +8,7 @@ import pytest
 from harbor.trial.queue import TrialQueue
 
 from osmosis_ai.packaging import build_bundle, inspect_bundle
+from osmosis_ai.rollout.backend.harbor.backend import PendingTrial
 from osmosis_ai.rollout.backend.harbor.backend_v2 import HarborBackendV2
 from osmosis_ai.rollout.backend.harbor.tasks import (
     SDK_REQUIREMENTS_FILENAME,
@@ -253,6 +255,30 @@ class TestPatchDockerfileWithSdk:
             agent="mini-swe-agent",
         )
         assert backend.sdk_requirements is None
+
+    def test_queue_capacity_bound(self, bundle, template_task):
+        backend = HarborBackendV2(
+            orchestrator=TrialQueue(n_concurrent=1),
+            tasks_dir=template_task,
+            bundle=bundle,
+            max_queue_depth=2,
+        )
+        assert backend.has_capacity()
+        backend.pending = {"a": None, "b": None, "c": None}
+        backend.running = 2
+        assert backend.has_capacity()
+        backend.running = 1
+        assert not backend.has_capacity()
+        assert backend.health()["max_queue_depth"] == 2
+
+    def test_unbounded_queue_always_has_capacity(self, bundle, template_task):
+        backend = HarborBackendV2(
+            orchestrator=TrialQueue(n_concurrent=1),
+            tasks_dir=template_task,
+            bundle=bundle,
+        )
+        backend.pending = {str(i): None for i in range(100)}
+        assert backend.has_capacity()
 
     def test_patch_opt_out(self, bundle, template_task):
         backend = HarborBackendV2(
@@ -536,6 +562,54 @@ class TestTaskRefs:
 
         with pytest.raises(ValueError, match="must be a local path"):
             parse_task_ref("not-a-ref", {})
+
+
+class TestCancellation:
+    def backend(self, bundle, template_task):
+        return HarborBackendV2(
+            orchestrator=TrialQueue(n_concurrent=1),
+            tasks_dir=template_task,
+            bundle=bundle,
+        )
+
+    async def hang(self):
+        await asyncio.Event().wait()
+
+    async def test_selectors_and_dispositions(self, bundle, template_task):
+        backend = self.backend(bundle, template_task)
+
+        async def noop(result):
+            pass
+
+        queued = PendingTrial(noop, None)
+        queued.task = asyncio.create_task(self.hang())
+        running = PendingTrial(noop, None)
+        running.task = asyncio.create_task(self.hang())
+        running.started = True
+        backend.pending = {"job1-a": queued, "job1-b": running, "other": PendingTrial(noop, None)}
+
+        assert backend.cancel_rollouts(ids=["missing"]) == {"missing": "not_found"}
+        assert backend.cancel_rollouts(prefix="job1-") == {
+            "job1-a": "cancelled_queued",
+            "job1-b": "cancelled_running",
+        }
+        await asyncio.sleep(0)
+        assert queued.task.cancelled()
+        assert running.task.cancelled()
+        # taskless entry: never submitted, nothing to cancel
+        assert backend.cancel_rollouts(all=True)["other"] == "not_found"
+
+    async def test_finished_task_is_not_found(self, bundle, template_task):
+        backend = self.backend(bundle, template_task)
+
+        async def noop(result):
+            pass
+
+        finished = PendingTrial(noop, None)
+        finished.task = asyncio.create_task(asyncio.sleep(0))
+        await finished.task
+        backend.pending = {"done": finished}
+        assert backend.cancel_rollouts(ids=["done"]) == {"done": "not_found"}
 
 
 class TestPrewarm:

@@ -5,6 +5,8 @@ from .config import (
     GraderConfig,
 )
 from .protocol import (
+    CancelRolloutsRequest,
+    CancelRolloutsResponse,
     GraderCompleteRequest,
     GraderInitRequest,
     GraderInitResponse,
@@ -25,6 +27,8 @@ from .sample import (
 __all__ = [
     "AgentWorkflowConfig",
     "BaseConfig",
+    "CancelRolloutsRequest",
+    "CancelRolloutsResponse",
     "ConcurrencyConfig",
     "ExecutionRequest",
     "ExecutionResult",

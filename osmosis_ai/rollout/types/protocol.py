@@ -51,6 +51,22 @@ class RolloutInitRequest(BaseModel):
 class RolloutInitResponse(BaseModel): ...
 
 
+class CancelRolloutsRequest(BaseModel):
+    """Body of the POST to /rollout/cancel. Exactly one selector applies:
+    explicit ``ids``, an id ``prefix``, or ``all``."""
+
+    ids: list[str] | None = None
+    prefix: str | None = None
+    all: bool = False
+
+
+class CancelRolloutsResponse(BaseModel):
+    """Disposition per rollout: ``cancelled_queued``, ``cancelled_running``,
+    or ``not_found`` for unknown/finished ids (cancellation is idempotent)."""
+
+    dispositions: dict[str, str]
+
+
 class RolloutCompleteRequest(BaseModel):
     """Body of the rollout-complete callback.
 
