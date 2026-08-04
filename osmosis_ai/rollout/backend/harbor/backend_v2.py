@@ -121,6 +121,7 @@ class HarborBackendV2(ExecutionBackend):
         cleanup_successful_trials: bool = True,
         patch_dockerfile_with_sdk: bool | None = None,
         agent_setup_timeout_sec: float | None = None,
+        max_queue_depth: int | None = None,
     ) -> None:
         self.orchestrator = orchestrator
         self.tasks_dir = Path(tasks_dir)
@@ -165,6 +166,9 @@ class HarborBackendV2(ExecutionBackend):
         self.trials_dir = trials_dir or root / "trials"
         self.artifact_root = default_artifact_root()
         self.cleanup_successful_trials = cleanup_successful_trials
+        if max_queue_depth is not None and max_queue_depth < 0:
+            raise ValueError("max_queue_depth must be >= 0")
+        self.max_queue_depth = max_queue_depth
         self.pending: dict[str, PendingTrial] = {}
         self.fetch_locks: dict[str, asyncio.Lock] = {}
         self.running = 0
@@ -172,6 +176,12 @@ class HarborBackendV2(ExecutionBackend):
         orchestrator.add_hook(TrialEvent.START, self.on_trial_started)
         orchestrator.add_hook(TrialEvent.VERIFICATION_START, self.on_verification_start)
         orchestrator.add_hook(TrialEvent.END, self.on_trial_end)
+
+    def queued(self) -> int:
+        return max(0, len(self.pending) - self.running)
+
+    def has_capacity(self) -> bool:
+        return self.max_queue_depth is None or self.queued() < self.max_queue_depth
 
     def health(self) -> dict[str, Any]:
         return {
@@ -182,7 +192,8 @@ class HarborBackendV2(ExecutionBackend):
             else ensure_import_path(self.agent),
             "in_flight": len(self.pending),
             "running": self.running,
-            "queued": max(0, len(self.pending) - self.running),
+            "queued": self.queued(),
+            "max_queue_depth": self.max_queue_depth,
         }
 
     async def resolve_task(self, request: ExecutionRequest) -> HarborTask:
@@ -300,10 +311,17 @@ class HarborBackendV2(ExecutionBackend):
             pending.api_key = container_input.api_key
             task = await self.resolve_task(request)
             task_dir = self.materialize_task(task, request.id, container_input)
-            await self.orchestrator.submit(
-                self.build_trial_config(task_dir, request, container_input)
+            pending.task = asyncio.create_task(
+                self.orchestrator.submit(
+                    self.build_trial_config(task_dir, request, container_input)
+                )
             )
+            await pending.task
             await pending.done
+        except asyncio.CancelledError:
+            # The canceller owns the outcome; no callbacks are due.
+            self.pending.pop(request.id, None)
+            logger.info("Rollout %s cancelled", request.id)
         except Exception as e:
             self.pending.pop(request.id, None)
             logger.error("Failed trial %s: %s", request.id, e)
@@ -405,6 +423,40 @@ class HarborBackendV2(ExecutionBackend):
 
     async def on_trial_started(self, event: TrialHookEvent) -> None:
         self.running += 1
+        pending = self.pending.get(parse_rollout_id(event))
+        if pending:
+            pending.started = True
+
+    def cancel_rollouts(
+        self,
+        ids: Sequence[str] | None = None,
+        prefix: str | None = None,
+        all: bool = False,
+    ) -> dict[str, str]:
+        """Cancel matching rollouts; queued ones never reach a sandbox.
+
+        Returns a disposition per requested rollout: ``cancelled_queued``,
+        ``cancelled_running``, or ``not_found`` (unknown or already finished,
+        making cancellation idempotent).
+        """
+        if all:
+            selected = list(self.pending)
+        elif prefix is not None:
+            selected = [rid for rid in self.pending if rid.startswith(prefix)]
+        else:
+            selected = list(ids or [])
+
+        dispositions: dict[str, str] = {}
+        for rollout_id in selected:
+            pending = self.pending.get(rollout_id)
+            if pending is None or pending.task is None or pending.task.done():
+                dispositions[rollout_id] = "not_found"
+                continue
+            pending.task.cancel()
+            dispositions[rollout_id] = (
+                "cancelled_running" if pending.started else "cancelled_queued"
+            )
+        return dispositions
 
     def event_diagnostics(
         self, event: TrialHookEvent, category: RolloutErrorCategory | None = None
@@ -583,6 +635,12 @@ class HarborBackendV2(ExecutionBackend):
         pending = self.pending.pop(rollout_id, None)
         if not pending:
             logger.error("No pending trial found for rollout %s", rollout_id)
+            return
+
+        err = event.result.exception_info if event.result else None
+        if err and err.exception_type == "CancelledError":
+            if not pending.done.done():
+                pending.done.set_result(None)
             return
 
         try:
