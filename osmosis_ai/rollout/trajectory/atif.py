@@ -1,8 +1,19 @@
-"""Lightweight ATIF v1.7 models used by trajectory persistence.
+"""Internal ATIF v1.7 models used by trajectory persistence.
 
-The rollout server only needs the Agent Trajectory Interchange Format (ATIF)
-data contract. Keeping that contract here avoids coupling generic trajectory
-persistence to a particular execution backend's runtime package.
+These models were initially adapted from Harbor 0.20.0:
+
+- ``harbor/models/trajectories/`` for the ATIF models
+- ``harbor/utils/trajectory_utils.py`` for JSON formatting
+
+They intentionally live in the SDK because trajectory persistence is shared by
+all execution backends. Importing Harbor's models here would make the generic
+rollout server and ``LocalBackend`` require the optional ``harbor`` extra.
+This module is not re-exported as supported SDK API; external consumers that
+need general-purpose ATIF models should use Harbor's implementation directly.
+
+When updating ATIF support, compare this module with both the upstream ATIF RFC
+and those Harbor paths. Preserve SDK-specific hardening such as rejecting
+non-finite floats, which prevents invalid JSON documents.
 """
 
 from __future__ import annotations
@@ -19,6 +30,8 @@ from pydantic import (
     field_validator,
     model_validator,
 )
+
+__all__: list[str] = []
 
 ATIFSchemaVersion = Literal[
     "ATIF-v1.0",

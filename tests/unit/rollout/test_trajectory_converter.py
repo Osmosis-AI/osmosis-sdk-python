@@ -4,7 +4,7 @@ from typing import Any
 
 import pytest
 
-from osmosis_ai.rollout.trajectory._atif import Metrics
+from osmosis_ai.rollout.trajectory.atif import Metrics
 from osmosis_ai.rollout.trajectory.converter import (
     _messages_to_steps,
     convert_sample_to_trajectory,

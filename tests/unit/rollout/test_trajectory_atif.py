@@ -5,7 +5,7 @@ from typing import Any
 import pytest
 from pydantic import BaseModel, ValidationError
 
-from osmosis_ai.rollout.trajectory._atif import (
+from osmosis_ai.rollout.trajectory.atif import (
     Agent,
     ContentPart,
     FinalMetrics,

@@ -9,7 +9,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from osmosis_ai.rollout.trajectory._atif import format_trajectory_json
+from osmosis_ai.rollout.trajectory.atif import format_trajectory_json
 from osmosis_ai.rollout.trajectory.converter import convert_sample_to_trajectory
 from osmosis_ai.rollout.trajectory.report import SampleReport, TrajectoryReport
 from osmosis_ai.rollout.types import ExecutionResult

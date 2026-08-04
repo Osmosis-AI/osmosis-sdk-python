@@ -195,6 +195,8 @@ def _smoke_bare() -> None:
             "SampleSource",
         ),
     )
+    atif = importlib.import_module("osmosis_ai.rollout.trajectory.atif")
+    assert atif.Trajectory is not None
 
 
 def _smoke_server() -> None:

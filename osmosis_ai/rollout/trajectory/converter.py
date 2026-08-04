@@ -12,7 +12,7 @@ from typing import Any, Literal
 from pydantic import ValidationError
 
 from osmosis_ai.consts import PACKAGE_VERSION
-from osmosis_ai.rollout.trajectory._atif import (
+from osmosis_ai.rollout.trajectory.atif import (
     Agent,
     FinalMetrics,
     Metrics,
