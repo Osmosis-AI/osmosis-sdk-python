@@ -230,10 +230,15 @@ def _format_rate_interval(rate: Any) -> str:
         return "–"
     value = float(rate["value"])
     low, high = rate.get("ci_low"), rate.get("ci_high")
+    sample = rate.get("n")
+    decimals = 1 if isinstance(sample, int | float) and sample >= 100 else 0
+
+    def pct(fraction: float) -> str:
+        return f"{fraction * 100:.{decimals}f}"
+
     if isinstance(low, int | float) and isinstance(high, int | float):
-        margin = max(value - low, high - value)
-        return f"{value:.1%} ± {margin:.1%}"
-    return f"{value:.1%}"
+        return f"{pct(value)}% ({pct(float(low))}–{pct(float(high))})"
+    return f"{pct(value)}%"
 
 
 def _leaderboard_rows(entries: list[dict[str, Any]]) -> list[tuple[str, str]]:
@@ -384,8 +389,8 @@ def benchmark_info(name_or_id: str, *, limit: int, all_: bool) -> DetailResult:
     if not benchmark.leaderboard:
         display_hints.insert(
             0,
-            "No leaderboard entries yet: finished runs on the full task set "
-            "with scores rank here.",
+            "No eligible benchmark runs. Finished benchmark runs on the full "
+            "task set with scores will appear here.",
         )
     if benchmark.default_harness:
         display_hints.insert(

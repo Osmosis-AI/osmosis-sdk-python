@@ -283,7 +283,7 @@ def test_submit_warns_before_hle_missing_secret_failure(
         lambda message, **kwargs: warnings.append({"message": message, **kwargs}),
     )
 
-    with pytest.raises(CLIError, match=r"HF_TOKEN"):
+    with pytest.raises(CLIError, match=r"OPENAI_API_KEY"):
         benchmark_module.submit(config_path, yes=True)
 
     assert warnings == [

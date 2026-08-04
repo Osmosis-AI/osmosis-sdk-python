@@ -149,10 +149,6 @@ class BenchmarkSubmitConfig(_StrictSection):
         judge_secret = self.execution.judge_api_key_secret
         if isinstance(judge_secret, str):
             names.append(judge_secret)
-        # HLE's managed adapter reads the dataset through a fixed Platform
-        # secret, even though the name is not repeated in the submit config.
-        if self.experiment.benchmark.strip() == "HLE":
-            names.append("HF_TOKEN")
         return list(dict.fromkeys(names))
 
 

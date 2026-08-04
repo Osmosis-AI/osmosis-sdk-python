@@ -202,7 +202,7 @@ judge_api_key_secret = "OPENAI_API_KEY"
         "task_names": ["hle__sample"],
         "task_set": "parity",
     }
-    assert config.required_secrets == ["OPENAI_API_KEY", "HF_TOKEN"]
+    assert config.required_secrets == ["OPENAI_API_KEY"]
 
 
 def test_load_benchmark_submit_config_rejects_unknown_task_set(

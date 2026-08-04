@@ -200,7 +200,7 @@ def test_info_exposes_selection_metadata_and_full_task_list(
     assert fields["Key"] == "hle"
     assert fields["Required Secret Records"] == "HF_TOKEN"
     assert 'task_set = "parity"' in result.display_hints[0]
-    assert "No leaderboard entries yet" in result.display_hints[1]
+    assert "No eligible benchmark runs" in result.display_hints[1]
     assert any("Omit [tasks]" in hint for hint in result.display_hints)
     assert calls == [
         {
@@ -536,7 +536,7 @@ def test_benchmark_info_renders_leaderboard_and_runs(
     assert any("GPT-5.5 (codex)" in line for line in result.sections[0].plain_lines)
     assert result.sections[1].plain_lines[0] == "Runs (1 of 12):"
     assert not any(
-        "No leaderboard entries yet" in hint for hint in result.display_hints
+        "No eligible benchmark runs" in hint for hint in result.display_hints
     )
 
 
@@ -549,9 +549,20 @@ def test_leaderboard_rows_format_and_tolerate_sparse_entries() -> None:
                 "task_set": "parity",
                 "harness": "codex",
                 "model": "GPT-5.5",
-                "pass_at_1": {"value": 0.75, "ci_low": 0.719, "ci_high": 0.781},
+                "pass_at_1": {
+                    "value": 0.75,
+                    "ci_low": 0.719,
+                    "ci_high": 0.781,
+                    "n": 249,
+                },
                 "pass_at_k": [
-                    {"k": 2, "value": 0.812, "ci_low": 0.77, "ci_high": 0.85}
+                    {
+                        "k": 2,
+                        "value": 0.812,
+                        "ci_low": 0.77,
+                        "ci_high": 0.85,
+                        "n": 249,
+                    }
                 ],
                 "reported_cost_usd": 4.2,
                 "mean_duration_seconds": 54,
@@ -564,7 +575,7 @@ def test_leaderboard_rows_format_and_tolerate_sparse_entries() -> None:
     label, value = full
     assert label == "#1"
     assert "GPT-5.5 (codex) [parity]" in value
-    assert "pass@1 75.0% ± 3.1%" in value
+    assert "pass@1 75.0% (71.9–78.1)" in value
     assert "pass@2 81.2%" in value
     assert "$4.20" in value
     assert "54s/task" in value
