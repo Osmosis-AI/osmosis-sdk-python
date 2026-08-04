@@ -12,6 +12,7 @@ from osmosis_ai.platform.api.models import (
     BenchmarkCatalogDetail,
     BenchmarkCatalogEntry,
     BenchmarkCategory,
+    BenchmarkRun,
     BenchmarkTaskSet,
     PaginatedBenchmarkRuns,
     PaginatedBenchmarks,
@@ -237,14 +238,14 @@ def test_catalog_detail_defaults_required_secret_names() -> None:
 def _syncing_entry(**overrides: Any) -> BenchmarkCatalogEntry:
     return BenchmarkCatalogEntry(
         id="benchmark-2",
-        name="acme/suite",
+        name="acme/custom",
         description=None,
         source_type="harbor_registry",
-        source_ref="acme/suite@3",
+        source_ref="acme/custom@3",
         task_count=4_000,
         category_count=0,
         task_sets=[],
-        platform_url="https://platform.example/Acme/benchmarks",
+        platform_url="https://platform.example/Acme/benchmarks/benchmark-2",
         **overrides,
     )
 
@@ -303,7 +304,7 @@ def test_list_benchmarks_surfaces_failed_sync_and_platform_url(
     )
 
 
-def test_catalog_info_surfaces_the_default_harness(
+def test_benchmark_info_surfaces_the_default_harness(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     class FakeClient:
@@ -348,7 +349,7 @@ def test_catalog_info_surfaces_the_default_harness(
     assert 'harness = "terminus-2"' in result.display_hints[0]
 
 
-def test_catalog_info_names_the_official_scaffold_as_the_default(
+def test_benchmark_info_names_the_official_scaffold_as_the_default(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A benchmark that allows but does not require a harness defaults to its own scaffold."""
@@ -393,7 +394,7 @@ def test_catalog_info_names_the_official_scaffold_as_the_default(
     assert "[[agents]] entry" in result.display_hints[0]
 
 
-def test_catalog_info_reports_a_scaffold_only_benchmark(
+def test_benchmark_info_reports_a_scaffold_only_benchmark(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A benchmark with no harness support runs its own scaffold, not "nothing"."""
@@ -435,3 +436,189 @@ def test_catalog_info_reports_a_scaffold_only_benchmark(
 
     fields = {field.label: field.value for field in result.fields}
     assert fields["Harness"] == "Official scaffold only"
+
+
+def test_benchmark_info_renders_leaderboard_and_runs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    leaderboard = [
+        {
+            "rank": 1,
+            "tied": False,
+            "task_set": "parity",
+            "harness": "codex",
+            "model": "GPT-5.5",
+            "pass_at_1": {
+                "value": 0.75,
+                "ci_low": 0.719,
+                "ci_high": 0.781,
+                "n": 249,
+                "method": "wilson",
+            },
+            "pass_at_k": [
+                {"k": 1, "value": 0.75, "ci_low": 0.719, "ci_high": 0.781, "n": 249},
+                {"k": 2, "value": 0.812, "ci_low": 0.77, "ci_high": 0.85, "n": 249},
+            ],
+            "tokens_per_task": 1_100_000,
+            "mean_duration_seconds": 54,
+            "reported_cost_usd": 4.2,
+            "run": {
+                "id": "run-1",
+                "name": "warm-gull",
+                "platform_url": "https://platform.example/Acme/benchmarks/runs/run-1",
+            },
+        },
+        # A sparse entrant: every optional metric missing or the wrong type.
+        {"rank": None, "tied": True, "task_set": "full", "model": "122-test-lora"},
+    ]
+
+    class FakeClient:
+        def get_benchmark(self, *_: Any, **__: Any) -> BenchmarkCatalogDetail:
+            return BenchmarkCatalogDetail(
+                id="benchmark-1",
+                name="HLE",
+                description=None,
+                source_type="osmosis_managed",
+                source_ref="hle",
+                task_count=2_500,
+                category_count=30,
+                task_sets=[],
+                runner_family="harbor",
+                supports_harness=True,
+                requires_harness=True,
+                requires_judge_model=True,
+                judge_model_default="openai/gpt-5",
+                pass_threshold=1,
+                categories=[],
+                tasks=[],
+                unavailable_tasks=None,
+                leaderboard=leaderboard,
+            )
+
+        def list_benchmark_runs(self, **_: Any) -> PaginatedBenchmarkRuns:
+            return PaginatedBenchmarkRuns(
+                benchmark_runs=[
+                    BenchmarkRun.from_dict(
+                        {
+                            "id": "run-1",
+                            "name": "warm-gull",
+                            "status": "finished",
+                            "benchmark": {"id": "benchmark-1", "name": "HLE"},
+                            "agent_count": 1,
+                            "best_pass_at_1": 0.75,
+                            "ingested_results": 498,
+                            "expected_results": 498,
+                            "created_at": "2026-08-01T00:00:00Z",
+                        }
+                    )
+                ],
+                total_count=12,
+                has_more=True,
+                next_offset=10,
+            )
+
+    monkeypatch.setattr(
+        benchmark_module,
+        "require_git_workspace_directory_context",
+        _context,
+    )
+    monkeypatch.setattr(benchmark_module, "OsmosisClient", FakeClient)
+
+    result = benchmark_module.benchmark_info("hle", limit=DEFAULT_PAGE_SIZE, all_=False)
+
+    assert result.data["leaderboard"] == leaderboard
+    assert result.data["runs_total_count"] == 12
+    assert result.data["runs"][0]["name"] == "warm-gull"
+    fields = {field.label: field.value for field in result.fields}
+    assert fields["Runs"] == "12"
+    assert len(result.sections) == 2
+    assert result.sections[0].plain_lines[0] == "Leaderboard:"
+    assert any("GPT-5.5 (codex)" in line for line in result.sections[0].plain_lines)
+    assert result.sections[1].plain_lines[0] == "Runs (1 of 12):"
+    assert not any(
+        "No leaderboard entries yet" in hint for hint in result.display_hints
+    )
+
+
+def test_leaderboard_rows_format_and_tolerate_sparse_entries() -> None:
+    full, sparse = benchmark_module._leaderboard_rows(
+        [
+            {
+                "rank": 1,
+                "tied": False,
+                "task_set": "parity",
+                "harness": "codex",
+                "model": "GPT-5.5",
+                "pass_at_1": {"value": 0.75, "ci_low": 0.719, "ci_high": 0.781},
+                "pass_at_k": [
+                    {"k": 2, "value": 0.812, "ci_low": 0.77, "ci_high": 0.85}
+                ],
+                "reported_cost_usd": 4.2,
+                "mean_duration_seconds": 54,
+                "run": {"name": "warm-gull"},
+            },
+            {"rank": "not-a-rank", "tied": True, "task_set": "full"},
+        ]
+    )
+
+    label, value = full
+    assert label == "#1"
+    assert "GPT-5.5 (codex) [parity]" in value
+    assert "pass@1 75.0% ± 3.1%" in value
+    assert "pass@2 81.2%" in value
+    assert "$4.20" in value
+    assert "54s/task" in value
+    assert "run warm-gull" in value
+
+    label, value = sparse
+    assert label == "–"
+    assert value.startswith("– [tied]")
+    assert "pass@1 –" in value
+
+
+def test_catalog_status_prefers_activity_over_sync_state() -> None:
+    def entry(**overrides: Any) -> BenchmarkCatalogEntry:
+        return BenchmarkCatalogEntry(
+            id="benchmark-1",
+            name="HLE",
+            description=None,
+            source_type="osmosis_managed",
+            source_ref="hle",
+            task_count=1,
+            category_count=1,
+            task_sets=[],
+            **overrides,
+        )
+
+    assert benchmark_module._catalog_status(entry(running_count=2)) == "Running (2)"
+    assert (
+        benchmark_module._catalog_status(entry(running_count=1, sync_status="failed"))
+        == "Running (1)"
+    )
+    assert benchmark_module._catalog_status(entry(sync_status="pending")) == "Syncing"
+    assert benchmark_module._catalog_status(entry(sync_status="syncing")) == "Syncing"
+    assert (
+        benchmark_module._catalog_status(entry(sync_status="failed")) == "Sync failed"
+    )
+    assert benchmark_module._catalog_status(entry()) == "Ready"
+
+
+def test_benchmark_run_rows_render_status_progress_and_date() -> None:
+    run = BenchmarkRun.from_dict(
+        {
+            "id": "run-1",
+            "name": "warm-gull",
+            "status": "finished",
+            "benchmark": {"id": "benchmark-1", "name": "HLE"},
+            "best_pass_at_1": 0.75,
+            "ingested_results": 498,
+            "expected_results": 498,
+            "created_at": "2026-08-01T00:00:00Z",
+        }
+    )
+
+    [(label, value)] = benchmark_module._benchmark_run_rows([run])
+
+    assert label == "warm-gull"
+    assert "best pass@1 75.0%" in value
+    assert "498" in value
