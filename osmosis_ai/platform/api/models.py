@@ -453,6 +453,9 @@ class BenchmarkCatalogEntry:
     run_count: int = 0
     running_count: int = 0
     last_run_at: str | None = None
+    last_run_status: str | None = None
+    last_run_name: str | None = None
+    creator_name: str | None = None
 
     @property
     def is_ready(self) -> bool:
@@ -479,6 +482,9 @@ class BenchmarkCatalogEntry:
             run_count=int(data.get("run_count") or 0),
             running_count=int(data.get("running_count") or 0),
             last_run_at=data.get("last_run_at"),
+            last_run_status=data.get("last_run_status"),
+            last_run_name=data.get("last_run_name"),
+            creator_name=data.get("creator_name"),
         )
 
 

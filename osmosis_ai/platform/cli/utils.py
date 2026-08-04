@@ -217,6 +217,16 @@ def format_benchmark_status(run: Any) -> str:
     return format_status_token(run.status, _BENCHMARK_STATUS_STYLES)
 
 
+def format_benchmark_status_label(status: str) -> str:
+    """Status as a plain styled word: the benchmarks table reads state as text
+    alongside its detail, not as a ``[token]``."""
+    text = status.replace("_", " ").title()
+    for statuses, style in _BENCHMARK_STATUS_STYLES:
+        if status in statuses:
+            return console.format_styled(text, style)
+    return console.escape(text)
+
+
 def format_reward(reward: float | None) -> str:
     """Format a training reward to two decimals, en dash when unset."""
     if reward is None:

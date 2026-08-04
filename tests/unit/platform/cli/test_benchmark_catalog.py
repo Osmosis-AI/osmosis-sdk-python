@@ -68,6 +68,11 @@ def test_list_benchmarks_returns_catalog_and_git_context(
                         task_count=2_500,
                         category_count=30,
                         task_sets=[parity],
+                        run_count=14,
+                        last_run_at="2026-08-01T00:00:00Z",
+                        last_run_status="finished",
+                        last_run_name="brave-otter",
+                        creator_name="Brian",
                     )
                 ],
                 total_count=1,
@@ -97,16 +102,23 @@ def test_list_benchmarks_returns_catalog_and_git_context(
         }
     ]
     assert result.display_items[0]["key"] == "hle"
-    assert result.display_items[0]["status"] == "Ready"
-    assert result.display_items[0]["run_count"] == "0"
-    assert result.display_items[0]["last_run_at"] == "–"
+    assert result.display_items[0]["run_count"] == "14"
+    assert result.display_items[0]["task_count"] == "2,500"
+    assert result.display_items[0]["creator_name"] == "Brian"
+    last_run = result.display_items[0]["last_run"]
+    assert "Finished" in last_run
+    assert "ago" in last_run
+    assert last_run.endswith("brave-otter")
+    assert result.items[0]["last_run_status"] == "finished"
+    assert result.items[0]["last_run_name"] == "brave-otter"
+    assert result.items[0]["creator_name"] == "Brian"
     assert [column.key for column in result.columns] == [
         "name",
         "key",
-        "status",
-        "run_count",
-        "last_run_at",
+        "last_run",
         "task_count",
+        "run_count",
+        "creator_name",
     ]
     assert result.columns[1].no_wrap is True
     assert result.columns[1].min_width == 20
@@ -279,7 +291,9 @@ def test_list_benchmarks_shows_registry_sync_progress(
         _syncing_entry(sync_status="syncing", synced_task_count=1_000),
     )
 
-    assert result.display_items[0]["task_count"] == "1,000 / 4,000 syncing"
+    assert result.display_items[0]["task_count"] == "–"
+    assert "1,000 / 4,000 tasks" in result.display_items[0]["last_run"]
+    assert "Syncing" in result.display_items[0]["last_run"]
     assert result.items[0]["sync_status"] == "syncing"
     assert any("still syncing" in hint for hint in result.display_hints)
 
@@ -296,6 +310,7 @@ def test_list_benchmarks_surfaces_failed_sync_and_platform_url(
     )
 
     assert result.display_items[0]["task_count"] == "unavailable"
+    assert "Task list unavailable." in result.display_items[0]["last_run"]
     assert result.items[0]["sync_error"] == "Task list unavailable."
     assert any(
         "Task list unavailable." in hint
@@ -564,8 +579,9 @@ def test_leaderboard_rows_format_and_tolerate_sparse_entries() -> None:
                         "n": 249,
                     }
                 ],
-                "reported_cost_usd": 4.2,
+                "cost_per_task": 4.2,
                 "mean_duration_seconds": 54,
+                "tokens_per_task": 1_100_000,
                 "run": {"name": "warm-gull"},
             },
             {"rank": "not-a-rank", "tied": True, "task_set": "full"},
@@ -577,41 +593,58 @@ def test_leaderboard_rows_format_and_tolerate_sparse_entries() -> None:
     assert "GPT-5.5 (codex) [parity]" in value
     assert "pass@1 75.0% (71.9–78.1)" in value
     assert "pass@2 81.2%" in value
-    assert "$4.20" in value
+    assert "$4.20/task" in value
     assert "54s/task" in value
+    assert "1.1M tokens/task" in value
     assert "run warm-gull" in value
 
     label, value = sparse
     assert label == "–"
-    assert value.startswith("– [tied]")
+    assert value.startswith("– [tied for first]")
     assert "pass@1 –" in value
 
 
-def test_catalog_status_prefers_activity_over_sync_state() -> None:
+def test_last_run_cell_shows_sync_state_before_run_history() -> None:
     def entry(**overrides: Any) -> BenchmarkCatalogEntry:
-        return BenchmarkCatalogEntry(
-            id="benchmark-1",
-            name="HLE",
-            description=None,
-            source_type="osmosis_managed",
-            source_ref="hle",
-            task_count=1,
-            category_count=1,
-            task_sets=[],
-            **overrides,
-        )
+        fields: dict[str, Any] = {
+            "id": "benchmark-1",
+            "name": "HLE",
+            "description": None,
+            "source_type": "osmosis_managed",
+            "source_ref": "hle",
+            "task_count": 1,
+            "category_count": 1,
+            "task_sets": [],
+        }
+        return BenchmarkCatalogEntry(**{**fields, **overrides})
 
-    assert benchmark_module._catalog_status(entry(running_count=2)) == "Running (2)"
-    assert (
-        benchmark_module._catalog_status(entry(running_count=1, sync_status="failed"))
-        == "Running (1)"
+    syncing = benchmark_module._last_run_cell(
+        entry(sync_status="syncing", task_count=4_000, synced_task_count=1_000)
     )
-    assert benchmark_module._catalog_status(entry(sync_status="pending")) == "Syncing"
-    assert benchmark_module._catalog_status(entry(sync_status="syncing")) == "Syncing"
-    assert (
-        benchmark_module._catalog_status(entry(sync_status="failed")) == "Sync failed"
+    assert "Syncing" in syncing
+    assert "1,000 / 4,000 tasks" in syncing
+
+    queued = benchmark_module._last_run_cell(entry(sync_status="pending"))
+    assert "Queued" in queued
+    assert "Waiting to start" in queued
+
+    failed = benchmark_module._last_run_cell(
+        entry(sync_status="failed", sync_error="Registry unreachable.")
     )
-    assert benchmark_module._catalog_status(entry()) == "Ready"
+    assert "Failed" in failed
+    assert "Registry unreachable." in failed
+
+    assert benchmark_module._last_run_cell(entry()) == "No benchmark runs yet"
+
+    ran = benchmark_module._last_run_cell(
+        entry(
+            last_run_at="2026-08-01T00:00:00Z",
+            last_run_status="running",
+            last_run_name="calm-yak",
+        )
+    )
+    assert "Running" in ran
+    assert ran.endswith("calm-yak")
 
 
 def test_benchmark_run_rows_render_status_progress_and_date() -> None:

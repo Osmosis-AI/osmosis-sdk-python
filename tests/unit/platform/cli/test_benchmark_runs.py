@@ -122,6 +122,17 @@ def test_list_benchmark_runs_returns_public_and_display_shapes(
     }
     assert result.display_items[0]["progress"] == "50 / 100 results"
     assert result.display_items[0]["best_pass_at_1"] == "42.0%"
+    assert result.display_items[0]["agent_count"] == "2"
+    assert [column.key for column in result.columns] == [
+        "name",
+        "status",
+        "progress",
+        "benchmark",
+        "agent_count",
+        "best_pass_at_1",
+        "created_at",
+        "creator_name",
+    ]
     assert calls == [
         {
             "limit": 50,
@@ -193,6 +204,74 @@ def test_run_info_returns_config_agents_results_and_next_steps(
     ]
     assert "osmosis benchmark runs stop hle-smoke" in result.display_hints[-2]
     assert "osmosis benchmark runs download hle-smoke" in result.display_hints[-1]
+
+
+def test_run_info_reports_duration_and_per_agent_metrics(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    detail = _detail(status="finished")
+    detail.started_at = "2026-07-30T00:05:00Z"
+    detail.completed_at = "2026-07-30T01:35:00Z"
+    detail.agents = [
+        {
+            "id": "agent-1",
+            "agent_index": 0,
+            "harness": "codex",
+            "model_display_name": "GPT-5",
+            "status": "finished",
+            "aggregates": {
+                "reported_cost_usd": 498.0,
+                "mean_duration_seconds": 54,
+                "tokens_per_task": 1_100_000,
+            },
+        }
+    ]
+    detail.agent_metrics = [
+        {
+            "benchmark_run_agent_id": "agent-1",
+            "rank": 1,
+            "n_tasks": 249,
+            "pass_at_1": {
+                "value": 0.75,
+                "ci_low": 0.719,
+                "ci_high": 0.781,
+                "n": 249,
+            },
+            "pass_at_k": [
+                {"k": 2, "value": 0.812, "ci_low": 0.77, "ci_high": 0.85, "n": 249}
+            ],
+        }
+    ]
+
+    class FakeClient:
+        def get_benchmark_run(self, *_: Any, **__: Any) -> BenchmarkRunDetail:
+            return detail
+
+    monkeypatch.setattr(
+        benchmark_module, "require_git_workspace_directory_context", _context
+    )
+    monkeypatch.setattr(benchmark_module, "OsmosisClient", FakeClient)
+
+    result = benchmark_module.run_info("hle-smoke")
+
+    fields = {field.label: field.value for field in result.fields}
+    assert fields["Duration"] == "1h 30m"
+
+    agents = next(
+        section for section in result.sections if section.plain_lines[0] == "Agents:"
+    )
+    agent_line = " ".join(agents.plain_lines)
+    assert "#1" in agent_line
+    assert "pass@1 75.0% (71.9–78.1)" in agent_line
+    assert "pass@2 81.2%" in agent_line
+    assert "$2.00/task" in agent_line
+    assert "54s/task" in agent_line
+    assert "1.1M tokens/task" in agent_line
+
+    results = next(
+        section for section in result.sections if section.plain_lines[0] == "Results:"
+    )
+    assert any("LLM Cost" in line for line in results.plain_lines)
 
 
 def test_run_info_always_displays_canonical_id(

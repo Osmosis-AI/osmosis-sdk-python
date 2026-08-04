@@ -17,7 +17,12 @@ from osmosis_ai.cli.output import (
     get_output_context,
     serialize_benchmark_run,
 )
-from osmosis_ai.cli.output.display import format_local_date, format_local_datetime
+from osmosis_ai.cli.output.display import (
+    format_elapsed,
+    format_local_date,
+    format_local_datetime,
+    format_relative_time,
+)
 from osmosis_ai.cli.prompts import require_confirmation
 from osmosis_ai.platform.api.client import OsmosisClient
 from osmosis_ai.platform.api.models import (
@@ -48,6 +53,7 @@ from osmosis_ai.platform.cli.shared_submit import (
 from osmosis_ai.platform.cli.utils import (
     build_logs_result,
     format_benchmark_status,
+    format_benchmark_status_label,
     format_env_config,
     format_progress,
     format_secret_scopes,
@@ -73,11 +79,17 @@ _HLE_PARITY_WARNING = (
 _BENCHMARK_COLUMNS = [
     ListColumn(key="name", label="Name", ratio=3, overflow="fold"),
     ListColumn(key="key", label="Key", no_wrap=True, min_width=20),
-    ListColumn(key="status", label="Status", no_wrap=True, ratio=1),
-    ListColumn(key="run_count", label="Runs", no_wrap=True, ratio=1),
-    ListColumn(key="last_run_at", label="Last Run", no_wrap=True, ratio=1),
+    ListColumn(key="last_run", label="Last Run", ratio=3, overflow="fold"),
     ListColumn(key="task_count", label="Tasks", no_wrap=True, ratio=1),
+    ListColumn(key="run_count", label="Runs", no_wrap=True, ratio=1),
+    ListColumn(key="creator_name", label="Added By", no_wrap=True, ratio=1),
 ]
+
+_SYNC_STATUS_DISPLAY: dict[str, tuple[str, str]] = {
+    "pending": ("Queued", "orange3"),
+    "syncing": ("Syncing", "blue"),
+    "failed": ("Failed", "red"),
+}
 
 
 def _task_set_resource(task_set: BenchmarkTaskSet) -> dict[str, Any]:
@@ -109,15 +121,34 @@ def _benchmark_resource(
     }
 
 
-def _catalog_status(benchmark: BenchmarkCatalogEntry) -> str:
-    """Activity beats sync state; a quiet benchmark is Ready, never blank."""
-    if benchmark.running_count > 0:
-        return f"Running ({benchmark.running_count})"
-    if benchmark.sync_status in ("pending", "syncing"):
-        return "Syncing"
+def _sync_detail(benchmark: BenchmarkCatalogEntry) -> str:
     if benchmark.sync_status == "failed":
-        return "Sync failed"
-    return "Ready"
+        return benchmark.sync_error or "Failed to sync tasks"
+    if benchmark.sync_status == "pending":
+        return "Waiting to start"
+    if benchmark.task_count == 0:
+        return "Starting"
+    synced = min(benchmark.synced_task_count, benchmark.task_count)
+    return f"{synced:,} / {benchmark.task_count:,} tasks"
+
+
+def _last_run_cell(benchmark: BenchmarkCatalogEntry) -> str:
+    """Sync state until the task list lands, then the newest run's state."""
+    if not benchmark.is_ready:
+        label, style = _SYNC_STATUS_DISPLAY.get(
+            benchmark.sync_status, (benchmark.sync_status.title(), "")
+        )
+        styled = console.format_styled(label, style) if style else label
+        return f"{styled} · {console.escape(_sync_detail(benchmark))}"
+    if not benchmark.last_run_at or not benchmark.last_run_status:
+        return "No benchmark runs yet"
+    parts = [
+        format_benchmark_status_label(benchmark.last_run_status),
+        format_relative_time(benchmark.last_run_at),
+    ]
+    if benchmark.last_run_name:
+        parts.append(console.escape(benchmark.last_run_name))
+    return " · ".join(parts)
 
 
 def _benchmark_list_resource(benchmark: BenchmarkCatalogEntry) -> dict[str, Any]:
@@ -126,6 +157,9 @@ def _benchmark_list_resource(benchmark: BenchmarkCatalogEntry) -> dict[str, Any]
         "run_count": benchmark.run_count,
         "running_count": benchmark.running_count,
         "last_run_at": benchmark.last_run_at,
+        "last_run_status": benchmark.last_run_status,
+        "last_run_name": benchmark.last_run_name,
+        "creator_name": benchmark.creator_name,
     }
 
 
@@ -138,6 +172,13 @@ def _task_count_display(
     if benchmark.sync_status == "failed":
         return "unavailable"
     return f"{benchmark.synced_task_count:,} / {benchmark.task_count:,} syncing"
+
+
+def _list_task_count_display(benchmark: BenchmarkCatalogEntry) -> str:
+    """Mid-sync rows leave Tasks blank; the Last Run cell carries the progress."""
+    if benchmark.is_ready or benchmark.sync_status == "failed":
+        return _task_count_display(benchmark)
+    return "–"
 
 
 def _sync_hints(
@@ -201,19 +242,10 @@ def list_benchmarks(*, limit: int, all_: bool) -> ListResult:
         display_items=[
             {
                 **_benchmark_list_resource(benchmark),
-                "status": _catalog_status(benchmark),
+                "last_run": _last_run_cell(benchmark),
+                "task_count": _list_task_count_display(benchmark),
                 "run_count": f"{benchmark.run_count:,}",
-                "last_run_at": (
-                    format_local_date(benchmark.last_run_at)
-                    if benchmark.last_run_at
-                    else "–"
-                ),
-                "task_count": _task_count_display(benchmark),
-                "source": (
-                    "Managed"
-                    if benchmark.source_type == "osmosis_managed"
-                    else "Harbor"
-                ),
+                "creator_name": benchmark.creator_name or "–",
             }
             for benchmark in benchmarks
         ],
@@ -241,6 +273,35 @@ def _format_rate_interval(rate: Any) -> str:
     return f"{pct(value)}%"
 
 
+def _format_tokens(value: Any) -> str | None:
+    if not isinstance(value, int | float) or isinstance(value, bool):
+        return None
+    if value >= 1_000_000:
+        return f"{value / 1_000_000:.1f}M tokens"
+    if value >= 1_000:
+        return f"{value / 1_000:.1f}k tokens"
+    return f"{round(value):,} tokens"
+
+
+def _metric_parts(entry: dict[str, Any]) -> list[str]:
+    """The platform's metric set, in the order its leaderboard ranks by."""
+    parts = [f"pass@1 {_format_rate_interval(entry.get('pass_at_1'))}"]
+    points = entry.get("pass_at_k") or []
+    deepest = points[-1] if points else None
+    if isinstance(deepest, dict) and deepest.get("value") is not None:
+        parts.append(f"pass@{deepest.get('k')} {float(deepest['value']):.1%}")
+    cost = entry.get("cost_per_task")
+    if isinstance(cost, int | float):
+        parts.append(f"${cost:,.2f}/task")
+    seconds = entry.get("mean_duration_seconds")
+    if isinstance(seconds, int | float):
+        parts.append(f"{seconds:,.0f}s/task")
+    tokens = _format_tokens(entry.get("tokens_per_task"))
+    if tokens is not None:
+        parts.append(f"{tokens}/task")
+    return parts
+
+
 def _leaderboard_rows(entries: list[dict[str, Any]]) -> list[tuple[str, str]]:
     rows: list[tuple[str, str]] = []
     for entry in entries:
@@ -252,25 +313,15 @@ def _leaderboard_rows(entries: list[dict[str, Any]]) -> list[tuple[str, str]]:
         tags = [
             tag
             for tag, present in (
-                ("tied", bool(entry.get("tied"))),
+                ("tied for first", bool(entry.get("tied"))),
                 ("parity", entry.get("task_set") == "parity"),
             )
             if present
         ]
         parts = [
             name + (f" [{', '.join(tags)}]" if tags else ""),
-            f"pass@1 {_format_rate_interval(entry.get('pass_at_1'))}",
+            *_metric_parts(entry),
         ]
-        points = entry.get("pass_at_k") or []
-        deepest = points[-1] if points else None
-        if isinstance(deepest, dict) and deepest.get("value") is not None:
-            parts.append(f"pass@{deepest.get('k')} {float(deepest['value']):.1%}")
-        cost = entry.get("reported_cost_usd")
-        if isinstance(cost, int | float):
-            parts.append(f"${cost:,.2f}")
-        seconds = entry.get("mean_duration_seconds")
-        if isinstance(seconds, int | float):
-            parts.append(f"{seconds:,.0f}s/task")
         run = entry.get("run")
         if isinstance(run, dict) and run.get("name"):
             parts.append(f"run {run['name']}")
@@ -489,8 +540,9 @@ def list_benchmark_runs(*, limit: int, all_: bool) -> ListResult:
         columns=[
             ListColumn(key="name", label="Name", ratio=3, overflow="fold"),
             ListColumn(key="status", label="Status", no_wrap=True, ratio=1),
-            ListColumn(key="benchmark", label="Benchmark", ratio=2, overflow="fold"),
             ListColumn(key="progress", label="Progress", no_wrap=True, ratio=2),
+            ListColumn(key="benchmark", label="Benchmark", ratio=2, overflow="fold"),
+            ListColumn(key="agent_count", label="Agents", no_wrap=True),
             ListColumn(key="best_pass_at_1", label="Best Pass@1", no_wrap=True),
             ListColumn(key="created_at", label="Submitted", no_wrap=True, ratio=1),
             ListColumn(key="creator_name", label="Submitted By", no_wrap=True),
@@ -499,8 +551,9 @@ def list_benchmark_runs(*, limit: int, all_: bool) -> ListResult:
             {
                 **serialize_benchmark_run(run),
                 "status": format_benchmark_status(run),
-                "benchmark": run.benchmark_name or "–",
                 "progress": format_progress(_benchmark_progress(run)) or "–",
+                "benchmark": run.benchmark_name or "–",
+                "agent_count": f"{run.agent_count:,}",
                 "best_pass_at_1": _format_pass_at_1(run.best_pass_at_1),
                 "created_at": format_local_date(run.created_at),
                 "creator_name": run.creator_name or "–",
@@ -544,7 +597,33 @@ def _configuration_rows(detail: BenchmarkRunDetail) -> list[tuple[str, str]]:
     return rows
 
 
+def _agent_metric_entry(
+    agent: dict[str, Any], metrics: dict[str, Any]
+) -> dict[str, Any]:
+    """cloud-eval stores the agent's summed spend; the per-task rate is derived
+    against the same task count that backs tokens_per_task."""
+    aggregates = agent.get("aggregates") or {}
+    total_cost = aggregates.get("reported_cost_usd")
+    tasks = metrics.get("n_tasks")
+    cost_per_task = (
+        total_cost / tasks
+        if isinstance(total_cost, int | float) and isinstance(tasks, int) and tasks > 0
+        else None
+    )
+    return {
+        "pass_at_1": metrics.get("pass_at_1"),
+        "pass_at_k": metrics.get("pass_at_k") or [],
+        "cost_per_task": cost_per_task,
+        "mean_duration_seconds": aggregates.get("mean_duration_seconds"),
+        "tokens_per_task": aggregates.get("tokens_per_task"),
+    }
+
+
 def _agent_rows(detail: BenchmarkRunDetail) -> list[tuple[str, str]]:
+    metrics_by_agent = {
+        metrics.get("benchmark_run_agent_id"): metrics
+        for metrics in (detail.agent_metrics or [])
+    }
     rows: list[tuple[str, str]] = []
     for position, agent in enumerate(detail.agents or [], start=1):
         index = agent.get("agent_index")
@@ -558,11 +637,17 @@ def _agent_rows(detail: BenchmarkRunDetail) -> list[tuple[str, str]]:
         if not isinstance(model, str):
             model = jsonish(model)
         harness = agent.get("harness") or "default"
+        parts = [f"{harness} · {model}"]
         status = agent.get("status")
-        value = f"{harness} · {model}"
         if status:
-            value += f" · {status}"
-        rows.append((label, value))
+            parts.append(str(status))
+        metrics = metrics_by_agent.get(agent.get("id"))
+        if metrics is not None:
+            rank = metrics.get("rank")
+            if isinstance(rank, int):
+                parts.append(f"#{rank}")
+            parts.extend(_metric_parts(_agent_metric_entry(agent, metrics)))
+        rows.append((label, " · ".join(parts)))
     return rows
 
 
@@ -579,7 +664,7 @@ def _result_rows(detail: BenchmarkRunDetail) -> list[tuple[str, str]]:
     for key, label in (
         ("total_input_tokens", "Input Tokens"),
         ("total_output_tokens", "Output Tokens"),
-        ("total_cost_usd", "Reported Cost"),
+        ("total_cost_usd", "LLM Cost"),
     ):
         value = totals.get(key)
         if not isinstance(value, int | float) or isinstance(value, bool):
@@ -627,6 +712,9 @@ def run_info(name_or_id: str) -> DetailResult:
     progress_label = format_progress(progress)
     if progress_label:
         rows.append(("Progress", progress_label))
+    duration = format_elapsed(detail.started_at, detail.completed_at)
+    if duration:
+        rows.append(("Duration", duration))
     if detail.best_pass_at_1 is not None:
         rows.append(("Best Pass@1", _format_pass_at_1(detail.best_pass_at_1)))
     rows.append(("Agents", f"{detail.agent_count:,}"))
