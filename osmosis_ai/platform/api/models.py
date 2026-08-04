@@ -446,6 +446,7 @@ class BenchmarkCatalogEntry:
     task_count: int
     category_count: int
     task_sets: list[BenchmarkTaskSet]
+    source_url: str | None = None
     sync_status: str = "ready"
     synced_task_count: int = 0
     sync_error: str | None = None
@@ -470,6 +471,7 @@ class BenchmarkCatalogEntry:
             description=data.get("description"),
             source_type=data["source_type"],
             source_ref=data["source_ref"],
+            source_url=data.get("source_url"),
             task_count=data["task_count"],
             category_count=data["category_count"],
             task_sets=[
@@ -533,6 +535,7 @@ class BenchmarkCatalogDetail:
     unavailable_tasks: dict[str, Any] | None
     required_secret_names: list[str] = field(default_factory=list)
     default_harness: str | None = None
+    source_url: str | None = None
     sync_status: str = "ready"
     synced_task_count: int = 0
     sync_error: str | None = None
@@ -555,6 +558,7 @@ class BenchmarkCatalogDetail:
             description=benchmark.get("description"),
             source_type=benchmark["source_type"],
             source_ref=benchmark["source_ref"],
+            source_url=benchmark.get("source_url"),
             task_count=benchmark["task_count"],
             category_count=benchmark["category_count"],
             task_sets=[

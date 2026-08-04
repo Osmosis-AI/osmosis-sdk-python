@@ -210,7 +210,7 @@ def test_info_exposes_selection_metadata_and_full_task_list(
     assert result.data["benchmark"]["required_secret_names"] == ["HF_TOKEN"]
     fields = {field.label: field.value for field in result.fields}
     assert fields["Key"] == "hle"
-    assert fields["Required Secret Records"] == "HF_TOKEN"
+    assert fields["Required Secrets"] == "HF_TOKEN"
     assert 'task_set = "parity"' in result.display_hints[0]
     assert "No eligible benchmark runs" in result.display_hints[1]
     assert any("Omit [tasks]" in hint for hint in result.display_hints)

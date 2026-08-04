@@ -111,6 +111,7 @@ def _benchmark_resource(
         "description": benchmark.description,
         "source_type": benchmark.source_type,
         "source_ref": benchmark.source_ref,
+        "source_url": benchmark.source_url,
         "task_count": benchmark.task_count,
         "category_count": benchmark.category_count,
         "task_sets": [_task_set_resource(task_set) for task_set in benchmark.task_sets],
@@ -383,7 +384,7 @@ def benchmark_info(name_or_id: str, *, limit: int, all_: bool) -> DetailResult:
         harness += f" (default: {benchmark.default_harness})"
     elif benchmark.supports_harness and not benchmark.requires_harness:
         harness += " (default: official scaffold)"
-    judge = "Not required"
+    judge = "–"
     if benchmark.requires_judge_model:
         judge = "Required"
         if benchmark.judge_model_default:
@@ -397,7 +398,7 @@ def benchmark_info(name_or_id: str, *, limit: int, all_: bool) -> DetailResult:
         ("Name", console.escape(benchmark.name)),
         ("Key", console.escape(benchmark.source_ref)),
         ("Description", console.escape(benchmark.description or "–")),
-        ("Source", f"{benchmark.source_type}: {benchmark.source_ref}"),
+        ("Source", benchmark.source_url or benchmark.source_ref),
         ("Runner", benchmark.runner_family),
         ("Tasks", _task_count_display(benchmark)),
         ("Categories", category_display or "–"),
@@ -405,7 +406,7 @@ def benchmark_info(name_or_id: str, *, limit: int, all_: bool) -> DetailResult:
         ("Harness", harness),
         ("LLM Judge", judge),
         (
-            "Required Secret Records",
+            "Required Secrets",
             ", ".join(benchmark.required_secret_names) or "–",
         ),
         ("Pass Threshold", f"{benchmark.pass_threshold:g}"),
