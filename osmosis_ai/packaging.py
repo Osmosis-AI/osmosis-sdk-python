@@ -18,11 +18,12 @@ from dataclasses import dataclass
 from importlib.metadata import PathDistribution
 from pathlib import Path
 
+import platformdirs
 import toml
 from packaging.requirements import Requirement
 from packaging.utils import canonicalize_name
 
-BUNDLES_DIR = Path.home() / ".osmosis" / "bundles"
+BUNDLES_DIR = platformdirs.user_cache_path("osmosis") / "bundles"
 
 AGENT_MAIN_TEMPLATE = """\
 
