@@ -49,6 +49,7 @@ from harbor.tasks.client import TaskClient
 from harbor.trial.hooks import TrialEvent, TrialHookEvent
 from harbor.trial.queue import TrialQueue
 
+from osmosis_ai.packaging import BundleInfo
 from osmosis_ai.rollout.backend.base import ExecutionBackend, ResultCallback
 from osmosis_ai.rollout.backend.harbor.artifacts import (
     merge_grader_artifacts,
@@ -75,6 +76,7 @@ from osmosis_ai.rollout.backend.harbor.diagnostics import (
     trial_timings,
 )
 from osmosis_ai.rollout.backend.harbor.native_agents import (
+    NativeAgentBinding,
     native_agent_config,
     native_binding,
 )
@@ -130,20 +132,20 @@ class HarborBackendV2(ExecutionBackend):
         max_queue_depth: int | None = None,
     ) -> None:
         self.orchestrator = orchestrator
-        self.tasks_dir = Path(tasks_dir)
-        self.task_mode = TaskMode(task_mode)
+        self.tasks_dir: Path = Path(tasks_dir)
+        self.task_mode: TaskMode = TaskMode(task_mode)
         self.task_resolver = task_resolver
         self.model_name = model_name
         self.agent = agent
         self.agent_setup_timeout_sec = agent_setup_timeout_sec
-        self.native = native_binding(agent)
+        self.native: NativeAgentBinding | None = native_binding(agent)
         if self.native and not self.native.trainable:
             logger.warning(
                 "native agent %r emits no model trajectory; use it to validate "
                 "datasets and verifiers, never for training",
                 agent,
             )
-        self.bundle = resolve_backend_bundle(
+        self.bundle: BundleInfo | None = resolve_backend_bundle(
             agent=agent,
             grader=grader,
             workflow_config=workflow_config,
@@ -152,8 +154,10 @@ class HarborBackendV2(ExecutionBackend):
             bundle=bundle,
             native=self.native is not None,
         )
-        self.environment_config = apply_managed_skypilot_placement(
-            environment_config or HarborEnvironmentConfig()
+        self.environment_config: HarborEnvironmentConfig = (
+            apply_managed_skypilot_placement(
+                environment_config or HarborEnvironmentConfig()
+            )
         )
         if patch_dockerfile_with_sdk and self.bundle is None:
             raise ValueError("patch_dockerfile_with_sdk requires a bundle")
@@ -161,24 +165,24 @@ class HarborBackendV2(ExecutionBackend):
             patch_dockerfile_with_sdk = self.bundle is not None
         # The bundle's declared dependencies (stable) are pre-installed into the
         # task image; the bundle itself (volatile user code) installs per trial.
-        self.sdk_requirements = (
+        self.sdk_requirements: list[str] | None = (
             self.bundle.requirements
             if patch_dockerfile_with_sdk and self.bundle
             else None
         )
 
         root = Path(f"/tmp/osmosis-harbor-{self.tasks_dir.name}")
-        self.rollouts_dir = root / "rollouts"
+        self.rollouts_dir: Path = root / "rollouts"
         self.rollouts_dir.mkdir(parents=True, exist_ok=True)
-        self.trials_dir = trials_dir or root / "trials"
-        self.artifact_root = default_artifact_root()
+        self.trials_dir: Path = trials_dir or root / "trials"
+        self.artifact_root: Path = default_artifact_root()
         self.cleanup_successful_trials = cleanup_successful_trials
         if max_queue_depth is not None and max_queue_depth < 0:
             raise ValueError("max_queue_depth must be >= 0")
         self.max_queue_depth = max_queue_depth
         self.pending: dict[str, PendingTrial] = {}
         self.fetch_locks: dict[str, asyncio.Lock] = {}
-        self.running = 0
+        self.running: int = 0
         self.finished: TtlCache[str, dict[str, Any]] = TtlCache(STATUS_RETENTION_SEC)
 
         orchestrator.add_hook(TrialEvent.START, self.on_trial_started)

@@ -131,7 +131,7 @@ def patch_dockerfile_with_sdk(env_dir: Path, requirements: list[str]) -> None:
 
 class HarborTask:
     def __init__(self, path: Path):
-        self.path = path.resolve()
+        self.path: Path = path.resolve()
         if not self.path.is_dir():
             raise ValueError(f"harbor task directory not found: {self.path}")
 
