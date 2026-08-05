@@ -51,6 +51,20 @@ class RolloutInitRequest(BaseModel):
 class RolloutInitResponse(BaseModel): ...
 
 
+class RolloutStatusResponse(BaseModel):
+    """GET /rollout/{rollout_id}/status.
+
+    QUEUED/RUNNING/GRADING while in flight; SUCCESS/FAILURE/CANCELLED for a
+    retention window after the rollout ends; UNKNOWN for ids never seen or
+    whose record aged out.
+    """
+
+    rollout_id: str
+    status: RolloutStatus
+    reward: float | None = None
+    err_message: str | None = None
+
+
 class CancelRolloutsRequest(BaseModel):
     """Body of the POST to /rollout/cancel. Exactly one selector applies:
     explicit ``ids``, an id ``prefix``, or ``all``."""

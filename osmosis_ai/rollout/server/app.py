@@ -24,6 +24,7 @@ from osmosis_ai.rollout.types import (
     RolloutInitRequest,
     RolloutInitResponse,
     RolloutStatus,
+    RolloutStatusResponse,
 )
 from osmosis_ai.rollout.utils.http import post_json_with_retry
 
@@ -75,6 +76,15 @@ def create_rollout_server(
         except Exception as e:
             logger.error(traceback.format_exc())
             raise HTTPException(status_code=500, detail=str(e)) from e
+
+    @app.get("/rollout/{rollout_id}/status")
+    async def rollout_status(rollout_id: str) -> RolloutStatusResponse:
+        state = backend.rollout_status(rollout_id)
+        if state is None:
+            return RolloutStatusResponse(
+                rollout_id=rollout_id, status=RolloutStatus.UNKNOWN
+            )
+        return RolloutStatusResponse(rollout_id=rollout_id, **state)
 
     @app.post("/rollout/cancel")
     async def cancel(request: CancelRolloutsRequest) -> CancelRolloutsResponse:

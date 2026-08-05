@@ -120,7 +120,10 @@ class PendingTrial:
         self.on_grader_complete = on_grader_complete
         self.workflow_complete_called = False
         self.preserve_trial = False
+        self.started = False
+        self.grading = False
         self.api_key: str | None = None
+        self.task: asyncio.Task | None = None
         self.done: asyncio.Future[None] = asyncio.get_event_loop().create_future()
 
 

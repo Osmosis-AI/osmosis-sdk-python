@@ -50,9 +50,16 @@ class RolloutSample(BaseModel):
 
 
 class RolloutStatus(StrEnum):
-    PENDING = "pending"
+    """One vocabulary for rollout status everywhere: lifecycle states while
+    in flight (status polling), terminal states as execution outcomes."""
+
+    QUEUED = "queued"
+    RUNNING = "running"
+    GRADING = "grading"
     SUCCESS = "success"
     FAILURE = "failure"
+    CANCELLED = "cancelled"
+    UNKNOWN = "unknown"
 
 
 class RolloutErrorCategory(StrEnum):

@@ -30,6 +30,10 @@ class ExecutionBackend(ABC):
         """
         return True
 
+    def rollout_status(self, rollout_id: str) -> dict[str, Any] | None:
+        """Live or retained state for one rollout; None when unknown."""
+        return None
+
     def cancel_rollouts(
         self,
         ids: Sequence[str] | None = None,

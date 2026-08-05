@@ -14,6 +14,7 @@ from .protocol import (
     RolloutCompleteRequest,
     RolloutInitRequest,
     RolloutInitResponse,
+    RolloutStatusResponse,
 )
 from .sample import (
     ExecutionRequest,
@@ -44,4 +45,5 @@ __all__ = [
     "RolloutInitResponse",
     "RolloutSample",
     "RolloutStatus",
+    "RolloutStatusResponse",
 ]

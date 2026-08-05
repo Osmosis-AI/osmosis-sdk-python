@@ -93,6 +93,7 @@ from osmosis_ai.rollout.types import (
 )
 from osmosis_ai.rollout.utils.file_artifacts import default_artifact_root
 from osmosis_ai.rollout.utils.rewards import validate_sample_has_reward
+from osmosis_ai.rollout.utils.ttl_cache import TtlCache
 
 logger: logging.Logger = logging.getLogger(__name__)
 
@@ -100,6 +101,7 @@ HARNESS_AGENT_IMPORT_PATH = (
     "osmosis_ai.rollout.backend.harbor.harness_agent:OsmosisHarnessInstalledAgent"
 )
 PREWARM_PREFIX = "prewarm-"
+STATUS_RETENTION_SEC = 900.0
 
 
 class HarborBackendV2(ExecutionBackend):
@@ -172,6 +174,7 @@ class HarborBackendV2(ExecutionBackend):
         self.pending: dict[str, PendingTrial] = {}
         self.fetch_locks: dict[str, asyncio.Lock] = {}
         self.running = 0
+        self.finished: TtlCache[str, dict[str, Any]] = TtlCache(STATUS_RETENTION_SEC)
 
         orchestrator.add_hook(TrialEvent.START, self.on_trial_started)
         orchestrator.add_hook(TrialEvent.VERIFICATION_START, self.on_verification_start)
@@ -182,6 +185,29 @@ class HarborBackendV2(ExecutionBackend):
 
     def has_capacity(self) -> bool:
         return self.max_queue_depth is None or self.queued() < self.max_queue_depth
+
+    def record_outcome(
+        self,
+        rollout_id: str,
+        status: RolloutStatus,
+        reward: float | None = None,
+        err_message: str | None = None,
+    ) -> None:
+        """Retain a terminal state so status polls answer after completion."""
+        self.finished.set(
+            rollout_id,
+            {"status": status, "reward": reward, "err_message": err_message},
+        )
+
+    def rollout_status(self, rollout_id: str) -> dict[str, Any] | None:
+        pending = self.pending.get(rollout_id)
+        if pending is not None:
+            if pending.grading:
+                return {"status": RolloutStatus.GRADING}
+            if pending.started:
+                return {"status": RolloutStatus.RUNNING}
+            return {"status": RolloutStatus.QUEUED}
+        return self.finished.get(rollout_id)
 
     def health(self) -> dict[str, Any]:
         return {
@@ -321,9 +347,11 @@ class HarborBackendV2(ExecutionBackend):
         except asyncio.CancelledError:
             # The canceller owns the outcome; no callbacks are due.
             self.pending.pop(request.id, None)
+            self.record_outcome(request.id, RolloutStatus.CANCELLED)
             logger.info("Rollout %s cancelled", request.id)
         except Exception as e:
             self.pending.pop(request.id, None)
+            self.record_outcome(request.id, RolloutStatus.FAILURE, err_message=str(e))
             logger.error("Failed trial %s: %s", request.id, e)
             await on_workflow_complete(
                 ExecutionResult(
@@ -547,6 +575,7 @@ class HarborBackendV2(ExecutionBackend):
         if not pending:
             logger.error("No pending trial found for rollout %s", rollout_id)
             return
+        pending.grading = True
 
         succeeded, err_message = self.agent_succeeded(event)
         if succeeded:
@@ -639,16 +668,19 @@ class HarborBackendV2(ExecutionBackend):
 
         err = event.result.exception_info if event.result else None
         if err and err.exception_type == "CancelledError":
+            self.record_outcome(rollout_id, RolloutStatus.CANCELLED)
             if not pending.done.done():
                 pending.done.set_result(None)
             return
 
         try:
             merge_grader_artifacts(self.trials_dir, rollout_id)
-            grader_result = (
-                self.grader_outcome(event, rollout_id, pending)
-                if pending.on_grader_complete
-                else None
+            grader_result = self.grader_outcome(event, rollout_id, pending)
+            self.record_outcome(
+                rollout_id,
+                RolloutStatus(grader_result.status.value),
+                reward=grader_result.sample.reward if grader_result.sample else None,
+                err_message=grader_result.err_message,
             )
             delete_trial = bool(
                 self.cleanup_successful_trials
@@ -683,7 +715,7 @@ class HarborBackendV2(ExecutionBackend):
                     "workflow",
                 )
 
-            if pending.on_grader_complete and grader_result is not None:
+            if pending.on_grader_complete:
                 await self.try_callback(
                     pending.on_grader_complete, grader_result, rollout_id, "grader"
                 )
