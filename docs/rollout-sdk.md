@@ -30,7 +30,7 @@ class AgentWorkflow[TConfig: AgentWorkflowConfig](ABC):
 
 [../osmosis_ai/rollout/agent_workflow.py](../osmosis_ai/rollout/agent_workflow.py)
 
-- `run` is **async** (enforced by [validator.py](../osmosis_ai/rollout/validator.py)).
+- `run` is **async** — the backend awaits it.
 - `ctx.prompt` is the initial message list; `ctx.config` is your typed config.
 - The return value is not the trajectory. Samples are collected from the active `RolloutContext` (see [Samples](#samples)); the integrations register sources for you.
 
@@ -168,7 +168,7 @@ class AgentWorkflowConfig(BaseConfig):   # also GraderConfig
 ```
 
 - `BaseConfig` sets `extra="allow"` and `validate_assignment=True`, so you can add your own fields (model paths, tool flags) and read them off `self.config` in `run` / `grade`.
-- `name` becomes the resolved agent name (1–256 chars; see `validate_backend`).
+- `name` becomes the resolved agent name.
 - `concurrency.max_concurrent` caps in-flight executions — raise/lower it to avoid saturating an MCP-based rollout server (see [troubleshooting.md](./troubleshooting.md)).
 
 ## Server and backends

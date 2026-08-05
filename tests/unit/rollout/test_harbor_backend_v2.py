@@ -586,7 +586,11 @@ class TestCancellation:
         running = PendingTrial(noop, None)
         running.task = asyncio.create_task(self.hang())
         running.started = True
-        backend.pending = {"job1-a": queued, "job1-b": running, "other": PendingTrial(noop, None)}
+        backend.pending = {
+            "job1-a": queued,
+            "job1-b": running,
+            "other": PendingTrial(noop, None),
+        }
 
         assert backend.cancel_rollouts(ids=["missing"]) == {"missing": "not_found"}
         assert backend.cancel_rollouts(prefix="job1-") == {

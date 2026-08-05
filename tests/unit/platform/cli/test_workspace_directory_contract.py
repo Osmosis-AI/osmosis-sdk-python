@@ -252,6 +252,74 @@ def _make_rollout(
 _SATISFIED = '"osmosis-ai"'
 _UNSATISFIED = '"osmosis-ai>=999.0.0"'
 
+# A native Harbor entrypoint: the backend runs Harbor's own agent and the
+# task verifier supplies the reward, so no AgentWorkflow or Grader exists.
+# The load counter proves preflight executes module-level side effects once.
+_NATIVE_V2_ENTRYPOINT = """\
+from pathlib import Path
+
+from harbor.trial.queue import TrialQueue
+
+from osmosis_ai.rollout.backend.harbor.backend_v2 import HarborBackendV2
+from osmosis_ai.rollout.server import create_rollout_server
+
+_count_file = Path(__file__).with_name("load_count")
+_count = int(_count_file.read_text()) if _count_file.exists() else 0
+_count_file.write_text(str(_count + 1))
+
+backend = HarborBackendV2(
+    orchestrator=TrialQueue(n_concurrent=1),
+    tasks_dir=Path(__file__).parent / "tasks",
+    agent="terminus-2",
+    grader=None,
+)
+app = create_rollout_server(backend=backend)
+"""
+
+# A backend with no workflow or grader: CLI preflight must not infer either
+# requirement from classes present (or absent) in the module namespace.
+_COMPONENT_FREE_BACKEND_ENTRYPOINT = """\
+from osmosis_ai.rollout.backend.base import ExecutionBackend
+from osmosis_ai.rollout.server import create_rollout_server
+
+
+class ComponentFreeBackend(ExecutionBackend):
+    async def execute(self, request, on_workflow_complete, on_grader_complete=None):
+        return None
+
+
+app = create_rollout_server(backend=ComponentFreeBackend())
+"""
+
+# A script-style entrypoint with no module-level backend. Importability is the
+# only CLI concern; the script validates its backend when it constructs one.
+_WORKFLOW_WITHOUT_GRADER_ENTRYPOINT = """\
+from osmosis_ai.rollout.agent_workflow import AgentWorkflow
+
+
+class DemoWorkflow(AgentWorkflow):
+    async def run(self, ctx):
+        return None
+"""
+
+# A backend whose constructor rejects its configuration: preflight surfaces
+# the import-time error instead of running any validation of its own.
+_INVALID_BACKEND_ENTRYPOINT = """\
+from osmosis_ai.rollout.backend.base import ExecutionBackend
+from osmosis_ai.rollout.server import create_rollout_server
+
+
+class InvalidBackend(ExecutionBackend):
+    def __init__(self):
+        raise ValueError("backend constructor rejected the configuration")
+
+    async def execute(self, request, on_workflow_complete, on_grader_complete=None):
+        return None
+
+
+app = create_rollout_server(backend=InvalidBackend())
+"""
+
 # A rollout naming an enum member that only exists in a newer dependency. The
 # import alone cannot tell this from a typo.
 _VERSION_SKEW_ENTRYPOINT = (
@@ -337,6 +405,111 @@ def test_unsatisfied_requirements_empty_without_pyproject(tmp_path: Path) -> Non
         )
         == []
     )
+
+
+def test_validate_rollout_backend_accepts_native_backend_without_workflow(
+    tmp_path: Path,
+) -> None:
+    """A backend that runs Harbor's own agent with verifier rewards needs no
+    dummy AgentWorkflow or Grader to pass preflight."""
+    project = _make_workspace_directory(tmp_path / "project")
+    _make_rollout(
+        project,
+        "demo",
+        dependencies=_SATISFIED,
+        entrypoint=_NATIVE_V2_ENTRYPOINT,
+    )
+
+    warnings = workspace_directory_contract.validate_rollout_backend(
+        workspace_directory=project,
+        rollout="demo",
+        entrypoint="main.py",
+        command_label="eval submit",
+    )
+
+    assert warnings == []
+
+
+def test_validate_rollout_backend_does_not_discover_components(
+    tmp_path: Path,
+) -> None:
+    project = _make_workspace_directory(tmp_path / "project")
+    _make_rollout(
+        project,
+        "demo",
+        dependencies=_SATISFIED,
+        entrypoint=_COMPONENT_FREE_BACKEND_ENTRYPOINT,
+    )
+
+    warnings = workspace_directory_contract.validate_rollout_backend(
+        workspace_directory=project,
+        rollout="demo",
+        entrypoint="main.py",
+        command_label="eval submit",
+    )
+
+    assert warnings == []
+
+
+def test_validate_rollout_backend_loads_entrypoint_once(tmp_path: Path) -> None:
+    """Preflight must not execute user module side effects more than once."""
+    project = _make_workspace_directory(tmp_path / "project")
+    _make_rollout(
+        project,
+        "demo",
+        dependencies=_SATISFIED,
+        entrypoint=_NATIVE_V2_ENTRYPOINT,
+    )
+
+    workspace_directory_contract.validate_rollout_backend(
+        workspace_directory=project,
+        rollout="demo",
+        entrypoint="main.py",
+        command_label="eval submit",
+    )
+
+    assert (project / "rollouts" / "demo" / "load_count").read_text() == "1"
+
+
+def test_validate_rollout_backend_accepts_script_without_grader(
+    tmp_path: Path,
+) -> None:
+    project = _make_workspace_directory(tmp_path / "project")
+    _make_rollout(
+        project,
+        "demo",
+        dependencies=_SATISFIED,
+        entrypoint=_WORKFLOW_WITHOUT_GRADER_ENTRYPOINT,
+    )
+
+    warnings = workspace_directory_contract.validate_rollout_backend(
+        workspace_directory=project,
+        rollout="demo",
+        entrypoint="main.py",
+        command_label="eval submit",
+    )
+
+    assert warnings == []
+
+
+def test_validate_rollout_backend_reports_constructor_error(
+    tmp_path: Path,
+) -> None:
+    project = _make_workspace_directory(tmp_path / "project")
+    _make_rollout(
+        project,
+        "demo",
+        dependencies=_SATISFIED,
+        entrypoint=_INVALID_BACKEND_ENTRYPOINT,
+    )
+
+    with pytest.raises(CLIError, match="backend constructor rejected"):
+        workspace_directory_contract.validate_rollout_backend(
+            workspace_directory=project,
+            rollout="demo",
+            entrypoint="main.py",
+            command_label="eval submit",
+        )
 
 
 def test_validate_rollout_backend_skips_and_warns_on_version_skew(
