@@ -66,9 +66,9 @@ The workflow does not return samples; instead a `SampleSource` is registered on 
 ```python
 from osmosis_ai.rollout import get_rollout_context
 
-rollout_ctx = get_rollout_context()                  # the active RolloutContext
-rollout_ctx.register_sample_source(name, source)     # name must be unique per rollout
-samples = await rollout_ctx.get_samples()            # async -> {name: RolloutSample}
+rollout_ctx = get_rollout_context()  # the active RolloutContext
+rollout_ctx.register_sample_source(name, source)  # name must be unique per rollout
+samples = await rollout_ctx.get_samples()  # async -> {name: RolloutSample}
 ```
 
 `OsmosisStrandsAgent` registers a source automatically (keyed by the agent `name`/`agent_id`), so most workflows never call `register_sample_source` directly.
@@ -85,6 +85,7 @@ There is one rule: write files under `ctx.artifacts_dir` (available on both `Age
 
 ```python
 import json
+
 
 async def grade(self, ctx: GraderContext) -> Any:
     if ctx.artifacts_dir:
@@ -159,9 +160,10 @@ ATIF has first-class slots for LLM operational data (`Step.metrics`, `Step.model
 
 ```python
 class ConcurrencyConfig(BaseModel):
-    max_concurrent: int | None = None   # ge=1; None = backend default / no limit
+    max_concurrent: int | None = None  # ge=1; None = backend default / no limit
 
-class AgentWorkflowConfig(BaseConfig):   # also GraderConfig
+
+class AgentWorkflowConfig(BaseConfig):  # also GraderConfig
     name: str
     description: str | None = None
     concurrency: ConcurrencyConfig = ConcurrencyConfig()
@@ -179,10 +181,12 @@ class AgentWorkflowConfig(BaseConfig):   # also GraderConfig
 from osmosis_ai.rollout import create_rollout_server, LocalBackend
 
 backend = LocalBackend(
-    workflow=MyWorkflow, workflow_config=MyConfig(name="my-rollout"),
-    grader=MyGrader, grader_config=GraderConfig(name="my-grader"),
+    workflow=MyWorkflow,
+    workflow_config=MyConfig(name="my-rollout"),
+    grader=MyGrader,
+    grader_config=GraderConfig(name="my-grader"),
 )
-app = create_rollout_server(backend=backend)   # FastAPI: POST /rollout, GET /health
+app = create_rollout_server(backend=backend)  # FastAPI: POST /rollout, GET /health
 ```
 
 - `create_rollout_server` ([server/app.py](../osmosis_ai/rollout/server/app.py)) wires the protocol: it runs the backend in a background task and posts the completion + grader callbacks.
@@ -211,12 +215,20 @@ There is no `osmosis rollout serve` command. Scaffold a server with `osmosis rol
 ```python
 from typing import Any
 from osmosis_ai.rollout import (
-    AgentWorkflow, AgentWorkflowConfig, AgentWorkflowContext,
-    Grader, GraderConfig, GraderContext, OsmosisStrandsAgent, OsmosisRolloutModel,
+    AgentWorkflow,
+    AgentWorkflowConfig,
+    AgentWorkflowContext,
+    Grader,
+    GraderConfig,
+    GraderContext,
+    OsmosisStrandsAgent,
+    OsmosisRolloutModel,
 )
+
 
 class MyConfig(AgentWorkflowConfig):
     pass
+
 
 class MyWorkflow(AgentWorkflow[MyConfig]):
     async def run(self, ctx: AgentWorkflowContext[MyConfig]) -> Any:
@@ -224,6 +236,7 @@ class MyWorkflow(AgentWorkflow[MyConfig]):
         # controller's model via the active RolloutContext (no model id needed here).
         agent = OsmosisStrandsAgent(name="solver", model=OsmosisRolloutModel())
         await agent.invoke_async(ctx.prompt[-1]["content"])
+
 
 class MyGrader(Grader):
     async def grade(self, ctx: GraderContext) -> Any:
