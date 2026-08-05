@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -18,7 +19,11 @@ from osmosis_ai.rollout.backend.harbor.tasks import (
     venv_or_fallback_script,
 )
 from osmosis_ai.rollout.container.files import ContainerInput, ContainerResult
-from osmosis_ai.rollout.types import ExecutionRequest, RolloutStatus
+from osmosis_ai.rollout.types import (
+    ExecutionRequest,
+    RolloutErrorCategory,
+    RolloutStatus,
+)
 from osmosis_ai.rollout.types.output import AgentWorkflowOutput, coerce_output
 
 PYPROJECT = """\
@@ -383,7 +388,7 @@ class TestNativeAgents:
     def test_kwargs_wired_agent_receives_endpoint(self, template_task):
         backend = self.backend_for("terminus-2", template_task, model_name="openai/m")
         container_input = ContainerInput(
-            rollout_id="r1", chat_completions_url="http://t/v1"
+            rollout_id="r1", chat_completions_url="http://t/v1", api_key="rk-1"
         )
         config = backend.build_agent_config(template_task, container_input)
 
@@ -391,6 +396,40 @@ class TestNativeAgents:
         assert config.model_name == "openai/m"
         assert config.kwargs["api_base"] == "http://t/v1"
         assert config.kwargs["enable_summarize"] is False
+        # Terminus-2 ignores a top-level api_key; identity must ride in
+        # llm_kwargs, and controllers require non-streaming responses.
+        assert "api_key" not in config.kwargs
+        assert config.kwargs["llm_kwargs"]["api_key"] == "rk-1"
+        assert config.kwargs["llm_kwargs"]["extra_body"]["stream"] is False
+
+    def test_kwargs_wiring_merges_user_llm_kwargs_without_mutation(self):
+        from osmosis_ai.rollout.backend.harbor.native_agents import (
+            NativeAgentBinding,
+            native_agent_config,
+        )
+
+        binding = NativeAgentBinding(
+            wiring="kwargs",
+            kwargs={
+                "enable_summarize": False,
+                "llm_kwargs": {
+                    "api_key": "user-key",
+                    "temperature": 0.2,
+                    "extra_body": {"stream": True, "top_k": 5},
+                },
+            },
+        )
+        config = native_agent_config(
+            "terminus-2", binding, "openai/m", "http://t/v1", "rk-1"
+        )
+
+        llm_kwargs = config.kwargs["llm_kwargs"]
+        assert llm_kwargs["api_key"] == "rk-1"
+        assert llm_kwargs["temperature"] == 0.2
+        assert llm_kwargs["extra_body"] == {"stream": False, "top_k": 5}
+        # The registered binding must stay pristine for the next rollout.
+        assert binding.kwargs["llm_kwargs"]["api_key"] == "user-key"
+        assert binding.kwargs["llm_kwargs"]["extra_body"]["stream"] is True
 
     def test_native_without_grader_needs_no_bundle(self, template_task):
         backend = self.backend_for("mini-swe-agent", template_task)
@@ -462,6 +501,249 @@ class TestNativeAgents:
         assert config.model_name == "openai/override"
 
 
+class TestGraderOutcome:
+    """Failure precedence: the agent's own failure must stay primary.
+
+    The agent phase is identified by the exception's timestamp against the
+    verifier's start, never by exception class name — harbor records
+    pattern-classified subclasses no fixed name set would cover. Timestamps
+    mirror harbor's mixed conventions: ``occurred_at`` is naive-local,
+    timings are timezone-aware UTC.
+    """
+
+    # A naive-local base instant, as harbor's ExceptionInfo records it.
+    BASE = datetime.now()
+
+    def backend_for(self, template_task, tmp_path):
+        return HarborBackendV2(
+            orchestrator=TrialQueue(n_concurrent=1),
+            tasks_dir=template_task,
+            agent="terminus-2",
+            trials_dir=tmp_path / "trials",
+        )
+
+    def verifier_span(self, start_offset_sec=30, duration_sec=30):
+        from types import SimpleNamespace
+
+        started = (self.BASE + timedelta(seconds=start_offset_sec)).astimezone(UTC)
+        return SimpleNamespace(
+            started_at=started,
+            finished_at=started + timedelta(seconds=duration_sec),
+        )
+
+    def event_with(self, exception_info=None, verifier_result=None, verifier=None):
+        from types import SimpleNamespace
+
+        result = SimpleNamespace(
+            exception_info=exception_info,
+            verifier_result=verifier_result,
+            started_at=None,
+            finished_at=None,
+            environment_setup=None,
+            agent_setup=None,
+            agent_execution=None,
+            verifier=verifier,
+        )
+        return SimpleNamespace(result=result)
+
+    def exception_at(self, offset_sec, exception_type="NonZeroAgentExitCodeError"):
+        from types import SimpleNamespace
+
+        return SimpleNamespace(
+            exception_type=exception_type,
+            exception_message="Command failed (exit 1): /app/agent_runner.py",
+            exception_traceback="",
+            occurred_at=self.BASE + timedelta(seconds=offset_sec),
+        )
+
+    async def test_agent_command_failure_stays_primary(self, template_task, tmp_path):
+        """Harbor records the agent failure and still runs the verifier; the
+        verifier's missing-sample error must not replace the agent error."""
+        from types import SimpleNamespace
+
+        async def noop(result):
+            pass
+
+        backend = self.backend_for(template_task, tmp_path)
+        event = self.event_with(
+            exception_info=self.exception_at(0),
+            verifier_result=SimpleNamespace(rewards={"reward": 0.0}),
+            verifier=self.verifier_span(),
+        )
+
+        outcome = backend.grader_outcome(event, "r1", PendingTrial(noop, None))
+
+        assert outcome.status == RolloutStatus.FAILURE
+        assert outcome.err_category == RolloutErrorCategory.AGENT_ERROR
+        assert "Command failed" in outcome.err_message
+
+    async def test_classified_subclass_failure_stays_primary(
+        self, template_task, tmp_path
+    ):
+        """Harbor's ERROR_PATTERNS record subclass names; the phase decision
+        must not depend on the class name."""
+        from types import SimpleNamespace
+
+        async def noop(result):
+            pass
+
+        backend = self.backend_for(template_task, tmp_path)
+        event = self.event_with(
+            exception_info=self.exception_at(
+                0, exception_type="AgentAuthenticationError"
+            ),
+            verifier_result=SimpleNamespace(rewards={"reward": 0.0}),
+            verifier=self.verifier_span(),
+        )
+
+        outcome = backend.grader_outcome(event, "r1", PendingTrial(noop, None))
+
+        assert outcome.err_category == RolloutErrorCategory.AGENT_ERROR
+
+    async def test_missing_sample_after_clean_agent_is_validation_error(
+        self, template_task, tmp_path
+    ):
+        from types import SimpleNamespace
+
+        async def noop(result):
+            pass
+
+        backend = self.backend_for(template_task, tmp_path)
+        event = self.event_with(
+            verifier_result=SimpleNamespace(rewards={"reward": 1.0}),
+            verifier=self.verifier_span(),
+        )
+
+        outcome = backend.grader_outcome(event, "r1", PendingTrial(noop, None))
+
+        assert outcome.status == RolloutStatus.FAILURE
+        assert outcome.err_category == RolloutErrorCategory.VALIDATION_ERROR
+        assert "No sample to grade" in outcome.err_message
+
+    async def test_post_verifier_exception_does_not_preempt_verifier(
+        self, template_task, tmp_path
+    ):
+        """An exception recorded after the verifier finished (teardown noise)
+        must not preempt the verifier branch, whatever its class name."""
+        from types import SimpleNamespace
+
+        async def noop(result):
+            pass
+
+        backend = self.backend_for(template_task, tmp_path)
+        event = self.event_with(
+            exception_info=self.exception_at(120),
+            verifier_result=SimpleNamespace(rewards={"reward": 1.0}),
+            verifier=self.verifier_span(start_offset_sec=30, duration_sec=30),
+        )
+
+        outcome = backend.grader_outcome(event, "r1", PendingTrial(noop, None))
+
+        assert outcome.err_category == RolloutErrorCategory.VALIDATION_ERROR
+
+    async def test_exception_without_verifier_run_stays_primary(
+        self, template_task, tmp_path
+    ):
+        """When the verifier never started, any recorded exception precedes it."""
+
+        async def noop(result):
+            pass
+
+        backend = self.backend_for(template_task, tmp_path)
+        event = self.event_with(exception_info=self.exception_at(0))
+
+        outcome = backend.grader_outcome(event, "r1", PendingTrial(noop, None))
+
+        assert outcome.status == RolloutStatus.FAILURE
+        assert outcome.err_category == RolloutErrorCategory.AGENT_ERROR
+        assert "Command failed" in outcome.err_message
+
+
+class TestTaskResolver:
+    def backend_for(self, template_task, resolver=None):
+        return HarborBackendV2(
+            orchestrator=TrialQueue(n_concurrent=1),
+            tasks_dir=template_task,
+            agent="terminus-2",
+            task_resolver=resolver,
+        )
+
+    async def test_sync_resolver_owns_task_selection(self, template_task, tmp_path):
+        custom = tmp_path / "custom-task"
+        custom.mkdir()
+        seen = []
+
+        def resolver(request):
+            seen.append(request.id)
+            return HarborTask(custom)
+
+        backend = self.backend_for(template_task, resolver)
+        request = request_for(metadata={"harbor_task": "ignored/by-resolver"})
+
+        task = await backend.resolve_task(request)
+
+        assert task.path == custom
+        assert seen == ["r1"]
+
+    async def test_async_resolver_is_awaited(self, template_task, tmp_path):
+        custom = tmp_path / "custom-task"
+        custom.mkdir()
+
+        async def resolver(request):
+            return HarborTask(custom)
+
+        backend = self.backend_for(template_task, resolver)
+
+        task = await backend.resolve_task(request_for())
+
+        assert task.path == custom
+
+    async def test_default_resolution_unchanged_without_resolver(self, template_task):
+        backend = self.backend_for(template_task)
+
+        task = await backend.resolve_task(request_for())
+
+        assert task.path == template_task
+
+    async def test_template_prompt_overwriting_task_instruction_warns(
+        self, template_task, tmp_path, caplog
+    ):
+        """An explicit harbor_task that ships instruction.md loses it to the
+        template-mode prompt; the backend must say so."""
+        import logging
+        from types import SimpleNamespace
+
+        (template_task / "instruction.md").write_text("Task-owned instruction")
+
+        async def failing_submit(config):
+            raise RuntimeError("stop before harbor")
+
+        orchestrator = SimpleNamespace(
+            add_hook=lambda *args: None, submit=failing_submit
+        )
+        backend = HarborBackendV2(
+            orchestrator=orchestrator,
+            tasks_dir=template_task,
+            agent="terminus-2",
+            task_resolver=lambda request: HarborTask(template_task),
+        )
+        request = request_for(
+            prompt=[{"role": "user", "content": "dataset prompt"}],
+            metadata={"harbor_task": "./tasks/x"},
+        )
+
+        async def noop(result):
+            pass
+
+        with caplog.at_level(logging.WARNING):
+            await backend.execute(request, noop)
+
+        assert any(
+            "template mode replaces the instruction.md" in record.getMessage()
+            for record in caplog.records
+        )
+
+
 class TestDiagnostics:
     def result_with_timings(self):
         from datetime import UTC, datetime, timedelta
@@ -506,6 +788,33 @@ class TestDiagnostics:
         result.agent_execution = None
         assert failure_phase(result) == "agent_setup"
         assert failure_phase(None) == "setup"
+
+    def test_agent_phase_failure_compares_mixed_timezone_timestamps(self):
+        """harbor records occurred_at naive-local but timings aware-UTC; the
+        phase decision must normalize instead of raising TypeError."""
+        from types import SimpleNamespace
+
+        from osmosis_ai.rollout.backend.harbor.diagnostics import agent_phase_failure
+
+        base = datetime.now()  # naive local, as ExceptionInfo records it
+        verifier = SimpleNamespace(
+            started_at=(base + timedelta(seconds=30)).astimezone(UTC),
+            finished_at=(base + timedelta(seconds=60)).astimezone(UTC),
+        )
+
+        def result(occurred_at):
+            return SimpleNamespace(
+                exception_info=SimpleNamespace(occurred_at=occurred_at),
+                verifier=verifier,
+            )
+
+        assert agent_phase_failure(result(base)) is not None
+        assert agent_phase_failure(result(base + timedelta(seconds=120))) is None
+        assert agent_phase_failure(None) is None
+        assert (
+            agent_phase_failure(SimpleNamespace(exception_info=None, verifier=None))
+            is None
+        )
 
     def test_redact_secrets_scrubs_keys_and_api_key(self):
         from osmosis_ai.rollout.backend.harbor.diagnostics import redact_secrets

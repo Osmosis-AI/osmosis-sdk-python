@@ -6,6 +6,7 @@ tests can pass any object with the same fields.
 from __future__ import annotations
 
 import logging
+from datetime import UTC, datetime
 from typing import Any
 
 from osmosis_ai.rollout.types import RolloutErrorCategory
@@ -70,6 +71,34 @@ def trial_timings(result: Any) -> dict[str, float]:
         for name, info in spans.items()
         if (seconds := span_seconds(info)) is not None
     }
+
+
+def _as_utc(dt: datetime) -> datetime:
+    """Naive datetimes are host-local (harbor's ExceptionInfo.occurred_at)."""
+    return dt.astimezone(UTC)
+
+
+def agent_phase_failure(result: Any) -> Any | None:
+    """The recorded exception, when it struck before verification started.
+
+    Harbor's single-step trial catches agent command failures and timeouts,
+    records them, and still runs the verifier — so a trial can carry both an
+    agent exception and a verifier result. The exception's timestamp against
+    the verifier's start separates that agent failure from noise recorded
+    after verification (e.g. a teardown error). Timestamps are normalized to
+    UTC because harbor records ``occurred_at`` naive-local but timings
+    timezone-aware. Exception class names are deliberately not consulted:
+    harbor records pattern-classified subclasses (``AgentAuthenticationError``,
+    ``NetworkConnectionError``, ...) that no fixed name set would cover.
+    """
+    err = getattr(result, "exception_info", None)
+    if err is None:
+        return None
+    verifier_started = getattr(getattr(result, "verifier", None), "started_at", None)
+    if verifier_started is None:
+        # The verifier never ran; whatever was recorded precedes it.
+        return err
+    return err if _as_utc(err.occurred_at) < _as_utc(verifier_started) else None
 
 
 def failure_phase(result: Any) -> str:

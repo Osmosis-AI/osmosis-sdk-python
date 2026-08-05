@@ -22,12 +22,13 @@ content-addressed hb__ image across trials.
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import logging
 import shutil
 import traceback
 import uuid
-from collections.abc import AsyncIterator, Callable, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from pathlib import Path
 from typing import Any
@@ -66,6 +67,7 @@ from osmosis_ai.rollout.backend.harbor.backend import (
 )
 from osmosis_ai.rollout.backend.harbor.bundling import resolve_backend_bundle
 from osmosis_ai.rollout.backend.harbor.diagnostics import (
+    agent_phase_failure,
     diagnostic_payload,
     failure_phase,
     redact_secrets,
@@ -112,6 +114,8 @@ class HarborBackendV2(ExecutionBackend):
         tasks_dir: Path,
         agent: str | type | None = None,
         task_mode: TaskMode | str = TaskMode.TEMPLATE,
+        task_resolver: Callable[[ExecutionRequest], HarborTask | Awaitable[HarborTask]]
+        | None = None,
         model_name: str = "openai/osmosis-rollout",
         grader: type | str | None = None,
         workflow_config: Any = None,
@@ -128,6 +132,7 @@ class HarborBackendV2(ExecutionBackend):
         self.orchestrator = orchestrator
         self.tasks_dir = Path(tasks_dir)
         self.task_mode = TaskMode(task_mode)
+        self.task_resolver = task_resolver
         self.model_name = model_name
         self.agent = agent
         self.agent_setup_timeout_sec = agent_setup_timeout_sec
@@ -223,6 +228,12 @@ class HarborBackendV2(ExecutionBackend):
         }
 
     async def resolve_task(self, request: ExecutionRequest) -> HarborTask:
+        # A caller-supplied resolver owns task selection entirely (including
+        # any path-containment policy); it bypasses metadata and task-mode
+        # resolution.
+        if self.task_resolver is not None:
+            task = self.task_resolver(request)
+            return await task if inspect.isawaitable(task) else task
         metadata = request.metadata or {}
         if ref := metadata.get("harbor_task"):
             return await self.fetch_task(str(ref), metadata)
@@ -336,6 +347,18 @@ class HarborBackendV2(ExecutionBackend):
             container_input = self.build_input(request)
             pending.api_key = container_input.api_key
             task = await self.resolve_task(request)
+            if (
+                container_input.prompt
+                and (request.metadata or {}).get("harbor_task")
+                and (task.path / "instruction.md").is_file()
+            ):
+                logger.warning(
+                    "rollout %s: template mode replaces the instruction.md that "
+                    "task %s ships with the request prompt; use "
+                    "task_mode='dataset' to keep the task's own instruction",
+                    request.id,
+                    task.path.name,
+                )
             task_dir = self.materialize_task(task, request.id, container_input)
             pending.task = asyncio.create_task(
                 self.orchestrator.submit(
@@ -602,6 +625,22 @@ class HarborBackendV2(ExecutionBackend):
         self, event: TrialHookEvent, rollout_id: str, pending: PendingTrial
     ) -> ExecutionResult:
         sample = self.primary_sample(event, rollout_id, pending)
+        err = event.result.exception_info if event.result else None
+
+        # An agent-phase failure is the actionable error; the verifier branch
+        # below would otherwise bury it under a secondary missing-sample or
+        # missing-reward validation error.
+        if (agent_err := agent_phase_failure(event.result)) is not None:
+            log_trial_exception(rollout_id, agent_err, phase="during the agent run")
+            return ExecutionResult(
+                status=RolloutStatus.FAILURE,
+                sample=sample,
+                err_message=agent_err.exception_message,
+                err_category=RolloutErrorCategory.AGENT_ERROR,
+                extra_fields=self.event_diagnostics(
+                    event, RolloutErrorCategory.AGENT_ERROR
+                ),
+            )
 
         if event.result and event.result.verifier_result:
             rewards = event.result.verifier_result.rewards or {}
@@ -631,8 +670,7 @@ class HarborBackendV2(ExecutionBackend):
                 extra_fields=self.event_diagnostics(event),
             )
 
-        if event.result and event.result.exception_info:
-            err = event.result.exception_info
+        if err:
             log_trial_exception(rollout_id, err, phase="during grading")
             return ExecutionResult(
                 status=RolloutStatus.FAILURE,
