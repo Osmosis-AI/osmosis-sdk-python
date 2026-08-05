@@ -81,7 +81,6 @@ _BENCHMARK_COLUMNS = [
     ListColumn(key="key", label="Key", no_wrap=True, min_width=20),
     ListColumn(key="last_run", label="Last Run", ratio=3, overflow="fold"),
     ListColumn(key="task_count", label="Tasks", no_wrap=True, ratio=1),
-    ListColumn(key="run_count", label="Runs", no_wrap=True, ratio=1),
     ListColumn(key="creator_name", label="Added By", no_wrap=True, ratio=1),
 ]
 
@@ -245,7 +244,6 @@ def list_benchmarks(*, limit: int, all_: bool) -> ListResult:
                 **_benchmark_list_resource(benchmark),
                 "last_run": _last_run_cell(benchmark),
                 "task_count": _list_task_count_display(benchmark),
-                "run_count": f"{benchmark.run_count:,}",
                 "creator_name": benchmark.creator_name or "–",
             }
             for benchmark in benchmarks

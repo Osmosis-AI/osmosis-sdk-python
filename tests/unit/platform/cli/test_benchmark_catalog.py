@@ -102,13 +102,13 @@ def test_list_benchmarks_returns_catalog_and_git_context(
         }
     ]
     assert result.display_items[0]["key"] == "hle"
-    assert result.display_items[0]["run_count"] == "14"
     assert result.display_items[0]["task_count"] == "2,500"
     assert result.display_items[0]["creator_name"] == "Brian"
     last_run = result.display_items[0]["last_run"]
     assert "Finished" in last_run
     assert "ago" in last_run
     assert last_run.endswith("brave-otter")
+    assert result.items[0]["run_count"] == 14
     assert result.items[0]["last_run_status"] == "finished"
     assert result.items[0]["last_run_name"] == "brave-otter"
     assert result.items[0]["creator_name"] == "Brian"
@@ -117,7 +117,6 @@ def test_list_benchmarks_returns_catalog_and_git_context(
         "key",
         "last_run",
         "task_count",
-        "run_count",
         "creator_name",
     ]
     assert result.columns[1].no_wrap is True
