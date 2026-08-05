@@ -32,19 +32,19 @@ def test_benchmark_info_delegates_to_handler(
     captured: dict[str, object] = {}
     expected = object()
 
-    def fake_info(name_or_id: str, *, limit: int, all_: bool) -> object:
-        captured.update(name_or_id=name_or_id, limit=limit, all_=all_)
+    def fake_info(key: str, *, limit: int, all_: bool) -> object:
+        captured.update(key=key, limit=limit, all_=all_)
         return expected
 
     monkeypatch.setattr(benchmark_handler, "benchmark_info", fake_info)
 
     result = benchmark_commands.benchmark_info(
-        "Terminal-Bench 2.1", limit=15, all_=False
+        "terminal-bench-2-1", limit=15, all_=False
     )
 
     assert result is expected
     assert captured == {
-        "name_or_id": "Terminal-Bench 2.1",
+        "key": "terminal-bench-2-1",
         "limit": 15,
         "all_": False,
     }
@@ -87,27 +87,25 @@ def test_benchmark_run_commands_delegate_to_handlers(
     monkeypatch.setattr(
         benchmark_handler,
         "run_info",
-        lambda name_or_id: calls.append(("info", name_or_id)) or expected,
+        lambda name: calls.append(("info", name)) or expected,
     )
     monkeypatch.setattr(
         benchmark_handler,
         "logs",
-        lambda name_or_id, *, limit, cursor: (
-            calls.append(("logs", (name_or_id, limit, cursor))) or expected
+        lambda name, *, limit, cursor: (
+            calls.append(("logs", (name, limit, cursor))) or expected
         ),
     )
     monkeypatch.setattr(
         benchmark_handler,
         "stop",
-        lambda name_or_id, *, yes: (
-            calls.append(("stop", (name_or_id, yes))) or expected
-        ),
+        lambda name, *, yes: calls.append(("stop", (name, yes))) or expected,
     )
     monkeypatch.setattr(
         benchmark_handler,
         "download",
-        lambda name_or_id, *, output, types, overwrite, yes: (
-            calls.append(("download", (name_or_id, output, types, overwrite, yes)))
+        lambda name, *, output, types, overwrite, yes: (
+            calls.append(("download", (name, output, types, overwrite, yes)))
             or expected
         ),
     )

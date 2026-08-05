@@ -421,7 +421,7 @@ def _leaderboard_section(
         show_header=True,
         header_style="bold",
         title_justify="left",
-        expand=True,
+        expand=False,
         caption=(
             "* tied for first (not distinguishable from the leader)"
             if any_tied
@@ -436,7 +436,6 @@ def _leaderboard_section(
         no_wrap=True,
         overflow="ellipsis",
         min_width=16,
-        ratio=2,
     )
     table.add_column("Pass@1", no_wrap=True)
     if show_pass_k:
@@ -546,16 +545,16 @@ def _benchmark_runs_section(
     return DetailSection(rich=table, plain_lines=plain_lines)
 
 
-def benchmark_info(name_or_id: str, *, limit: int, all_: bool) -> DetailResult:
+def benchmark_info(key: str, *, limit: int, all_: bool) -> DetailResult:
     """Show a benchmark: metadata, task options, leaderboard, and runs."""
     effective_limit, fetch_all = validate_list_options(limit=limit, all_=all_)
     context = require_git_workspace_directory_context()
     client = OsmosisClient()
     output = get_output_context()
 
-    with output.status(f'Fetching benchmark "{console.escape(name_or_id)}"...'):
+    with output.status(f'Fetching benchmark "{console.escape(key)}"...'):
         benchmark = client.get_benchmark(
-            name_or_id,
+            key,
             credentials=context.credentials,
             git_identity=context.git_identity,
         )
@@ -876,14 +875,14 @@ def _result_rows(detail: BenchmarkRunDetail) -> list[tuple[str, str]]:
     return rows
 
 
-def run_info(name_or_id: str) -> DetailResult:
+def run_info(name: str) -> DetailResult:
     """Show benchmark run details, progress, configuration, and results."""
     context = require_git_workspace_directory_context()
     client = OsmosisClient()
     output = get_output_context()
     with output.status("Fetching benchmark run..."):
         detail = client.get_benchmark_run(
-            name_or_id,
+            name,
             credentials=context.credentials,
             git_identity=context.git_identity,
         )
@@ -964,29 +963,29 @@ def run_info(name_or_id: str) -> DetailResult:
     )
 
 
-def logs(name_or_id: str, *, limit: int, cursor: str | None = None) -> ListResult:
+def logs(name: str, *, limit: int, cursor: str | None = None) -> ListResult:
     """Show the most recent logs for a benchmark run, oldest-first."""
     context = require_git_workspace_directory_context()
     client = OsmosisClient()
     output = get_output_context()
     with output.status("Fetching logs..."):
         page = client.get_benchmark_run_logs(
-            name_or_id,
+            name,
             limit=limit,
             cursor=cursor,
             credentials=context.credentials,
             git_identity=context.git_identity,
         )
     return build_logs_result(
-        title=f"Benchmark Run Logs: {name_or_id}",
+        title=f"Benchmark Run Logs: {name}",
         page=page,
         context=context,
-        next_step_hint=f"Use osmosis benchmark runs info {name_or_id} for run details.",
+        next_step_hint=f"Use osmosis benchmark runs info {name} for run details.",
     )
 
 
 def download(
-    name_or_id: str,
+    name: str,
     *,
     output: str | None,
     types: str = "summary,results",
@@ -1008,7 +1007,7 @@ def download(
     output_ctx = get_output_context()
     with output_ctx.status("Fetching benchmark run..."):
         detail = client.get_benchmark_run(
-            name_or_id,
+            name,
             credentials=context.credentials,
             git_identity=context.git_identity,
         )
@@ -1056,14 +1055,14 @@ def download(
         raise
 
 
-def stop(name_or_id: str, *, yes: bool) -> OperationResult:
+def stop(name: str, *, yes: bool) -> OperationResult:
     """Stop a benchmark run."""
     context = require_git_workspace_directory_context()
     client = OsmosisClient()
     output = get_output_context()
     with output.status("Fetching benchmark run..."):
         detail = client.get_benchmark_run(
-            name_or_id,
+            name,
             credentials=context.credentials,
             git_identity=context.git_identity,
         )

@@ -43,7 +43,7 @@ def benchmark_list(
 
 @app.command("info")
 def benchmark_info(
-    name_or_id: str = typer.Argument(..., help="Benchmark key, name, or ID."),
+    key: str = typer.Argument(..., help="Benchmark key."),
     limit: int = typer.Option(
         DEFAULT_PAGE_SIZE,
         "--limit",
@@ -56,7 +56,7 @@ def benchmark_info(
     """Show a benchmark: metadata, task options, leaderboard, and runs."""
     from osmosis_ai.platform.cli.benchmark import benchmark_info as _info
 
-    return _info(name_or_id, limit=limit, all_=all_)
+    return _info(key, limit=limit, all_=all_)
 
 
 @app.command("submit")
@@ -97,17 +97,17 @@ def benchmark_runs_list(
 
 @runs_app.command("info")
 def benchmark_runs_info(
-    name_or_id: str = typer.Argument(..., help="Benchmark run name or ID."),
+    name: str = typer.Argument(..., help="Benchmark run name."),
 ) -> Any:
     """Show benchmark run details, progress, and results."""
     from osmosis_ai.platform.cli.benchmark import run_info as _info
 
-    return _info(name_or_id)
+    return _info(name)
 
 
 @runs_app.command("logs")
 def benchmark_runs_logs(
-    name_or_id: str = typer.Argument(..., help="Benchmark run name or ID."),
+    name: str = typer.Argument(..., help="Benchmark run name."),
     limit: int = typer.Option(
         DEFAULT_PAGE_SIZE,
         "--limit",
@@ -124,23 +124,23 @@ def benchmark_runs_logs(
     """Show recent logs for a benchmark run, oldest first."""
     from osmosis_ai.platform.cli.benchmark import logs as _logs
 
-    return _logs(name_or_id, limit=limit, cursor=cursor)
+    return _logs(name, limit=limit, cursor=cursor)
 
 
 @runs_app.command("stop")
 def benchmark_runs_stop(
-    name_or_id: str = typer.Argument(..., help="Benchmark run name or ID."),
+    name: str = typer.Argument(..., help="Benchmark run name."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt."),
 ) -> Any:
     """Stop a benchmark run."""
     from osmosis_ai.platform.cli.benchmark import stop as _stop
 
-    return _stop(name_or_id, yes=yes)
+    return _stop(name, yes=yes)
 
 
 @runs_app.command("download")
 def benchmark_runs_download(
-    name_or_id: str = typer.Argument(..., help="Benchmark run name or ID."),
+    name: str = typer.Argument(..., help="Benchmark run name."),
     output: str | None = typer.Option(
         None,
         "--output",
@@ -171,7 +171,7 @@ def benchmark_runs_download(
     from osmosis_ai.platform.cli.benchmark import download as _download
 
     return _download(
-        name_or_id,
+        name,
         output=output,
         types=types,
         overwrite=overwrite,

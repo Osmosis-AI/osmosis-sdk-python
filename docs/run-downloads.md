@@ -5,14 +5,14 @@ The shared manifest-to-disk engine lives in [`platform/cli/run_download.py`](../
 ## Commands
 
 ```text
-osmosis eval download NAME_OR_ID
+osmosis eval download NAME
   --type metrics,trajectories|artifacts|logs|all
   --rows 3,7,10-20
   -o, --output ROOT
   --overwrite
   -y, --yes
 
-osmosis benchmark runs download NAME_OR_ID
+osmosis benchmark runs download NAME
   --type summary,results|artifacts|logs|all
   -o, --output ROOT
   --overwrite
