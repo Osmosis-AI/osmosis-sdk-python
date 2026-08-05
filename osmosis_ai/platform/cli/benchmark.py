@@ -360,10 +360,35 @@ def _metric_parts(entry: dict[str, Any]) -> list[str]:
     return parts
 
 
-def _leaderboard_section(entries: list[dict[str, Any]]) -> DetailSection | None:
+def _empty_leaderboard_message(*, parity_ranks: bool) -> str:
+    return (
+        "No eligible benchmark runs. Rankings will appear here once a "
+        "run finishes on the full dataset"
+        + (" or the parity sample" if parity_ranks else "")
+        + " with scores."
+    )
+
+
+def _leaderboard_section(
+    entries: list[dict[str, Any]],
+    *,
+    parity_ranks: bool = False,
+) -> DetailSection:
     """Multi-column standings; drops metric columns that are empty for everyone."""
     if not entries:
-        return None
+        from rich.console import Group
+        from rich.text import Text
+
+        message = _empty_leaderboard_message(parity_ranks=parity_ranks)
+        return DetailSection(
+            rich=Group(
+                Text(),
+                Text("Leaderboard", style="bold"),
+                Text(message, style="dim"),
+                Text(),
+            ),
+            plain_lines=["", "Leaderboard:", message, ""],
+        )
 
     from rich import box
     from rich.table import Table
@@ -614,13 +639,6 @@ def benchmark_info(name_or_id: str, *, limit: int, all_: bool) -> DetailResult:
         "Use osmosis benchmark runs info <run-name> for a run's details.",
         *_sync_hints(benchmark),
     ]
-    if not benchmark.leaderboard:
-        display_hints.insert(
-            0,
-            "No eligible benchmark runs. Finished benchmark runs with scores "
-            "on the full task set (or an eligible parity task set) will "
-            "appear here.",
-        )
     if benchmark.default_harness:
         display_hints.insert(
             0,
@@ -643,17 +661,22 @@ def benchmark_info(name_or_id: str, *, limit: int, all_: bool) -> DetailResult:
                 f'"{task_set.name}" ({task_set.task_count:,} tasks).',
             )
 
-    sections: list[DetailSection] = []
-    for section in (
-        _leaderboard_section(benchmark.leaderboard),
-        _benchmark_runs_section(
-            runs,
-            shown=len(runs),
-            total=runs_total_count,
+    parity_ranks = any(
+        task_set.name == "parity" for task_set in benchmark.task_sets
+    )
+    sections: list[DetailSection] = [
+        _leaderboard_section(
+            benchmark.leaderboard,
+            parity_ranks=parity_ranks,
         ),
-    ):
-        if section is not None:
-            sections.append(section)
+    ]
+    runs_section = _benchmark_runs_section(
+        runs,
+        shown=len(runs),
+        total=runs_total_count,
+    )
+    if runs_section is not None:
+        sections.append(runs_section)
 
     return DetailResult(
         title="Benchmark Info",

@@ -212,7 +212,16 @@ def test_info_exposes_selection_metadata_and_full_task_list(
     assert fields["Key"] == "hle"
     assert fields["Required Secrets"] == "HF_TOKEN"
     assert 'task_set = "parity"' in result.display_hints[0]
-    assert "No eligible benchmark runs" in result.display_hints[1]
+    assert result.sections[0].plain_lines == [
+        "",
+        "Leaderboard:",
+        "No eligible benchmark runs. Rankings will appear here once a run "
+        "finishes on the full dataset or the parity sample with scores.",
+        "",
+    ]
+    assert not any(
+        "No eligible benchmark runs" in hint for hint in result.display_hints
+    )
     assert any("Omit [tasks]" in hint for hint in result.display_hints)
     assert calls == [
         {
@@ -362,6 +371,17 @@ def test_benchmark_info_surfaces_the_default_harness(
     fields = {field.label: field.value for field in result.fields}
     assert fields["Harness"] == "Required (default: terminus-2)"
     assert 'harness = "terminus-2"' in result.display_hints[0]
+    assert result.sections[0].plain_lines == [
+        "",
+        "Leaderboard:",
+        "No eligible benchmark runs. Rankings will appear here once a "
+        "run finishes on the full dataset with scores.",
+        "",
+    ]
+    assert not any(
+        "No eligible benchmark runs" in hint for hint in result.display_hints
+    )
+    assert not any("parity sample" in line for line in result.sections[0].plain_lines)
 
 
 def test_benchmark_info_names_the_official_scaffold_as_the_default(
@@ -555,6 +575,30 @@ def test_benchmark_info_renders_leaderboard_and_runs(
     )
 
 
+def test_leaderboard_section_empty_state_omits_parity_when_not_ranked() -> None:
+    section = benchmark_module._leaderboard_section([], parity_ranks=False)
+
+    assert section.plain_lines == [
+        "",
+        "Leaderboard:",
+        "No eligible benchmark runs. Rankings will appear here once a "
+        "run finishes on the full dataset with scores.",
+        "",
+    ]
+
+
+def test_leaderboard_section_empty_state_mentions_parity_when_ranked() -> None:
+    section = benchmark_module._leaderboard_section([], parity_ranks=True)
+
+    assert section.plain_lines == [
+        "",
+        "Leaderboard:",
+        "No eligible benchmark runs. Rankings will appear here once a "
+        "run finishes on the full dataset or the parity sample with scores.",
+        "",
+    ]
+
+
 def test_leaderboard_section_format_and_tolerate_sparse_entries() -> None:
     section = benchmark_module._leaderboard_section(
         [
@@ -588,7 +632,6 @@ def test_leaderboard_section_format_and_tolerate_sparse_entries() -> None:
         ]
     )
 
-    assert section is not None
     assert section.plain_lines[0] == "Leaderboard:"
     full = section.plain_lines[1]
     assert full.startswith("#1 · GPT-5.5 (codex) [parity]")
