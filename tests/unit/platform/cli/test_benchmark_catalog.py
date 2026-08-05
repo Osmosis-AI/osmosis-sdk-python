@@ -646,11 +646,9 @@ def test_leaderboard_section_format_and_tolerate_sparse_entries() -> None:
     sparse = section.plain_lines[2]
     assert sparse.startswith("–* · –")
     assert "pass@1 –" in sparse
-    assert (
-        plain_lines[-1]
-        if (plain_lines := section.plain_lines)
-        else ""
-    ).startswith("* tied for first")
+    assert (plain_lines[-1] if (plain_lines := section.plain_lines) else "").startswith(
+        "* tied for first"
+    )
     # Rich table should expose the dynamic Pass@k header + caption.
     assert any(getattr(col, "header", None) == "Pass@2" for col in section.rich.columns)
     assert section.rich.caption is not None
