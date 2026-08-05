@@ -661,9 +661,7 @@ def benchmark_info(name_or_id: str, *, limit: int, all_: bool) -> DetailResult:
                 f'"{task_set.name}" ({task_set.task_count:,} tasks).',
             )
 
-    parity_ranks = any(
-        task_set.name == "parity" for task_set in benchmark.task_sets
-    )
+    parity_ranks = any(task_set.name == "parity" for task_set in benchmark.task_sets)
     sections: list[DetailSection] = [
         _leaderboard_section(
             benchmark.leaderboard,
