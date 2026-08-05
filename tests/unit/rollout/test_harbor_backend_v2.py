@@ -599,6 +599,34 @@ class TestCancellation:
         # taskless entry: never submitted, nothing to cancel
         assert backend.cancel_rollouts(all=True)["other"] == "not_found"
 
+    async def test_status_lifecycle(self, bundle, template_task):
+        backend = self.backend(bundle, template_task)
+
+        async def noop(result):
+            pass
+
+        assert backend.rollout_status("r1") is None
+
+        pending = PendingTrial(noop, None)
+        backend.pending["r1"] = pending
+        assert backend.rollout_status("r1") == {"status": "queued"}
+        pending.started = True
+        assert backend.rollout_status("r1") == {"status": "running"}
+        pending.grading = True
+        assert backend.rollout_status("r1") == {"status": "grading"}
+
+        backend.pending.pop("r1")
+        backend.record_outcome("r1", RolloutStatus.SUCCESS, reward=1.0)
+        assert backend.rollout_status("r1") == {
+            "status": "success",
+            "reward": 1.0,
+            "err_message": None,
+        }
+
+        backend.finished.ttl_sec = -1.0
+        backend.record_outcome("r2", RolloutStatus.FAILURE, err_message="boom")
+        assert backend.rollout_status("r2") is None
+
     async def test_finished_task_is_not_found(self, bundle, template_task):
         backend = self.backend(bundle, template_task)
 

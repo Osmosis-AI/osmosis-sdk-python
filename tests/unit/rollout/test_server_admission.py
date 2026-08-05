@@ -37,6 +37,11 @@ class StubBackend(ExecutionBackend):
         self.cancel_args = (ids, prefix, all)
         return {"r1": "cancelled_queued"}
 
+    def rollout_status(self, rollout_id: str) -> dict | None:
+        if rollout_id == "known":
+            return {"status": "success", "reward": 1.0, "err_message": None}
+        return None
+
 
 def init_body() -> dict:
     return {
@@ -92,3 +97,22 @@ def test_cancel_default_backend_reports_nothing():
     response = client.post("/rollout/cancel", json={"all": True})
     assert response.status_code == 200
     assert response.json() == {"dispositions": {}}
+
+
+def test_status_returns_backend_state():
+    client = TestClient(create_rollout_server(backend=StubBackend()))
+    response = client.get("/rollout/known/status")
+    assert response.status_code == 200
+    assert response.json() == {
+        "rollout_id": "known",
+        "status": "success",
+        "reward": 1.0,
+        "err_message": None,
+    }
+
+
+def test_status_unknown_rollout():
+    client = TestClient(create_rollout_server(backend=StubBackend()))
+    body = client.get("/rollout/nope/status").json()
+    assert body["status"] == "unknown"
+    assert body["reward"] is None
