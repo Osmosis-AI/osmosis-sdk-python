@@ -219,6 +219,7 @@ def test_run_info_reports_duration_and_per_agent_metrics(
             "harness": "codex",
             "model_display_name": "GPT-5",
             "status": "finished",
+            "environment_variables": {"MSWEA_COST_LIMIT": "20"},
             "aggregates": {
                 "reported_cost_usd": 498.0,
                 "mean_duration_seconds": 54,
@@ -267,6 +268,7 @@ def test_run_info_reports_duration_and_per_agent_metrics(
     assert "$2.00/task" in agent_line
     assert "54s/task" in agent_line
     assert "1.1M tokens/task" in agent_line
+    assert "env MSWEA_COST_LIMIT=20" in agent_line
 
     results = next(
         section for section in result.sections if section.plain_lines[0] == "Results:"

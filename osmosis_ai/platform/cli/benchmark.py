@@ -342,6 +342,24 @@ def _format_seconds_per_task(seconds: Any) -> str:
     return f"{seconds:,.0f}s"
 
 
+def _metric_parts(entry: dict[str, Any]) -> list[str]:
+    """The platform's metric set, in the order its leaderboard ranks by."""
+    parts = [f"pass@1 {_format_rate_interval(entry.get('pass_at_1'))}"]
+    point = _deepest_pass_at_k(entry)
+    if point is not None:
+        parts.append(f"pass@{point.get('k')} {_format_pass_at_k(point)}")
+    cost = _format_cost_per_task(entry.get("cost_per_task"))
+    if cost != "–":
+        parts.append(f"{cost}/task")
+    duration = _format_seconds_per_task(entry.get("mean_duration_seconds"))
+    if duration != "–":
+        parts.append(f"{duration}/task")
+    tokens = _format_tokens(entry.get("tokens_per_task"))
+    if tokens is not None:
+        parts.append(f"{tokens} tokens/task")
+    return parts
+
+
 def _leaderboard_section(entries: list[dict[str, Any]]) -> DetailSection | None:
     """Multi-column standings; drops metric columns that are empty for everyone."""
     if not entries:
@@ -444,9 +462,7 @@ def _leaderboard_section(entries: list[dict[str, Any]]) -> DetailSection | None:
         plain_lines.append(" · ".join(plain_parts))
 
     if any_tied:
-        plain_lines.append(
-            "* tied for first (not distinguishable from the leader)"
-        )
+        plain_lines.append("* tied for first (not distinguishable from the leader)")
 
     return DetailSection(rich=table, plain_lines=plain_lines)
 
@@ -601,8 +617,9 @@ def benchmark_info(name_or_id: str, *, limit: int, all_: bool) -> DetailResult:
     if not benchmark.leaderboard:
         display_hints.insert(
             0,
-            "No eligible benchmark runs. Finished benchmark runs on the full "
-            "task set with scores will appear here.",
+            "No eligible benchmark runs. Finished benchmark runs with scores "
+            "on the full task set (or an eligible parity task set) will "
+            "appear here.",
         )
     if benchmark.default_harness:
         display_hints.insert(
@@ -753,9 +770,6 @@ def _configuration_rows(detail: BenchmarkRunDetail) -> list[tuple[str, str]]:
     scopes = format_secret_scopes(configuration.get("resolved_secret_scopes"))
     if scopes:
         rows.append(("Secrets", scopes))
-    env = format_env_config(configuration.get("env_config"))
-    if env:
-        rows.append(("Environment Variables", env))
     return rows
 
 
@@ -809,6 +823,9 @@ def _agent_rows(detail: BenchmarkRunDetail) -> list[tuple[str, str]]:
             if isinstance(rank, int):
                 parts.append(f"#{rank}")
             parts.extend(_metric_parts(_agent_metric_entry(agent, metrics)))
+        env = format_env_config(agent.get("environment_variables"))
+        if env:
+            parts.append(f"env {env}")
         rows.append((label, " · ".join(parts)))
     return rows
 
