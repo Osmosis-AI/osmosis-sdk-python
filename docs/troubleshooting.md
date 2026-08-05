@@ -35,6 +35,7 @@ agent_workflow_timeout_s = 900   # 15 minutes instead of the default 7.5
 
   ```python
   import asyncio
+
   tools = await asyncio.get_running_loop().run_in_executor(None, mcp.list_tools_sync)
   ```
 

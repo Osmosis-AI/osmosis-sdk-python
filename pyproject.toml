@@ -47,8 +47,8 @@ dependencies = [
     # litellm, but declared because the CLI imports it directly.
     "packaging>=24.0",
     "platformdirs>=4.0",
-    # CLI framework. <0.27: cli/_click_compat.py imports typer._click internals.
-    "typer>=0.26,<0.27",
+    # CLI framework. <0.28 keeps cli/_click_compat.py's private imports stable.
+    "typer>=0.27,<0.28",
     # Do not directly constrain typer-slim: versions <0.22 shared typer/* with
     # typer, and upgrading that legacy distribution can delete Typer's files.
     "rich>=14.2.0",
@@ -97,7 +97,7 @@ dev = [
     "pytest>=9.0.3,<10.0.0",
     "pytest-asyncio>=1.4.0,<2.0.0",
     "pytest-cov>=7.1.0",
-    "ruff==0.15.20",  # Keep in sync with pre-commit and CI
+    "ruff==0.16.0",  # Keep in sync with pre-commit and CI
     "pre-commit>=4.6.0,<5.0.0",
     "pyright[nodejs]==1.1.411",
     "types-requests>=2.0",
