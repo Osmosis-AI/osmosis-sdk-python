@@ -36,11 +36,18 @@ The validator only checks that the required columns are *present*; it never reje
 import pyarrow as pa
 import pyarrow.parquet as pq
 
-table = pa.table({
-    "system_prompt": ["You are a helpful calculator."] * 4,
-    "user_prompt": ["What is 2 + 2?", "What is 10 * 5?", "What is 9 - 3?", "What is 8 / 2?"],
-    "ground_truth": ["4", "50", "6", "4"],   # optional
-})
+table = pa.table(
+    {
+        "system_prompt": ["You are a helpful calculator."] * 4,
+        "user_prompt": [
+            "What is 2 + 2?",
+            "What is 10 * 5?",
+            "What is 9 - 3?",
+            "What is 8 / 2?",
+        ],
+        "ground_truth": ["4", "50", "6", "4"],  # optional
+    }
+)
 pq.write_table(table, "data.parquet")
 ```
 

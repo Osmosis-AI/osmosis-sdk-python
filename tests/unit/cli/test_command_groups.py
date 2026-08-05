@@ -84,6 +84,11 @@ def _root_help_command_names(output: str) -> set[str]:
     return command_names
 
 
+def _flatten_help(output: str) -> str:
+    """Normalize Rich help output for stable contract assertions."""
+    return " ".join(ANSI_ESCAPE.sub("", output).split())
+
+
 @pytest.mark.parametrize("args", PRESERVED_HELP_COMMANDS)
 def test_preserved_help_commands_exit_zero(args, capfd):
     rc = main(args)
@@ -111,6 +116,38 @@ def test_root_help_surface_lists_supported_groups(capfd):
 
     for command in HIDDEN_ROOT_COMMANDS:
         assert command not in root_help_commands
+
+
+def test_typer_027_required_argument_metavar_contract(capfd):
+    rc = main(["secret", "set", "--help"])
+    output = _flatten_help(capfd.readouterr().out)
+
+    assert rc == 0
+    # Typer 0.27 wraps required argument references in braces, preserves an
+    # explicitly declared metavar's casing, and renders the Python type in <>.
+    assert "secret set [OPTIONS] {NAME}" in output
+    assert "NAME <str> Secret name. [required]" in output
+    assert "--scope <str>" in output
+
+
+def test_typer_027_declared_argument_name_contract(capfd):
+    rc = main(["dataset", "upload", "--help"])
+    output = _flatten_help(capfd.readouterr().out)
+
+    assert rc == 0
+    # Argument names retain their declared casing and are no longer rendered
+    # in brackets in the Arguments panel.
+    assert "dataset upload [OPTIONS] {file}" in output
+    assert "file <str> Path to the file to upload. [required]" in output
+    assert "[file]" not in output
+
+
+def test_typer_027_numeric_option_metavar_contract(capfd):
+    rc = main(["model", "list", "--help"])
+    output = _flatten_help(capfd.readouterr().out)
+
+    assert rc == 0
+    assert "--limit <int range> [1<=x<=50]" in output
 
 
 def test_help_command_nudges_to_help_flag(capfd):
