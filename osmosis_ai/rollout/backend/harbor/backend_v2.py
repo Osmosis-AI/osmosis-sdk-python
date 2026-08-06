@@ -100,7 +100,7 @@ from osmosis_ai.rollout.types import (
     RolloutStatus,
 )
 from osmosis_ai.rollout.utils.file_artifacts import default_artifact_root
-from osmosis_ai.rollout.utils.rewards import pick_reward, validate_sample_has_reward
+from osmosis_ai.rollout.utils.rewards import validate_sample_has_reward
 from osmosis_ai.rollout.utils.ttl_cache import TtlCache
 
 logger: logging.Logger = logging.getLogger(__name__)
@@ -123,7 +123,6 @@ class HarborBackendV2(ExecutionBackend):
         task_resolver: Callable[[ExecutionRequest], HarborTask | Awaitable[HarborTask]]
         | None = None,
         model_name: str = "openai/osmosis-rollout",
-        reward_key: str = "reward",
         grader: type | str | None = None,
         workflow_config: Any = None,
         grader_config: Any = None,
@@ -141,8 +140,6 @@ class HarborBackendV2(ExecutionBackend):
         self.task_mode: TaskMode = TaskMode(task_mode)
         self.task_resolver = task_resolver
         self.model_name = model_name
-        # Verifier reward channel: prefer this key, else accept a sole channel.
-        self.reward_key = reward_key
         self.agent = agent
         if agent_setup_timeout_sec is not None and not (
             math.isfinite(agent_setup_timeout_sec) and agent_setup_timeout_sec > 0
@@ -884,8 +881,10 @@ class HarborBackendV2(ExecutionBackend):
             )
 
         if event.result and event.result.verifier_result:
+            # The 'reward' channel is the harbor-wide convention (telemetry,
+            # viewer, step gating all hardcode it); never guess another one.
             rewards = event.result.verifier_result.rewards or {}
-            reward = pick_reward(rewards, self.reward_key)
+            reward = rewards.get("reward")
             if sample is not None and reward is not None:
                 sample.reward = float(reward)
             try:

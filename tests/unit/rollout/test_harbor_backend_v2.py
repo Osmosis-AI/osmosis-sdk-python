@@ -1931,41 +1931,13 @@ class TestNativeAtif:
         assert outcome.status == RolloutStatus.FAILURE
         assert outcome.err_category == RolloutErrorCategory.VALIDATION_ERROR
 
-    async def test_reward_key_selects_named_channel(self, template_task, tmp_path):
-        backend = self.backend_for(template_task, tmp_path, reward_key="accuracy")
-        self.write_trajectory(backend, "r1", atif_document())
-
-        outcome = backend.grader_outcome(
-            self.graded_event({"accuracy": 0.5, "style": 0.9}),
-            "r1",
-            self.pending_with_label(),
-        )
-
-        assert outcome.status == RolloutStatus.SUCCESS
-        assert outcome.sample.reward == 0.5
-
-    async def test_sole_reward_channel_is_accepted(self, template_task, tmp_path):
-        """A single channel is unambiguous even when not named 'reward'."""
+    async def test_non_reward_channels_fail_validation(self, template_task, tmp_path):
+        """Only the 'reward' channel counts; custom channels are never guessed."""
         backend = self.backend_for(template_task, tmp_path)
         self.write_trajectory(backend, "r1", atif_document())
 
         outcome = backend.grader_outcome(
             self.graded_event({"accuracy": 1.0}), "r1", self.pending_with_label()
-        )
-
-        assert outcome.status == RolloutStatus.SUCCESS
-        assert outcome.sample.reward == 1.0
-
-    async def test_ambiguous_reward_channels_fail_validation(
-        self, template_task, tmp_path
-    ):
-        backend = self.backend_for(template_task, tmp_path)
-        self.write_trajectory(backend, "r1", atif_document())
-
-        outcome = backend.grader_outcome(
-            self.graded_event({"accuracy": 1.0, "style": 0.2}),
-            "r1",
-            self.pending_with_label(),
         )
 
         assert outcome.status == RolloutStatus.FAILURE
