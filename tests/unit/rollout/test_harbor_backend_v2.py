@@ -1865,9 +1865,7 @@ class TestNativeAtif:
         )
 
     async def test_native_atif_document_is_authoritative(self, template_task, tmp_path):
-        """The Harbor-authored document rides the result for archival; the
-        wire sample is a chat projection that keeps tool turns, and the
-        converter is told not to rebuild a lossy trajectory from it."""
+        """The Harbor-authored document rides the result for archival."""
         backend = self.backend_for(template_task, tmp_path)
         self.write_trajectory(backend, "r1", atif_document())
         pending = self.pending_with_label("row-7")
@@ -1906,8 +1904,7 @@ class TestNativeAtif:
     async def test_reward_only_binding_succeeds_without_trajectory(
         self, template_task, tmp_path
     ):
-        """Oracle writes no trajectory by design; its verifier outcome must
-        become a graded SUCCESS with a trajectoryless sample."""
+        """Oracle writes no trajectory; it must still reach graded SUCCESS."""
         backend = self.backend_for(template_task, tmp_path, agent="oracle")
         pending = self.pending_with_label("row-1")
 
@@ -1948,8 +1945,7 @@ class TestNativeAtif:
         assert outcome.sample.reward == 0.5
 
     async def test_sole_reward_channel_is_accepted(self, template_task, tmp_path):
-        """Harbor's convention: a single channel is unambiguous even when it
-        is not named 'reward'."""
+        """A single channel is unambiguous even when not named 'reward'."""
         backend = self.backend_for(template_task, tmp_path)
         self.write_trajectory(backend, "r1", atif_document())
 

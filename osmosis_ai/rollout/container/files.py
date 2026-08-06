@@ -45,11 +45,8 @@ class ContainerInput(BaseModel):
 class ContainerResult(BaseModel):
     """How the agent phase went: status, error, and the workflow's output.
 
-    ``sample`` round-trips the workflow's full RolloutSample across the
-    container boundary; the ``output`` projection loses trajectory_messages
-    (including the explicit-None opt-out), label, extra_fields,
-    remove_sample, and non-float metrics, so it remains only for workflows
-    that returned an explicit output and for older readers.
+    ``sample`` round-trips the full RolloutSample across the container
+    boundary; the lossy ``output`` projection remains for older readers.
     """
 
     status: RolloutStatus

@@ -79,8 +79,7 @@ async def run_agent(workflow_cls: Any, workflow_config: Any) -> ContainerResult:
         output = coerce_output(returned)
         if output is None:
             # The documented fallback: the ambient context's sample is the
-            # workflow's output. It crosses the boundary whole; the projection
-            # below stays for older hosts and the in-container grader.
+            # output. The projection below stays for older hosts.
             sample = await rollout_ctx.get_sample()
             if sample is not None:
                 output = AgentWorkflowOutput(
@@ -144,8 +143,7 @@ def read_container_input() -> ContainerInput:
 def load_sample() -> RolloutSample | None:
     """The workflow's full sample, else one rebuilt from what the agent left.
 
-    Preference order mirrors fidelity: the round-tripped RolloutSample, the
-    workflow-output projection, then the agent's own trajectory document.
+    Fidelity order: sample, output projection, then the trajectory document.
     """
     result_path = AGENT_LOGS_DIR / RESULT_FILENAME
     if result_path.exists():

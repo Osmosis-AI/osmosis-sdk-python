@@ -11,9 +11,8 @@ def pick_reward(
 ) -> float | int | None:
     """Select the reward channel from a verifier's rewards dict.
 
-    Harbor's convention: prefer the named key; otherwise a sole channel is
-    unambiguous. Multiple channels without the named key cannot be guessed —
-    an unrelated custom dimension must not silently become the reward.
+    Harbor's convention: prefer the named key, else a sole channel; multiple
+    channels without the named key cannot be guessed.
     """
     if not rewards:
         return None

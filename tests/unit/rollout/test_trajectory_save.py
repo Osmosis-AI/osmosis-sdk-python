@@ -258,8 +258,7 @@ def native_document() -> dict:
 async def test_native_document_archived_without_reconstruction(
     tmp_path: Path,
 ) -> None:
-    """The Harbor-authored ATIF keeps its step structure, tool calls, token
-    ids and logprobs; Osmosis context is overlaid under extra.osmosis."""
+    """The Harbor-authored ATIF keeps its steps, tool calls, token ids."""
     sample = RolloutSample(
         messages=[{"role": "assistant", "content": "patching"}],
         trajectory_messages=None,
@@ -296,8 +295,7 @@ async def test_native_document_archived_without_reconstruction(
 async def test_native_final_metrics_seeded_from_trial_totals(
     tmp_path: Path,
 ) -> None:
-    """Harbor's per-trial token accounting seeds FinalMetrics when the
-    document carries none; total_steps is always recomputed."""
+    """Trial totals seed FinalMetrics; total_steps is always recomputed."""
     sample = RolloutSample(
         messages=[],
         trajectory_messages=None,
@@ -321,8 +319,7 @@ async def test_native_final_metrics_seeded_from_trial_totals(
 async def test_native_controller_report_overlays_step_metrics(
     tmp_path: Path,
 ) -> None:
-    """Controller-reported metrics win field by field without touching the
-    document's step structure or identifiers."""
+    """Controller metrics win field by field; the step structure stays."""
     report = TrajectoryReport(
         model_name="openai/controller-view",
         samples={
@@ -360,8 +357,7 @@ async def test_native_controller_report_overlays_step_metrics(
 
 
 async def test_native_document_wins_over_converter_path(tmp_path: Path) -> None:
-    """When a document is present the converter must not run at all, even for
-    a sample that would otherwise produce a rebuilt trajectory."""
+    """When a document is present the converter must not run at all."""
     result = ExecutionResult(
         status=RolloutStatus.SUCCESS,
         sample=make_sample(reward=1.0),  # has default trajectory_messages

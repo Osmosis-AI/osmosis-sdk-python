@@ -51,10 +51,7 @@ class TestFallbackSampleBoundary:
     async def test_fallback_sample_round_trips_field_for_field(
         self, monkeypatch, tmp_path
     ):
-        """The documented run()->None pattern: the context's sample is the
-        output, and every field must survive the file boundary — including
-        the explicit trajectory_messages=None opt-out and non-float metrics
-        that the AgentWorkflowOutput projection cannot represent."""
+        """run()->None: every sample field must survive the file boundary."""
         monkeypatch.setattr(runner, "AGENT_LOGS_DIR", tmp_path)
         stage_input(tmp_path)
         sample = RolloutSample(
@@ -201,8 +198,7 @@ class TestMessagesFromTrajectory:
         assert messages_from_trajectory(doc) == [{"role": "user", "content": "hi"}]
 
     def test_atif_steps_keep_tool_calls_and_observations(self):
-        """Tool results must come back as tool turns; dropping them would
-        emit consecutive assistant messages that never existed."""
+        """Tool results must come back as tool turns."""
         doc = {
             "steps": [
                 {"source": "user", "message": "fix it"},

@@ -26,8 +26,7 @@ from osmosis_ai.rollout.utils.file_artifacts import default_artifact_root
 
 logger: logging.Logger = logging.getLogger(__name__)
 
-# Sample token totals (harbor's per-trial accounting) seed FinalMetrics
-# fields a native document left unset.
+# Sample token totals seed FinalMetrics fields the document left unset.
 _FINAL_METRIC_BY_SAMPLE_KEY = {
     "input_tokens": "total_prompt_tokens",
     "output_tokens": "total_completion_tokens",
@@ -69,10 +68,8 @@ def _prepare_native_trajectory(
 ) -> Trajectory:
     """Enrich a backend-native ATIF document without rebuilding its steps.
 
-    The agent's own step structure — tool calls, observations, reasoning,
-    token ids, logprobs, tool definitions, subagent trajectories — stays
-    authoritative; controller-reported metrics and Osmosis rollout metadata
-    are overlaid on top.
+    The agent's own step structure stays authoritative; controller-reported
+    metrics and Osmosis rollout metadata are overlaid on top.
     """
     trajectory = Trajectory.model_validate(document)
     native_session_id = trajectory.session_id
@@ -84,8 +81,7 @@ def _prepare_native_trajectory(
     sample = result.sample
     if trajectory.final_metrics is None:
         trajectory.final_metrics = FinalMetrics()
-    # Seed totals harbor already accounted for the trial when the document
-    # carries none; the controller's report still wins below.
+    # Seed totals harbor accounted; the controller's report wins below.
     sample_metrics = sample.metrics if sample is not None else {}
     for sample_key, final_field in _FINAL_METRIC_BY_SAMPLE_KEY.items():
         value = sample_metrics.get(sample_key)
@@ -201,8 +197,8 @@ async def _save(
         )
 
     if result.trajectory_document is not None:
-        # A backend-native ATIF document is the authoritative training
-        # trajectory; archive it enriched, never rebuilt from messages.
+        # A native ATIF document is authoritative; never rebuild it from
+        # messages.
         trajectory = _prepare_native_trajectory(
             result.trajectory_document,
             rollout_id=rollout_id,

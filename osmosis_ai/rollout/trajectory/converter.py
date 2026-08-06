@@ -250,8 +250,8 @@ def _apply_report(
     for step, entry in zip(agent_steps, report.llm_call_metrics, strict=True):
         reported = _metrics_from_report_entry(entry)
         if reported is not None:
-            # Merge field by field: native documents carry token ids and
-            # logprobs the controller's count-only report must not erase.
+            # Merge field by field: the count-only report must not erase
+            # native token ids and logprobs.
             step.metrics = (
                 reported
                 if step.metrics is None

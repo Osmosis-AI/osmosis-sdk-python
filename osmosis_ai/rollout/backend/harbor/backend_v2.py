@@ -141,8 +141,7 @@ class HarborBackendV2(ExecutionBackend):
         self.task_mode: TaskMode = TaskMode(task_mode)
         self.task_resolver = task_resolver
         self.model_name = model_name
-        # Which verifier reward channel is the sample's reward; harbor's own
-        # convention (prefer this key, else accept a sole channel) applies.
+        # Verifier reward channel: prefer this key, else accept a sole channel.
         self.reward_key = reward_key
         self.agent = agent
         if agent_setup_timeout_sec is not None and not (
@@ -735,12 +734,9 @@ class HarborBackendV2(ExecutionBackend):
     ) -> tuple[RolloutSample | None, dict[str, Any] | None]:
         """Sample and authoritative ATIF document for a native-agent trial.
 
-        The document is archived verbatim — harbor's step structure, token
-        ids, logprobs, tool definitions, subagent trajectories, and metrics
-        stay authoritative — while the sample carries the chat-shaped
-        projection for the wire callbacks. Reward-only bindings (oracle)
-        yield a trajectoryless sample so their verifier outcome can succeed;
-        trainable bindings missing a document keep failing validation.
+        The document is archived verbatim; the sample carries the chat-shaped
+        wire projection. Reward-only bindings (oracle) yield a trajectoryless
+        sample; trainable bindings missing a document fail validation.
         """
         assert self.native is not None
         document = self.load_native_trajectory(rollout_id, pending)
@@ -761,8 +757,8 @@ class HarborBackendV2(ExecutionBackend):
         return (
             RolloutSample(
                 messages=messages,
-                # The document is the training trajectory; the converter must
-                # not rebuild a lossy one from these wire messages.
+                # The converter must not rebuild a lossy document from these
+                # wire messages.
                 trajectory_messages=None,
                 label=pending.label,
                 metrics=trial_metrics(event.result),
@@ -777,11 +773,9 @@ class HarborBackendV2(ExecutionBackend):
         if result is None:
             return None
         if result.sample is not None:
-            # The workflow's sample round-trips field-for-field (explicit
-            # trajectory_messages=None included); the host adds only
-            # backend-owned data: trial metrics and the request-label
-            # fallback. model_copy skips validators, so the resolved
-            # trajectory_messages value is untouched.
+            # The workflow's sample round-trips field-for-field; the host adds
+            # only trial metrics and the request-label fallback. model_copy
+            # skips validators, so trajectory_messages=None stays untouched.
             sample = result.sample
             return sample.model_copy(
                 update={
@@ -798,9 +792,8 @@ class HarborBackendV2(ExecutionBackend):
         if output is None:
             return None
         if len(output.samples) > 1:
-            # In-container validation rejects this for current bundles; a
-            # stale container SDK must still not have samples silently
-            # dropped — fail the rollout loudly instead.
+            # A stale container SDK must not have samples silently dropped;
+            # fail the rollout loudly instead.
             logger.error(
                 "rollout %s returned %d named samples; multiple samples per "
                 "rollout are unsupported",

@@ -38,9 +38,8 @@ def _chat_tool_calls(raw: Any) -> list[dict[str, Any]] | None:
 def messages_from_trajectory(document: dict[str, Any]) -> list[dict[str, Any]]:
     """Accept ATIF (steps) or raw harness formats (a messages list).
 
-    ATIF agent steps keep their tool calls, reasoning content, and
-    observation results (as ``tool`` messages): dropping them would emit
-    consecutive assistant turns that never existed as a conversation.
+    Agent steps keep tool calls, reasoning, and observations; dropping them
+    would emit consecutive assistant turns that never existed.
     """
     if isinstance(document.get("messages"), list):
         return document["messages"]
