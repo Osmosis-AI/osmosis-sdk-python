@@ -182,7 +182,6 @@ def test_info_exposes_selection_metadata_and_full_task_list(
                     },
                 ],
                 unavailable_tasks=None,
-                required_secret_names=["HF_TOKEN"],
             )
 
         list_benchmark_runs = staticmethod(_empty_runs_page)
@@ -206,10 +205,8 @@ def test_info_exposes_selection_metadata_and_full_task_list(
         {"name": "math", "task_count": 1},
         {"name": "science", "task_count": 1},
     ]
-    assert result.data["benchmark"]["required_secret_names"] == ["HF_TOKEN"]
     fields = {field.label: field.value for field in result.fields}
     assert fields["Key"] == "hle"
-    assert fields["Required Secrets"] == "HF_TOKEN"
     assert 'task_set = "parity"' in result.display_hints[0]
     assert result.sections[0].plain_lines == [
         "",
@@ -229,30 +226,6 @@ def test_info_exposes_selection_metadata_and_full_task_list(
             "git_identity": GIT_IDENTITY,
         }
     ]
-
-
-def test_catalog_detail_defaults_required_secret_names() -> None:
-    detail = BenchmarkCatalogDetail(
-        id="benchmark-1",
-        name="Example",
-        description=None,
-        source_type="harbor_registry",
-        source_ref="example@1",
-        task_count=1,
-        category_count=0,
-        task_sets=[],
-        runner_family="harbor",
-        supports_harness=True,
-        requires_harness=True,
-        requires_judge_model=False,
-        judge_model_default=None,
-        pass_threshold=1,
-        categories=[],
-        tasks=[{"name": "task-1", "category": None, "difficulty": None}],
-        unavailable_tasks=None,
-    )
-
-    assert detail.required_secret_names == []
 
 
 def _syncing_entry(**overrides: Any) -> BenchmarkCatalogEntry:

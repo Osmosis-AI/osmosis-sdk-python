@@ -605,10 +605,6 @@ def benchmark_info(key: str, *, limit: int, all_: bool) -> DetailResult:
         ("Named Task Sets", _task_set_display(benchmark.task_sets)),
         ("Harness", harness),
         ("LLM Judge", judge),
-        (
-            "Required Secrets",
-            ", ".join(benchmark.required_secret_names) or "–",
-        ),
         ("Pass Threshold", f"{benchmark.pass_threshold:g}"),
         ("Runs", f"{runs_total_count:,}"),
     ]
@@ -622,7 +618,6 @@ def benchmark_info(key: str, *, limit: int, all_: bool) -> DetailResult:
         "requires_judge_model": benchmark.requires_judge_model,
         "requires_judge_api_key": benchmark.requires_judge_api_key,
         "judge_model_default": benchmark.judge_model_default,
-        "required_secret_names": benchmark.required_secret_names,
         "pass_threshold": benchmark.pass_threshold,
         "categories": [
             {"name": category.name, "task_count": category.task_count}

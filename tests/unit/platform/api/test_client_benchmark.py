@@ -69,7 +69,6 @@ def test_get_benchmark_encodes_name_and_parses_detail(mock_request: MagicMock) -
             "requires_harness": True,
             "requires_judge_model": False,
             "judge_model_default": None,
-            "required_secret_names": ["HF_TOKEN"],
             "pass_threshold": 1,
             "categories": [{"name": "terminal", "task_count": 89}],
             "tasks": [
@@ -106,7 +105,6 @@ def test_get_benchmark_encodes_name_and_parses_detail(mock_request: MagicMock) -
         "reason": "Missing fixture",
         "tasks": [{"name": "task-2", "category": "terminal", "difficulty": None}],
     }
-    assert result.required_secret_names == ["HF_TOKEN"]
     assert mock_request.call_args.args[0] == (
         "/api/cli/benchmarks/Terminal-Bench%202.1"
     )
@@ -117,7 +115,7 @@ def test_get_benchmark_encodes_name_and_parses_detail(mock_request: MagicMock) -
 
 
 @patch("osmosis_ai.platform.api.client.platform_request")
-def test_get_benchmark_defaults_missing_required_secret_names(
+def test_get_benchmark_parses_a_detail_without_optional_fields(
     mock_request: MagicMock,
 ) -> None:
     mock_request.return_value = {
@@ -154,7 +152,6 @@ def test_get_benchmark_defaults_missing_required_secret_names(
         git_identity="acme/workspace",
     )
 
-    assert result.required_secret_names == []
     assert result.tasks == [
         {"name": "task-1", "category": "terminal", "difficulty": None},
         {"name": "task-2", "category": "terminal", "difficulty": None},
