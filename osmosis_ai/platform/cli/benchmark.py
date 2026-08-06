@@ -620,6 +620,7 @@ def benchmark_info(key: str, *, limit: int, all_: bool) -> DetailResult:
         "requires_harness": benchmark.requires_harness,
         "default_harness": benchmark.default_harness,
         "requires_judge_model": benchmark.requires_judge_model,
+        "requires_judge_api_key": benchmark.requires_judge_api_key,
         "judge_model_default": benchmark.judge_model_default,
         "required_secret_names": benchmark.required_secret_names,
         "pass_threshold": benchmark.pass_threshold,

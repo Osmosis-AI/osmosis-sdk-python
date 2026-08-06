@@ -788,3 +788,5 @@ def test_benchmark_info_judge_row_covers_every_grader_shape(
 
     fields = {field.label: field.value for field in result.fields}
     assert fields["LLM Judge"] == expected
+    # Agents read the JSON, not the rendered row.
+    assert result.data["benchmark"]["requires_judge_api_key"] is requires_judge_api_key
