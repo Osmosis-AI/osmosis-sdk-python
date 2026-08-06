@@ -209,7 +209,7 @@ def list_models(
             "inference deployments used"
         )
     if lora_models:
-        display_hints.append("Use osmosis model info <name> for details.")
+        display_hints.append("Use osmosis model info <lora-model-name> for details.")
     lora_extra = {**git_result_context(context)}
     if deployment_info["present"]:
         lora_extra["active_deployments"] = active_deployments

@@ -60,7 +60,8 @@ def create_rollout_server(
     async def health() -> dict[str, Any]:
         return backend.health()
 
-    @app.post("/rollout")
+    # 202: the rollout is queued and runs after this response returns.
+    @app.post("/rollout", status_code=202)
     async def rollout(
         request: RolloutInitRequest, background_tasks: BackgroundTasks
     ) -> RolloutInitResponse:
