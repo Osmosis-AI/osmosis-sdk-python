@@ -4,10 +4,7 @@ from typing import Any
 from unittest.mock import AsyncMock
 
 from osmosis_ai.rollout.agent_workflow import AgentWorkflow
-from osmosis_ai.rollout.backend.local.backend import (
-    LocalBackend,
-    _categorize_exception,
-)
+from osmosis_ai.rollout.backend.local.backend import LocalBackend
 from osmosis_ai.rollout.context import (
     AgentWorkflowContext,
     GraderContext,
@@ -22,6 +19,7 @@ from osmosis_ai.rollout.types import (
     RolloutSample,
     RolloutStatus,
 )
+from osmosis_ai.rollout.utils.errors import categorize_exception
 
 # ---------------------------------------------------------------------------
 # Stub implementations
@@ -63,35 +61,35 @@ class FailingGrader(Grader):
 
 
 # ---------------------------------------------------------------------------
-# _categorize_exception
+# categorize_exception
 # ---------------------------------------------------------------------------
 
 
 class TestCategorizeException:
     def test_timeout(self):
-        assert _categorize_exception(TimeoutError()) == RolloutErrorCategory.TIMEOUT
+        assert categorize_exception(TimeoutError()) == RolloutErrorCategory.TIMEOUT
 
     def test_value_error(self):
         assert (
-            _categorize_exception(ValueError("bad"))
+            categorize_exception(ValueError("bad"))
             == RolloutErrorCategory.VALIDATION_ERROR
         )
 
     def test_type_error(self):
         assert (
-            _categorize_exception(TypeError("bad"))
+            categorize_exception(TypeError("bad"))
             == RolloutErrorCategory.VALIDATION_ERROR
         )
 
     def test_assertion_error(self):
         assert (
-            _categorize_exception(AssertionError())
+            categorize_exception(AssertionError())
             == RolloutErrorCategory.VALIDATION_ERROR
         )
 
     def test_generic(self):
         assert (
-            _categorize_exception(RuntimeError("boom"))
+            categorize_exception(RuntimeError("boom"))
             == RolloutErrorCategory.AGENT_ERROR
         )
 

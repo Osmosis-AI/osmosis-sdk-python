@@ -127,12 +127,10 @@ async def test_diagnostics_override_wins_over_result_extra_fields(
 
     sidecar = json.loads((tmp_path / "r1" / "diagnostics.json").read_text())
     assert sidecar["phase"] == "grading"
-    # The trajectory document still carries the archived result's own fields.
-    doc = json.loads((tmp_path / "r1" / "trajectory.json").read_text())
-    assert doc["extra"]["osmosis"]["result_extra_fields"] == {"phase": "agent"}
 
 
-async def test_result_extra_fields_land_in_trajectory_extra(tmp_path: Path) -> None:
+async def test_diagnostics_live_in_sidecar_not_trajectory(tmp_path: Path) -> None:
+    """The sidecar is the sole home for backend diagnostics."""
     await save_trajectories(
         rollout_id="r1",
         result=ExecutionResult(
@@ -143,9 +141,10 @@ async def test_result_extra_fields_land_in_trajectory_extra(tmp_path: Path) -> N
         artifact_root=tmp_path,
     )
 
+    sidecar = json.loads((tmp_path / "r1" / "diagnostics.json").read_text())
+    assert sidecar["backend"] == "harbor-v2"
     doc = json.loads((tmp_path / "r1" / "trajectory.json").read_text())
-    assert doc["extra"]["osmosis"]["result_extra_fields"]["backend"] == "harbor-v2"
-    assert (tmp_path / "r1" / "diagnostics.json").exists()
+    assert "result_extra_fields" not in doc["extra"]["osmosis"]
 
 
 async def test_report_metrics_land_in_document(tmp_path: Path) -> None:

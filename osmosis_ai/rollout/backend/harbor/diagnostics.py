@@ -116,15 +116,6 @@ def failure_phase(result: Any) -> str:
     return "setup"
 
 
-def categorize_exception(exc: BaseException) -> RolloutErrorCategory:
-    """Map pre-submit and setup exceptions onto the wire error vocabulary."""
-    if isinstance(exc, TimeoutError):
-        return RolloutErrorCategory.TIMEOUT
-    if isinstance(exc, (ValueError, TypeError, AssertionError)):
-        return RolloutErrorCategory.VALIDATION_ERROR
-    return RolloutErrorCategory.AGENT_ERROR
-
-
 def trial_metrics(result: Any) -> dict[str, Any]:
     """Token and cost totals Harbor accumulated across the trial."""
     if result is None:

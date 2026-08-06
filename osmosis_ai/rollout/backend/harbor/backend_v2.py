@@ -22,13 +22,12 @@ content-addressed hb__ image across trials.
 from __future__ import annotations
 
 import asyncio
-import inspect
 import json
 import logging
 import shutil
 import traceback
 import uuid
-from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
+from collections.abc import AsyncIterator, Callable, Sequence
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from pathlib import Path
 from typing import Any
@@ -69,7 +68,6 @@ from osmosis_ai.rollout.backend.harbor.backend import (
 from osmosis_ai.rollout.backend.harbor.bundling import resolve_backend_bundle
 from osmosis_ai.rollout.backend.harbor.diagnostics import (
     agent_phase_failure,
-    categorize_exception,
     diagnostic_payload,
     failure_phase,
     redact_secrets,
@@ -81,7 +79,6 @@ from osmosis_ai.rollout.backend.harbor.native_agents import (
     native_agent_config,
     native_binding,
     native_prewarm_agent_config,
-    validate_model_for_binding,
 )
 from osmosis_ai.rollout.backend.harbor.tasks import (
     HarborTask,
@@ -98,6 +95,7 @@ from osmosis_ai.rollout.types import (
     RolloutSample,
     RolloutStatus,
 )
+from osmosis_ai.rollout.utils.errors import categorize_exception
 from osmosis_ai.rollout.utils.file_artifacts import default_artifact_root
 from osmosis_ai.rollout.utils.rewards import validate_sample_has_reward
 from osmosis_ai.rollout.utils.ttl_cache import TtlCache
@@ -119,8 +117,6 @@ class HarborBackendV2(ExecutionBackend):
         tasks_dir: Path,
         agent: str | type | None = None,
         task_mode: TaskMode | str = TaskMode.TEMPLATE,
-        task_resolver: Callable[[ExecutionRequest], HarborTask | Awaitable[HarborTask]]
-        | None = None,
         model_name: str = "openai/osmosis-rollout",
         grader: type | str | None = None,
         workflow_config: Any = None,
@@ -137,13 +133,10 @@ class HarborBackendV2(ExecutionBackend):
         self.orchestrator = orchestrator
         self.tasks_dir: Path = Path(tasks_dir)
         self.task_mode: TaskMode = TaskMode(task_mode)
-        self.task_resolver = task_resolver
         self.model_name = model_name
         self.agent = agent
         self.agent_setup_timeout_sec = agent_setup_timeout_sec
         self.native: NativeAgentBinding | None = native_binding(agent)
-        if self.native is not None and isinstance(agent, str):
-            validate_model_for_binding(agent, self.native, model_name)
         if self.native and not self.native.trainable:
             logger.warning(
                 "native agent %r emits no model trajectory; use it to validate "
@@ -251,10 +244,6 @@ class HarborBackendV2(ExecutionBackend):
         }
 
     async def resolve_task(self, request: ExecutionRequest) -> HarborTask:
-        # A caller-supplied resolver bypasses metadata and task-mode resolution.
-        if self.task_resolver is not None:
-            task = self.task_resolver(request)
-            return await task if inspect.isawaitable(task) else task
         metadata = request.metadata or {}
         if ref := metadata.get("harbor_task"):
             return await self.fetch_task(str(ref), metadata)
@@ -303,18 +292,7 @@ class HarborBackendV2(ExecutionBackend):
     ) -> HarborAgentConfig:
         if self.native is not None and isinstance(self.agent, str):
             metadata = container_input.metadata or {}
-            # A present-but-invalid override must fail, not fall back.
-            if "harbor_model" in metadata:
-                model = metadata["harbor_model"]
-                if not isinstance(model, str) or not model.strip():
-                    raise ValueError(
-                        f"rollout {container_input.rollout_id!r}: "
-                        f"metadata['harbor_model'] must be a non-empty string; "
-                        f"got {model!r}"
-                    )
-            else:
-                model = self.model_name
-            validate_model_for_binding(self.agent, self.native, model)
+            model = metadata.get("harbor_model") or self.model_name
             url = container_input.chat_completions_url
             if self.native.wiring != "none" and not url:
                 # An empty api_base routes litellm (and the credential) to the
