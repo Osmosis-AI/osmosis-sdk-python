@@ -91,6 +91,3 @@ class ExecutionResult(BaseModel):
     err_category: RolloutErrorCategory | None = None
     # Backend diagnostics (failure phase, timings); not part of the wire protocol.
     extra_fields: dict[str, Any] | None = None
-    # Backend-native ATIF document. Process-local: excluded from callback
-    # serialization; archived verbatim by save_trajectories.
-    trajectory_document: dict[str, Any] | None = Field(default=None, exclude=True)

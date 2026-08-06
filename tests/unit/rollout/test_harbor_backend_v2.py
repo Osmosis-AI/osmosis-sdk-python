@@ -1849,8 +1849,8 @@ class TestNativeAtif:
             result=trial_result(verifier_result=SimpleNamespace(rewards=rewards)),
         )
 
-    async def test_native_atif_document_is_authoritative(self, template_task, tmp_path):
-        """The Harbor-authored document rides the result for archival."""
+    async def test_native_sample_projected_from_atif(self, template_task, tmp_path):
+        """The trial's ATIF document projects to a chat-shaped sample."""
         backend = self.backend_for(template_task, tmp_path)
         self.write_trajectory(backend, "r1", atif_document())
         pending = self.pending_with_label("row-7")
@@ -1860,31 +1860,13 @@ class TestNativeAtif:
         )
 
         assert outcome.status == RolloutStatus.SUCCESS
-        document = outcome.trajectory_document
-        assert document is not None
-        agent_step = document["steps"][1]
-        assert agent_step["metrics"]["prompt_token_ids"] == [1, 2, 3]
-        assert agent_step["metrics"]["logprobs"] == [-0.1, -0.2]
-        assert agent_step["tool_calls"][0]["function_name"] == "bash"
-        assert document["agent"]["tool_definitions"] == [
-            {"name": "bash", "parameters": {}}
-        ]
         sample = outcome.sample
         assert sample is not None
         assert sample.reward == 1.0
         assert sample.label == "row-7"
-        assert sample.trajectory_messages is None
+        assert sample.trajectory_messages is not None
         roles = [m["role"] for m in sample.messages]
         assert roles == ["user", "assistant", "tool"]
-
-    async def test_wire_result_excludes_document(self, template_task, tmp_path):
-        backend = self.backend_for(template_task, tmp_path)
-        self.write_trajectory(backend, "r1", atif_document())
-        outcome = backend.grader_outcome(
-            self.graded_event({"reward": 1.0}), "r1", self.pending_with_label()
-        )
-
-        assert "trajectory_document" not in outcome.model_dump()
 
     async def test_reward_only_binding_succeeds_without_trajectory(
         self, template_task, tmp_path
@@ -1898,7 +1880,6 @@ class TestNativeAtif:
         )
 
         assert outcome.status == RolloutStatus.SUCCESS
-        assert outcome.trajectory_document is None
         assert outcome.sample is not None
         assert outcome.sample.reward == 1.0
         assert outcome.sample.trajectory_messages is None
