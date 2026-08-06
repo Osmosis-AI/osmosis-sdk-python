@@ -131,7 +131,7 @@ def patch_dockerfile_with_sdk(env_dir: Path, requirements: list[str]) -> None:
 
 class HarborTask:
     def __init__(self, path: Path):
-        self.path = path.resolve()
+        self.path: Path = path.resolve()
         if not self.path.is_dir():
             raise ValueError(f"harbor task directory not found: {self.path}")
 
@@ -151,6 +151,7 @@ class HarborTask:
         grader_script: str | None = None,
         grader_wheel: Path | None = None,
         sdk_requirements: list[str] | None = None,
+        write_input: bool = True,
     ) -> Path:
         """Copy this task into *out_dir* and stage one rollout's files.
 
@@ -159,6 +160,8 @@ class HarborTask:
         Harbor agents); the container input ships in tests/ for the same reason.
         With sdk_requirements the copied Dockerfile pre-installs them into an
         isolated venv, so per-trial installs stop downloading dependencies.
+        ``write_input=False`` skips the top-level container input file — it
+        carries the api_key in cleartext, so it is not staged without a consumer.
         """
         task_dir = out_dir / self.path.name
         shutil.rmtree(task_dir, ignore_errors=True)
@@ -173,7 +176,8 @@ class HarborTask:
         elif not (task_dir / "instruction.md").exists():
             raise ValueError(f"task {self.path.name} has no instruction and no prompt")
 
-        container_input.write(task_dir / INPUT_FILENAME)
+        if write_input:
+            container_input.write(task_dir / INPUT_FILENAME)
 
         test_sh = task_dir / "tests" / "test.sh"
         if grader_script and not test_sh.exists():

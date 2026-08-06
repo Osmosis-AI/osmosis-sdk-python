@@ -22,6 +22,12 @@ class ExecutionBackend(ABC):
         """Max concurrent executions this backend supports. 0 = no limit."""
         return 0
 
+    @property
+    def capture_final_result(self) -> bool:
+        """Accept the grader result for archival even without a grader
+        callback URL. True for backends that compute the reward themselves."""
+        return False
+
     def has_capacity(self) -> bool:
         """Whether the backend can admit another rollout right now.
 

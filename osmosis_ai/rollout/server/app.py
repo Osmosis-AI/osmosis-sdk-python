@@ -125,13 +125,17 @@ async def _handle_rollout(
         rollout_id=rollout_id,
     )
 
-    # Prefer grader (has the reward) unless it carries no sample.
+    # Two retention slots: the best sample-bearing result for the archive, and
+    # the latest diagnostics so a sample-less failure still leaves a record.
     result_to_save: ExecutionResult | None = None
+    last_diagnostics: dict[str, Any] | None = None
     # Latest metrics from callback acks.
     report: TrajectoryReport | None = None
 
     def record_result_to_save(result: ExecutionResult) -> None:
-        nonlocal result_to_save
+        nonlocal result_to_save, last_diagnostics
+        if result.extra_fields is not None:
+            last_diagnostics = result.extra_fields
         if result_to_save is None or result.sample is not None:
             result_to_save = result
 
@@ -199,7 +203,7 @@ async def _handle_rollout(
                 ),
                 on_workflow_complete=on_workflow_complete,
                 on_grader_complete=on_grader_complete
-                if request.grader_callback_url
+                if request.grader_callback_url or backend.capture_final_result
                 else None,
             )
         logger.info("Rollout %s completed successfully", rollout_id)
@@ -228,12 +232,13 @@ async def _handle_rollout(
                 )
     finally:
         # Best-effort archive once execute() has finished.
-        if result_to_save is not None:
+        if result_to_save is not None or last_diagnostics is not None:
             await save_trajectories(
                 rollout_id=rollout_id,
-                result=result_to_save,
+                result=result_to_save or ExecutionResult(status=RolloutStatus.FAILURE),
                 request_label=request.label,
                 request_metadata=request.metadata,
                 request_extra_fields=request.extra_fields,
                 report=report,
+                diagnostics=last_diagnostics,
             )

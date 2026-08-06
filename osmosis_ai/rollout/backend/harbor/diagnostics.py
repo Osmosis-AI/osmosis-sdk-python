@@ -6,6 +6,7 @@ tests can pass any object with the same fields.
 from __future__ import annotations
 
 import logging
+from datetime import UTC, datetime
 from typing import Any
 
 from osmosis_ai.rollout.types import RolloutErrorCategory
@@ -72,16 +73,44 @@ def trial_timings(result: Any) -> dict[str, float]:
     }
 
 
+def _as_utc(dt: datetime) -> datetime:
+    """Naive datetimes are host-local (harbor's ExceptionInfo.occurred_at)."""
+    return dt.astimezone(UTC)
+
+
+def agent_phase_failure(result: Any) -> Any | None:
+    """The recorded exception, when it struck before verification started.
+
+    Harbor records agent failures and still runs the verifier, so both can
+    coexist; the timestamps (UTC-normalized: ``occurred_at`` is naive-local)
+    separate them, since harbor's exception class names are open-ended.
+    """
+    err = getattr(result, "exception_info", None)
+    if err is None:
+        return None
+    verifier_started = getattr(getattr(result, "verifier", None), "started_at", None)
+    if verifier_started is None:
+        return err
+    return err if _as_utc(err.occurred_at) < _as_utc(verifier_started) else None
+
+
 def failure_phase(result: Any) -> str:
-    """The furthest phase the trial reached; a failure happened there."""
+    """The phase a failure belongs to.
+
+    Normally the furthest phase the trial reached, but a pre-verification
+    exception belongs to the agent-side phase that produced it.
+    """
     if result is None:
         return "setup"
-    for name, info in (
+    spans = [
         ("verifier", result.verifier),
         ("agent", result.agent_execution),
         ("agent_setup", result.agent_setup),
         ("environment_setup", result.environment_setup),
-    ):
+    ]
+    if agent_phase_failure(result) is not None:
+        spans = spans[1:]
+    for name, info in spans:
         if info is not None:
             return name
     return "setup"

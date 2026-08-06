@@ -13,7 +13,7 @@ from osmosis_ai.rollout.utils.file_artifacts import (
     copy_artifact_tree,
 )
 
-logger = logging.getLogger(__name__)
+logger: logging.Logger = logging.getLogger(__name__)
 
 
 def relocate_trial_artifacts(

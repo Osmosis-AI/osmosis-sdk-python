@@ -43,6 +43,16 @@ from osmosis_ai.rollout.utils.file_artifacts import (
 )
 
 
+def validate_workflow_output(output: AgentWorkflowOutput) -> None:
+    """Reject shapes the single-sample rollout protocol cannot represent."""
+    if len(output.samples) > 1:
+        raise ValueError(
+            f"run() returned {len(output.samples)} named samples "
+            f"({sorted(output.samples)}); a rollout carries exactly one "
+            "sample — return a single message list or one samples entry"
+        )
+
+
 async def run_agent(workflow_cls: Any, workflow_config: Any) -> ContainerResult:
     container_input = ContainerInput.read(AGENT_LOGS_DIR / INPUT_FILENAME)
     rollout_ctx = RolloutContext(
@@ -62,16 +72,25 @@ async def run_agent(workflow_cls: Any, workflow_config: Any) -> ContainerResult:
         returned = await workflow.run(ctx)
         output = coerce_output(returned)
         if output is None:
+            # The documented fallback: the ambient context's sample is the
+            # output. The projection below stays for older hosts.
             sample = await rollout_ctx.get_sample()
             if sample is not None:
                 output = AgentWorkflowOutput(
                     samples={"default": [dict(m) for m in sample.messages]},
-                    metrics=sample.metrics or {},
+                    metrics={
+                        key: value
+                        for key, value in (sample.metrics or {}).items()
+                        if isinstance(value, (int, float))
+                        and not isinstance(value, bool)
+                    },
                 )
             else:
                 output = AgentWorkflowOutput()
+        else:
+            validate_workflow_output(output)
     write_trajectory_json(sample, output, container_input.rollout_id)
-    return ContainerResult(status=RolloutStatus.SUCCESS, output=output)
+    return ContainerResult(status=RolloutStatus.SUCCESS, output=output, sample=sample)
 
 
 def write_trajectory_json(
@@ -142,32 +161,39 @@ def read_container_input() -> ContainerInput:
     )
 
 
-def load_messages() -> tuple[list[dict[str, Any]] | None, dict[str, float]]:
-    """Messages from the workflow result, else from the agent's trajectory."""
+def load_sample() -> RolloutSample | None:
+    """The workflow's full sample, else one rebuilt from what the agent left.
+
+    Fidelity order: sample, output projection, then the trajectory document.
+    """
     result_path = AGENT_LOGS_DIR / RESULT_FILENAME
     if result_path.exists():
-        output = ContainerResult.read(result_path).output
+        result = ContainerResult.read(result_path)
+        if result.sample is not None:
+            return result.sample
+        output = result.output
         if output is not None:
-            return output.primary_messages(), output.metrics
+            messages = output.primary_messages()
+            if messages is not None:
+                return RolloutSample(messages=messages, metrics=dict(output.metrics))
     for name in sorted(AGENT_LOGS_DIR.glob("*trajectory*.json")):
         try:
             messages = messages_from_trajectory(json.loads(name.read_text()))
         except (ValueError, OSError):
             continue
         if messages:
-            return messages, {}
-    return None, {}
+            return RolloutSample(messages=messages)
+    return None
 
 
 def grader_main(grader_cls: Any, grader_config: Any = None) -> None:
     container_input = read_container_input()
-    messages, metrics = load_messages()
-    if messages is None:
+    sample = load_sample()
+    if sample is None:
         print("No messages from the agent phase, skipping grading")
         write_reward(0.0)
         return
 
-    sample = RolloutSample(messages=messages, metrics=metrics)
     try:
         baseline = artifact_tree_state(HARBOR_ARTIFACTS_DIR)
     except Exception:

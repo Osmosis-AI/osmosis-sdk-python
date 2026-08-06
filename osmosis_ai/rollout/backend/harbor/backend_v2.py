@@ -48,6 +48,7 @@ from harbor.tasks.client import TaskClient
 from harbor.trial.hooks import TrialEvent, TrialHookEvent
 from harbor.trial.queue import TrialQueue
 
+from osmosis_ai.packaging import BundleInfo
 from osmosis_ai.rollout.backend.base import ExecutionBackend, ResultCallback
 from osmosis_ai.rollout.backend.harbor.artifacts import (
     merge_grader_artifacts,
@@ -66,6 +67,7 @@ from osmosis_ai.rollout.backend.harbor.backend import (
 )
 from osmosis_ai.rollout.backend.harbor.bundling import resolve_backend_bundle
 from osmosis_ai.rollout.backend.harbor.diagnostics import (
+    agent_phase_failure,
     diagnostic_payload,
     failure_phase,
     redact_secrets,
@@ -73,8 +75,10 @@ from osmosis_ai.rollout.backend.harbor.diagnostics import (
     trial_timings,
 )
 from osmosis_ai.rollout.backend.harbor.native_agents import (
+    NativeAgentBinding,
     native_agent_config,
     native_binding,
+    native_prewarm_agent_config,
 )
 from osmosis_ai.rollout.backend.harbor.tasks import (
     HarborTask,
@@ -91,6 +95,7 @@ from osmosis_ai.rollout.types import (
     RolloutSample,
     RolloutStatus,
 )
+from osmosis_ai.rollout.utils.errors import categorize_exception
 from osmosis_ai.rollout.utils.file_artifacts import default_artifact_root
 from osmosis_ai.rollout.utils.rewards import validate_sample_has_reward
 from osmosis_ai.rollout.utils.ttl_cache import TtlCache
@@ -102,6 +107,11 @@ HARNESS_AGENT_IMPORT_PATH = (
 )
 PREWARM_PREFIX = "prewarm-"
 STATUS_RETENTION_SEC = 900.0
+
+
+def trial_cancelled(err: Any) -> bool:
+    """True when harbor recorded an external cancellation on the trial result."""
+    return err is not None and err.exception_type == "CancelledError"
 
 
 class HarborBackendV2(ExecutionBackend):
@@ -127,12 +137,12 @@ class HarborBackendV2(ExecutionBackend):
         max_queue_depth: int | None = None,
     ) -> None:
         self.orchestrator = orchestrator
-        self.tasks_dir = Path(tasks_dir)
-        self.task_mode = TaskMode(task_mode)
+        self.tasks_dir: Path = Path(tasks_dir)
+        self.task_mode: TaskMode = TaskMode(task_mode)
         self.model_name = model_name
         self.agent = agent
         self.agent_setup_timeout_sec = agent_setup_timeout_sec
-        self.native = native_binding(agent)
+        self.native: NativeAgentBinding | None = native_binding(agent)
         if native_agent_kwargs and self.native is None:
             raise ValueError(
                 "native_agent_kwargs configures native harbor agents; "
@@ -147,7 +157,7 @@ class HarborBackendV2(ExecutionBackend):
                 "datasets and verifiers, never for training",
                 agent,
             )
-        self.bundle = resolve_backend_bundle(
+        self.bundle: BundleInfo | None = resolve_backend_bundle(
             agent=agent,
             grader=grader,
             workflow_config=workflow_config,
@@ -156,8 +166,14 @@ class HarborBackendV2(ExecutionBackend):
             bundle=bundle,
             native=self.native is not None,
         )
-        self.environment_config = apply_managed_skypilot_placement(
-            environment_config or HarborEnvironmentConfig()
+        # The placement helper mutates in place; keep the caller's object
+        # untouched.
+        self.environment_config: HarborEnvironmentConfig = (
+            apply_managed_skypilot_placement(
+                environment_config.model_copy(deep=True)
+                if environment_config is not None
+                else HarborEnvironmentConfig()
+            )
         )
         if patch_dockerfile_with_sdk and self.bundle is None:
             raise ValueError("patch_dockerfile_with_sdk requires a bundle")
@@ -165,29 +181,39 @@ class HarborBackendV2(ExecutionBackend):
             patch_dockerfile_with_sdk = self.bundle is not None
         # The bundle's declared dependencies (stable) are pre-installed into the
         # task image; the bundle itself (volatile user code) installs per trial.
-        self.sdk_requirements = (
+        self.sdk_requirements: list[str] | None = (
             self.bundle.requirements
             if patch_dockerfile_with_sdk and self.bundle
             else None
         )
 
         root = Path(f"/tmp/osmosis-harbor-{self.tasks_dir.name}")
-        self.rollouts_dir = root / "rollouts"
+        self.rollouts_dir: Path = root / "rollouts"
         self.rollouts_dir.mkdir(parents=True, exist_ok=True)
-        self.trials_dir = trials_dir or root / "trials"
-        self.artifact_root = default_artifact_root()
+        self.trials_dir: Path = trials_dir or root / "trials"
+        self.artifact_root: Path = default_artifact_root()
         self.cleanup_successful_trials = cleanup_successful_trials
-        if max_queue_depth is not None and max_queue_depth < 0:
-            raise ValueError("max_queue_depth must be >= 0")
+        if max_queue_depth is not None and max_queue_depth < 1:
+            # A depth of 0 is unenforceable here; it previously meant
+            # reject-everything.
+            raise ValueError("max_queue_depth must be >= 1, or None for unbounded")
         self.max_queue_depth = max_queue_depth
         self.pending: dict[str, PendingTrial] = {}
+        # Hooks dispatch on membership, never on caller-controlled id patterns.
+        self.prewarm_trials: set[str] = set()
         self.fetch_locks: dict[str, asyncio.Lock] = {}
-        self.running = 0
+        self.running: int = 0
         self.finished: TtlCache[str, dict[str, Any]] = TtlCache(STATUS_RETENTION_SEC)
 
         orchestrator.add_hook(TrialEvent.START, self.on_trial_started)
         orchestrator.add_hook(TrialEvent.VERIFICATION_START, self.on_verification_start)
         orchestrator.add_hook(TrialEvent.END, self.on_trial_end)
+
+    @property
+    def capture_final_result(self) -> bool:
+        # The reward is computed backend-side; archive it even without a
+        # grader callback URL.
+        return True
 
     def queued(self) -> int:
         return max(0, len(self.pending) - self.running)
@@ -279,17 +305,28 @@ class HarborBackendV2(ExecutionBackend):
         self, task_dir: Path, container_input: ContainerInput
     ) -> HarborAgentConfig:
         if self.native is not None and isinstance(self.agent, str):
-            model = (container_input.metadata or {}).get(
-                "harbor_model"
-            ) or self.model_name
+            metadata = container_input.metadata or {}
+            model = metadata.get("harbor_model") or self.model_name
+            url = container_input.chat_completions_url
+            if self.native.wiring != "none" and not url:
+                # An empty api_base routes litellm (and the credential) to the
+                # provider's public endpoint.
+                raise ValueError(
+                    f"rollout {container_input.rollout_id!r} has no "
+                    f"chat_completions_url; refusing to wire {self.agent!r} "
+                    "without the controller endpoint"
+                )
             return native_agent_config(
                 self.agent,
                 self.native,
                 model,
-                container_input.chat_completions_url,
+                url,
                 container_input.api_key or "dummy",
                 extra_kwargs=self.native_agent_kwargs,
             )
+        return self.harness_agent_config(task_dir)
+
+    def harness_agent_config(self, task_dir: Path) -> HarborAgentConfig:
         if self.bundle is None:
             raise ValueError("workflow agents require a bundle")
         return HarborAgentConfig(
@@ -302,9 +339,14 @@ class HarborBackendV2(ExecutionBackend):
         )
 
     def build_trial_config(
-        self, task_dir: Path, request: ExecutionRequest, container_input: ContainerInput
+        self,
+        task_dir: Path,
+        request: ExecutionRequest,
+        container_input: ContainerInput,
+        agent_config: HarborAgentConfig | None = None,
     ) -> TrialConfig:
-        agent_config = self.build_agent_config(task_dir, container_input)
+        if agent_config is None:
+            agent_config = self.build_agent_config(task_dir, container_input)
         if request.agent_timeout_sec is not None:
             agent_config.override_timeout_sec = request.agent_timeout_sec
         if self.agent_setup_timeout_sec is not None:
@@ -332,6 +374,9 @@ class HarborBackendV2(ExecutionBackend):
             grader_script=self.bundle.grader_script if self.bundle else None,
             grader_wheel=self.bundle.wheel if self.bundle and self.native else None,
             sdk_requirements=self.sdk_requirements,
+            # Only the bundled harness reads the top-level input file; don't
+            # stage the api_key without a consumer.
+            write_input=self.bundle is not None and self.native is None,
         )
 
     async def execute(
@@ -341,41 +386,115 @@ class HarborBackendV2(ExecutionBackend):
         on_grader_complete: ResultCallback | None = None,
     ) -> None:
         pending = PendingTrial(on_workflow_complete, on_grader_complete)
+        pending.label = request.label
         self.pending[request.id] = pending
         try:
             container_input = self.build_input(request)
             pending.api_key = container_input.api_key
             task = await self.resolve_task(request)
+            # Dataset mode zeroes the prompt, so the task keeps its own
+            # instruction.md. In template mode the prompt owns it: silently
+            # for the configured template dir, with a warning elsewhere.
+            if (
+                container_input.prompt
+                and task.path != self.tasks_dir.resolve()
+                and (task.path / "instruction.md").is_file()
+            ):
+                logger.warning(
+                    "rollout %s: template mode replaces the instruction.md that "
+                    "task %s ships with the request prompt; use "
+                    "task_mode='dataset' to keep the task's own instruction",
+                    request.id,
+                    task.path.name,
+                )
             task_dir = self.materialize_task(task, request.id, container_input)
             pending.task = asyncio.create_task(
                 self.orchestrator.submit(
                     self.build_trial_config(task_dir, request, container_input)
                 )
             )
-            await pending.task
+            trial_result = await pending.task
             await pending.done
         except asyncio.CancelledError:
             # The canceller owns the outcome; no callbacks are due.
             self.pending.pop(request.id, None)
             self.record_outcome(request.id, RolloutStatus.CANCELLED)
+            self.cleanup_rollout_residue(request.id, include_trial=True)
+            if not pending.cancel_requested:
+                # An external canceller (uvicorn shutdown, task group) owns
+                # this; swallowing it would corrupt its bookkeeping.
+                raise
             logger.info("Rollout %s cancelled", request.id)
         except Exception as e:
             self.pending.pop(request.id, None)
+            category = categorize_exception(e)
             self.record_outcome(request.id, RolloutStatus.FAILURE, err_message=str(e))
-            logger.error("Failed trial %s: %s", request.id, e)
-            await on_workflow_complete(
-                ExecutionResult(
-                    status=RolloutStatus.FAILURE,
-                    err_message=str(e),
-                    err_category=RolloutErrorCategory.AGENT_ERROR,
-                    extra_fields=diagnostic_payload(
-                        phase="setup",
-                        category=RolloutErrorCategory.AGENT_ERROR,
-                        exception_type=type(e).__name__,
-                        timings={},
-                    ),
-                )
+            self.cleanup_rollout_residue(request.id, include_trial=False)
+            logger.error("Failed trial %s: %s", request.id, traceback.format_exc())
+            failure = ExecutionResult(
+                status=RolloutStatus.FAILURE,
+                err_message=str(e),
+                err_category=category,
+                extra_fields=diagnostic_payload(
+                    phase="setup",
+                    category=category,
+                    exception_type=type(e).__name__,
+                    timings={},
+                ),
             )
+            # Both channels get a terminal outcome, so a controller waiting on
+            # the grader callback does not burn its full deadline.
+            if not pending.workflow_complete_called:
+                await self.try_callback(
+                    on_workflow_complete,
+                    pending.workflow_result or failure,
+                    request.id,
+                    "workflow",
+                )
+            if on_grader_complete is not None and not pending.grader_complete_called:
+                await self.try_callback(
+                    on_grader_complete, failure, request.id, "grader"
+                )
+        else:
+            if trial_cancelled(getattr(trial_result, "exception_info", None)):
+                self.cleanup_rollout_residue(request.id, include_trial=True)
+            else:
+                self.archive_trial(request.id, trial_result, pending)
+
+    def archive_trial(
+        self, rollout_id: str, trial_result: Any, pending: PendingTrial
+    ) -> None:
+        """Persist trial artifacts and clean per-rollout staging.
+
+        Runs strictly after ``orchestrator.submit()`` resolved: harbor scrubs
+        secrets before ``submit()`` returns, so any earlier relocation (e.g.
+        from a trial hook) copies unredacted content into durable storage.
+        """
+        merge_grader_artifacts(self.trials_dir, rollout_id)
+        delete_trial = bool(
+            self.cleanup_successful_trials
+            and trial_result is not None
+            and getattr(trial_result, "exception_info", None) is None
+            and not pending.preserve_trial
+        )
+        relocated = relocate_trial_artifacts(
+            self.trials_dir, self.artifact_root, rollout_id, move=delete_trial
+        )
+        if self.cleanup_successful_trials and not pending.preserve_trial:
+            self.cleanup_rollout_residue(
+                rollout_id, include_trial=delete_trial and relocated
+            )
+
+    def cleanup_rollout_residue(self, rollout_id: str, *, include_trial: bool) -> None:
+        """Remove per-rollout staging (and optionally the trial directory).
+
+        The staging dir can hold the api_key in cleartext; failed trials keep
+        their trial directory for debugging.
+        """
+        shutil.rmtree(self.rollouts_dir / rollout_id, ignore_errors=True)
+        if include_trial:
+            trial_dir = self.trials_dir / f"{TRIAL_NAME_PREFIX}{rollout_id}"
+            shutil.rmtree(trial_dir, ignore_errors=True)
 
     async def prewarm(self, task_ids: Sequence[str] | None = None) -> None:
         """Build every task image and run agent setup before serving rollouts.
@@ -392,24 +511,41 @@ class HarborBackendV2(ExecutionBackend):
 
         configs = [self.prewarm_trial_config(task) for task in tasks]
         logger.info("Prewarming %d harbor task(s)", len(configs))
-        outcomes = await asyncio.gather(
-            *(self.orchestrator.submit(config) for config in configs),
-            return_exceptions=True,
-        )
+        failures: list[str] = []
+        try:
+            outcomes = await asyncio.gather(
+                *(self.orchestrator.submit(config) for config in configs),
+                return_exceptions=True,
+            )
 
-        failures = []
-        for config, outcome in zip(configs, outcomes, strict=True):
-            label = config.task.path.name if config.task.path else config.trial_name
-            if isinstance(outcome, BaseException):
-                failures.append(f"{label}: {type(outcome).__name__}: {outcome}")
-            elif (err := getattr(outcome, "exception_info", None)) is not None:
-                failures.append(f"{label}: {err.exception_type}")
+            for config, outcome in zip(configs, outcomes, strict=True):
+                label = config.task.path.name if config.task.path else config.trial_name
+                if isinstance(outcome, BaseException):
+                    failures.append(f"{label}: {type(outcome).__name__}: {outcome}")
+                elif (err := getattr(outcome, "exception_info", None)) is not None:
+                    failures.append(f"{label}: {err.exception_type}")
+                elif self.cleanup_successful_trials:
+                    # submit() resolved, so harbor's secret scrub has run.
+                    self.cleanup_rollout_residue(
+                        config.trial_name.removeprefix(TRIAL_NAME_PREFIX),
+                        include_trial=True,
+                    )
+        finally:
+            self.prewarm_trials.difference_update(
+                config.trial_name for config in configs
+            )
         if failures:
             raise RuntimeError(
                 f"prewarm failed for {len(failures)} of {len(configs)} task(s):\n"
                 + "\n".join(f"  - {failure}" for failure in failures)
             )
         logger.info("Prewarmed %d harbor task(s)", len(configs))
+
+    def prewarm_agent_config(self, task_dir: Path) -> HarborAgentConfig:
+        """Install-only trials never run the agent: no endpoint, no credentials."""
+        if self.native is not None and isinstance(self.agent, str):
+            return native_prewarm_agent_config(self.agent, self.native, self.model_name)
+        return self.harness_agent_config(task_dir)
 
     def prewarm_trial_config(self, task: HarborTask) -> TrialConfig:
         rollout_id = f"{PREWARM_PREFIX}{uuid.uuid4().hex[:8]}"
@@ -421,10 +557,14 @@ class HarborBackendV2(ExecutionBackend):
         )
         task_dir = self.materialize_task(task, rollout_id, container_input)
         config = self.build_trial_config(
-            task_dir, ExecutionRequest(id=rollout_id, prompt=[]), container_input
+            task_dir,
+            ExecutionRequest(id=rollout_id, prompt=[]),
+            container_input,
+            agent_config=self.prewarm_agent_config(task_dir),
         )
         config.install_only = True
         config.verifier.disable = True
+        self.prewarm_trials.add(config.trial_name)
         return config
 
     def prewarm_lifespan(
@@ -461,6 +601,8 @@ class HarborBackendV2(ExecutionBackend):
 
     async def on_trial_started(self, event: TrialHookEvent) -> None:
         self.running += 1
+        if event.config.trial_name in self.prewarm_trials:
+            return
         pending = self.pending.get(parse_rollout_id(event))
         if pending:
             pending.started = True
@@ -490,6 +632,7 @@ class HarborBackendV2(ExecutionBackend):
             if pending is None or pending.task is None or pending.task.done():
                 dispositions[rollout_id] = "not_found"
                 continue
+            pending.cancel_requested = True
             pending.task.cancel()
             dispositions[rollout_id] = (
                 "cancelled_running" if pending.started else "cancelled_queued"
@@ -497,11 +640,14 @@ class HarborBackendV2(ExecutionBackend):
         return dispositions
 
     def event_diagnostics(
-        self, event: TrialHookEvent, category: RolloutErrorCategory | None = None
+        self,
+        event: TrialHookEvent,
+        category: RolloutErrorCategory | None = None,
+        phase: str | None = None,
     ) -> dict[str, Any]:
         err = event.result.exception_info if event.result else None
         return diagnostic_payload(
-            phase=failure_phase(event.result),
+            phase=phase or failure_phase(event.result),
             category=category,
             exception_type=err.exception_type if err else None,
             timings=trial_timings(event.result),
@@ -516,9 +662,14 @@ class HarborBackendV2(ExecutionBackend):
         except ValueError:
             return None
 
-    def native_sample(
-        self, event: TrialHookEvent, rollout_id: str, pending: PendingTrial
-    ) -> RolloutSample | None:
+    def load_native_trajectory(
+        self, rollout_id: str, pending: PendingTrial
+    ) -> dict[str, Any] | None:
+        """The redacted Harbor-authored ATIF document for this trial.
+
+        Returns None — preserving the trial directory — when a document
+        exists but cannot be used verbatim (invalid, or several of them).
+        """
         trial_dir = self.trials_dir / f"{TRIAL_NAME_PREFIX}{rollout_id}"
         paths = [p for p in (trial_dir / "agent" / "trajectory.json",) if p.is_file()]
         paths += sorted(trial_dir.glob("steps/*/agent/trajectory.json"))
@@ -547,18 +698,58 @@ class HarborBackendV2(ExecutionBackend):
             trajectory.agent.extra = redact_secrets(
                 trajectory.agent.extra, pending.api_key
             )
-        messages = messages_from_trajectory(trajectory.to_json_dict(exclude_none=True))
-        if not messages:
-            return None
-        return RolloutSample(messages=messages, metrics=trial_metrics(event.result))
+        return trajectory.to_json_dict(exclude_none=True)
 
-    def primary_sample(
+    def native_sample(
         self, event: TrialHookEvent, rollout_id: str, pending: PendingTrial
     ) -> RolloutSample | None:
-        if self.native is not None:
-            return self.native_sample(event, rollout_id, pending)
+        """Chat-shaped sample projected from the trial's ATIF document.
+
+        Reward-only bindings (oracle) yield a trajectoryless sample; trainable
+        bindings missing a document fail validation.
+        """
+        assert self.native is not None
+        document = self.load_native_trajectory(rollout_id, pending)
+        if document is None:
+            if not self.native.trainable:
+                return RolloutSample(
+                    trajectory_messages=None,
+                    label=pending.label,
+                    metrics=trial_metrics(event.result),
+                )
+            return None
+        messages = messages_from_trajectory(document)
+        if not messages:
+            return None
+        return RolloutSample(
+            messages=messages,
+            label=pending.label,
+            metrics=trial_metrics(event.result),
+        )
+
+    def bundle_sample(
+        self, event: TrialHookEvent, pending: PendingTrial
+    ) -> RolloutSample | None:
         result = self.container_result(event)
-        output = result.output if result else None
+        if result is None:
+            return None
+        if result.sample is not None:
+            # The workflow's sample round-trips field-for-field; the host adds
+            # only trial metrics and the request-label fallback. model_copy
+            # skips validators, so trajectory_messages=None stays untouched.
+            sample = result.sample
+            return sample.model_copy(
+                update={
+                    "metrics": {
+                        **trial_metrics(event.result),
+                        **(sample.metrics or {}),
+                    },
+                    "label": sample.label
+                    if sample.label is not None
+                    else pending.label,
+                }
+            )
+        output = result.output
         if output is None:
             return None
         messages = output.primary_messages()
@@ -566,8 +757,16 @@ class HarborBackendV2(ExecutionBackend):
             return None
         return RolloutSample(
             messages=messages,
+            label=pending.label,
             metrics={**trial_metrics(event.result), **output.metrics},
         )
+
+    def primary_sample(
+        self, event: TrialHookEvent, rollout_id: str, pending: PendingTrial
+    ) -> RolloutSample | None:
+        if self.native is not None:
+            return self.native_sample(event, rollout_id, pending)
+        return self.bundle_sample(event, pending)
 
     def agent_succeeded(self, event: TrialHookEvent) -> tuple[bool, str | None]:
         if event.result and event.result.exception_info:
@@ -580,6 +779,8 @@ class HarborBackendV2(ExecutionBackend):
         return False, result.err_message if result else "Unknown error"
 
     async def on_verification_start(self, event: TrialHookEvent) -> None:
+        if event.config.trial_name in self.prewarm_trials:
+            return
         rollout_id = parse_rollout_id(event)
         pending = self.pending.get(rollout_id)
         if not pending:
@@ -588,10 +789,11 @@ class HarborBackendV2(ExecutionBackend):
         pending.grading = True
 
         succeeded, err_message = self.agent_succeeded(event)
+        sample = self.primary_sample(event, rollout_id, pending)
         if succeeded:
             outcome = ExecutionResult(
                 status=RolloutStatus.SUCCESS,
-                sample=self.primary_sample(event, rollout_id, pending),
+                sample=sample,
                 extra_fields=self.event_diagnostics(event),
             )
         else:
@@ -604,6 +806,7 @@ class HarborBackendV2(ExecutionBackend):
                 ),
             )
 
+        pending.workflow_result = outcome
         pending.workflow_complete_called = await self.try_callback(
             pending.on_workflow_complete, outcome, rollout_id, "workflow"
         )
@@ -612,8 +815,25 @@ class HarborBackendV2(ExecutionBackend):
         self, event: TrialHookEvent, rollout_id: str, pending: PendingTrial
     ) -> ExecutionResult:
         sample = self.primary_sample(event, rollout_id, pending)
+        err = event.result.exception_info if event.result else None
+
+        # Report agent-phase failures before the verifier branch buries them
+        # under a secondary validation error.
+        if (agent_err := agent_phase_failure(event.result)) is not None:
+            log_trial_exception(rollout_id, agent_err, phase="during the agent run")
+            return ExecutionResult(
+                status=RolloutStatus.FAILURE,
+                sample=sample,
+                err_message=agent_err.exception_message,
+                err_category=RolloutErrorCategory.AGENT_ERROR,
+                extra_fields=self.event_diagnostics(
+                    event, RolloutErrorCategory.AGENT_ERROR
+                ),
+            )
 
         if event.result and event.result.verifier_result:
+            # The 'reward' channel is the harbor-wide convention (telemetry,
+            # viewer, step gating all hardcode it); never guess another one.
             rewards = event.result.verifier_result.rewards or {}
             reward = rewards.get("reward")
             if sample is not None and reward is not None:
@@ -632,7 +852,7 @@ class HarborBackendV2(ExecutionBackend):
                     err_message=str(e),
                     err_category=RolloutErrorCategory.VALIDATION_ERROR,
                     extra_fields=self.event_diagnostics(
-                        event, RolloutErrorCategory.VALIDATION_ERROR
+                        event, RolloutErrorCategory.VALIDATION_ERROR, phase="grading"
                     ),
                 )
             return ExecutionResult(
@@ -641,8 +861,7 @@ class HarborBackendV2(ExecutionBackend):
                 extra_fields=self.event_diagnostics(event),
             )
 
-        if event.result and event.result.exception_info:
-            err = event.result.exception_info
+        if err:
             log_trial_exception(rollout_id, err, phase="during grading")
             return ExecutionResult(
                 status=RolloutStatus.FAILURE,
@@ -653,23 +872,27 @@ class HarborBackendV2(ExecutionBackend):
                     event, RolloutErrorCategory.AGENT_ERROR
                 ),
             )
+        # A task without tests/ and without a grader has no reward source.
         return ExecutionResult(
             status=RolloutStatus.FAILURE,
             sample=sample,
+            err_message=(
+                "trial ended with no verifier result and no recorded error; "
+                "the task has no reward source (no tests/ and no grader)"
+            ),
+            err_category=RolloutErrorCategory.VALIDATION_ERROR,
             extra_fields=self.event_diagnostics(
-                event, RolloutErrorCategory.AGENT_ERROR
+                event, RolloutErrorCategory.VALIDATION_ERROR, phase="grading"
             ),
         )
 
     async def on_trial_end(self, event: TrialHookEvent) -> None:
-        rollout_id = parse_rollout_id(event)
         self.running = max(0, self.running - 1)
-        if rollout_id.startswith(PREWARM_PREFIX):
-            if event.result and not event.result.exception_info:
-                trial_dir = self.trials_dir / f"{TRIAL_NAME_PREFIX}{rollout_id}"
-                shutil.rmtree(trial_dir, ignore_errors=True)
-                shutil.rmtree(self.rollouts_dir / rollout_id, ignore_errors=True)
+        if event.config.trial_name in self.prewarm_trials:
+            # Prewarm cleanup happens at the prewarm() call site, after
+            # submit() resolves (post-scrub).
             return
+        rollout_id = parse_rollout_id(event)
 
         pending = self.pending.pop(rollout_id, None)
         if not pending:
@@ -677,14 +900,13 @@ class HarborBackendV2(ExecutionBackend):
             return
 
         err = event.result.exception_info if event.result else None
-        if err and err.exception_type == "CancelledError":
+        if trial_cancelled(err):
             self.record_outcome(rollout_id, RolloutStatus.CANCELLED)
             if not pending.done.done():
                 pending.done.set_result(None)
             return
 
         try:
-            merge_grader_artifacts(self.trials_dir, rollout_id)
             grader_result = self.grader_outcome(event, rollout_id, pending)
             self.record_outcome(
                 rollout_id,
@@ -692,49 +914,35 @@ class HarborBackendV2(ExecutionBackend):
                 reward=grader_result.sample.reward if grader_result.sample else None,
                 err_message=grader_result.err_message,
             )
-            delete_trial = bool(
-                self.cleanup_successful_trials
-                and event.result
-                and not event.result.exception_info
-                and not pending.preserve_trial
-            )
-            relocated = relocate_trial_artifacts(
-                self.trials_dir, self.artifact_root, rollout_id, move=delete_trial
-            )
 
             if not pending.workflow_complete_called:
-                if event.result and event.result.exception_info:
-                    err = event.result.exception_info
-                    log_trial_exception(
-                        rollout_id, err, phase="before the agent completed"
-                    )
-                    message = err.exception_message
-                else:
-                    message = "Trial ended before agent completed"
-                pending.workflow_complete_called = await self.try_callback(
-                    pending.on_workflow_complete,
-                    ExecutionResult(
+                # A cached outcome means delivery failed at verification
+                # start; resend it byte-identical instead of fabricating.
+                result = pending.workflow_result
+                if result is None:
+                    if err:
+                        log_trial_exception(
+                            rollout_id, err, phase="before the agent completed"
+                        )
+                    result = ExecutionResult(
                         status=RolloutStatus.FAILURE,
-                        err_message=message,
+                        err_message=err.exception_message
+                        if err
+                        else "Trial ended before agent completed",
                         err_category=RolloutErrorCategory.AGENT_ERROR,
                         extra_fields=self.event_diagnostics(
                             event, RolloutErrorCategory.AGENT_ERROR
                         ),
-                    ),
-                    rollout_id,
-                    "workflow",
+                    )
+                    pending.workflow_result = result
+                pending.workflow_complete_called = await self.try_callback(
+                    pending.on_workflow_complete, result, rollout_id, "workflow"
                 )
 
             if pending.on_grader_complete:
-                await self.try_callback(
+                pending.grader_complete_called = await self.try_callback(
                     pending.on_grader_complete, grader_result, rollout_id, "grader"
                 )
-
-            if self.cleanup_successful_trials and not pending.preserve_trial:
-                shutil.rmtree(self.rollouts_dir / rollout_id, ignore_errors=True)
-            if delete_trial and relocated and not pending.preserve_trial:
-                trial_dir = self.trials_dir / f"{TRIAL_NAME_PREFIX}{rollout_id}"
-                shutil.rmtree(trial_dir, ignore_errors=True)
         finally:
             timings = trial_timings(event.result)
             if timings:

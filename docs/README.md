@@ -20,7 +20,7 @@ The package (`osmosis_ai/`) is organized into top-level domains. See [architectu
 | CLI framework + commands | [../osmosis_ai/cli/](../osmosis_ai/cli/) | Typer entry point, command shells, output/JSON envelopes | `from osmosis_ai.cli.errors import CLIError` |
 | Platform integration | [../osmosis_ai/platform/](../osmosis_ai/platform/) | Auth, platform API client, CLI business logic | `from osmosis_ai.platform.auth import load_credentials` |
 | Remote rollout SDK | [../osmosis_ai/rollout/](../osmosis_ai/rollout/) | `AgentWorkflow` + `Grader`, contexts, server, backends | `from osmosis_ai.rollout import AgentWorkflow, Grader` |
-| Eval helpers | [../osmosis_ai/eval/](../osmosis_ai/eval/) | Rubric (LLM-as-judge) + workflow/grader loader | `from osmosis_ai.eval.rubric import evaluate_rubric` |
+| Eval helpers | [../osmosis_ai/eval/](../osmosis_ai/eval/) | Rubric (LLM-as-judge) | `from osmosis_ai.eval.rubric import evaluate_rubric` |
 | Workspace templates | [../osmosis_ai/templates/](../osmosis_ai/templates/) | `osmosis template` recipe catalog + source resolution | (internal) |
 
 ## Pages

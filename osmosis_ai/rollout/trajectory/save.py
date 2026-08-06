@@ -1,10 +1,12 @@
 """Best-effort saving of finished rollouts as ATIF trajectory documents.
 
 Documents land at ``<artifact_root>/<rollout_id>/trajectory.json``, next to
-the rollout's file artifacts. Failures are logged and swallowed.
+the rollout's file artifacts; backend diagnostics land alongside as
+``diagnostics.json``. Failures are logged and swallowed.
 """
 
 import asyncio
+import json
 import logging
 from pathlib import Path
 from typing import Any
@@ -49,8 +51,12 @@ async def save_trajectories(
     request_extra_fields: dict[str, Any] | None = None,
     report: TrajectoryReport | None = None,
     artifact_root: Path | None = None,
+    diagnostics: dict[str, Any] | None = None,
 ) -> None:
-    """Save the rollout's sample as an ATIF document. Never raises."""
+    """Save the rollout's sample as an ATIF document. Never raises.
+
+    ``diagnostics`` overrides ``result.extra_fields`` for the sidecar.
+    """
     try:
         await _save(
             rollout_id=rollout_id,
@@ -60,6 +66,7 @@ async def save_trajectories(
             request_extra_fields=request_extra_fields,
             report=report,
             artifact_root=artifact_root or default_artifact_root(),
+            diagnostics=diagnostics,
         )
     except Exception:
         logger.warning(
@@ -78,7 +85,20 @@ async def _save(
     request_extra_fields: dict[str, Any] | None,
     report: TrajectoryReport | None,
     artifact_root: Path,
+    diagnostics: dict[str, Any] | None = None,
 ) -> None:
+    # Written before the sample-None early return so failures leave a record.
+    payload = diagnostics if diagnostics is not None else result.extra_fields
+    if payload is not None:
+        diagnostics_dest = artifact_root / rollout_id / "diagnostics.json"
+        diagnostics_data = json.dumps(
+            payload, ensure_ascii=False, indent=2, sort_keys=True, default=str
+        ).encode()
+        await asyncio.to_thread(_write_document, diagnostics_dest, diagnostics_data)
+        logger.info(
+            "Saved rollout diagnostics for %s -> %s", rollout_id, diagnostics_dest
+        )
+
     sample = result.sample
     if sample is None:
         return
