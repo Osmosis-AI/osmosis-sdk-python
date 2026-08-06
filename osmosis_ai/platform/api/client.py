@@ -650,6 +650,7 @@ class OsmosisClient:
         tasks_config: dict[str, Any] | None = None,
         execution_config: dict[str, Any] | None = None,
         env_config: dict[str, str] | None = None,
+        secrets: dict[str, Any] | None = None,
         credentials: Credentials | None = None,
         git_identity: str,
     ) -> SubmitBenchmarkRunResult:
@@ -664,6 +665,8 @@ class OsmosisClient:
             data["execution_config"] = execution_config
         if env_config:
             data["env_config"] = env_config
+        if secrets:
+            data["secrets"] = secrets
         result = platform_request(
             "/api/cli/benchmark-runs",
             method="POST",

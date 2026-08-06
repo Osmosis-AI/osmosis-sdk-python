@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -41,6 +42,7 @@ from osmosis_ai.platform.cli.benchmark_config import (
     BenchmarkSubmitConfig,
     load_benchmark_submit_config,
 )
+from osmosis_ai.platform.cli.secret_resolution import resolve_run_secrets
 from osmosis_ai.platform.cli.shared_config import (
     build_env_table_rows,
     build_secret_table_rows,
@@ -1127,19 +1129,26 @@ def _submit_benchmark(
     config: BenchmarkSubmitConfig,
     credentials: Any,
     git_identity: str,
+    secret_values: dict[str, str],
 ) -> SubmitBenchmarkRunResult:
+    secrets: dict[str, Any] | None = None
+    if config.secrets.required or secret_values:
+        secrets = {"required": config.secrets.required, "values": secret_values}
     return client.submit_benchmark_run(
         experiment_config=config.experiment_config,
         tasks_config=config.tasks_config or None,
         agents=config.agents_config,
         execution_config=config.execution_config or None,
         env_config=config.env or None,
+        secrets=secrets,
         credentials=credentials,
         git_identity=git_identity,
     )
 
 
-def submit(config_path: Path, *, yes: bool) -> OperationResult:
+def submit(
+    config_path: Path, *, yes: bool, secrets_file: str | None = None
+) -> OperationResult:
     """Submit a benchmark run."""
     context = require_git_workspace_directory_context()
     workspace_directory = Path(context.workspace_directory)
@@ -1212,11 +1221,21 @@ def submit(config_path: Path, *, yes: bool) -> OperationResult:
 
     _warn_if_hle_without_parity(config)
 
+    secret_values: dict[str, str] = {}
     if config.required_secrets:
         scopes = _fetch_secret_scopes(
             OsmosisClient(),
             credentials=context.credentials,
             git_identity=context.git_identity,
+        )
+        stored_names = set() if scopes is None else scopes[0] | scopes[1]
+        # Names the config lists under [secrets] may be supplied at submit; every
+        # other reference must already exist as a record.
+        secret_values = resolve_run_secrets(
+            names=config.secrets.required,
+            secrets_file=secrets_file,
+            stored_names=stored_names,
+            is_tty=sys.stdin.isatty(),
         )
         if scopes is None:
             secret_rows = [(name, "–") for name in sorted(config.required_secrets)]
@@ -1225,14 +1244,19 @@ def submit(config_path: Path, *, yes: bool) -> OperationResult:
             missing = sorted(
                 name
                 for name in config.required_secrets
-                if name not in workspace_names and name not in personal_names
+                if name not in workspace_names
+                and name not in personal_names
+                and name not in secret_values
             )
             if missing:
                 raise CLIError(_missing_secret_message(missing))
-            secret_rows = build_secret_table_rows(
-                config.required_secrets,
+            stored_rows = build_secret_table_rows(
+                [name for name in config.required_secrets if name not in secret_values],
                 user_secret_names=personal_names,
                 workspace_secret_names=workspace_names,
+            )
+            secret_rows = sorted(
+                [*stored_rows, *((name, "Run") for name in secret_values)]
             )
         console.table(
             secret_rows,
@@ -1255,6 +1279,7 @@ def submit(config_path: Path, *, yes: bool) -> OperationResult:
                 config,
                 context.credentials,
                 context.git_identity,
+                secret_values,
             )
         except PlatformAPIError as exc:
             enriched = _enrich_missing_secret_error(exc)

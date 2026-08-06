@@ -109,6 +109,12 @@ class BenchmarkExecutionSection(_StrictSection):
     judge_api_key_secret: str | None = None
 
 
+class BenchmarkSecretsSection(_StrictSection):
+    # Names resolved at submit from --secrets-file, the process environment, a
+    # prompt, or the secret store, in that order. Values never live in the file.
+    required: list[str] = Field(default_factory=list, max_length=16)
+
+
 class BenchmarkVerifierSection(_StrictSection):
     # Key is the variable the dataset's verifier reads, value the secret record
     # supplying it. Submit rejects the section for managed benchmarks.
@@ -125,6 +131,7 @@ class BenchmarkSubmitConfig(_StrictSection):
         default_factory=BenchmarkExecutionSection
     )
     verifier: BenchmarkVerifierSection = Field(default_factory=BenchmarkVerifierSection)
+    secrets: BenchmarkSecretsSection = Field(default_factory=BenchmarkSecretsSection)
     env: dict[str, str] = Field(default_factory=dict)
 
     @property
@@ -165,6 +172,7 @@ class BenchmarkSubmitConfig(_StrictSection):
         if isinstance(judge_secret, str):
             names.append(judge_secret)
         names.extend(self.verifier.env.values())
+        names.extend(self.secrets.required)
         return list(dict.fromkeys(names))
 
 

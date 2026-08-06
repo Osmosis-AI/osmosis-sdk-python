@@ -71,11 +71,19 @@ def benchmark_submit(
         help="Path to benchmark config TOML file.",
     ),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt."),
+    secrets_file: str = typer.Option(
+        None,
+        "--secrets-file",
+        help=(
+            "Dotenv file supplying values for [secrets] names; - reads stdin. "
+            "Values are never saved and are re-supplied on every run."
+        ),
+    ),
 ) -> Any:
     """Submit a benchmark run."""
     from osmosis_ai.platform.cli.benchmark import submit as _submit
 
-    return _submit(config_path, yes=yes)
+    return _submit(config_path, yes=yes, secrets_file=secrets_file)
 
 
 @runs_app.command("list")
