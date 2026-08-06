@@ -14,6 +14,8 @@ from osmosis_ai.rollout.trajectory import (
     save_trajectories,
 )
 from osmosis_ai.rollout.types import (
+    CancelRolloutsRequest,
+    CancelRolloutsResponse,
     ExecutionRequest,
     ExecutionResult,
     GraderCompleteRequest,
@@ -22,6 +24,7 @@ from osmosis_ai.rollout.types import (
     RolloutInitRequest,
     RolloutInitResponse,
     RolloutStatus,
+    RolloutStatusResponse,
 )
 from osmosis_ai.rollout.utils.http import post_json_with_retry
 
@@ -57,16 +60,52 @@ def create_rollout_server(
     async def health() -> dict[str, Any]:
         return backend.health()
 
-    @app.post("/rollout")
+    # 202: the rollout is queued and runs after this response returns.
+    @app.post("/rollout", status_code=202)
     async def rollout(
         request: RolloutInitRequest, background_tasks: BackgroundTasks
     ) -> RolloutInitResponse:
+        if not backend.has_capacity():
+            raise HTTPException(
+                status_code=429,
+                detail="rollout queue is full; retry later",
+                headers={"Retry-After": "5"},
+            )
         try:
             background_tasks.add_task(_handle_rollout, backend, request)
             return RolloutInitResponse()
         except Exception as e:
             logger.error(traceback.format_exc())
             raise HTTPException(status_code=500, detail=str(e)) from e
+
+    @app.get("/rollout/{rollout_id}/status")
+    async def rollout_status(rollout_id: str) -> RolloutStatusResponse:
+        state = backend.rollout_status(rollout_id)
+        if state is None:
+            return RolloutStatusResponse(
+                rollout_id=rollout_id, status=RolloutStatus.UNKNOWN
+            )
+        return RolloutStatusResponse(rollout_id=rollout_id, **state)
+
+    @app.post("/rollout/cancel")
+    async def cancel(request: CancelRolloutsRequest) -> CancelRolloutsResponse:
+        selectors = sum(
+            [request.ids is not None, request.prefix is not None, request.all]
+        )
+        if selectors != 1:
+            raise HTTPException(
+                status_code=422,
+                detail="pass exactly one selector: ids, prefix, or all",
+            )
+        dispositions = backend.cancel_rollouts(
+            ids=request.ids, prefix=request.prefix, all=request.all
+        )
+        logger.info(
+            "Cancelled %d rollout(s) (%s)",
+            sum(1 for d in dispositions.values() if d.startswith("cancelled")),
+            "all" if request.all else request.prefix or f"{len(request.ids or [])} ids",
+        )
+        return CancelRolloutsResponse(dispositions=dispositions)
 
     return app
 
