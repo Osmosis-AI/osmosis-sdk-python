@@ -50,9 +50,16 @@ class RolloutSample(BaseModel):
 
 
 class RolloutStatus(StrEnum):
-    PENDING = "pending"
+    """One vocabulary for rollout status everywhere: lifecycle states while
+    in flight (status polling), terminal states as execution outcomes."""
+
+    QUEUED = "queued"
+    RUNNING = "running"
+    GRADING = "grading"
     SUCCESS = "success"
     FAILURE = "failure"
+    CANCELLED = "cancelled"
+    UNKNOWN = "unknown"
 
 
 class RolloutErrorCategory(StrEnum):
@@ -82,3 +89,5 @@ class ExecutionResult(BaseModel):
     sample: RolloutSample | None = None
     err_message: str | None = None
     err_category: RolloutErrorCategory | None = None
+    # Backend diagnostics (failure phase, timings); not part of the wire protocol.
+    extra_fields: dict[str, Any] | None = None
