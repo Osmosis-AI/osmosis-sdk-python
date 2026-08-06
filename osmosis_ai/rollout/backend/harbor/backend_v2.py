@@ -25,7 +25,6 @@ import asyncio
 import inspect
 import json
 import logging
-import math
 import shutil
 import traceback
 import uuid
@@ -141,12 +140,6 @@ class HarborBackendV2(ExecutionBackend):
         self.task_resolver = task_resolver
         self.model_name = model_name
         self.agent = agent
-        if agent_setup_timeout_sec is not None and not (
-            math.isfinite(agent_setup_timeout_sec) and agent_setup_timeout_sec > 0
-        ):
-            # Harbor feeds this straight into asyncio.wait_for; 0/negative/NaN
-            # break it.
-            raise ValueError("agent_setup_timeout_sec must be a finite value > 0")
         self.agent_setup_timeout_sec = agent_setup_timeout_sec
         self.native: NativeAgentBinding | None = native_binding(agent)
         if self.native is not None and isinstance(agent, str):
@@ -474,10 +467,7 @@ class HarborBackendV2(ExecutionBackend):
                 )
             if on_grader_complete is not None and not pending.grader_complete_called:
                 await self.try_callback(
-                    on_grader_complete,
-                    pending.grader_result or failure,
-                    request.id,
-                    "grader",
+                    on_grader_complete, failure, request.id, "grader"
                 )
         else:
             err = getattr(trial_result, "exception_info", None)
@@ -969,39 +959,30 @@ class HarborBackendV2(ExecutionBackend):
             )
 
             if not pending.workflow_complete_called:
-                if pending.workflow_result is not None:
-                    # The outcome was produced but delivery failed; resend it
-                    # byte-identical instead of fabricating a failure.
-                    result = pending.workflow_result
-                elif event.result and event.result.exception_info:
-                    err = event.result.exception_info
-                    log_trial_exception(
-                        rollout_id, err, phase="before the agent completed"
-                    )
+                # A cached outcome means delivery failed at verification
+                # start; resend it byte-identical instead of fabricating.
+                result = pending.workflow_result
+                if result is None:
+                    if err:
+                        log_trial_exception(
+                            rollout_id, err, phase="before the agent completed"
+                        )
                     result = ExecutionResult(
                         status=RolloutStatus.FAILURE,
-                        err_message=err.exception_message,
+                        err_message=err.exception_message
+                        if err
+                        else "Trial ended before agent completed",
                         err_category=RolloutErrorCategory.AGENT_ERROR,
                         extra_fields=self.event_diagnostics(
                             event, RolloutErrorCategory.AGENT_ERROR
                         ),
                     )
-                else:
-                    result = ExecutionResult(
-                        status=RolloutStatus.FAILURE,
-                        err_message="Trial ended before agent completed",
-                        err_category=RolloutErrorCategory.AGENT_ERROR,
-                        extra_fields=self.event_diagnostics(
-                            event, RolloutErrorCategory.AGENT_ERROR
-                        ),
-                    )
-                pending.workflow_result = result
+                    pending.workflow_result = result
                 pending.workflow_complete_called = await self.try_callback(
                     pending.on_workflow_complete, result, rollout_id, "workflow"
                 )
 
             if pending.on_grader_complete:
-                pending.grader_result = grader_result
                 pending.grader_complete_called = await self.try_callback(
                     pending.on_grader_complete, grader_result, rollout_id, "grader"
                 )

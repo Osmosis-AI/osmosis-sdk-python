@@ -1062,21 +1062,6 @@ class TestConfigValidation:
             **kwargs,
         )
 
-    @pytest.mark.parametrize("timeout", [0, -5, float("nan"), float("inf")])
-    def test_agent_setup_timeout_rejects_nonpositive_and_nonfinite(
-        self, template_task, timeout
-    ):
-        with pytest.raises(ValueError, match="agent_setup_timeout_sec"):
-            self.backend_for(
-                template_task, agent="oracle", agent_setup_timeout_sec=timeout
-            )
-
-    def test_agent_setup_timeout_accepts_finite_positive(self, template_task):
-        backend = self.backend_for(
-            template_task, agent="oracle", agent_setup_timeout_sec=120.0
-        )
-        assert backend.agent_setup_timeout_sec == 120.0
-
     def test_max_queue_depth_zero_rejected(self, template_task):
         """Depth 0 used to mean reject-everything (429 on an idle server)."""
         with pytest.raises(ValueError, match="max_queue_depth"):
