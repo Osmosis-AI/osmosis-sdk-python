@@ -4,6 +4,7 @@ import asyncio
 import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from harbor.trial.queue import TrialQueue
@@ -148,10 +149,12 @@ class TestHarborTask:
         prompt = [{"role": "user", "content": "x"}]
         task_dir = HarborTask(template_task).materialize(
             tmp_path / "r1",
-            ContainerInput(rollout_id="r1", prompt=prompt),
+            ContainerInput(rollout_id="r1", prompt=prompt, label="42"),
             grader_script="bench-grade",
         )
         assert "bench-grade" in (task_dir / "tests" / "test.sh").read_text()
+        staged = ContainerInput.read(task_dir / "tests" / "container_input.json")
+        assert staged.label == "42"
 
     def test_task_native_tests_win(self, template_task, tmp_path):
         (template_task / "tests").mkdir()
@@ -182,6 +185,33 @@ class TestHarborTask:
             HarborTask.from_dataset(root, "../../etc")
         with pytest.raises(ValueError, match="unknown harbor task id"):
             HarborTask.from_dataset(root, "nope")
+
+
+class TestHarnessAgentLabelStrip:
+    async def test_agent_phase_copy_has_no_label(self, tmp_path):
+        from osmosis_ai.rollout.backend.harbor.harness_agent import (
+            OsmosisHarnessInstalledAgent,
+        )
+
+        agent = OsmosisHarnessInstalledAgent.__new__(OsmosisHarnessInstalledAgent)
+        agent.logs_dir = tmp_path / "logs"
+        agent.logs_dir.mkdir()
+        agent.input_path = tmp_path / "container_input.json"
+        agent.agent_script = "bench-agent"
+        ContainerInput(rollout_id="r1", label="42").write(agent.input_path)
+
+        async def fake_exec(environment, command):
+            pass
+
+        agent.exec_as_agent = fake_exec
+        env = SimpleNamespace(capabilities=SimpleNamespace(mounted=True))
+
+        await agent.run("do it", env, None)
+
+        staged = ContainerInput.read(agent.logs_dir / "container_input.json")
+        assert staged.label is None
+        assert staged.prompt == [{"role": "user", "content": "do it"}]
+        assert ContainerInput.read(agent.input_path).label == "42"
 
 
 class TestPatchDockerfileWithSdk:
