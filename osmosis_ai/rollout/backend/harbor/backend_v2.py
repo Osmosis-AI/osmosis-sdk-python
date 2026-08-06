@@ -120,6 +120,7 @@ class HarborBackendV2(ExecutionBackend):
         orchestrator: TrialQueue,
         tasks_dir: Path,
         agent: str | type | None = None,
+        native_agent_kwargs: dict[str, Any] | None = None,
         task_mode: TaskMode | str = TaskMode.TEMPLATE,
         model_name: str = "openai/osmosis-rollout",
         grader: type | str | None = None,
@@ -141,6 +142,14 @@ class HarborBackendV2(ExecutionBackend):
         self.agent = agent
         self.agent_setup_timeout_sec = agent_setup_timeout_sec
         self.native: NativeAgentBinding | None = native_binding(agent)
+        if native_agent_kwargs and self.native is None:
+            raise ValueError(
+                "native_agent_kwargs configures native harbor agents; "
+                "workflow agents take workflow_config"
+            )
+        self.native_agent_kwargs = (
+            dict(native_agent_kwargs) if native_agent_kwargs else None
+        )
         if self.native and not self.native.trainable:
             logger.warning(
                 "native agent %r emits no model trajectory; use it to validate "
@@ -306,6 +315,7 @@ class HarborBackendV2(ExecutionBackend):
                 model,
                 url,
                 container_input.api_key or "dummy",
+                extra_kwargs=self.native_agent_kwargs,
             )
         return self.harness_agent_config(task_dir)
 
