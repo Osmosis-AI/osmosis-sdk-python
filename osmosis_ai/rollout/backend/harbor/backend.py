@@ -127,6 +127,8 @@ class PendingTrial:
         self.grader_complete_called = False
         # Lets execute() tell a requested cancellation from an external one.
         self.cancel_requested = False
+        # Request label, the fallback when the sample carries none.
+        self.label: str | None = None
         self.preserve_trial = False
         self.started = False
         self.grading = False

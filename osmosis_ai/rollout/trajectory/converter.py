@@ -245,7 +245,17 @@ def _apply_report(
     if len(agent_steps) != len(report.llm_call_metrics):
         return [e.model_dump(exclude_none=True) for e in report.llm_call_metrics]
     for step, entry in zip(agent_steps, report.llm_call_metrics, strict=True):
-        step.metrics = _metrics_from_report_entry(entry) or step.metrics
+        reported = _metrics_from_report_entry(entry)
+        if reported is not None:
+            # Merge field by field: the count-only report must not erase
+            # native token ids and logprobs.
+            step.metrics = (
+                reported
+                if step.metrics is None
+                else step.metrics.model_copy(
+                    update=reported.model_dump(exclude_none=True)
+                )
+            )
         step.model_name = entry.model_name or step.model_name
         step.llm_call_count = 1
     return None

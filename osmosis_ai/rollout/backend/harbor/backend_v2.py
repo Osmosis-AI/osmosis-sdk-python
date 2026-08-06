@@ -386,6 +386,7 @@ class HarborBackendV2(ExecutionBackend):
         on_grader_complete: ResultCallback | None = None,
     ) -> None:
         pending = PendingTrial(on_workflow_complete, on_grader_complete)
+        pending.label = request.label
         self.pending[request.id] = pending
         try:
             container_input = self.build_input(request)
@@ -661,9 +662,14 @@ class HarborBackendV2(ExecutionBackend):
         except ValueError:
             return None
 
-    def native_sample(
-        self, event: TrialHookEvent, rollout_id: str, pending: PendingTrial
-    ) -> RolloutSample | None:
+    def load_native_trajectory(
+        self, rollout_id: str, pending: PendingTrial
+    ) -> dict[str, Any] | None:
+        """The redacted Harbor-authored ATIF document for this trial.
+
+        Returns None — preserving the trial directory — when a document
+        exists but cannot be used verbatim (invalid, or several of them).
+        """
         trial_dir = self.trials_dir / f"{TRIAL_NAME_PREFIX}{rollout_id}"
         paths = [p for p in (trial_dir / "agent" / "trajectory.json",) if p.is_file()]
         paths += sorted(trial_dir.glob("steps/*/agent/trajectory.json"))
@@ -692,18 +698,58 @@ class HarborBackendV2(ExecutionBackend):
             trajectory.agent.extra = redact_secrets(
                 trajectory.agent.extra, pending.api_key
             )
-        messages = messages_from_trajectory(trajectory.to_json_dict(exclude_none=True))
-        if not messages:
-            return None
-        return RolloutSample(messages=messages, metrics=trial_metrics(event.result))
+        return trajectory.to_json_dict(exclude_none=True)
 
-    def primary_sample(
+    def native_sample(
         self, event: TrialHookEvent, rollout_id: str, pending: PendingTrial
     ) -> RolloutSample | None:
-        if self.native is not None:
-            return self.native_sample(event, rollout_id, pending)
+        """Chat-shaped sample projected from the trial's ATIF document.
+
+        Reward-only bindings (oracle) yield a trajectoryless sample; trainable
+        bindings missing a document fail validation.
+        """
+        assert self.native is not None
+        document = self.load_native_trajectory(rollout_id, pending)
+        if document is None:
+            if not self.native.trainable:
+                return RolloutSample(
+                    trajectory_messages=None,
+                    label=pending.label,
+                    metrics=trial_metrics(event.result),
+                )
+            return None
+        messages = messages_from_trajectory(document)
+        if not messages:
+            return None
+        return RolloutSample(
+            messages=messages,
+            label=pending.label,
+            metrics=trial_metrics(event.result),
+        )
+
+    def bundle_sample(
+        self, event: TrialHookEvent, pending: PendingTrial
+    ) -> RolloutSample | None:
         result = self.container_result(event)
-        output = result.output if result else None
+        if result is None:
+            return None
+        if result.sample is not None:
+            # The workflow's sample round-trips field-for-field; the host adds
+            # only trial metrics and the request-label fallback. model_copy
+            # skips validators, so trajectory_messages=None stays untouched.
+            sample = result.sample
+            return sample.model_copy(
+                update={
+                    "metrics": {
+                        **trial_metrics(event.result),
+                        **(sample.metrics or {}),
+                    },
+                    "label": sample.label
+                    if sample.label is not None
+                    else pending.label,
+                }
+            )
+        output = result.output
         if output is None:
             return None
         messages = output.primary_messages()
@@ -711,8 +757,16 @@ class HarborBackendV2(ExecutionBackend):
             return None
         return RolloutSample(
             messages=messages,
+            label=pending.label,
             metrics={**trial_metrics(event.result), **output.metrics},
         )
+
+    def primary_sample(
+        self, event: TrialHookEvent, rollout_id: str, pending: PendingTrial
+    ) -> RolloutSample | None:
+        if self.native is not None:
+            return self.native_sample(event, rollout_id, pending)
+        return self.bundle_sample(event, pending)
 
     def agent_succeeded(self, event: TrialHookEvent) -> tuple[bool, str | None]:
         if event.result and event.result.exception_info:
@@ -735,10 +789,11 @@ class HarborBackendV2(ExecutionBackend):
         pending.grading = True
 
         succeeded, err_message = self.agent_succeeded(event)
+        sample = self.primary_sample(event, rollout_id, pending)
         if succeeded:
             outcome = ExecutionResult(
                 status=RolloutStatus.SUCCESS,
-                sample=self.primary_sample(event, rollout_id, pending),
+                sample=sample,
                 extra_fields=self.event_diagnostics(event),
             )
         else:
@@ -777,6 +832,8 @@ class HarborBackendV2(ExecutionBackend):
             )
 
         if event.result and event.result.verifier_result:
+            # The 'reward' channel is the harbor-wide convention (telemetry,
+            # viewer, step gating all hardcode it); never guess another one.
             rewards = event.result.verifier_result.rewards or {}
             reward = rewards.get("reward")
             if sample is not None and reward is not None:
