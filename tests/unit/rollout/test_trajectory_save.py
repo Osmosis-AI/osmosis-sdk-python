@@ -348,6 +348,11 @@ async def test_native_controller_report_overlays_step_metrics(
     doc = json.loads((tmp_path / "r1" / "trajectory.json").read_text())
     agent_step = doc["steps"][1]
     assert agent_step["metrics"]["prompt_tokens"] == 99
+    assert agent_step["metrics"]["completion_tokens"] == 42
+    # Native retokenization fields survive the count-only overlay.
+    assert agent_step["metrics"]["prompt_token_ids"] == [1, 2, 3]
+    assert agent_step["metrics"]["completion_token_ids"] == [7]
+    assert agent_step["metrics"]["logprobs"] == [-0.5]
     assert doc["final_metrics"]["total_prompt_tokens"] == 99
     assert doc["agent"]["model_name"] == "openai/controller-view"
     # Structure untouched: same steps, same tool calls.
