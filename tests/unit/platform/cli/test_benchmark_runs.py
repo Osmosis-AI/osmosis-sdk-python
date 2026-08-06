@@ -367,10 +367,7 @@ def test_stop_confirms_and_calls_platform(monkeypatch: pytest.MonkeyPatch) -> No
     }
     assert confirmations[0]["yes"] is True
     assert confirmations[0]["prompt"] == 'Stop benchmark run "hle-smoke"?'
-    assert confirmations[0]["summary"] == [
-        ("Name", "hle-smoke"),
-        ("ID", "run-1"),
-    ]
+    assert confirmations[0]["summary"] == [("Name", "hle-smoke")]
     assert calls == [
         {
             "operation": "get",

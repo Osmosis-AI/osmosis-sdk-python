@@ -1071,7 +1071,7 @@ def stop(name: str, *, yes: bool) -> OperationResult:
         f'Stop benchmark run "{detail.name}"?',
         yes=yes,
         default=False,
-        summary=[("Name", detail.name), ("ID", detail.id)],
+        summary=[("Name", detail.name)],
     )
     with output.status("Stopping benchmark run..."):
         client.stop_benchmark_run(
