@@ -277,17 +277,16 @@ def test_run_info_reports_duration_and_per_agent_metrics(
     assert any("LLM Cost" in line for line in results.plain_lines)
 
 
-def test_run_info_always_displays_canonical_id(
+@pytest.mark.parametrize("is_internal_user", [True, False])
+def test_run_info_shows_id_only_to_internal_users(
     monkeypatch: pytest.MonkeyPatch,
+    is_internal_user: bool,
 ) -> None:
-    """Unlike eval, the benchmark-run route sends no ``is_internal_user``, so
-    gating the ID on it would hide it from everyone."""
-
     class FakeClient:
         def get_benchmark_run(
             self, name_or_id: str, **kwargs: Any
         ) -> BenchmarkRunDetail:
-            return _detail(is_internal_user=False)
+            return _detail(is_internal_user=is_internal_user)
 
     monkeypatch.setattr(
         benchmark_module, "require_git_workspace_directory_context", _context
@@ -297,7 +296,9 @@ def test_run_info_always_displays_canonical_id(
     result = benchmark_module.run_info("hle-smoke")
 
     fields = {field.label: field.value for field in result.fields}
-    assert fields["ID"] == "run-1"
+    assert fields.get("ID") == ("run-1" if is_internal_user else None)
+    # The ID stays in the JSON envelope either way; only the table hides it.
+    assert result.data["benchmark_run"]["id"] == "run-1"
 
 
 def test_logs_uses_shared_cursor_result(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -889,8 +889,9 @@ def run_info(name: str) -> DetailResult:
 
     rows: list[tuple[str, str]] = [
         ("Name", console.escape(detail.name)),
-        ("ID", detail.id),
     ]
+    if detail.is_internal_user:
+        rows.append(("ID", detail.id))
     rows.extend(
         [
             ("Status", detail.status.replace("_", " ").title()),
