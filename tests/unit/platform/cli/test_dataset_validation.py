@@ -1,7 +1,4 @@
-"""Tests for dataset local validation (Step 0).
-
-Covers: required column checks, head+tail sampling, format-specific validation.
-"""
+"""Tests for dataset local validation (Step 0)."""
 
 from __future__ import annotations
 
@@ -15,7 +12,6 @@ from osmosis_ai.platform.cli.dataset import (
     _check_metadata_value,
     _check_required_columns,
     _metadata_is_absent,
-    _read_tail_lines,
     _validate_csv,
     _validate_file_with_warnings,
     _validate_jsonl,
@@ -28,69 +24,33 @@ from osmosis_ai.platform.cli.dataset import (
 
 
 class TestCheckRequiredColumns:
-    def test_all_present(self):
-        assert (
-            _check_required_columns(["system_prompt", "user_prompt", "ground_truth"])
-            == []
-        )
+    def test_prompt_mode_without_system_prompt(self):
+        assert _check_required_columns(["user_prompt", "ground_truth"]) == []
 
     def test_extra_columns_ok(self):
         cols = ["system_prompt", "user_prompt", "ground_truth", "extra", "another"]
         assert _check_required_columns(cols) == []
 
+    def test_metadata_mode_only_requires_metadata_column(self):
+        assert _check_required_columns(["metadata"]) == []
+
+    def test_label_is_ground_truth_alias(self):
+        assert _check_required_columns(["user_prompt", "label"]) == []
+
     def test_missing_one(self):
-        errors = _check_required_columns(["system_prompt"])
+        errors = _check_required_columns(["user_prompt"])
         assert len(errors) == 1
-        assert "user_prompt" in errors[0]
+        assert "ground_truth" in errors[0]
 
     def test_missing_all(self):
         errors = _check_required_columns(["foo", "bar"])
         assert len(errors) == 1
-        assert "system_prompt" in errors[0]
         assert "user_prompt" in errors[0]
+        assert "ground_truth" in errors[0]
 
     def test_empty(self):
         errors = _check_required_columns([])
         assert len(errors) == 1
-
-
-# ---------------------------------------------------------------------------
-# _read_tail_lines
-# ---------------------------------------------------------------------------
-
-
-class TestReadTailLines:
-    def test_small_file(self, tmp_path: Path):
-        f = tmp_path / "small.txt"
-        f.write_text("a\nb\nc\n")
-        assert _read_tail_lines(f, 100) == ["a", "b", "c"]
-
-    def test_returns_last_n(self, tmp_path: Path):
-        f = tmp_path / "lines.txt"
-        f.write_text("\n".join(f"line{i}" for i in range(200)) + "\n")
-        tail = _read_tail_lines(f, 5)
-        assert tail == [f"line{i}" for i in range(195, 200)]
-
-    def test_empty_file(self, tmp_path: Path):
-        f = tmp_path / "empty.txt"
-        f.write_text("")
-        assert _read_tail_lines(f, 10) == []
-
-    def test_no_trailing_newline(self, tmp_path: Path):
-        f = tmp_path / "no_nl.txt"
-        f.write_text("a\nb\nc")  # no trailing newline
-        assert _read_tail_lines(f, 100) == ["a", "b", "c"]
-
-    def test_chunk_boundary(self, tmp_path: Path):
-        """When chunk_size < file_size, partial first line is dropped."""
-        f = tmp_path / "big.txt"
-        lines = [f"line-{i:04d}" for i in range(50)]
-        f.write_text("\n".join(lines) + "\n")
-        # Use a tiny chunk so we don't read from the start
-        tail = _read_tail_lines(f, 3, chunk_size=64)
-        assert len(tail) == 3
-        # Should be the last 3 lines
-        assert tail == lines[-3:]
 
 
 # ---------------------------------------------------------------------------
@@ -105,11 +65,13 @@ def _make_jsonl(path: Path, rows: list[dict]) -> Path:
 
 class TestValidateJsonl:
     def test_valid_file(self, tmp_path: Path):
-        rows = [
-            {"system_prompt": "s", "user_prompt": "u", "ground_truth": "g"}
-            for _ in range(10)
-        ]
+        rows = [{"user_prompt": "u", "ground_truth": "g"} for _ in range(10)]
         f = _make_jsonl(tmp_path / "ok.jsonl", rows)
+        assert _validate_jsonl(f) == []
+
+    def test_metadata_only_file(self, tmp_path: Path):
+        rows = [{"metadata": {"task": "qa"}} for _ in range(5)]
+        f = _make_jsonl(tmp_path / "metadata.jsonl", rows)
         assert _validate_jsonl(f) == []
 
     def test_missing_required_columns(self, tmp_path: Path):
@@ -126,8 +88,7 @@ class TestValidateJsonl:
         errors = _validate_jsonl(f)
         assert any("Line 3" in e for e in errors)
 
-    def test_invalid_json_tail(self, tmp_path: Path):
-        """Errors in the last 100 lines are caught even if head is clean."""
+    def test_invalid_json_at_end(self, tmp_path: Path):
         f = tmp_path / "bad_tail.jsonl"
         good = '{"system_prompt":"s","user_prompt":"u","ground_truth":"g"}'
         lines = [good] * 200
@@ -135,10 +96,10 @@ class TestValidateJsonl:
         lines[-3] = "{bad"
         f.write_text("\n".join(lines) + "\n")
         errors = _validate_jsonl(f)
-        assert any("Near end of file" in e for e in errors)
+        assert any("Line 198" in e for e in errors)
+        assert any("Line 200" in e for e in errors)
 
-    def test_small_file_no_tail_pass(self, tmp_path: Path):
-        """Files <= 100 lines skip tail validation (already fully read)."""
+    def test_small_valid_file(self, tmp_path: Path):
         rows = [
             {"system_prompt": "s", "user_prompt": "u", "ground_truth": "g"}
             for _ in range(50)
@@ -172,14 +133,32 @@ class TestValidateJsonl:
         errors = _validate_jsonl(f)
         assert any("Dataset too small" in e for e in errors)
 
-    def test_columns_checked_from_tail_when_head_blank(self, tmp_path: Path):
-        """If head is all blank lines, columns are still checked via tail."""
+    def test_columns_checked_after_leading_blank_lines(self, tmp_path: Path):
         f = tmp_path / "blank_head.jsonl"
         blank_lines = [""] * 101  # > 100 so tail validation triggers
         data_lines = ['{"foo": "bar"}'] * 50
         f.write_text("\n".join(blank_lines + data_lines) + "\n")
         errors = _validate_jsonl(f)
         assert any("Missing required columns" in e for e in errors)
+
+    def test_top_level_fields_must_match_first_row(self, tmp_path: Path):
+        rows = [{"user_prompt": "u", "ground_truth": "g"} for _ in range(7)]
+        rows[3]["extra"] = "x"
+        f = _make_jsonl(tmp_path / "different-fields.jsonl", rows)
+        errors = _validate_jsonl(f)
+        assert any("Line 4" in e and "extra: extra" in e for e in errors)
+
+    def test_cannot_mix_prompt_and_metadata_modes(self, tmp_path: Path):
+        rows = [{"user_prompt": "u", "ground_truth": "g"} for _ in range(5)]
+        rows[2] = {"metadata": {"task": "qa"}}
+        f = _make_jsonl(tmp_path / "mixed-modes.jsonl", rows)
+        errors = _validate_jsonl(f)
+        assert any(
+            "Line 3" in e
+            and "missing: ground_truth, user_prompt" in e
+            and "extra: metadata" in e
+            for e in errors
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -190,8 +169,8 @@ class TestValidateJsonl:
 class TestValidateCsv:
     def test_valid_file(self, tmp_path: Path):
         f = tmp_path / "ok.csv"
-        rows = "s,u,g\n" * 5
-        f.write_text(f"system_prompt,user_prompt,ground_truth\n{rows}")
+        rows = "u,g\n" * 5
+        f.write_text(f"user_prompt,ground_truth\n{rows}")
         assert _validate_csv(f) == []
 
     def test_extra_columns_ok(self, tmp_path: Path):
@@ -218,7 +197,7 @@ class TestValidateCsv:
         errors = _validate_csv(f)
         assert any("expected 3 columns, got 2" in e for e in errors)
 
-    def test_inconsistent_columns_tail(self, tmp_path: Path):
+    def test_inconsistent_columns_at_end(self, tmp_path: Path):
         f = tmp_path / "bad_tail.csv"
         header = "system_prompt,user_prompt,ground_truth"
         good = "s,u,g"
@@ -226,7 +205,7 @@ class TestValidateCsv:
         lines[-1] = "s,u"  # bad row at end
         f.write_text("\n".join(lines) + "\n")
         errors = _validate_csv(f)
-        assert any("Near end of file" in e for e in errors)
+        assert any("Row 201" in e for e in errors)
 
     def test_small_file_no_tail(self, tmp_path: Path):
         f = tmp_path / "small.csv"
@@ -235,22 +214,11 @@ class TestValidateCsv:
         f.write_text("\n".join([header] + [good] * 20) + "\n")
         assert _validate_csv(f) == []
 
-    def test_exactly_100_data_rows_no_tail_pass(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ):
-        """100 data rows are fully covered by head validation for CSV."""
-        import osmosis_ai.platform.cli.dataset as dataset_module
-
+    def test_exactly_100_data_rows(self, tmp_path: Path):
         f = tmp_path / "exactly_100.csv"
         header = "system_prompt,user_prompt,ground_truth"
         good = "s,u,g"
         f.write_text("\n".join([header] + [good] * 100) + "\n")
-
-        def _should_not_be_called(*_args, **_kwargs):
-            raise AssertionError("Tail validation should not run for 100 data rows")
-
-        monkeypatch.setattr(dataset_module, "_read_tail_lines", _should_not_be_called)
-
         assert _validate_csv(f) == []
 
 
@@ -336,7 +304,6 @@ class TestValidateParquet:
 
         table = pa.table(
             {
-                "system_prompt": ["s"] * 5,
                 "user_prompt": ["u"] * 5,
                 "ground_truth": ["g"] * 5,
             }
@@ -382,7 +349,7 @@ class TestValidateParquet:
 
 
 # ---------------------------------------------------------------------------
-# Optional "metadata" column helpers
+# "metadata" mode helpers
 # ---------------------------------------------------------------------------
 
 
@@ -408,9 +375,11 @@ class TestMetadataHelpers:
     def test_object_string_passes(self):
         assert _check_metadata_value('{"tools": ["x"]}', location="Line 1") == []
 
-    def test_absent_passes(self):
-        assert _check_metadata_value(None, location="Line 1") == []
-        assert _check_metadata_value("", location="Line 1") == []
+    @pytest.mark.parametrize("value", [None, "", "   "])
+    def test_absent_rejected(self, value):
+        errors = _check_metadata_value(value, location="Line 1")
+        assert len(errors) == 1
+        assert "non-empty JSON object" in errors[0]
 
     def test_number_rejected(self):
         errors = _check_metadata_value(3, location="Line 1")
@@ -432,11 +401,11 @@ class TestMetadataHelpers:
         assert len(errors) == 1
         assert "not valid JSON" in errors[0]
 
-    def test_root_empty_object_passes_per_cell(self):
-        # {} mixed with keyed objects is valid; only an all-empty column is
-        # rejected, which is a cross-row check (see TestMetadataCrossRow).
-        assert _check_metadata_value({}, location="Line 1") == []
-        assert _check_metadata_value("{}", location="Line 1") == []
+    @pytest.mark.parametrize("value", [{}, "{}"])
+    def test_root_empty_object_rejected(self, value):
+        errors = _check_metadata_value(value, location="Line 1")
+        assert len(errors) == 1
+        assert "non-empty JSON object" in errors[0]
 
     def test_nested_empty_object_rejected(self):
         errors = _check_metadata_value({"a": {}}, location="Line 1")
@@ -477,7 +446,7 @@ class TestMetadataHelpers:
 
 
 def _base_row() -> dict:
-    return {"system_prompt": "s", "user_prompt": "u", "ground_truth": "g"}
+    return {"user_prompt": "u", "ground_truth": "g"}
 
 
 class TestMetadataJsonl:
@@ -491,11 +460,19 @@ class TestMetadataJsonl:
         f = _make_jsonl(tmp_path / "str.jsonl", rows)
         assert _validate_jsonl(f) == []
 
-    def test_absent_metadata_accepted(self, tmp_path: Path):
+    def test_null_metadata_rejected(self, tmp_path: Path):
         rows = [{**_base_row(), "metadata": None} for _ in range(5)]
-        rows.extend(_base_row() for _ in range(5))  # column missing entirely
         f = _make_jsonl(tmp_path / "absent.jsonl", rows)
-        assert _validate_jsonl(f) == []
+        errors = _validate_jsonl(f)
+        assert any("non-empty JSON object" in e for e in errors)
+
+    def test_missing_metadata_field_rejected(self, tmp_path: Path):
+        rows = [{**_base_row(), "metadata": {"k": "v"}} for _ in range(5)]
+        rows[2] = _base_row()
+        f = _make_jsonl(tmp_path / "missing.jsonl", rows)
+        errors = _validate_jsonl(f)
+        assert any("Line 3" in e and "missing: metadata" in e for e in errors)
+        assert any("Line 3" in e and "non-empty JSON object" in e for e in errors)
 
     def test_number_metadata_rejected(self, tmp_path: Path):
         rows = [{**_base_row(), "metadata": 3} for _ in range(5)]
@@ -541,20 +518,20 @@ class TestMetadataCrossRow:
         rows = [{**_base_row(), "metadata": {}} for _ in range(5)]
         f = _make_jsonl(tmp_path / "all_empty.jsonl", rows)
         errors = _validate_jsonl(f)
-        assert any("all sampled metadata objects are empty" in e for e in errors)
+        assert any("non-empty JSON object" in e for e in errors)
 
     def test_jsonl_all_empty_object_strings_rejected(self, tmp_path: Path):
         rows = [{**_base_row(), "metadata": "{}"} for _ in range(5)]
         f = _make_jsonl(tmp_path / "all_empty_str.jsonl", rows)
         errors = _validate_jsonl(f)
-        assert any("all sampled metadata objects are empty" in e for e in errors)
+        assert any("non-empty JSON object" in e for e in errors)
 
-    def test_jsonl_empty_mixed_with_keyed_accepted(self, tmp_path: Path):
-        # The platform only rejects a column whose non-null cells are ALL empty.
+    def test_jsonl_empty_mixed_with_keyed_rejected(self, tmp_path: Path):
         rows = [{**_base_row(), "metadata": {}} for _ in range(3)]
         rows.extend({**_base_row(), "metadata": {"k": "v"}} for _ in range(3))
         f = _make_jsonl(tmp_path / "mixed_empty.jsonl", rows)
-        assert _validate_jsonl(f) == []
+        errors = _validate_jsonl(f)
+        assert any("non-empty JSON object" in e for e in errors)
 
     def test_jsonl_nested_empty_object_rejected(self, tmp_path: Path):
         rows = [{**_base_row(), "metadata": {"a": {}}} for _ in range(5)]
@@ -615,7 +592,7 @@ class TestMetadataCrossRow:
         row = "s,u,g,{}"
         f.write_text("\n".join([header] + [row] * 5) + "\n")
         errors = _validate_csv(f)
-        assert any("all sampled metadata objects are empty" in e for e in errors)
+        assert any("non-empty JSON object" in e for e in errors)
 
     def test_csv_inconsistent_value_types_rejected(self, tmp_path: Path):
         f = tmp_path / "mixed_types.csv"
@@ -649,11 +626,12 @@ class TestMetadataCsv:
         f.write_text("\n".join([self._header()] + [row] * 5) + "\n")
         assert _validate_csv(f) == []
 
-    def test_absent_metadata_accepted(self, tmp_path: Path):
+    def test_absent_metadata_rejected(self, tmp_path: Path):
         f = tmp_path / "absent.csv"
         row = "s,u,g,"
         f.write_text("\n".join([self._header()] + [row] * 5) + "\n")
-        assert _validate_csv(f) == []
+        errors = _validate_csv(f)
+        assert any("non-empty JSON object" in e for e in errors)
 
     def test_json_array_string_metadata_rejected(self, tmp_path: Path):
         f = tmp_path / "arr.csv"
@@ -669,7 +647,7 @@ class TestMetadataCsv:
         errors = _validate_csv(f)
         assert any("not valid JSON" in e for e in errors)
 
-    def test_metadata_tail_validation(self, tmp_path: Path):
+    def test_metadata_validation_at_end(self, tmp_path: Path):
         f = tmp_path / "tail.csv"
         good = 's,u,g,"{""k"": ""v""}"'
         bad = "s,u,g,garbage{{"
@@ -677,12 +655,18 @@ class TestMetadataCsv:
         lines[-1] = bad
         f.write_text("\n".join(lines) + "\n")
         errors = _validate_csv(f)
-        assert any("Near end of file" in e and "metadata" in e for e in errors)
+        assert any("Row 201" in e and "metadata" in e for e in errors)
 
     def test_no_metadata_column_ok(self, tmp_path: Path):
         f = tmp_path / "no_meta.csv"
         header = "system_prompt,user_prompt,ground_truth"
         f.write_text("\n".join([header] + ["s,u,g"] * 5) + "\n")
+        assert _validate_csv(f) == []
+
+    def test_metadata_only_schema_ok(self, tmp_path: Path):
+        f = tmp_path / "metadata-only.csv"
+        row = '"{""task"": ""qa""}"'
+        f.write_text("\n".join(["metadata"] + [row] * 5) + "\n")
         assert _validate_csv(f) == []
 
 
@@ -703,9 +687,6 @@ class TestMetadataParquet:
 
         table = pa.table(
             {
-                "system_prompt": ["s"] * 5,
-                "user_prompt": ["u"] * 5,
-                "ground_truth": ["g"] * 5,
                 "metadata": [{"k": "v"}] * 5,
             }
         )
@@ -731,12 +712,10 @@ class TestMetadataParquet:
         assert _validate_parquet(f) == []
 
     @pytest.mark.usefixtures("_has_pyarrow")
-    def test_absent_string_metadata_accepted(self, tmp_path: Path):
+    def test_absent_string_metadata_rejected(self, tmp_path: Path):
         import pyarrow as pa
         import pyarrow.parquet as pq
 
-        # String-typed column with absent (null) cells: parseability check
-        # skips absent cells, so the column passes.
         table = pa.table(
             {
                 "system_prompt": ["s"] * 5,
@@ -747,14 +726,14 @@ class TestMetadataParquet:
         )
         f = tmp_path / "absent.parquet"
         pq.write_table(table, f)
-        assert _validate_parquet(f) == []
+        errors = _validate_parquet(f)
+        assert any("non-empty JSON object" in e for e in errors)
 
     @pytest.mark.usefixtures("_has_pyarrow")
-    def test_null_dtype_metadata_accepted(self, tmp_path: Path):
+    def test_null_dtype_metadata_rejected(self, tmp_path: Path):
         import pyarrow as pa
         import pyarrow.parquet as pq
 
-        # An all-null metadata column (null dtype) means every cell is absent.
         table = pa.table(
             {
                 "system_prompt": ["s"] * 5,
@@ -765,7 +744,8 @@ class TestMetadataParquet:
         )
         f = tmp_path / "null.parquet"
         pq.write_table(table, f)
-        assert _validate_parquet(f) == []
+        errors = _validate_parquet(f)
+        assert any("Invalid metadata column" in e for e in errors)
 
     @pytest.mark.usefixtures("_has_pyarrow")
     def test_int_dtype_rejected(self, tmp_path: Path):
@@ -819,7 +799,7 @@ class TestMetadataParquet:
         f = tmp_path / "all_empty.parquet"
         pq.write_table(table, f)
         errors = _validate_parquet(f)
-        assert any("all sampled metadata objects are empty" in e for e in errors)
+        assert any("non-empty JSON object" in e for e in errors)
 
     @pytest.mark.usefixtures("_has_pyarrow")
     def test_inconsistent_value_types_rejected(self, tmp_path: Path):
