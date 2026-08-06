@@ -426,11 +426,11 @@ class TestNativeAgents:
         backend = self.backend_for("mini-swe-agent", template_task)
         assert backend.bundle is None
 
-    def test_agent_kwargs_merge_into_native_config(self, template_task):
+    def test_native_agent_kwargs_merge_into_native_config(self, template_task):
         backend = self.backend_for(
             "mini-swe-agent",
             template_task,
-            agent_kwargs={"config": {"agent": {"step_limit": 20}}},
+            native_agent_kwargs={"config": {"agent": {"step_limit": 20}}},
         )
         container_input = ContainerInput(
             rollout_id="r1", chat_completions_url="http://t/v1", api_key="k"
@@ -439,9 +439,9 @@ class TestNativeAgents:
         assert config.kwargs["config"] == {"agent": {"step_limit": 20}}
         assert config.env["OPENAI_API_BASE"] == "http://t/v1"
 
-    def test_agent_kwargs_cannot_override_endpoint_wiring(self, template_task):
+    def test_native_agent_kwargs_cannot_override_endpoint_wiring(self, template_task):
         backend = self.backend_for(
-            "terminus-2", template_task, agent_kwargs={"api_base": "http://evil"}
+            "terminus-2", template_task, native_agent_kwargs={"api_base": "http://evil"}
         )
         container_input = ContainerInput(
             rollout_id="r1", chat_completions_url="http://t/v1"
@@ -449,13 +449,13 @@ class TestNativeAgents:
         config = backend.build_agent_config(template_task, container_input)
         assert config.kwargs["api_base"] == "http://t/v1"
 
-    def test_agent_kwargs_rejected_for_workflow_agents(self, bundle, template_task):
-        with pytest.raises(ValueError, match="agent_kwargs"):
+    def test_native_agent_kwargs_rejected_for_workflow_agents(self, bundle, template_task):
+        with pytest.raises(ValueError, match="native_agent_kwargs"):
             HarborBackendV2(
                 orchestrator=TrialQueue(n_concurrent=1),
                 tasks_dir=template_task,
                 bundle=bundle,
-                agent_kwargs={"config": {}},
+                native_agent_kwargs={"config": {}},
             )
 
     def test_dataset_mode_keeps_task_instruction(self, tmp_path, bundle):
