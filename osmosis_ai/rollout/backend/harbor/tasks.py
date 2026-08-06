@@ -182,10 +182,10 @@ class HarborTask:
         test_sh = task_dir / "tests" / "test.sh"
         if grader_script and not test_sh.exists():
             test_sh.parent.mkdir(parents=True, exist_ok=True)
+            container_input.write(test_sh.parent / INPUT_FILENAME)
             lines = ["#!/bin/bash", "set -e"]
             if grader_wheel is not None:
                 shutil.copy2(grader_wheel, test_sh.parent / grader_wheel.name)
-                container_input.write(test_sh.parent / INPUT_FILENAME)
                 lines.append(venv_or_fallback_install(f"/tests/{grader_wheel.name}"))
             lines.append(venv_or_fallback_script(grader_script))
             test_sh.write_text("\n".join(lines) + "\n")
