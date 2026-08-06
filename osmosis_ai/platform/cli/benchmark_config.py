@@ -116,9 +116,9 @@ class BenchmarkSecretsSection(_StrictSection):
 
 
 class BenchmarkVerifierSection(_StrictSection):
-    # Key is the variable the dataset's verifier reads, value the secret record
-    # supplying it. Submit rejects the section for managed benchmarks.
-    env: dict[str, str] = Field(default_factory=dict, max_length=16)
+    # Secret record names the dataset's verifier reads; the record name is the
+    # variable name. Submit rejects the section for managed benchmarks.
+    required: list[str] = Field(default_factory=list, max_length=16)
 
 
 class BenchmarkSubmitConfig(_StrictSection):
@@ -149,11 +149,8 @@ class BenchmarkSubmitConfig(_StrictSection):
     @property
     def execution_config(self) -> dict[str, Any]:
         config = self.execution.model_dump(exclude_none=True)
-        if self.verifier.env:
-            config["verifier_env"] = [
-                {"name": name, "secret": secret}
-                for name, secret in self.verifier.env.items()
-            ]
+        if self.verifier.required:
+            config["verifier_secrets"] = list(self.verifier.required)
         return config
 
     @property
@@ -171,7 +168,7 @@ class BenchmarkSubmitConfig(_StrictSection):
         judge_secret = self.execution.judge_api_key_secret
         if isinstance(judge_secret, str):
             names.append(judge_secret)
-        names.extend(self.verifier.env.values())
+        names.extend(self.verifier.required)
         names.extend(self.secrets.required)
         return list(dict.fromkeys(names))
 
@@ -236,14 +233,13 @@ def _validate_secret_references(config: BenchmarkSubmitConfig, path: Path) -> No
                 "judge secret value under that name; remove the env var or "
                 "rename it."
             )
-        for variable, secret in config.verifier.env.items():
+        for secret in config.verifier.required:
             if secret in effective_env:
                 source = _env_source_label(secret, index, agent.env)
                 raise CLIError(
-                    f"'{secret}' appears in {source} and as the secret for "
-                    f"'{variable}' in [verifier.env] of {path}. The platform "
-                    "injects the secret value under that name; remove the env "
-                    "var or rename it."
+                    f"'{secret}' appears in {source} and in [verifier].required "
+                    f"of {path}. The platform injects the secret value under "
+                    "that name; remove the env var or rename it."
                 )
         if "HF_TOKEN" in effective_env:
             source = _env_source_label("HF_TOKEN", index, agent.env)
@@ -300,9 +296,6 @@ def load_benchmark_submit_config(path: Path) -> BenchmarkSubmitConfig:
         ) from exc
 
     validate_env_var_keys(env=config.env, path=path)
-    validate_env_var_keys(
-        env=config.verifier.env, path=path, source_label="[verifier.env]"
-    )
     for index, agent in enumerate(config.agents, start=1):
         validate_env_var_keys(
             env=agent.env,
