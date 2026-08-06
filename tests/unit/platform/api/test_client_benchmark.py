@@ -250,6 +250,42 @@ def test_submit_benchmark_run_forwards_harness_api_key_secret(
 
 
 @patch("osmosis_ai.platform.api.client.platform_request")
+def test_submit_benchmark_run_includes_secrets_payload(
+    mock_request: MagicMock,
+) -> None:
+    mock_request.return_value = {
+        "id": "benchmark-run-1",
+        "name": "bright-otter",
+        "status": "pending",
+        "workflow_id": "benchmark-run/benchmark-run-1",
+        "task_count": 12,
+        "created_at": "2026-07-25T00:00:00Z",
+    }
+    secrets = {
+        "required": ["OPENAI_API_KEY"],
+        "provided": {"GITHUB_TOKEN": "ghp_test"},
+    }
+
+    OsmosisClient().submit_benchmark_run(
+        experiment_config={"benchmark": "HLE"},
+        agents=[
+            {
+                "harness": "codex",
+                "model": {
+                    "type": "provider",
+                    "model": "openai/gpt-5",
+                    "api_key_secret": "OPENAI_API_KEY",
+                },
+            }
+        ],
+        secrets=secrets,
+        git_identity="acme/workspace",
+    )
+
+    assert mock_request.call_args.kwargs["data"]["secrets"] == secrets
+
+
+@patch("osmosis_ai.platform.api.client.platform_request")
 def test_submit_benchmark_run_omits_empty_optional_sections(
     mock_request: MagicMock,
 ) -> None:
