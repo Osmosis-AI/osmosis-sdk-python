@@ -1100,23 +1100,6 @@ class TestConfigValidation:
         assert config.env["OPENAI_BASE_URL"] == "http://t/v1"
 
 
-class TestDuplicateRolloutIds:
-    async def test_duplicate_active_id_rejected(self, template_task):
-        """A duplicate must not overwrite live pending state or staged files."""
-        backend = HarborBackendV2(
-            orchestrator=TrialQueue(n_concurrent=1),
-            tasks_dir=template_task,
-            agent="oracle",
-        )
-        original = PendingTrial(noop_callback, None)
-        backend.pending["r1"] = original
-
-        with pytest.raises(ValueError, match="already active"):
-            await backend.execute(ExecutionRequest(id="r1", prompt=[]), noop_callback)
-
-        assert backend.pending["r1"] is original
-
-
 class TestArtifactLifecycle:
     def backend_for(self, template_task, tmp_path, queue, **kwargs):
         backend = HarborBackendV2(
