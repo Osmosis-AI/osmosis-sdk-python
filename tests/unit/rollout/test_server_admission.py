@@ -65,7 +65,7 @@ def test_backend_with_capacity_accepts():
     backend = StubBackend(capacity=True)
     client = TestClient(create_rollout_server(backend=backend))
     response = client.post("/rollout", json=init_body())
-    assert response.status_code == 200
+    assert response.status_code == 202
     assert backend.executed is True
 
 
