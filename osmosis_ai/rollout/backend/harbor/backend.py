@@ -118,12 +118,13 @@ class PendingTrial:
     ):
         self.on_workflow_complete = on_workflow_complete
         self.on_grader_complete = on_grader_complete
-        # Each channel's outcome is produced once and cached; *_called means
-        # "delivered". Retries resend the cached outcome byte-identical.
+        # The workflow outcome is produced at verification start and cached so
+        # a failed delivery is retried byte-identical at trial end; *_called
+        # means "delivered". The grader outcome is produced only at trial end,
+        # so it needs no cache -- just double-send protection.
         self.workflow_complete_called = False
         self.workflow_result: ExecutionResult | None = None
         self.grader_complete_called = False
-        self.grader_result: ExecutionResult | None = None
         # Lets execute() tell a requested cancellation from an external one.
         self.cancel_requested = False
         self.preserve_trial = False

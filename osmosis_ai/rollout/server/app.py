@@ -146,7 +146,6 @@ async def _handle_rollout(
             payload=RolloutCompleteRequest(
                 status=result.status,
                 rollout_id=rollout_id,
-                extra_fields=result.extra_fields,
                 err_message=result.err_message,
                 err_category=result.err_category,
             ).model_dump(),
@@ -178,7 +177,6 @@ async def _handle_rollout(
                 if result.status == RolloutStatus.SUCCESS
                 else GraderStatus.FAILURE,
                 sample=result.sample,
-                extra_fields=result.extra_fields,
                 err_message=result.err_message,
                 err_category=result.err_category,
             ).model_dump(exclude={"sample": {"trajectory_messages"}}),
@@ -216,7 +214,6 @@ async def _handle_rollout(
                 payload=RolloutCompleteRequest(
                     status=RolloutStatus.FAILURE,
                     rollout_id=rollout_id,
-                    extra_fields=last_diagnostics,
                     err_message="Internal server error",
                 ).model_dump(),
                 headers=auth.as_bearer_headers(),
@@ -226,11 +223,7 @@ async def _handle_rollout(
             logger.error("Failed to post error callback: %s", traceback.format_exc())
         if request.grader_callback_url:
             try:
-                await on_grader_complete(
-                    ExecutionResult(
-                        status=RolloutStatus.FAILURE, extra_fields=last_diagnostics
-                    )
-                )
+                await on_grader_complete(ExecutionResult(status=RolloutStatus.FAILURE))
             except Exception:
                 logger.error(
                     "Failed to post grader error callback: %s",
