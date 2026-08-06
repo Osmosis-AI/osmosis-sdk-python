@@ -47,6 +47,8 @@ _NonEmptyTaskSelector = Annotated[str, Field(min_length=1, pattern=r"\S")]
 class BenchmarkTasksSection(_StrictSection):
     categories: list[_NonEmptyTaskSelector] | None = None
     task_names: list[_NonEmptyTaskSelector] | None = None
+    # Strict on purpose: the route silently expands an unrecognized task_set to
+    # the full benchmark, so a typo here would run every task instead of erroring.
     task_set: Literal["parity"] | None = None
 
 

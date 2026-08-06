@@ -175,6 +175,33 @@ def test_all_benchmark_download_accepts_stable_artifact_paths(
     assert (root / "logs.txt").is_file()
 
 
+def test_benchmark_artifact_named_like_an_eval_manifest_is_downloadable(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Eval reserves ``artifacts/row_N_run_M/manifest.json`` as a server index.
+    That reservation belongs to eval's classifier, not to every domain."""
+    path = "artifacts/row_3_run_0/manifest.json"
+    _stub_context(monkeypatch, tmp_path)
+    monkeypatch.setattr(
+        benchmark_module,
+        "OsmosisClient",
+        _fake_client(manifest_files=[RunDownloadFile(path, 10, token="result-3")]),
+    )
+    _stub_download(monkeypatch)
+
+    result = benchmark_module.download(
+        "hle-smoke",
+        output=None,
+        types="artifacts",
+        overwrite=False,
+        yes=True,
+    )
+
+    assert result.status == "success"
+    assert (tmp_path / ".osmosis" / "benchmarks" / "hle-smoke" / path).is_file()
+
+
 @pytest.mark.parametrize("status", ["pending", "queued"])
 def test_benchmark_download_rejects_pending_statuses(
     monkeypatch: pytest.MonkeyPatch,

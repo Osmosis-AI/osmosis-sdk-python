@@ -1081,7 +1081,12 @@ def stop(name: str, *, yes: bool) -> OperationResult:
     return OperationResult(
         operation="benchmark.stop",
         status="success",
-        resource={"id": detail.id, "name": detail.name, "status": "stopped"},
+        resource={
+            "id": detail.id,
+            "name": detail.name,
+            "status": "stopped",
+            **git_result_context(context),
+        },
         message=f'Benchmark run "{detail.name}" stopped.',
     )
 
@@ -1156,6 +1161,7 @@ def submit(config_path: Path, *, yes: bool) -> OperationResult:
         ("Benchmark", config.experiment.benchmark),
         ("Tasks", _task_selection_label(config)),
         ("Agents", str(len(config.agents))),
+        # Mirrors the route's execution_config defaults.
         ("Attempts per task", str(execution.get("attempts_per_task", 1))),
         (
             "Max concurrent attempts",

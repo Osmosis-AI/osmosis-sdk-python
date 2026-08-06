@@ -44,7 +44,9 @@ PathCategory = Callable[[str], str | None]
 
 _ROWS_RE = re.compile(r"\d+(?:-\d+)?(?:,\d+(?:-\d+)?)*")
 _URL_RE = re.compile(r"https?://\S+", re.IGNORECASE)
-_RESERVED_ARTIFACT_MANIFEST_RE = re.compile(r"artifacts/row_\d+_run_\d+/manifest\.json")
+_EVAL_RESERVED_ARTIFACT_MANIFEST_RE = re.compile(
+    r"artifacts/row_\d+_run_\d+/manifest\.json"
+)
 
 
 @dataclass(frozen=True)
@@ -102,6 +104,9 @@ def validate_rows(value: str | None) -> str | None:
 
 
 def _path_category(path: str) -> str | None:
+    if _EVAL_RESERVED_ARTIFACT_MANIFEST_RE.fullmatch(path) is not None:
+        # The per-run artifact manifest is a server-side index, not an output.
+        return None
     if path == "metrics.json":
         return "metrics"
     if path == "logs.txt":
@@ -137,8 +142,6 @@ def _safe_relative_path(
         return None
     parts = path.split("/")
     if any(part in {"", ".", ".."} for part in parts):
-        return None
-    if _RESERVED_ARTIFACT_MANIFEST_RE.fullmatch(path) is not None:
         return None
     category = path_category(path)
     if category is None or category not in selected_types:

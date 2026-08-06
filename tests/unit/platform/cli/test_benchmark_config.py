@@ -208,6 +208,8 @@ judge_api_key_secret = "OPENAI_API_KEY"
 def test_load_benchmark_submit_config_rejects_unknown_task_set(
     tmp_path: Path,
 ) -> None:
+    """The route expands an unrecognized task_set to every task rather than
+    failing, so the typo has to be caught here."""
     path = _write_config(
         tmp_path / "benchmark.toml",
         """

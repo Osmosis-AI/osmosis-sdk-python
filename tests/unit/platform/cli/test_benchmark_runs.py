@@ -17,6 +17,7 @@ from osmosis_ai.platform.api.models import (
     LogsPage,
     PaginatedBenchmarkRuns,
 )
+from osmosis_ai.platform.cli.workspace_directory_context import git_result_context
 
 GIT_IDENTITY = "acme/workspace"
 FAKE_CREDENTIALS = object()
@@ -279,6 +280,9 @@ def test_run_info_reports_duration_and_per_agent_metrics(
 def test_run_info_always_displays_canonical_id(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Unlike eval, the benchmark-run route sends no ``is_internal_user``, so
+    gating the ID on it would hide it from everyone."""
+
     class FakeClient:
         def get_benchmark_run(
             self, name_or_id: str, **kwargs: Any
@@ -358,6 +362,7 @@ def test_stop_confirms_and_calls_platform(monkeypatch: pytest.MonkeyPatch) -> No
         "id": "run-1",
         "name": "hle-smoke",
         "status": "stopped",
+        **git_result_context(_context()),
     }
     assert confirmations[0]["yes"] is True
     assert confirmations[0]["prompt"] == 'Stop benchmark run "hle-smoke"?'
@@ -414,4 +419,5 @@ def test_stop_resolves_name_before_stopping_canonical_id(
         "id": "run-1",
         "name": "hle-smoke",
         "status": "stopped",
+        **git_result_context(_context()),
     }
