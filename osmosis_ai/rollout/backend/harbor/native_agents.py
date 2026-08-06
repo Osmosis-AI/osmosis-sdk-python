@@ -51,18 +51,21 @@ def native_agent_config(
     model_name: str,
     url: str,
     api_key: str,
+    extra_kwargs: dict[str, Any] | None = None,
 ) -> HarborAgentConfig:
+    kwargs = {**binding.kwargs, **(extra_kwargs or {})}
     if binding.wiring == "none":
         return HarborAgentConfig(
-            name=name,
-            model_name=model_name,
-            env=dict(binding.env),
-            kwargs=dict(binding.kwargs),
+            name=name, model_name=model_name, env=dict(binding.env), kwargs=kwargs
         )
     if binding.wiring == "env":
         env = {**binding.env, "OPENAI_API_BASE": url, "OPENAI_API_KEY": api_key}
         return HarborAgentConfig(
-            name=name, model_name=model_name, env=env, kwargs=dict(binding.kwargs)
+            name=name, model_name=model_name, env=env, kwargs=kwargs
         )
-    kwargs = {**binding.kwargs, "api_base": url, "api_key": api_key}
-    return HarborAgentConfig(name=name, model_name=model_name, kwargs=kwargs)
+    # Endpoint wiring wins over user kwargs: the rollout URL is not optional.
+    return HarborAgentConfig(
+        name=name,
+        model_name=model_name,
+        kwargs={**kwargs, "api_base": url, "api_key": api_key},
+    )
