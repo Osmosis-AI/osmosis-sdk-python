@@ -682,53 +682,22 @@ class TestGraderOutcome:
         assert "Command failed" in outcome.err_message
 
 
-class TestTaskResolver:
-    def backend_for(self, template_task, resolver=None):
+class TestTaskResolution:
+    def backend_for(self, template_task):
         return HarborBackendV2(
             orchestrator=TrialQueue(n_concurrent=1),
             tasks_dir=template_task,
             agent="terminus-2",
-            task_resolver=resolver,
         )
 
-    async def test_sync_resolver_owns_task_selection(self, template_task, tmp_path):
-        custom = tmp_path / "custom-task"
-        custom.mkdir()
-        seen = []
-
-        def resolver(request):
-            seen.append(request.id)
-            return HarborTask(custom)
-
-        backend = self.backend_for(template_task, resolver)
-        request = request_for(metadata={"harbor_task": "ignored/by-resolver"})
-
-        task = await backend.resolve_task(request)
-
-        assert task.path == custom
-        assert seen == ["r1"]
-
-    async def test_async_resolver_is_awaited(self, template_task, tmp_path):
-        custom = tmp_path / "custom-task"
-        custom.mkdir()
-
-        async def resolver(request):
-            return HarborTask(custom)
-
-        backend = self.backend_for(template_task, resolver)
-
-        task = await backend.resolve_task(request_for())
-
-        assert task.path == custom
-
-    async def test_default_resolution_unchanged_without_resolver(self, template_task):
+    async def test_template_mode_resolves_configured_dir(self, template_task):
         backend = self.backend_for(template_task)
 
         task = await backend.resolve_task(request_for())
 
         assert task.path == template_task
 
-    async def test_resolver_task_instruction_replacement_warns(
+    async def test_fetched_task_instruction_replacement_warns(
         self, template_task, tmp_path, caplog
     ):
         """The warning keys on what is destroyed, not how the task was selected."""
@@ -749,9 +718,16 @@ class TestTaskResolver:
             orchestrator=orchestrator,
             tasks_dir=template_task,
             agent="terminus-2",
-            task_resolver=lambda request: HarborTask(authored),
         )
-        request = request_for(prompt=[{"role": "user", "content": "row prompt"}])
+
+        async def fetch_local(ref, metadata):
+            return HarborTask(authored)
+
+        backend.fetch_task = fetch_local
+        request = request_for(
+            prompt=[{"role": "user", "content": "row prompt"}],
+            metadata={"harbor_task": "./tasks/x"},
+        )
 
         async def noop(result):
             pass
@@ -1117,36 +1093,10 @@ class TestConfigValidation:
         assert backend.environment_config is not caller_config
         assert "poison" not in backend.environment_config.kwargs
 
-    def test_model_provider_validated_at_construction(self, template_task):
-        with pytest.raises(ValueError, match="requires a model prefixed"):
-            self.backend_for(
-                template_task, agent="terminus-2", model_name="anthropic/claude"
-            )
-        with pytest.raises(ValueError, match="requires a model prefixed"):
-            self.backend_for(
-                template_task, agent="mini-swe-agent", model_name="unprefixed"
-            )
-        # Oracle emits no model traffic, so any model label is admissible.
-        self.backend_for(template_task, agent="oracle", model_name="anything/goes")
-
-    def test_harbor_model_override_validated_per_request(self, template_task):
+    def test_missing_harbor_model_falls_back_to_default(self, template_task):
         backend = self.backend_for(template_task, agent="terminus-2")
         base = {"rollout_id": "r1", "chat_completions_url": "http://t/v1"}
 
-        with pytest.raises(ValueError, match="requires a model prefixed"):
-            backend.build_agent_config(
-                template_task,
-                ContainerInput(**base, metadata={"harbor_model": "anthropic/x"}),
-            )
-        # Present-but-invalid must fail, not fall back to the default model.
-        with pytest.raises(ValueError, match="non-empty string"):
-            backend.build_agent_config(
-                template_task, ContainerInput(**base, metadata={"harbor_model": ""})
-            )
-        with pytest.raises(ValueError, match="non-empty string"):
-            backend.build_agent_config(
-                template_task, ContainerInput(**base, metadata={"harbor_model": None})
-            )
         config = backend.build_agent_config(template_task, ContainerInput(**base))
         assert config.model_name == backend.model_name
 
@@ -1602,16 +1552,16 @@ class TestCallbackOutcomes:
         async def on_grader(result):
             grader_results.append(result)
 
-        def resolver(request):
+        async def failing_resolve(request):
             raise ValueError("harbor_task metadata is malformed")
 
         backend = HarborBackendV2(
             orchestrator=FakeQueue(),
             tasks_dir=template_task,
             agent="terminus-2",
-            task_resolver=resolver,
             trials_dir=tmp_path / "trials",
         )
+        backend.resolve_task = failing_resolve
         backend.rollouts_dir = tmp_path / "rollouts"
         request = ExecutionRequest(id="r1", prompt=[{"role": "user", "content": "x"}])
         with self.execute_ctx():
@@ -1633,16 +1583,16 @@ class TestCallbackOutcomes:
         async def raising_workflow(result):
             raise RuntimeError("delivery failed")
 
-        def resolver(request):
+        async def failing_resolve(request):
             raise RuntimeError("setup failed")
 
         backend = HarborBackendV2(
             orchestrator=FakeQueue(),
             tasks_dir=template_task,
             agent="terminus-2",
-            task_resolver=resolver,
             trials_dir=tmp_path / "trials",
         )
+        backend.resolve_task = failing_resolve
         backend.rollouts_dir = tmp_path / "rollouts"
         request = ExecutionRequest(id="r1", prompt=[{"role": "user", "content": "x"}])
         with self.execute_ctx():

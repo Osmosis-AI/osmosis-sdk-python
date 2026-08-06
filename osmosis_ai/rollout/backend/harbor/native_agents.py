@@ -14,9 +14,6 @@ class NativeAgentBinding:
     trainable: bool = True
     env: dict[str, str] = field(default_factory=dict)
     kwargs: dict[str, Any] = field(default_factory=dict)
-    # Providers the rollout endpoint can serve; the model prefix selects
-    # litellm's protocol. None = unrestricted (no model traffic).
-    providers: frozenset[str] | None = None
 
 
 NATIVE_AGENTS: dict[str, NativeAgentBinding] = {
@@ -25,36 +22,15 @@ NATIVE_AGENTS: dict[str, NativeAgentBinding] = {
         # Summarization rewrites the running context, which forks the token
         # trajectory RL training needs to stay append-only.
         kwargs={"enable_summarize": False},
-        providers=frozenset({"openai"}),
     ),
     "mini-swe-agent": NativeAgentBinding(
         wiring="env",
         env={"MSWEA_COST_TRACKING": "ignore_errors"},
-        providers=frozenset({"openai"}),
     ),
     # Runs the task's reference solution with no model traffic; validates
     # datasets and verifiers, never produces training data.
     "oracle": NativeAgentBinding(wiring="none", trainable=False),
 }
-
-
-def validate_model_for_binding(
-    name: str, binding: NativeAgentBinding, model_name: str
-) -> None:
-    """Reject models whose provider the rollout endpoint cannot serve.
-
-    A dataset row switching the provider prefix would switch the wire protocol
-    or route the rollout credential to a provider-derived endpoint.
-    """
-    if binding.providers is None:
-        return
-    provider, separator, _ = model_name.partition("/")
-    if not separator or provider not in binding.providers:
-        raise ValueError(
-            f"native agent {name!r} requires a model prefixed with one of "
-            f"{sorted(binding.providers)!r} so traffic stays on the rollout "
-            f"endpoint; got {model_name!r}"
-        )
 
 
 def native_prewarm_agent_config(
