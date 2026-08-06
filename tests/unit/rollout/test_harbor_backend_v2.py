@@ -737,8 +737,7 @@ class TestTaskResolver:
     async def test_configured_template_instruction_stays_silent(
         self, template_task, caplog
     ):
-        """The configured template dir's own instruction.md is a fallback by
-        design; replacing it with the prompt is the intended flow."""
+        """Replacing the template dir's own instruction.md is the intended flow."""
         import logging
         from types import SimpleNamespace
 
@@ -1013,9 +1012,8 @@ class TestPrewarm:
 
 
 class FakeQueue:
-    """Stands in for harbor's TrialQueue: fires the registered hooks like a
-    real trial, then simulates harbor's secret scrub *after* the END hook and
-    *before* submit() resolves — the ordering the backend must respect."""
+    """A TrialQueue that fires hooks, then simulates harbor's secret scrub
+    after the END hook and before submit() resolves."""
 
     def __init__(self, run=None):
         self.hooks = {}
@@ -1080,8 +1078,7 @@ class TestConfigValidation:
         assert backend.agent_setup_timeout_sec == 120.0
 
     def test_max_queue_depth_zero_rejected(self, template_task):
-        """Depth 0 used to mean reject-everything (429 on an idle server); the
-        backend cannot see queue concurrency, so it cannot mean anything else."""
+        """Depth 0 used to mean reject-everything (429 on an idle server)."""
         with pytest.raises(ValueError, match="max_queue_depth"):
             self.backend_for(template_task, agent="oracle", max_queue_depth=0)
         assert (
@@ -1140,8 +1137,7 @@ class TestConfigValidation:
 
     @pytest.mark.parametrize("agent", ["terminus-2", "mini-swe-agent"])
     def test_empty_endpoint_refused_for_wired_agents(self, template_task, agent):
-        """An empty api_base makes litellm fall back to the provider's public
-        endpoint, sending the rollout credential off-host."""
+        """An empty api_base sends the rollout credential to the public endpoint."""
         backend = self.backend_for(template_task, agent=agent)
         with pytest.raises(ValueError, match="no chat_completions_url"):
             backend.build_agent_config(
@@ -1157,8 +1153,7 @@ class TestConfigValidation:
         assert config.name == "oracle"
 
     def test_env_wiring_sets_both_base_url_spellings(self, template_task):
-        """mini-swe-agent reads OPENAI_BASE_URL before OPENAI_API_BASE; both
-        must carry the rollout endpoint so host values cannot outrank it."""
+        """Both OPENAI_* spellings must carry the rollout endpoint."""
         backend = self.backend_for(template_task, agent="mini-swe-agent")
         config = backend.build_agent_config(
             template_task,
@@ -1172,8 +1167,7 @@ class TestConfigValidation:
 
 class TestDuplicateRolloutIds:
     async def test_duplicate_active_id_rejected(self, template_task):
-        """A duplicate would overwrite live pending state and rewrite the
-        active trial's staged input files; it must never be admitted."""
+        """A duplicate must not overwrite live pending state or staged files."""
         backend = HarborBackendV2(
             orchestrator=TrialQueue(n_concurrent=1),
             tasks_dir=template_task,
@@ -1205,8 +1199,7 @@ class TestArtifactLifecycle:
     async def test_artifacts_relocate_only_after_harbor_scrub(
         self, template_task, tmp_path
     ):
-        """Harbor scrubs the trial dir after the END hook and before submit()
-        resolves; the durable copy must be taken from the scrubbed tree."""
+        """The durable copy must be taken from the post-scrub tree."""
         from osmosis_ai.rollout.context import RolloutContext
 
         async def run(queue, config):
@@ -1241,8 +1234,7 @@ class TestArtifactLifecycle:
     async def test_cancellation_cleans_rollout_and_trial_residue(
         self, template_task, tmp_path
     ):
-        """Cancelled rollouts must not leave credential-bearing staging or
-        trial directories behind; harbor's scrub never ran for them."""
+        """Cancelled rollouts must not leave credential-bearing directories."""
         from osmosis_ai.rollout.context import RolloutContext
 
         started = asyncio.Event()
@@ -1355,8 +1347,7 @@ class TestPrewarmIdentity:
                 agent=agent,
                 trials_dir=tmp_path / "trials",
             )
-            # Even with an ambient rollout context, prewarm must not pick up
-            # its endpoint or credential.
+            # Prewarm must not pick up the ambient context's endpoint or key.
             with RolloutContext(
                 chat_completions_url="http://t/v1", api_key="rk-1", rollout_id="x"
             ):
@@ -1368,8 +1359,7 @@ class TestPrewarmIdentity:
     async def test_prewarm_named_rollout_id_is_not_treated_as_prewarm(
         self, template_task
     ):
-        """'prewarm-...' is a legal controller-supplied rollout id; dispatch
-        must key on the backend-generated registry, not the id pattern."""
+        """Dispatch must key on the registry, not a 'prewarm-' id pattern."""
         from types import SimpleNamespace
 
         backend = HarborBackendV2(
@@ -1403,8 +1393,7 @@ class TestPrewarmIdentity:
             )
             await queue.fire("start", event)
             await queue.fire("end", event)
-            # The END hook must not have removed anything: harbor's scrub
-            # (simulated here) still needs the tree.
+            # The END hook must leave the tree for harbor's scrub.
             seen_dirs[config.trial_name] = trial_dir.exists()
             return trial_result()
 

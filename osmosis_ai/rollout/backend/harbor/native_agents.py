@@ -14,10 +14,8 @@ class NativeAgentBinding:
     trainable: bool = True
     env: dict[str, str] = field(default_factory=dict)
     kwargs: dict[str, Any] = field(default_factory=dict)
-    # Model providers whose wire protocol the rollout endpoint serves; the
-    # model prefix selects litellm's protocol (and, for env-wired agents,
-    # which provider's key variables the agent derives). None = unrestricted,
-    # for agents that emit no model traffic.
+    # Providers the rollout endpoint can serve; the model prefix selects
+    # litellm's protocol. None = unrestricted (no model traffic).
     providers: frozenset[str] | None = None
 
 
@@ -98,9 +96,8 @@ def native_agent_config(
             kwargs=dict(binding.kwargs),
         )
     if binding.wiring == "env":
-        # mini-swe-agent reads OPENAI_BASE_URL before OPENAI_API_BASE; set
-        # both spellings so a host-level value can never outrank the rollout
-        # endpoint the credential belongs to.
+        # mini-swe-agent reads OPENAI_BASE_URL before OPENAI_API_BASE; set both
+        # so a host-level value can never outrank the rollout endpoint.
         env = {
             **binding.env,
             "OPENAI_API_BASE": url,
