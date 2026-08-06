@@ -1,0 +1,14 @@
+[project]
+name = "bench-harness"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "osmosis-ai @ https://github.com/Osmosis-AI/osmosis-sdk-python/archive/refs/heads/feat/harbor-backend-v2.tar.gz",
+]
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["bench_harness*"]
