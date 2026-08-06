@@ -46,6 +46,7 @@ dependencies = [
     # Requirement parsing for the submit preflight. Transitive via setuptools and
     # litellm, but declared because the CLI imports it directly.
     "packaging>=24.0",
+    "platformdirs>=4.0",
     # CLI framework. <0.28 keeps cli/_click_compat.py's private imports stable.
     "typer>=0.27,<0.28",
     # Do not directly constrain typer-slim: versions <0.22 shared typer/* with
