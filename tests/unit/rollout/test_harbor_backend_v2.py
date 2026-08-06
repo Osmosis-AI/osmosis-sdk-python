@@ -396,8 +396,7 @@ class TestNativeAgents:
         assert config.model_name == "openai/m"
         assert config.kwargs["api_base"] == "http://t/v1"
         assert config.kwargs["enable_summarize"] is False
-        # Terminus-2 ignores a top-level api_key; identity must ride in
-        # llm_kwargs, and controllers require non-streaming responses.
+        # Terminus-2 ignores a top-level api_key; it must ride in llm_kwargs.
         assert "api_key" not in config.kwargs
         assert config.kwargs["llm_kwargs"]["api_key"] == "rk-1"
         assert config.kwargs["llm_kwargs"]["extra_body"]["stream"] is False
@@ -504,11 +503,8 @@ class TestNativeAgents:
 class TestGraderOutcome:
     """Failure precedence: the agent's own failure must stay primary.
 
-    The agent phase is identified by the exception's timestamp against the
-    verifier's start, never by exception class name — harbor records
-    pattern-classified subclasses no fixed name set would cover. Timestamps
-    mirror harbor's mixed conventions: ``occurred_at`` is naive-local,
-    timings are timezone-aware UTC.
+    Phase is decided by timestamp against the verifier's start, never by
+    class name; occurred_at is naive-local, timings aware-UTC, as in harbor.
     """
 
     # A naive-local base instant, as harbor's ExceptionInfo records it.
@@ -557,8 +553,7 @@ class TestGraderOutcome:
         )
 
     async def test_agent_command_failure_stays_primary(self, template_task, tmp_path):
-        """Harbor records the agent failure and still runs the verifier; the
-        verifier's missing-sample error must not replace the agent error."""
+        """The verifier's missing-sample error must not replace the agent error."""
         from types import SimpleNamespace
 
         async def noop(result):
@@ -580,8 +575,7 @@ class TestGraderOutcome:
     async def test_classified_subclass_failure_stays_primary(
         self, template_task, tmp_path
     ):
-        """Harbor's ERROR_PATTERNS record subclass names; the phase decision
-        must not depend on the class name."""
+        """The phase decision must not depend on the exception class name."""
         from types import SimpleNamespace
 
         async def noop(result):
@@ -623,8 +617,7 @@ class TestGraderOutcome:
     async def test_post_verifier_exception_does_not_preempt_verifier(
         self, template_task, tmp_path
     ):
-        """An exception recorded after the verifier finished (teardown noise)
-        must not preempt the verifier branch, whatever its class name."""
+        """Teardown noise recorded after the verifier must not preempt it."""
         from types import SimpleNamespace
 
         async def noop(result):
@@ -708,9 +701,7 @@ class TestTaskResolver:
     async def test_resolver_task_instruction_replacement_warns(
         self, template_task, tmp_path, caplog
     ):
-        """Any task that is not the configured template dir loses its authored
-        instruction.md to the template-mode prompt; the warning keys on what
-        is being destroyed, not on how the task was selected."""
+        """The warning keys on what is destroyed, not how the task was selected."""
         import logging
         from types import SimpleNamespace
 
@@ -824,8 +815,7 @@ class TestDiagnostics:
         assert failure_phase(None) == "setup"
 
     def test_agent_phase_failure_compares_mixed_timezone_timestamps(self):
-        """harbor records occurred_at naive-local but timings aware-UTC; the
-        phase decision must normalize instead of raising TypeError."""
+        """Mixed naive/aware timestamps must normalize, not raise TypeError."""
         from types import SimpleNamespace
 
         from osmosis_ai.rollout.backend.harbor.diagnostics import agent_phase_failure
