@@ -54,17 +54,6 @@ from osmosis_ai.rollout.backend.harbor.artifacts import (
     merge_grader_artifacts,
     relocate_trial_artifacts,
 )
-from osmosis_ai.rollout.backend.harbor.backend import (
-    TRIAL_NAME_PREFIX,
-    PendingTrial,
-    apply_managed_skypilot_placement,
-    ensure_import_path,
-    get_agent_metadata,
-    log_trial_exception,
-    parse_rollout_id,
-    rewrite_url_for_docker,
-    uses_local_docker_runtime,
-)
 from osmosis_ai.rollout.backend.harbor.bundling import resolve_backend_bundle
 from osmosis_ai.rollout.backend.harbor.diagnostics import (
     agent_phase_failure,
@@ -73,6 +62,11 @@ from osmosis_ai.rollout.backend.harbor.diagnostics import (
     redact_secrets,
     trial_metrics,
     trial_timings,
+)
+from osmosis_ai.rollout.backend.harbor.environment import (
+    apply_managed_skypilot_placement,
+    rewrite_url_for_docker,
+    uses_local_docker_runtime,
 )
 from osmosis_ai.rollout.backend.harbor.native_agents import (
     NativeAgentBinding,
@@ -84,6 +78,13 @@ from osmosis_ai.rollout.backend.harbor.tasks import (
     HarborTask,
     TaskMode,
     parse_task_ref,
+)
+from osmosis_ai.rollout.backend.harbor.trial import (
+    TRIAL_NAME_PREFIX,
+    PendingTrial,
+    get_agent_metadata,
+    log_trial_exception,
+    parse_rollout_id,
 )
 from osmosis_ai.rollout.container.files import ContainerInput, ContainerResult
 from osmosis_ai.rollout.container.trajectories import messages_from_trajectory
@@ -97,6 +98,7 @@ from osmosis_ai.rollout.types import (
 )
 from osmosis_ai.rollout.utils.errors import categorize_exception
 from osmosis_ai.rollout.utils.file_artifacts import default_artifact_root
+from osmosis_ai.rollout.utils.imports import ensure_import_path
 from osmosis_ai.rollout.utils.rewards import validate_sample_has_reward
 from osmosis_ai.rollout.utils.ttl_cache import TtlCache
 

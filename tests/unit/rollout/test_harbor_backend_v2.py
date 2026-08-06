@@ -10,7 +10,6 @@ import pytest
 from harbor.trial.queue import TrialQueue
 
 from osmosis_ai.packaging import build_bundle, inspect_bundle
-from osmosis_ai.rollout.backend.harbor.backend import PendingTrial
 from osmosis_ai.rollout.backend.harbor.backend_v2 import HarborBackendV2
 from osmosis_ai.rollout.backend.harbor.tasks import (
     SDK_REQUIREMENTS_FILENAME,
@@ -19,6 +18,7 @@ from osmosis_ai.rollout.backend.harbor.tasks import (
     patch_dockerfile_with_sdk,
     venv_or_fallback_script,
 )
+from osmosis_ai.rollout.backend.harbor.trial import PendingTrial
 from osmosis_ai.rollout.container.files import ContainerInput, ContainerResult
 from osmosis_ai.rollout.types import (
     ExecutionRequest,

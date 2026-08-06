@@ -6,7 +6,7 @@ import logging
 import shutil
 from pathlib import Path
 
-from osmosis_ai.rollout.backend.harbor.backend import TRIAL_NAME_PREFIX
+from osmosis_ai.rollout.backend.harbor.trial import TRIAL_NAME_PREFIX
 from osmosis_ai.rollout.utils.file_artifacts import (
     GRADER_ARTIFACTS_SNAPSHOT_DIRNAME,
     HARBOR_ARTIFACTS_DIR,
