@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 import toml
+from harbor.environments.definition import environment_content_hash
 from harbor.models.environment_type import EnvironmentType
 from harbor.models.trial.config import (
     AgentConfig as HarborAgentConfig,
@@ -118,6 +119,11 @@ class PendingTrial:
         self.on_workflow_complete = on_workflow_complete
         self.on_grader_complete = on_grader_complete
         self.workflow_complete_called = False
+        self.preserve_trial = False
+        self.started = False
+        self.grading = False
+        self.api_key: str | None = None
+        self.task: asyncio.Task | None = None
         self.done: asyncio.Future[None] = asyncio.get_event_loop().create_future()
 
 
@@ -252,8 +258,16 @@ class HarborBackend(ExecutionBackend):
         )
 
     def build_image(self) -> str:
-        """Build the Docker image once from the shared env dir and return the tag."""
-        image_tag = f"osmosis-harbor-{self.task_dir.name}:latest"
+        """Content-addressed build: skip when the shared env dir is unchanged."""
+        image_tag = f"osmosis-harbor-{environment_content_hash(self.shared_env_dir)}"
+        inspect = subprocess.run(
+            ["docker", "image", "inspect", image_tag],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        if inspect.returncode == 0:
+            logger.info("Reusing prebuilt image %s", image_tag)
+            return image_tag
         logger.info(
             "Building prebuilt image %s from %s", image_tag, self.shared_env_dir
         )
