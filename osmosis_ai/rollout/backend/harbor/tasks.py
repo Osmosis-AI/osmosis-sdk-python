@@ -151,6 +151,7 @@ class HarborTask:
         grader_script: str | None = None,
         grader_wheel: Path | None = None,
         sdk_requirements: list[str] | None = None,
+        write_input: bool = True,
     ) -> Path:
         """Copy this task into *out_dir* and stage one rollout's files.
 
@@ -159,6 +160,9 @@ class HarborTask:
         Harbor agents); the container input ships in tests/ for the same reason.
         With sdk_requirements the copied Dockerfile pre-installs them into an
         isolated venv, so per-trial installs stop downloading dependencies.
+        ``write_input=False`` skips the top-level container input file for
+        tracks where no bundled harness reads it — the file carries the rollout
+        api_key in cleartext, so it must not be staged without a consumer.
         """
         task_dir = out_dir / self.path.name
         shutil.rmtree(task_dir, ignore_errors=True)
@@ -173,7 +177,8 @@ class HarborTask:
         elif not (task_dir / "instruction.md").exists():
             raise ValueError(f"task {self.path.name} has no instruction and no prompt")
 
-        container_input.write(task_dir / INPUT_FILENAME)
+        if write_input:
+            container_input.write(task_dir / INPUT_FILENAME)
 
         test_sh = task_dir / "tests" / "test.sh"
         if grader_script and not test_sh.exists():

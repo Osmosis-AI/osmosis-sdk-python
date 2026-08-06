@@ -705,15 +705,18 @@ class TestTaskResolver:
 
         assert task.path == template_task
 
-    async def test_template_prompt_overwriting_task_instruction_warns(
+    async def test_resolver_task_instruction_replacement_warns(
         self, template_task, tmp_path, caplog
     ):
-        """An explicit harbor_task that ships instruction.md loses it to the
-        template-mode prompt; the backend must say so."""
+        """Any task that is not the configured template dir loses its authored
+        instruction.md to the template-mode prompt; the warning keys on what
+        is being destroyed, not on how the task was selected."""
         import logging
         from types import SimpleNamespace
 
-        (template_task / "instruction.md").write_text("Task-owned instruction")
+        authored = tmp_path / "authored-task"
+        (authored / "environment").mkdir(parents=True)
+        (authored / "instruction.md").write_text("Task-owned instruction")
 
         async def failing_submit(config):
             raise RuntimeError("stop before harbor")
@@ -725,12 +728,9 @@ class TestTaskResolver:
             orchestrator=orchestrator,
             tasks_dir=template_task,
             agent="terminus-2",
-            task_resolver=lambda request: HarborTask(template_task),
+            task_resolver=lambda request: HarborTask(authored),
         )
-        request = request_for(
-            prompt=[{"role": "user", "content": "dataset prompt"}],
-            metadata={"harbor_task": "./tasks/x"},
-        )
+        request = request_for(prompt=[{"role": "user", "content": "row prompt"}])
 
         async def noop(result):
             pass
@@ -739,6 +739,40 @@ class TestTaskResolver:
             await backend.execute(request, noop)
 
         assert any(
+            "template mode replaces the instruction.md" in record.getMessage()
+            for record in caplog.records
+        )
+
+    async def test_configured_template_instruction_stays_silent(
+        self, template_task, caplog
+    ):
+        """The configured template dir's own instruction.md is a fallback by
+        design; replacing it with the prompt is the intended flow."""
+        import logging
+        from types import SimpleNamespace
+
+        (template_task / "instruction.md").write_text("template fallback")
+
+        async def failing_submit(config):
+            raise RuntimeError("stop before harbor")
+
+        orchestrator = SimpleNamespace(
+            add_hook=lambda *args: None, submit=failing_submit
+        )
+        backend = HarborBackendV2(
+            orchestrator=orchestrator,
+            tasks_dir=template_task,
+            agent="terminus-2",
+        )
+        request = request_for(prompt=[{"role": "user", "content": "row prompt"}])
+
+        async def noop(result):
+            pass
+
+        with caplog.at_level(logging.WARNING):
+            await backend.execute(request, noop)
+
+        assert not any(
             "template mode replaces the instruction.md" in record.getMessage()
             for record in caplog.records
         )
@@ -986,3 +1020,492 @@ class TestPrewarm:
         )
         with pytest.raises(ValueError, match="requires task ids"):
             await backend.prewarm()
+
+
+class FakeQueue:
+    """Stands in for harbor's TrialQueue: fires the registered hooks like a
+    real trial, then simulates harbor's secret scrub *after* the END hook and
+    *before* submit() resolves — the ordering the backend must respect."""
+
+    def __init__(self, run=None):
+        self.hooks = {}
+        self.run = run
+
+    def add_hook(self, event, hook):
+        self.hooks.setdefault(event, []).append(hook)
+
+    async def fire(self, event_name, event):
+        from harbor.trial.hooks import TrialEvent
+
+        for hook in self.hooks.get(TrialEvent(event_name), []):
+            await hook(event)
+
+    async def submit(self, config):
+        assert self.run is not None, "FakeQueue.run not configured"
+        return await self.run(self, config)
+
+
+def trial_result(**overrides):
+    from types import SimpleNamespace
+
+    fields = {
+        "exception_info": None,
+        "verifier_result": None,
+        "started_at": None,
+        "finished_at": None,
+        "environment_setup": None,
+        "agent_setup": None,
+        "agent_execution": None,
+        "verifier": None,
+    }
+    fields.update(overrides)
+    return SimpleNamespace(**fields)
+
+
+async def noop_callback(result):
+    pass
+
+
+class TestConfigValidation:
+    def backend_for(self, template_task, **kwargs):
+        return HarborBackendV2(
+            orchestrator=TrialQueue(n_concurrent=1),
+            tasks_dir=template_task,
+            **kwargs,
+        )
+
+    @pytest.mark.parametrize("timeout", [0, -5, float("nan"), float("inf")])
+    def test_agent_setup_timeout_rejects_nonpositive_and_nonfinite(
+        self, template_task, timeout
+    ):
+        with pytest.raises(ValueError, match="agent_setup_timeout_sec"):
+            self.backend_for(
+                template_task, agent="oracle", agent_setup_timeout_sec=timeout
+            )
+
+    def test_agent_setup_timeout_accepts_finite_positive(self, template_task):
+        backend = self.backend_for(
+            template_task, agent="oracle", agent_setup_timeout_sec=120.0
+        )
+        assert backend.agent_setup_timeout_sec == 120.0
+
+    def test_max_queue_depth_zero_rejected(self, template_task):
+        """Depth 0 used to mean reject-everything (429 on an idle server); the
+        backend cannot see queue concurrency, so it cannot mean anything else."""
+        with pytest.raises(ValueError, match="max_queue_depth"):
+            self.backend_for(template_task, agent="oracle", max_queue_depth=0)
+        assert (
+            self.backend_for(
+                template_task, agent="oracle", max_queue_depth=1
+            ).has_capacity()
+            is True
+        )
+
+    def test_environment_config_not_aliased(self, template_task):
+        from harbor.models.trial.config import (
+            EnvironmentConfig as HarborEnvironmentConfig,
+        )
+
+        caller_config = HarborEnvironmentConfig()
+        backend = self.backend_for(
+            template_task, agent="oracle", environment_config=caller_config
+        )
+        caller_config.kwargs["poison"] = True
+
+        assert backend.environment_config is not caller_config
+        assert "poison" not in backend.environment_config.kwargs
+
+    def test_model_provider_validated_at_construction(self, template_task):
+        with pytest.raises(ValueError, match="requires a model prefixed"):
+            self.backend_for(
+                template_task, agent="terminus-2", model_name="anthropic/claude"
+            )
+        with pytest.raises(ValueError, match="requires a model prefixed"):
+            self.backend_for(
+                template_task, agent="mini-swe-agent", model_name="unprefixed"
+            )
+        # Oracle emits no model traffic, so any model label is admissible.
+        self.backend_for(template_task, agent="oracle", model_name="anything/goes")
+
+    def test_harbor_model_override_validated_per_request(self, template_task):
+        backend = self.backend_for(template_task, agent="terminus-2")
+        base = {"rollout_id": "r1", "chat_completions_url": "http://t/v1"}
+
+        with pytest.raises(ValueError, match="requires a model prefixed"):
+            backend.build_agent_config(
+                template_task,
+                ContainerInput(**base, metadata={"harbor_model": "anthropic/x"}),
+            )
+        # Present-but-invalid must fail, not fall back to the default model.
+        with pytest.raises(ValueError, match="non-empty string"):
+            backend.build_agent_config(
+                template_task, ContainerInput(**base, metadata={"harbor_model": ""})
+            )
+        with pytest.raises(ValueError, match="non-empty string"):
+            backend.build_agent_config(
+                template_task, ContainerInput(**base, metadata={"harbor_model": None})
+            )
+        config = backend.build_agent_config(template_task, ContainerInput(**base))
+        assert config.model_name == backend.model_name
+
+    @pytest.mark.parametrize("agent", ["terminus-2", "mini-swe-agent"])
+    def test_empty_endpoint_refused_for_wired_agents(self, template_task, agent):
+        """An empty api_base makes litellm fall back to the provider's public
+        endpoint, sending the rollout credential off-host."""
+        backend = self.backend_for(template_task, agent=agent)
+        with pytest.raises(ValueError, match="no chat_completions_url"):
+            backend.build_agent_config(
+                template_task,
+                ContainerInput(rollout_id="r1", api_key="rk-1"),
+            )
+
+    def test_oracle_needs_no_endpoint(self, template_task):
+        backend = self.backend_for(template_task, agent="oracle")
+        config = backend.build_agent_config(
+            template_task, ContainerInput(rollout_id="r1")
+        )
+        assert config.name == "oracle"
+
+    def test_env_wiring_sets_both_base_url_spellings(self, template_task):
+        """mini-swe-agent reads OPENAI_BASE_URL before OPENAI_API_BASE; both
+        must carry the rollout endpoint so host values cannot outrank it."""
+        backend = self.backend_for(template_task, agent="mini-swe-agent")
+        config = backend.build_agent_config(
+            template_task,
+            ContainerInput(
+                rollout_id="r1", chat_completions_url="http://t/v1", api_key="k"
+            ),
+        )
+        assert config.env["OPENAI_API_BASE"] == "http://t/v1"
+        assert config.env["OPENAI_BASE_URL"] == "http://t/v1"
+
+
+class TestDuplicateRolloutIds:
+    async def test_duplicate_active_id_rejected(self, template_task):
+        """A duplicate would overwrite live pending state and rewrite the
+        active trial's staged input files; it must never be admitted."""
+        backend = HarborBackendV2(
+            orchestrator=TrialQueue(n_concurrent=1),
+            tasks_dir=template_task,
+            agent="oracle",
+        )
+        original = PendingTrial(noop_callback, None)
+        backend.pending["r1"] = original
+
+        with pytest.raises(ValueError, match="already active"):
+            await backend.execute(ExecutionRequest(id="r1", prompt=[]), noop_callback)
+
+        assert backend.pending["r1"] is original
+
+
+class TestArtifactLifecycle:
+    def backend_for(self, template_task, tmp_path, queue, **kwargs):
+        backend = HarborBackendV2(
+            orchestrator=queue,
+            tasks_dir=template_task,
+            agent="terminus-2",
+            trials_dir=tmp_path / "trials",
+            **kwargs,
+        )
+        backend.rollouts_dir = tmp_path / "rollouts"
+        backend.rollouts_dir.mkdir(parents=True, exist_ok=True)
+        backend.artifact_root = tmp_path / "durable"
+        return backend
+
+    async def test_artifacts_relocate_only_after_harbor_scrub(
+        self, template_task, tmp_path
+    ):
+        """Harbor scrubs the trial dir after the END hook and before submit()
+        resolves; the durable copy must be taken from the scrubbed tree."""
+        from osmosis_ai.rollout.context import RolloutContext
+
+        async def run(queue, config):
+            artifacts = config.trials_dir / config.trial_name / "artifacts"
+            artifacts.mkdir(parents=True)
+            (artifacts / "out.txt").write_text("rk-secret")
+            result = trial_result(
+                verifier_result=__import__("types").SimpleNamespace(
+                    rewards={"reward": 1.0}
+                )
+            )
+            event = __import__("types").SimpleNamespace(config=config, result=result)
+            await queue.fire("end", event)
+            # Harbor's scrub runs here: after hooks, before submit() returns.
+            (artifacts / "out.txt").write_text("[REDACTED]")
+            return result
+
+        queue = FakeQueue(run)
+        backend = self.backend_for(template_task, tmp_path, queue)
+        request = ExecutionRequest(id="r1", prompt=[{"role": "user", "content": "go"}])
+        with RolloutContext(
+            chat_completions_url="http://t/v1", api_key="rk-secret", rollout_id="r1"
+        ):
+            await backend.execute(request, noop_callback, noop_callback)
+
+        relocated = tmp_path / "durable" / "r1" / "artifacts" / "out.txt"
+        assert relocated.read_text() == "[REDACTED]"
+        # The successful trial was moved only after the durable copy existed.
+        assert not (tmp_path / "trials" / "trial-r1").exists()
+        assert not (tmp_path / "rollouts" / "r1").exists()
+
+    async def test_cancellation_cleans_rollout_and_trial_residue(
+        self, template_task, tmp_path
+    ):
+        """Cancelled rollouts must not leave credential-bearing staging or
+        trial directories behind; harbor's scrub never ran for them."""
+        from osmosis_ai.rollout.context import RolloutContext
+
+        started = asyncio.Event()
+
+        async def run(queue, config):
+            (config.trials_dir / config.trial_name).mkdir(parents=True)
+            started.set()
+            await asyncio.Event().wait()
+
+        queue = FakeQueue(run)
+        backend = self.backend_for(template_task, tmp_path, queue)
+        request = ExecutionRequest(id="r1", prompt=[{"role": "user", "content": "go"}])
+
+        async def execute():
+            with RolloutContext(
+                chat_completions_url="http://t/v1", api_key="rk-1", rollout_id="r1"
+            ):
+                await backend.execute(request, noop_callback)
+
+        task = asyncio.create_task(execute())
+        await started.wait()
+        assert (tmp_path / "rollouts" / "r1").exists()
+
+        assert backend.cancel_rollouts(ids=["r1"]) == {"r1": "cancelled_queued"}
+        await task
+
+        assert not (tmp_path / "rollouts" / "r1").exists()
+        assert not (tmp_path / "trials" / "trial-r1").exists()
+        assert "r1" not in backend.pending
+
+    async def test_setup_failure_cleans_staging_and_reports(
+        self, template_task, tmp_path
+    ):
+        from osmosis_ai.rollout.context import RolloutContext
+
+        async def run(queue, config):
+            raise RuntimeError("infra exploded")
+
+        queue = FakeQueue(run)
+        backend = self.backend_for(template_task, tmp_path, queue)
+        request = ExecutionRequest(id="r1", prompt=[{"role": "user", "content": "go"}])
+        delivered = []
+
+        async def on_workflow_complete(result):
+            delivered.append(result)
+
+        with RolloutContext(
+            chat_completions_url="http://t/v1", api_key="rk-1", rollout_id="r1"
+        ):
+            await backend.execute(request, on_workflow_complete)
+
+        assert not (tmp_path / "rollouts" / "r1").exists()
+        assert delivered and delivered[0].status == RolloutStatus.FAILURE
+
+    async def test_failed_trial_keeps_trial_dir_for_debugging(
+        self, template_task, tmp_path
+    ):
+        from types import SimpleNamespace
+
+        from osmosis_ai.rollout.context import RolloutContext
+
+        async def run(queue, config):
+            artifacts = config.trials_dir / config.trial_name / "artifacts"
+            artifacts.mkdir(parents=True)
+            (artifacts / "log.txt").write_text("evidence")
+            result = trial_result(
+                exception_info=SimpleNamespace(
+                    exception_type="AgentTimeoutError",
+                    exception_message="too slow",
+                    exception_traceback="",
+                    occurred_at=None,
+                )
+            )
+            event = SimpleNamespace(config=config, result=result)
+            await queue.fire("end", event)
+            return result
+
+        queue = FakeQueue(run)
+        backend = self.backend_for(template_task, tmp_path, queue)
+        request = ExecutionRequest(id="r1", prompt=[{"role": "user", "content": "go"}])
+        with RolloutContext(
+            chat_completions_url="http://t/v1", api_key="rk-1", rollout_id="r1"
+        ):
+            await backend.execute(request, noop_callback)
+
+        # Artifacts still copied for inspection; source retained on failure.
+        assert (tmp_path / "durable" / "r1" / "artifacts" / "log.txt").exists()
+        assert (tmp_path / "trials" / "trial-r1").exists()
+
+
+class TestPrewarmIdentity:
+    def test_prewarm_configs_are_credential_free(self, template_task, tmp_path):
+        from osmosis_ai.rollout.context import RolloutContext
+
+        for agent, check in (
+            (
+                "terminus-2",
+                lambda cfg: (
+                    "api_base" not in cfg.kwargs and "llm_kwargs" not in cfg.kwargs
+                ),
+            ),
+            (
+                "mini-swe-agent",
+                lambda cfg: not any(k.startswith("OPENAI_") for k in cfg.env),
+            ),
+        ):
+            backend = HarborBackendV2(
+                orchestrator=TrialQueue(n_concurrent=1),
+                tasks_dir=template_task,
+                agent=agent,
+                trials_dir=tmp_path / "trials",
+            )
+            # Even with an ambient rollout context, prewarm must not pick up
+            # its endpoint or credential.
+            with RolloutContext(
+                chat_completions_url="http://t/v1", api_key="rk-1", rollout_id="x"
+            ):
+                config = backend.prewarm_trial_config(HarborTask(template_task))
+            assert config.install_only is True
+            assert check(config.agent), agent
+            assert config.trial_name in backend.prewarm_trials
+
+    async def test_prewarm_named_rollout_id_is_not_treated_as_prewarm(
+        self, template_task
+    ):
+        """'prewarm-...' is a legal controller-supplied rollout id; dispatch
+        must key on the backend-generated registry, not the id pattern."""
+        from types import SimpleNamespace
+
+        backend = HarborBackendV2(
+            orchestrator=TrialQueue(n_concurrent=1),
+            tasks_dir=template_task,
+            agent="oracle",
+        )
+        pending = PendingTrial(noop_callback, None)
+        backend.pending["prewarm-abc"] = pending
+
+        event = SimpleNamespace(
+            config=SimpleNamespace(trial_name="trial-prewarm-abc"),
+            result=trial_result(),
+        )
+        await backend.on_trial_end(event)
+
+        # The rollout resolved normally instead of wedging execute() forever.
+        assert "prewarm-abc" not in backend.pending
+        assert pending.done.done()
+
+    async def test_prewarm_cleanup_happens_at_call_site_post_scrub(
+        self, template_task, tmp_path
+    ):
+        seen_dirs = {}
+
+        async def run(queue, config):
+            trial_dir = config.trials_dir / config.trial_name
+            trial_dir.mkdir(parents=True, exist_ok=True)
+            event = __import__("types").SimpleNamespace(
+                config=config, result=trial_result()
+            )
+            await queue.fire("start", event)
+            await queue.fire("end", event)
+            # The END hook must not have removed anything: harbor's scrub
+            # (simulated here) still needs the tree.
+            seen_dirs[config.trial_name] = trial_dir.exists()
+            return trial_result()
+
+        queue = FakeQueue(run)
+        backend = HarborBackendV2(
+            orchestrator=queue,
+            tasks_dir=template_task,
+            agent="terminus-2",
+            trials_dir=tmp_path / "trials",
+        )
+        backend.rollouts_dir = tmp_path / "rollouts"
+        backend.rollouts_dir.mkdir(parents=True, exist_ok=True)
+
+        await backend.prewarm()
+
+        assert all(seen_dirs.values())
+        assert backend.prewarm_trials == set()
+        assert list((tmp_path / "trials").iterdir()) == []
+        assert list((tmp_path / "rollouts").iterdir()) == []
+
+    async def test_prewarm_keeps_directories_when_cleanup_disabled(
+        self, template_task, tmp_path
+    ):
+        async def run(queue, config):
+            (config.trials_dir / config.trial_name).mkdir(parents=True)
+            return trial_result()
+
+        queue = FakeQueue(run)
+        backend = HarborBackendV2(
+            orchestrator=queue,
+            tasks_dir=template_task,
+            agent="terminus-2",
+            trials_dir=tmp_path / "trials",
+            cleanup_successful_trials=False,
+        )
+        backend.rollouts_dir = tmp_path / "rollouts"
+        backend.rollouts_dir.mkdir(parents=True, exist_ok=True)
+
+        await backend.prewarm()
+
+        assert list((tmp_path / "trials").iterdir()) != []
+
+
+class TestContainerInputGating:
+    def test_native_track_stages_no_container_input(self, template_task, tmp_path):
+        backend = HarborBackendV2(
+            orchestrator=TrialQueue(n_concurrent=1),
+            tasks_dir=template_task,
+            agent="mini-swe-agent",
+        )
+        backend.rollouts_dir = tmp_path / "rollouts"
+        task_dir = backend.materialize_task(
+            HarborTask(template_task),
+            "r1",
+            ContainerInput(
+                rollout_id="r1",
+                prompt=[{"role": "user", "content": "x"}],
+                api_key="rk-1",
+            ),
+        )
+        assert not (task_dir / "container_input.json").exists()
+
+    def test_bundle_track_stages_container_input(self, bundle, template_task, tmp_path):
+        backend = HarborBackendV2(
+            orchestrator=TrialQueue(n_concurrent=1),
+            tasks_dir=template_task,
+            bundle=bundle,
+        )
+        backend.rollouts_dir = tmp_path / "rollouts"
+        task_dir = backend.materialize_task(
+            HarborTask(template_task),
+            "r1",
+            ContainerInput(rollout_id="r1", prompt=[{"role": "user", "content": "x"}]),
+        )
+        assert (task_dir / "container_input.json").exists()
+
+    def test_native_with_grader_bundle_ships_input_only_in_tests(
+        self, bundle, template_task, tmp_path
+    ):
+        backend = HarborBackendV2(
+            orchestrator=TrialQueue(n_concurrent=1),
+            tasks_dir=template_task,
+            agent="terminus-2",
+            grader="bench.solver:G",
+            bundle=bundle,
+        )
+        backend.rollouts_dir = tmp_path / "rollouts"
+        task_dir = backend.materialize_task(
+            HarborTask(template_task),
+            "r1",
+            ContainerInput(rollout_id="r1", prompt=[{"role": "user", "content": "x"}]),
+        )
+        assert not (task_dir / "container_input.json").exists()
+        assert (task_dir / "tests" / "container_input.json").exists()
