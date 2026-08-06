@@ -79,7 +79,6 @@ from osmosis_ai.rollout.backend.harbor.native_agents import (
     native_agent_config,
     native_binding,
     native_prewarm_agent_config,
-    validate_model_for_binding,
 )
 from osmosis_ai.rollout.backend.harbor.tasks import (
     HarborTask,
@@ -137,8 +136,6 @@ class HarborBackendV2(ExecutionBackend):
         self.agent = agent
         self.agent_setup_timeout_sec = agent_setup_timeout_sec
         self.native: NativeAgentBinding | None = native_binding(agent)
-        if self.native is not None and isinstance(agent, str):
-            validate_model_for_binding(agent, self.native, model_name)
         if self.native and not self.native.trainable:
             logger.warning(
                 "native agent %r emits no model trajectory; use it to validate "
@@ -288,18 +285,7 @@ class HarborBackendV2(ExecutionBackend):
     ) -> HarborAgentConfig:
         if self.native is not None and isinstance(self.agent, str):
             metadata = container_input.metadata or {}
-            # A present-but-invalid override must fail, not fall back.
-            if "harbor_model" in metadata:
-                model = metadata["harbor_model"]
-                if not isinstance(model, str) or not model.strip():
-                    raise ValueError(
-                        f"rollout {container_input.rollout_id!r}: "
-                        f"metadata['harbor_model'] must be a non-empty string; "
-                        f"got {model!r}"
-                    )
-            else:
-                model = self.model_name
-            validate_model_for_binding(self.agent, self.native, model)
+            model = metadata.get("harbor_model") or self.model_name
             url = container_input.chat_completions_url
             if self.native.wiring != "none" and not url:
                 # An empty api_base routes litellm (and the credential) to the

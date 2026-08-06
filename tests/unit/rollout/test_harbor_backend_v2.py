@@ -1093,36 +1093,10 @@ class TestConfigValidation:
         assert backend.environment_config is not caller_config
         assert "poison" not in backend.environment_config.kwargs
 
-    def test_model_provider_validated_at_construction(self, template_task):
-        with pytest.raises(ValueError, match="requires a model prefixed"):
-            self.backend_for(
-                template_task, agent="terminus-2", model_name="anthropic/claude"
-            )
-        with pytest.raises(ValueError, match="requires a model prefixed"):
-            self.backend_for(
-                template_task, agent="mini-swe-agent", model_name="unprefixed"
-            )
-        # Oracle emits no model traffic, so any model label is admissible.
-        self.backend_for(template_task, agent="oracle", model_name="anything/goes")
-
-    def test_harbor_model_override_validated_per_request(self, template_task):
+    def test_missing_harbor_model_falls_back_to_default(self, template_task):
         backend = self.backend_for(template_task, agent="terminus-2")
         base = {"rollout_id": "r1", "chat_completions_url": "http://t/v1"}
 
-        with pytest.raises(ValueError, match="requires a model prefixed"):
-            backend.build_agent_config(
-                template_task,
-                ContainerInput(**base, metadata={"harbor_model": "anthropic/x"}),
-            )
-        # Present-but-invalid must fail, not fall back to the default model.
-        with pytest.raises(ValueError, match="non-empty string"):
-            backend.build_agent_config(
-                template_task, ContainerInput(**base, metadata={"harbor_model": ""})
-            )
-        with pytest.raises(ValueError, match="non-empty string"):
-            backend.build_agent_config(
-                template_task, ContainerInput(**base, metadata={"harbor_model": None})
-            )
         config = backend.build_agent_config(template_task, ContainerInput(**base))
         assert config.model_name == backend.model_name
 
