@@ -33,6 +33,18 @@ NATIVE_AGENTS: dict[str, NativeAgentBinding] = {
 }
 
 
+def native_prewarm_agent_config(
+    name: str, binding: NativeAgentBinding, model_name: str
+) -> HarborAgentConfig:
+    """Setup-only config: installs the agent with no endpoint or credentials."""
+    return HarborAgentConfig(
+        name=name,
+        model_name=model_name,
+        env=dict(binding.env),
+        kwargs=dict(binding.kwargs),
+    )
+
+
 def native_binding(agent: Any) -> NativeAgentBinding | None:
     """The binding for a registered native agent name; None for workflow agents."""
     if not isinstance(agent, str) or ":" in agent:
@@ -59,7 +71,14 @@ def native_agent_config(
             name=name, model_name=model_name, env=dict(binding.env), kwargs=kwargs
         )
     if binding.wiring == "env":
-        env = {**binding.env, "OPENAI_API_BASE": url, "OPENAI_API_KEY": api_key}
+        # mini-swe-agent reads OPENAI_BASE_URL before OPENAI_API_BASE; set both
+        # so a host-level value can never outrank the rollout endpoint.
+        env = {
+            **binding.env,
+            "OPENAI_API_BASE": url,
+            "OPENAI_BASE_URL": url,
+            "OPENAI_API_KEY": api_key,
+        }
         return HarborAgentConfig(
             name=name, model_name=model_name, env=env, kwargs=kwargs
         )
