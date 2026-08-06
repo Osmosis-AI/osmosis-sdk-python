@@ -16,6 +16,7 @@ those, and ``run_cloud_submit`` is the single implementation.
 from __future__ import annotations
 
 import re
+import sys
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -28,6 +29,7 @@ from osmosis_ai.cli.prompts import require_confirmation
 from osmosis_ai.platform.api.client import OsmosisClient
 from osmosis_ai.platform.api.models import WIRE_SCOPE_PERSONAL, SubmitRunResult
 from osmosis_ai.platform.auth.platform_client import PlatformAPIError
+from osmosis_ai.platform.cli.secret_resolution import resolve_run_secrets
 from osmosis_ai.platform.cli.shared_config import (
     BaseSubmitConfig,
     build_env_table_rows,
@@ -87,7 +89,9 @@ class CloudSubmitSpec[ConfigT: BaseSubmitConfig]:
 
     load_config: Callable[[Path], ConfigT]
     validate_context: Callable[[ConfigT, Path], None]
-    submit: Callable[[OsmosisClient, ConfigT, Any, str], SubmitRunResult]
+    submit: Callable[
+        [OsmosisClient, ConfigT, Any, str, dict[str, str]], SubmitRunResult
+    ]
     build_next_steps: Callable[
         [SubmitRunResult, ConfigT],
         tuple[list[str], list[dict[str, Any]]],
@@ -185,6 +189,7 @@ def run_cloud_submit[ConfigT: BaseSubmitConfig](
     *,
     yes: bool,
     spec: CloudSubmitSpec[ConfigT],
+    secrets_file: str | None = None,
 ) -> OperationResult:
     """Run the shared submit flow for ``spec``."""
     context = require_git_workspace_directory_context()
@@ -251,6 +256,7 @@ def run_cloud_submit[ConfigT: BaseSubmitConfig](
         )
         full_summary.extend((f"env.{name}", value) for name, value in env_rows)
 
+    provided_secrets: dict[str, str] = {}
     if config.secrets:
         scopes = _fetch_secret_scopes(
             OsmosisClient(),
@@ -263,19 +269,30 @@ def run_cloud_submit[ConfigT: BaseSubmitConfig](
             secret_rows = [(name, "–") for name in sorted(config.secrets)]
         else:
             workspace_names, personal_names = scopes
+            provided_secrets = resolve_run_secrets(
+                names=list(config.secrets),
+                secrets_file=secrets_file,
+                stored_names=workspace_names | personal_names,
+                is_tty=sys.stdin.isatty(),
+            )
             missing = sorted(
                 {
                     name
                     for name in config.secrets
-                    if name not in workspace_names and name not in personal_names
+                    if name not in workspace_names
+                    and name not in personal_names
+                    and name not in provided_secrets
                 }
             )
             if missing:
                 raise CLIError(_missing_secret_message(missing))
-            secret_rows = build_secret_table_rows(
-                config.secrets,
+            stored_rows = build_secret_table_rows(
+                [name for name in config.secrets if name not in provided_secrets],
                 user_secret_names=personal_names,
                 workspace_secret_names=workspace_names,
+            )
+            secret_rows = sorted(
+                [*stored_rows, *((name, "Run") for name in provided_secrets)]
             )
         console.table(
             secret_rows,
@@ -304,7 +321,11 @@ def run_cloud_submit[ConfigT: BaseSubmitConfig](
     with output.status(spec.status_message):
         try:
             result = spec.submit(
-                client, config, context.credentials, context.git_identity
+                client,
+                config,
+                context.credentials,
+                context.git_identity,
+                provided_secrets,
             )
         except PlatformAPIError as exc:
             enriched = _enrich_missing_secret_error(exc)

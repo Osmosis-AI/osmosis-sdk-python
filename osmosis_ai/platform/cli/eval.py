@@ -310,6 +310,7 @@ def _submit_eval(
     config: EvalSubmitConfig,
     credentials: Any,
     git_identity: str,
+    provided_secrets: dict[str, str],
 ) -> SubmitRunResult:
     return client.submit_evaluation_run(
         experiment_config=config.experiment_config,
@@ -317,6 +318,7 @@ def _submit_eval(
         advanced_config=config.advanced_config or None,
         env_config=config.env or None,
         secrets=config.secrets or None,
+        provided_secrets=provided_secrets or None,
         credentials=credentials,
         git_identity=git_identity,
     )
@@ -360,9 +362,13 @@ _EVAL_SUBMIT_SPEC: CloudSubmitSpec[EvalSubmitConfig] = CloudSubmitSpec(
 )
 
 
-def submit(config_path: Path, *, yes: bool) -> OperationResult:
+def submit(
+    config_path: Path, *, yes: bool, secrets_file: str | None = None
+) -> OperationResult:
     """Submit an evaluation run."""
-    return run_cloud_submit(config_path, yes=yes, spec=_EVAL_SUBMIT_SPEC)
+    return run_cloud_submit(
+        config_path, yes=yes, spec=_EVAL_SUBMIT_SPEC, secrets_file=secrets_file
+    )
 
 
 def list_eval_runs(*, limit: int, all_: bool) -> ListResult:

@@ -1133,7 +1133,7 @@ def _submit_benchmark(
 ) -> SubmitBenchmarkRunResult:
     secrets: dict[str, Any] | None = None
     if config.secrets.required or secret_values:
-        secrets = {"required": config.secrets.required, "values": secret_values}
+        secrets = {"required": config.secrets.required, "provided": secret_values}
     return client.submit_benchmark_run(
         experiment_config=config.experiment_config,
         tasks_config=config.tasks_config or None,
@@ -1228,19 +1228,18 @@ def submit(
             credentials=context.credentials,
             git_identity=context.git_identity,
         )
-        stored_names = set() if scopes is None else scopes[0] | scopes[1]
-        # Names the config lists under [secrets] may be supplied at submit; every
-        # other reference must already exist as a record.
-        secret_values = resolve_run_secrets(
-            names=config.secrets.required,
-            secrets_file=secrets_file,
-            stored_names=stored_names,
-            is_tty=sys.stdin.isatty(),
-        )
         if scopes is None:
             secret_rows = [(name, "–") for name in sorted(config.required_secrets)]
         else:
             workspace_names, personal_names = scopes
+            # Names under [secrets] may be supplied at submit; every other
+            # reference must already exist as a record.
+            secret_values = resolve_run_secrets(
+                names=config.secrets.required,
+                secrets_file=secrets_file,
+                stored_names=workspace_names | personal_names,
+                is_tty=sys.stdin.isatty(),
+            )
             missing = sorted(
                 name
                 for name in config.required_secrets

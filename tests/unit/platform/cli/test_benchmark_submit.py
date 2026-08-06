@@ -352,6 +352,6 @@ required = ["WEATHER_API_KEY"]
 
     assert captured["secrets"] == {
         "required": ["WEATHER_API_KEY"],
-        "values": {"WEATHER_API_KEY": "super-secret"},
+        "provided": {"WEATHER_API_KEY": "super-secret"},
     }
     assert "super-secret" not in json.dumps(asdict(result), default=str)
