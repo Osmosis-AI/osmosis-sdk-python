@@ -682,53 +682,22 @@ class TestGraderOutcome:
         assert "Command failed" in outcome.err_message
 
 
-class TestTaskResolver:
-    def backend_for(self, template_task, resolver=None):
+class TestTaskResolution:
+    def backend_for(self, template_task):
         return HarborBackendV2(
             orchestrator=TrialQueue(n_concurrent=1),
             tasks_dir=template_task,
             agent="terminus-2",
-            task_resolver=resolver,
         )
 
-    async def test_sync_resolver_owns_task_selection(self, template_task, tmp_path):
-        custom = tmp_path / "custom-task"
-        custom.mkdir()
-        seen = []
-
-        def resolver(request):
-            seen.append(request.id)
-            return HarborTask(custom)
-
-        backend = self.backend_for(template_task, resolver)
-        request = request_for(metadata={"harbor_task": "ignored/by-resolver"})
-
-        task = await backend.resolve_task(request)
-
-        assert task.path == custom
-        assert seen == ["r1"]
-
-    async def test_async_resolver_is_awaited(self, template_task, tmp_path):
-        custom = tmp_path / "custom-task"
-        custom.mkdir()
-
-        async def resolver(request):
-            return HarborTask(custom)
-
-        backend = self.backend_for(template_task, resolver)
-
-        task = await backend.resolve_task(request_for())
-
-        assert task.path == custom
-
-    async def test_default_resolution_unchanged_without_resolver(self, template_task):
+    async def test_template_mode_resolves_configured_dir(self, template_task):
         backend = self.backend_for(template_task)
 
         task = await backend.resolve_task(request_for())
 
         assert task.path == template_task
 
-    async def test_resolver_task_instruction_replacement_warns(
+    async def test_fetched_task_instruction_replacement_warns(
         self, template_task, tmp_path, caplog
     ):
         """The warning keys on what is destroyed, not how the task was selected."""
@@ -749,9 +718,16 @@ class TestTaskResolver:
             orchestrator=orchestrator,
             tasks_dir=template_task,
             agent="terminus-2",
-            task_resolver=lambda request: HarborTask(authored),
         )
-        request = request_for(prompt=[{"role": "user", "content": "row prompt"}])
+
+        async def fetch_local(ref, metadata):
+            return HarborTask(authored)
+
+        backend.fetch_task = fetch_local
+        request = request_for(
+            prompt=[{"role": "user", "content": "row prompt"}],
+            metadata={"harbor_task": "./tasks/x"},
+        )
 
         async def noop(result):
             pass
