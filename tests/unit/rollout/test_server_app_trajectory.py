@@ -222,6 +222,132 @@ async def test_backend_failure_without_sample_records_nothing(
     assert posted
 
 
+class CapturingStubBackend(StubBackend):
+    """A backend that computes the final reward itself (e.g. Harbor)."""
+
+    @property
+    def capture_final_result(self) -> bool:
+        return True
+
+
+async def test_capture_final_result_archives_reward_without_grader_url(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Eval-only callers omit grader_callback_url; a backend that computes the
+    reward itself must still get its grader result archived."""
+    posted = patch_callbacks(monkeypatch)
+    patch_artifact_root(monkeypatch, tmp_path)
+    backend = CapturingStubBackend(
+        workflow_result=ExecutionResult(
+            status=RolloutStatus.SUCCESS, sample=make_sample()
+        ),
+        grader_result=ExecutionResult(
+            status=RolloutStatus.SUCCESS, sample=make_sample(reward=0.9)
+        ),
+    )
+
+    await _handle_rollout(backend, make_request(grader_callback_url=None))
+
+    assert backend.received_grader_callback is True
+    doc = json.loads((tmp_path / "r1" / "trajectory.json").read_text())
+    assert doc["extra"]["osmosis"]["reward"] == 0.9
+    # No grader callback URL means no grader POST — archival only.
+    assert [url for url, _ in posted] == ["http://controller/v1/rollout/completed"]
+
+
+async def test_extra_fields_flow_to_both_callbacks(tmp_path: Path, monkeypatch) -> None:
+    posted = patch_callbacks(monkeypatch)
+    patch_artifact_root(monkeypatch, tmp_path)
+    backend = StubBackend(
+        workflow_result=ExecutionResult(
+            status=RolloutStatus.SUCCESS,
+            sample=make_sample(),
+            extra_fields={"phase": "agent", "backend": "harbor-v2"},
+        ),
+        grader_result=ExecutionResult(
+            status=RolloutStatus.SUCCESS,
+            sample=make_sample(reward=1.0),
+            extra_fields={"phase": "verifier", "backend": "harbor-v2"},
+        ),
+    )
+
+    await _handle_rollout(backend, make_request())
+
+    by_url = dict(posted)
+    workflow_payload = by_url["http://controller/v1/rollout/completed"]
+    grader_payload = by_url["http://controller/v1/grader/completed"]
+    assert workflow_payload["extra_fields"]["phase"] == "agent"
+    assert grader_payload["extra_fields"]["phase"] == "verifier"
+
+
+async def test_sample_less_terminal_failure_leaves_diagnostics(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Two retention slots: the sample-bearing result keeps the archive, and
+    the terminal sample-less failure keeps the diagnostics record."""
+    patch_callbacks(monkeypatch)
+    patch_artifact_root(monkeypatch, tmp_path)
+    backend = StubBackend(
+        workflow_result=ExecutionResult(
+            status=RolloutStatus.SUCCESS,
+            sample=make_sample(),
+            extra_fields={"phase": "agent"},
+        ),
+        grader_result=ExecutionResult(
+            status=RolloutStatus.FAILURE,
+            extra_fields={"phase": "grading", "category": "validation_error"},
+        ),
+    )
+
+    await _handle_rollout(backend, make_request())
+
+    # The sample-bearing workflow result is archived...
+    assert (tmp_path / "r1" / "trajectory.json").exists()
+    # ...and the terminal failure's diagnostics survive alongside it.
+    sidecar = json.loads((tmp_path / "r1" / "diagnostics.json").read_text())
+    assert sidecar["phase"] == "grading"
+
+
+async def test_failure_with_no_sample_at_all_still_writes_diagnostics(
+    tmp_path: Path, monkeypatch
+) -> None:
+    patch_callbacks(monkeypatch)
+    patch_artifact_root(monkeypatch, tmp_path)
+    backend = StubBackend(
+        workflow_result=ExecutionResult(
+            status=RolloutStatus.FAILURE,
+            extra_fields={"phase": "setup", "harbor_exception_type": "ValueError"},
+        ),
+    )
+
+    await _handle_rollout(backend, make_request())
+
+    sidecar = json.loads((tmp_path / "r1" / "diagnostics.json").read_text())
+    assert sidecar["phase"] == "setup"
+    assert not (tmp_path / "r1" / "trajectory.json").exists()
+
+
+async def test_fabricated_failure_callback_carries_last_diagnostics(
+    tmp_path: Path, monkeypatch
+) -> None:
+    posted = patch_callbacks(monkeypatch)
+    patch_artifact_root(monkeypatch, tmp_path)
+    backend = StubBackend(
+        workflow_result=ExecutionResult(
+            status=RolloutStatus.FAILURE,
+            extra_fields={"phase": "agent_setup"},
+        ),
+        raises=RuntimeError("boom"),
+    )
+
+    await _handle_rollout(backend, make_request(grader_callback_url=None))
+
+    fabricated = [
+        p for _, p in posted if p.get("err_message") == "Internal server error"
+    ]
+    assert fabricated and fabricated[0]["extra_fields"] == {"phase": "agent_setup"}
+
+
 async def test_callback_ack_report_lands_in_document(
     tmp_path: Path, monkeypatch
 ) -> None:

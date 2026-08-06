@@ -94,6 +94,61 @@ async def test_save_never_raises(tmp_path: Path) -> None:
     )
 
 
+async def test_sample_less_failure_writes_diagnostics_sidecar(tmp_path: Path) -> None:
+    """A failed rollout with no sample must still leave a durable record."""
+    await save_trajectories(
+        rollout_id="r1",
+        result=ExecutionResult(
+            status=RolloutStatus.FAILURE,
+            extra_fields={"backend": "harbor-v2", "phase": "setup"},
+        ),
+        artifact_root=tmp_path,
+    )
+
+    sidecar = json.loads((tmp_path / "r1" / "diagnostics.json").read_text())
+    assert sidecar["phase"] == "setup"
+    assert not (tmp_path / "r1" / "trajectory.json").exists()
+
+
+async def test_diagnostics_override_wins_over_result_extra_fields(
+    tmp_path: Path,
+) -> None:
+    """The retained latest diagnostics may come from a different result than
+    the archived sample; the explicit override must win."""
+    await save_trajectories(
+        rollout_id="r1",
+        result=ExecutionResult(
+            status=RolloutStatus.SUCCESS,
+            sample=make_sample(reward=1.0),
+            extra_fields={"phase": "agent"},
+        ),
+        diagnostics={"phase": "grading"},
+        artifact_root=tmp_path,
+    )
+
+    sidecar = json.loads((tmp_path / "r1" / "diagnostics.json").read_text())
+    assert sidecar["phase"] == "grading"
+    # The trajectory document still carries the archived result's own fields.
+    doc = json.loads((tmp_path / "r1" / "trajectory.json").read_text())
+    assert doc["extra"]["osmosis"]["result_extra_fields"] == {"phase": "agent"}
+
+
+async def test_result_extra_fields_land_in_trajectory_extra(tmp_path: Path) -> None:
+    await save_trajectories(
+        rollout_id="r1",
+        result=ExecutionResult(
+            status=RolloutStatus.SUCCESS,
+            sample=make_sample(reward=0.5),
+            extra_fields={"backend": "harbor-v2", "timings_sec": {"agent": 3.0}},
+        ),
+        artifact_root=tmp_path,
+    )
+
+    doc = json.loads((tmp_path / "r1" / "trajectory.json").read_text())
+    assert doc["extra"]["osmosis"]["result_extra_fields"]["backend"] == "harbor-v2"
+    assert (tmp_path / "r1" / "diagnostics.json").exists()
+
+
 async def test_report_metrics_land_in_document(tmp_path: Path) -> None:
     report = TrajectoryReport(
         model_name="rollout-model",

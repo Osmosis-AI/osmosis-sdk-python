@@ -70,6 +70,7 @@ from osmosis_ai.rollout.backend.harbor.backend import (
 from osmosis_ai.rollout.backend.harbor.bundling import resolve_backend_bundle
 from osmosis_ai.rollout.backend.harbor.diagnostics import (
     agent_phase_failure,
+    categorize_exception,
     diagnostic_payload,
     failure_phase,
     redact_secrets,
@@ -210,6 +211,12 @@ class HarborBackendV2(ExecutionBackend):
         orchestrator.add_hook(TrialEvent.START, self.on_trial_started)
         orchestrator.add_hook(TrialEvent.VERIFICATION_START, self.on_verification_start)
         orchestrator.add_hook(TrialEvent.END, self.on_trial_end)
+
+    @property
+    def capture_final_result(self) -> bool:
+        # Harbor verification computes the final reward backend-side; the
+        # server should archive it even when no grader callback URL exists.
+        return True
 
     def queued(self) -> int:
         return max(0, len(self.pending) - self.running)
@@ -444,25 +451,46 @@ class HarborBackendV2(ExecutionBackend):
             self.pending.pop(request.id, None)
             self.record_outcome(request.id, RolloutStatus.CANCELLED)
             self.cleanup_rollout_residue(request.id, include_trial=True)
+            if not pending.cancel_requested:
+                # Not a requested rollout cancellation: uvicorn shutdown or an
+                # enclosing task group owns this; swallowing it would corrupt
+                # the canceller's bookkeeping.
+                raise
             logger.info("Rollout %s cancelled", request.id)
         except Exception as e:
             self.pending.pop(request.id, None)
+            category = categorize_exception(e)
             self.record_outcome(request.id, RolloutStatus.FAILURE, err_message=str(e))
             self.cleanup_rollout_residue(request.id, include_trial=False)
-            logger.error("Failed trial %s: %s", request.id, e)
-            await on_workflow_complete(
-                ExecutionResult(
-                    status=RolloutStatus.FAILURE,
-                    err_message=str(e),
-                    err_category=RolloutErrorCategory.AGENT_ERROR,
-                    extra_fields=diagnostic_payload(
-                        phase="setup",
-                        category=RolloutErrorCategory.AGENT_ERROR,
-                        exception_type=type(e).__name__,
-                        timings={},
-                    ),
-                )
+            logger.error("Failed trial %s: %s", request.id, traceback.format_exc())
+            failure = ExecutionResult(
+                status=RolloutStatus.FAILURE,
+                err_message=str(e),
+                err_category=category,
+                extra_fields=diagnostic_payload(
+                    phase="setup",
+                    category=category,
+                    exception_type=type(e).__name__,
+                    timings={},
+                ),
             )
+            # Both channels get a terminal outcome, so a controller waiting on
+            # the grader callback does not burn its full deadline; wrapped
+            # deliveries keep exceptions out of the server's fabrication path.
+            if not pending.workflow_complete_called:
+                await self.try_callback(
+                    on_workflow_complete,
+                    pending.workflow_result or failure,
+                    request.id,
+                    "workflow",
+                )
+            if on_grader_complete is not None and not pending.grader_complete_called:
+                await self.try_callback(
+                    on_grader_complete,
+                    pending.grader_result or failure,
+                    request.id,
+                    "grader",
+                )
         else:
             err = getattr(trial_result, "exception_info", None)
             if err is not None and err.exception_type == "CancelledError":
@@ -646,6 +674,7 @@ class HarborBackendV2(ExecutionBackend):
             if pending is None or pending.task is None or pending.task.done():
                 dispositions[rollout_id] = "not_found"
                 continue
+            pending.cancel_requested = True
             pending.task.cancel()
             dispositions[rollout_id] = (
                 "cancelled_running" if pending.started else "cancelled_queued"
@@ -653,11 +682,14 @@ class HarborBackendV2(ExecutionBackend):
         return dispositions
 
     def event_diagnostics(
-        self, event: TrialHookEvent, category: RolloutErrorCategory | None = None
+        self,
+        event: TrialHookEvent,
+        category: RolloutErrorCategory | None = None,
+        phase: str | None = None,
     ) -> dict[str, Any]:
         err = event.result.exception_info if event.result else None
         return diagnostic_payload(
-            phase=failure_phase(event.result),
+            phase=phase or failure_phase(event.result),
             category=category,
             exception_type=err.exception_type if err else None,
             timings=trial_timings(event.result),
@@ -762,6 +794,7 @@ class HarborBackendV2(ExecutionBackend):
                 ),
             )
 
+        pending.workflow_result = outcome
         pending.workflow_complete_called = await self.try_callback(
             pending.on_workflow_complete, outcome, rollout_id, "workflow"
         )
@@ -806,7 +839,7 @@ class HarborBackendV2(ExecutionBackend):
                     err_message=str(e),
                     err_category=RolloutErrorCategory.VALIDATION_ERROR,
                     extra_fields=self.event_diagnostics(
-                        event, RolloutErrorCategory.VALIDATION_ERROR
+                        event, RolloutErrorCategory.VALIDATION_ERROR, phase="grading"
                     ),
                 )
             return ExecutionResult(
@@ -826,11 +859,18 @@ class HarborBackendV2(ExecutionBackend):
                     event, RolloutErrorCategory.AGENT_ERROR
                 ),
             )
+        # Reachable in normal operation: a task without tests/ and without a
+        # grader disables the verifier, so no reward source ever runs.
         return ExecutionResult(
             status=RolloutStatus.FAILURE,
             sample=sample,
+            err_message=(
+                "trial ended with no verifier result and no recorded error; "
+                "the task has no reward source (no tests/ and no grader)"
+            ),
+            err_category=RolloutErrorCategory.VALIDATION_ERROR,
             extra_fields=self.event_diagnostics(
-                event, RolloutErrorCategory.AGENT_ERROR
+                event, RolloutErrorCategory.VALIDATION_ERROR, phase="grading"
             ),
         )
 
@@ -865,30 +905,41 @@ class HarborBackendV2(ExecutionBackend):
             )
 
             if not pending.workflow_complete_called:
-                if event.result and event.result.exception_info:
+                if pending.workflow_result is not None:
+                    # The semantic outcome was produced but delivery failed;
+                    # resend it byte-identical instead of fabricating a
+                    # failure for a trial that may have succeeded.
+                    result = pending.workflow_result
+                elif event.result and event.result.exception_info:
                     err = event.result.exception_info
                     log_trial_exception(
                         rollout_id, err, phase="before the agent completed"
                     )
-                    message = err.exception_message
-                else:
-                    message = "Trial ended before agent completed"
-                pending.workflow_complete_called = await self.try_callback(
-                    pending.on_workflow_complete,
-                    ExecutionResult(
+                    result = ExecutionResult(
                         status=RolloutStatus.FAILURE,
-                        err_message=message,
+                        err_message=err.exception_message,
                         err_category=RolloutErrorCategory.AGENT_ERROR,
                         extra_fields=self.event_diagnostics(
                             event, RolloutErrorCategory.AGENT_ERROR
                         ),
-                    ),
-                    rollout_id,
-                    "workflow",
+                    )
+                else:
+                    result = ExecutionResult(
+                        status=RolloutStatus.FAILURE,
+                        err_message="Trial ended before agent completed",
+                        err_category=RolloutErrorCategory.AGENT_ERROR,
+                        extra_fields=self.event_diagnostics(
+                            event, RolloutErrorCategory.AGENT_ERROR
+                        ),
+                    )
+                pending.workflow_result = result
+                pending.workflow_complete_called = await self.try_callback(
+                    pending.on_workflow_complete, result, rollout_id, "workflow"
                 )
 
             if pending.on_grader_complete:
-                await self.try_callback(
+                pending.grader_result = grader_result
+                pending.grader_complete_called = await self.try_callback(
                     pending.on_grader_complete, grader_result, rollout_id, "grader"
                 )
         finally:

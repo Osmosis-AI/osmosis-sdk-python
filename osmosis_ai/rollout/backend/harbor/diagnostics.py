@@ -102,18 +102,36 @@ def agent_phase_failure(result: Any) -> Any | None:
 
 
 def failure_phase(result: Any) -> str:
-    """The furthest phase the trial reached; a failure happened there."""
+    """The phase a failure belongs to.
+
+    Normally the furthest phase the trial reached — but an exception recorded
+    before verification started belongs to the agent-side phase that produced
+    it, not to the verifier harbor ran anyway. Without that, the workflow and
+    grader callbacks blame different phases for the same failure.
+    """
     if result is None:
         return "setup"
-    for name, info in (
+    spans = [
         ("verifier", result.verifier),
         ("agent", result.agent_execution),
         ("agent_setup", result.agent_setup),
         ("environment_setup", result.environment_setup),
-    ):
+    ]
+    if agent_phase_failure(result) is not None:
+        spans = spans[1:]
+    for name, info in spans:
         if info is not None:
             return name
     return "setup"
+
+
+def categorize_exception(exc: BaseException) -> RolloutErrorCategory:
+    """Map pre-submit and setup exceptions onto the wire error vocabulary."""
+    if isinstance(exc, TimeoutError):
+        return RolloutErrorCategory.TIMEOUT
+    if isinstance(exc, (ValueError, TypeError, AssertionError)):
+        return RolloutErrorCategory.VALIDATION_ERROR
+    return RolloutErrorCategory.AGENT_ERROR
 
 
 def trial_metrics(result: Any) -> dict[str, Any]:
