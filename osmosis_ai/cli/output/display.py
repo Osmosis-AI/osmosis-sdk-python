@@ -57,6 +57,48 @@ def format_local_datetime(
     )
 
 
+def format_elapsed(
+    started_at: str | None,
+    completed_at: str | None = None,
+    *,
+    now: datetime | None = None,
+) -> str | None:
+    """Wall-clock span from *started_at*, to *completed_at* or to now."""
+    started = _parse_iso_datetime(started_at)
+    if started is None:
+        return None
+    finished = _parse_iso_datetime(completed_at)
+    if finished is None:
+        finished = now.astimezone() if now is not None else datetime.now(started.tzinfo)
+    return format_duration_ms(max(0.0, (finished - started).total_seconds()) * 1000)
+
+
+def format_relative_time(value: str | None, *, now: datetime | None = None) -> str:
+    """Compact age for table cells (e.g. ``2d ago``)."""
+    parsed = _parse_iso_datetime(value)
+    if parsed is None:
+        return "" if value is None else str(value)
+    reference = now.astimezone() if now is not None else datetime.now(parsed.tzinfo)
+    minutes = max(0.0, (reference - parsed).total_seconds()) / 60
+    if minutes < 1:
+        return "just now"
+    if minutes < 60:
+        return f"{int(minutes)}m ago"
+    hours = minutes / 60
+    if hours < 24:
+        return f"{int(hours)}h ago"
+    days = hours / 24
+    if days < 7:
+        return f"{int(days)}d ago"
+    weeks = days / 7
+    if weeks < 5:
+        return f"{int(weeks)}w ago"
+    months = days / 30.44
+    if months < 12:
+        return f"{max(1, int(months))}mo ago"
+    return f"{max(1, round(months / 12))}y ago"
+
+
 def format_duration_ms(duration_ms: float) -> str:
     """Human-readable duration from milliseconds (e.g. ``2h 47m``)."""
     duration_ms = max(0.0, duration_ms)

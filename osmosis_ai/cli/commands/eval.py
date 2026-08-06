@@ -111,7 +111,7 @@ def eval_list(
 
 @app.command("logs")
 def eval_logs(
-    name_or_id: str = typer.Argument(..., help="Evaluation run name or ID."),
+    name: str = typer.Argument(..., help="Evaluation run name."),
     limit: int = typer.Option(
         DEFAULT_PAGE_SIZE,
         "--limit",
@@ -128,33 +128,33 @@ def eval_logs(
     """Show recent logs for an evaluation run, oldest first."""
     from osmosis_ai.platform.cli.eval import logs as _logs
 
-    return _logs(name_or_id, limit=limit, cursor=cursor)
+    return _logs(name, limit=limit, cursor=cursor)
 
 
 @app.command("info")
 def eval_info(
-    name_or_id: str = typer.Argument(..., help="Evaluation run name or ID."),
+    name: str = typer.Argument(..., help="Evaluation run name."),
     output: str | None = typer.Option(
         None,
         "--output",
         "-o",
-        help="Run output root (default in rich mode: .osmosis/evals/<name>/).",
+        help="Run output root (default in rich mode: .osmosis/evals/<run-name>/).",
     ),
 ) -> Any:
     """Show evaluation run details, results, and metrics."""
     from osmosis_ai.platform.cli.eval import info as _info
 
-    return _info(name_or_id, output=output)
+    return _info(name, output=output)
 
 
 @app.command("download")
 def eval_download(
-    name_or_id: str = typer.Argument(..., help="Evaluation run name or ID."),
+    name: str = typer.Argument(..., help="Evaluation run name."),
     output: str | None = typer.Option(
         None,
         "--output",
         "-o",
-        help="Run output root (default: .osmosis/evals/<name>/).",
+        help="Run output root (default: .osmosis/evals/<run-name>/).",
     ),
     types: str = typer.Option(
         "metrics,trajectories",
@@ -185,7 +185,7 @@ def eval_download(
     from osmosis_ai.platform.cli.eval import download as _download
 
     return _download(
-        name_or_id,
+        name,
         output=output,
         types=types,
         rows=rows,
@@ -196,10 +196,10 @@ def eval_download(
 
 @app.command("stop")
 def eval_stop(
-    name_or_id: str = typer.Argument(..., help="Evaluation run name or ID."),
+    name: str = typer.Argument(..., help="Evaluation run name."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt."),
 ) -> Any:
     """Stop an evaluation run."""
     from osmosis_ai.platform.cli.eval import stop as _stop
 
-    return _stop(name_or_id, yes=yes)
+    return _stop(name, yes=yes)
