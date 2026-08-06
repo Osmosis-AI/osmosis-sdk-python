@@ -727,3 +727,112 @@ lora_model_name = "deep-swe-agent"
 
     with pytest.raises(CLIError, match=r"Invalid secret name ''"):
         load_benchmark_submit_config(path)
+
+
+_VERIFIER_BASE = """
+[experiment]
+benchmark = "acme/custom@1.0"
+
+[[agents]]
+harness = "terminus"
+
+[agents.model]
+type = "provider"
+model = "openai/gpt-5"
+api_key_secret = "OPENAI_API_KEY"
+"""
+
+
+def test_verifier_env_becomes_execution_verifier_env(tmp_path: Path) -> None:
+    path = _write_config(
+        tmp_path / "benchmark.toml",
+        _VERIFIER_BASE
+        + """
+[verifier.env]
+VLM_API_KEY = "HF_TOKEN"
+""",
+    )
+
+    config = load_benchmark_submit_config(path)
+
+    assert config.execution_config["verifier_env"] == [
+        {"name": "VLM_API_KEY", "secret": "HF_TOKEN"}
+    ]
+    assert "HF_TOKEN" in config.required_secrets
+
+
+def test_config_without_verifier_env_omits_the_key(tmp_path: Path) -> None:
+    path = _write_config(tmp_path / "benchmark.toml", _VERIFIER_BASE)
+
+    config = load_benchmark_submit_config(path)
+
+    assert "verifier_env" not in config.execution_config
+
+
+def test_verifier_env_rejects_a_reserved_variable_name(tmp_path: Path) -> None:
+    path = _write_config(
+        tmp_path / "benchmark.toml",
+        _VERIFIER_BASE
+        + """
+[verifier.env]
+_OSMOSIS_SNEAKY = "HF_TOKEN"
+""",
+    )
+
+    with pytest.raises(CLIError, match=r"\[verifier\.env\]"):
+        load_benchmark_submit_config(path)
+
+
+def test_verifier_env_rejects_a_lowercase_variable_name(tmp_path: Path) -> None:
+    path = _write_config(
+        tmp_path / "benchmark.toml",
+        _VERIFIER_BASE
+        + """
+[verifier.env]
+vlm_api_key = "HF_TOKEN"
+""",
+    )
+
+    with pytest.raises(CLIError, match=r"Invalid env var name 'vlm_api_key'"):
+        load_benchmark_submit_config(path)
+
+
+def test_verifier_secret_colliding_with_agent_env_is_rejected(tmp_path: Path) -> None:
+    path = _write_config(
+        tmp_path / "benchmark.toml",
+        """
+[experiment]
+benchmark = "acme/custom@1.0"
+
+[[agents]]
+harness = "terminus"
+
+[agents.model]
+type = "provider"
+model = "openai/gpt-5"
+api_key_secret = "OPENAI_API_KEY"
+
+[agents.env]
+VLM_KEY = "literal-value"
+
+[verifier.env]
+VLM_API_KEY = "VLM_KEY"
+""",
+    )
+
+    with pytest.raises(CLIError, match=r"'VLM_KEY' appears in \[agents\.env\]"):
+        load_benchmark_submit_config(path)
+
+
+def test_verifier_env_rejects_an_invalid_secret_name(tmp_path: Path) -> None:
+    path = _write_config(
+        tmp_path / "benchmark.toml",
+        _VERIFIER_BASE
+        + """
+[verifier.env]
+VLM_API_KEY = "not-a-secret"
+""",
+    )
+
+    with pytest.raises(CLIError, match=r"Invalid secret name 'not-a-secret'"):
+        load_benchmark_submit_config(path)

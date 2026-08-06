@@ -109,6 +109,12 @@ class BenchmarkExecutionSection(_StrictSection):
     judge_api_key_secret: str | None = None
 
 
+class BenchmarkVerifierSection(_StrictSection):
+    # Key is the variable the dataset's verifier reads, value the secret record
+    # supplying it. Submit rejects the section for managed benchmarks.
+    env: dict[str, str] = Field(default_factory=dict, max_length=16)
+
+
 class BenchmarkSubmitConfig(_StrictSection):
     """Parsed benchmark run TOML configuration."""
 
@@ -118,6 +124,7 @@ class BenchmarkSubmitConfig(_StrictSection):
     execution: BenchmarkExecutionSection = Field(
         default_factory=BenchmarkExecutionSection
     )
+    verifier: BenchmarkVerifierSection = Field(default_factory=BenchmarkVerifierSection)
     env: dict[str, str] = Field(default_factory=dict)
 
     @property
@@ -134,7 +141,13 @@ class BenchmarkSubmitConfig(_StrictSection):
 
     @property
     def execution_config(self) -> dict[str, Any]:
-        return self.execution.model_dump(exclude_none=True)
+        config = self.execution.model_dump(exclude_none=True)
+        if self.verifier.env:
+            config["verifier_env"] = [
+                {"name": name, "secret": secret}
+                for name, secret in self.verifier.env.items()
+            ]
+        return config
 
     @property
     def required_secrets(self) -> list[str]:
@@ -151,6 +164,7 @@ class BenchmarkSubmitConfig(_StrictSection):
         judge_secret = self.execution.judge_api_key_secret
         if isinstance(judge_secret, str):
             names.append(judge_secret)
+        names.extend(self.verifier.env.values())
         return list(dict.fromkeys(names))
 
 
@@ -164,8 +178,9 @@ def _validate_secret_references(config: BenchmarkSubmitConfig, path: Path) -> No
     """Validate secret record names and per-agent env collisions.
 
     The platform injects an agent model's ``api_key_secret`` value (and any
-    judge secret) as an env var of the same name into that agent's runtime env,
-    so a literal env var with that name would be silently overwritten.
+    judge secret, and any verifier secret) as an env var of the same name into
+    that agent's runtime env, so a literal env var with that name would be
+    silently overwritten.
     Collisions are scoped per agent: one agent's secret name may still be
     another agent's literal env var. Model secrets also cannot use names the
     runner removes before model-key aliasing. Harness credentials travel
@@ -213,6 +228,15 @@ def _validate_secret_references(config: BenchmarkSubmitConfig, path: Path) -> No
                 "judge secret value under that name; remove the env var or "
                 "rename it."
             )
+        for variable, secret in config.verifier.env.items():
+            if secret in effective_env:
+                source = _env_source_label(secret, index, agent.env)
+                raise CLIError(
+                    f"'{secret}' appears in {source} and as the secret for "
+                    f"'{variable}' in [verifier.env] of {path}. The platform "
+                    "injects the secret value under that name; remove the env "
+                    "var or rename it."
+                )
         if "HF_TOKEN" in effective_env:
             source = _env_source_label("HF_TOKEN", index, agent.env)
             raise CLIError(
@@ -268,6 +292,9 @@ def load_benchmark_submit_config(path: Path) -> BenchmarkSubmitConfig:
         ) from exc
 
     validate_env_var_keys(env=config.env, path=path)
+    validate_env_var_keys(
+        env=config.verifier.env, path=path, source_label="[verifier.env]"
+    )
     for index, agent in enumerate(config.agents, start=1):
         validate_env_var_keys(
             env=agent.env,

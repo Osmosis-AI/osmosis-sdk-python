@@ -587,6 +587,8 @@ def benchmark_info(key: str, *, limit: int, all_: bool) -> DetailResult:
         judge = "Required"
         if benchmark.judge_model_default:
             judge += f" (default: {benchmark.judge_model_default})"
+    elif benchmark.requires_judge_api_key:
+        judge = "API key only (pinned grader)"
 
     category_display = ", ".join(
         f"{category.name} ({category.task_count:,})"

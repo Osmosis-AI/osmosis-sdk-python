@@ -533,6 +533,7 @@ class BenchmarkCatalogDetail:
     categories: list[BenchmarkCategory]
     tasks: list[BenchmarkCatalogTask]
     unavailable_tasks: dict[str, Any] | None
+    requires_judge_api_key: bool = False
     required_secret_names: list[str] = field(default_factory=list)
     default_harness: str | None = None
     source_url: str | None = None
@@ -569,6 +570,7 @@ class BenchmarkCatalogDetail:
             supports_harness=benchmark["supports_harness"],
             requires_harness=benchmark["requires_harness"],
             requires_judge_model=benchmark["requires_judge_model"],
+            requires_judge_api_key=benchmark.get("requires_judge_api_key", False),
             judge_model_default=benchmark.get("judge_model_default"),
             pass_threshold=float(benchmark["pass_threshold"]),
             categories=[

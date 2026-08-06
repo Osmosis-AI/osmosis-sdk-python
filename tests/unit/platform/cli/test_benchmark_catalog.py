@@ -731,3 +731,60 @@ def test_benchmark_runs_section_render_status_progress_and_date() -> None:
         "Best Pass@1",
         "Submitted",
     ]
+
+
+@pytest.mark.parametrize(
+    ("requires_judge_model", "requires_judge_api_key", "default", "expected"),
+    [
+        (False, False, None, "–"),
+        (True, False, "openai/gpt-5", "Required (default: openai/gpt-5)"),
+        (False, True, None, "API key only (pinned grader)"),
+    ],
+)
+def test_benchmark_info_judge_row_covers_every_grader_shape(
+    monkeypatch: pytest.MonkeyPatch,
+    requires_judge_model: bool,
+    requires_judge_api_key: bool,
+    default: str | None,
+    expected: str,
+) -> None:
+    """A benchmark can pin its own grader, needing the key but no model."""
+
+    class FakeClient:
+        def get_benchmark(self, *_: Any, **__: Any) -> BenchmarkCatalogDetail:
+            return BenchmarkCatalogDetail(
+                id="benchmark-judge",
+                name="BrowseComp",
+                description=None,
+                source_type="osmosis_managed",
+                source_ref="browsecomp",
+                task_count=10,
+                category_count=0,
+                task_sets=[],
+                runner_family="harbor",
+                supports_harness=True,
+                requires_harness=False,
+                requires_judge_model=requires_judge_model,
+                requires_judge_api_key=requires_judge_api_key,
+                judge_model_default=default,
+                pass_threshold=1,
+                categories=[],
+                tasks=[],
+                unavailable_tasks=None,
+            )
+
+        list_benchmark_runs = staticmethod(_empty_runs_page)
+
+    monkeypatch.setattr(
+        benchmark_module,
+        "require_git_workspace_directory_context",
+        _context,
+    )
+    monkeypatch.setattr(benchmark_module, "OsmosisClient", FakeClient)
+
+    result = benchmark_module.benchmark_info(
+        "browsecomp", limit=DEFAULT_PAGE_SIZE, all_=False
+    )
+
+    fields = {field.label: field.value for field in result.fields}
+    assert fields["LLM Judge"] == expected
