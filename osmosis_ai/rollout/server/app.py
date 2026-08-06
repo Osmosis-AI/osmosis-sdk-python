@@ -124,10 +124,8 @@ async def _handle_rollout(
         rollout_id=rollout_id,
     )
 
-    # Two independent retention slots: the best sample-bearing result (the
-    # grader's, normally — it has the reward) for the trajectory archive, and
-    # the latest diagnostics payload, so a terminal sample-less failure still
-    # leaves a durable, attributable record.
+    # Two retention slots: the best sample-bearing result for the archive, and
+    # the latest diagnostics so a sample-less failure still leaves a record.
     result_to_save: ExecutionResult | None = None
     last_diagnostics: dict[str, Any] | None = None
     # Latest metrics from callback acks.
@@ -239,8 +237,7 @@ async def _handle_rollout(
                     traceback.format_exc(),
                 )
     finally:
-        # Best-effort archive once execute() has finished. A diagnostics-only
-        # outcome must still leave a durable artifact.
+        # Best-effort archive once execute() has finished.
         if result_to_save is not None or last_diagnostics is not None:
             await save_trajectories(
                 rollout_id=rollout_id,

@@ -24,12 +24,8 @@ class ExecutionBackend(ABC):
 
     @property
     def capture_final_result(self) -> bool:
-        """Whether the server should accept the grader result for archival
-        even when the request carries no grader callback URL.
-
-        True for backends that compute the final reward themselves; eval-only
-        and local callers then still archive the reward and final status.
-        """
+        """Accept the grader result for archival even without a grader
+        callback URL. True for backends that compute the reward themselves."""
         return False
 
     def has_capacity(self) -> bool:

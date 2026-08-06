@@ -233,8 +233,7 @@ class CapturingStubBackend(StubBackend):
 async def test_capture_final_result_archives_reward_without_grader_url(
     tmp_path: Path, monkeypatch
 ) -> None:
-    """Eval-only callers omit grader_callback_url; a backend that computes the
-    reward itself must still get its grader result archived."""
+    """Reward-computing backends archive the grader result without a URL."""
     posted = patch_callbacks(monkeypatch)
     patch_artifact_root(monkeypatch, tmp_path)
     backend = CapturingStubBackend(
@@ -283,8 +282,7 @@ async def test_extra_fields_flow_to_both_callbacks(tmp_path: Path, monkeypatch) 
 async def test_sample_less_terminal_failure_leaves_diagnostics(
     tmp_path: Path, monkeypatch
 ) -> None:
-    """Two retention slots: the sample-bearing result keeps the archive, and
-    the terminal sample-less failure keeps the diagnostics record."""
+    """The archive keeps the sample; the diagnostics keep the failure."""
     patch_callbacks(monkeypatch)
     patch_artifact_root(monkeypatch, tmp_path)
     backend = StubBackend(

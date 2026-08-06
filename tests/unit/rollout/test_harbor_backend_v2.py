@@ -396,8 +396,7 @@ class TestNativeAgents:
         assert config.model_name == "openai/m"
         assert config.kwargs["api_base"] == "http://t/v1"
         assert config.kwargs["enable_summarize"] is False
-        # Terminus-2 ignores a top-level api_key; identity must ride in
-        # llm_kwargs, and controllers require non-streaming responses.
+        # Terminus-2 ignores a top-level api_key; it must ride in llm_kwargs.
         assert "api_key" not in config.kwargs
         assert config.kwargs["llm_kwargs"]["api_key"] == "rk-1"
         assert config.kwargs["llm_kwargs"]["extra_body"]["stream"] is False
@@ -504,11 +503,8 @@ class TestNativeAgents:
 class TestGraderOutcome:
     """Failure precedence: the agent's own failure must stay primary.
 
-    The agent phase is identified by the exception's timestamp against the
-    verifier's start, never by exception class name — harbor records
-    pattern-classified subclasses no fixed name set would cover. Timestamps
-    mirror harbor's mixed conventions: ``occurred_at`` is naive-local,
-    timings are timezone-aware UTC.
+    Phase is decided by timestamp against the verifier's start, never by
+    class name; occurred_at is naive-local, timings aware-UTC, as in harbor.
     """
 
     # A naive-local base instant, as harbor's ExceptionInfo records it.
@@ -557,8 +553,7 @@ class TestGraderOutcome:
         )
 
     async def test_agent_command_failure_stays_primary(self, template_task, tmp_path):
-        """Harbor records the agent failure and still runs the verifier; the
-        verifier's missing-sample error must not replace the agent error."""
+        """The verifier's missing-sample error must not replace the agent error."""
         from types import SimpleNamespace
 
         async def noop(result):
@@ -580,8 +575,7 @@ class TestGraderOutcome:
     async def test_classified_subclass_failure_stays_primary(
         self, template_task, tmp_path
     ):
-        """Harbor's ERROR_PATTERNS record subclass names; the phase decision
-        must not depend on the class name."""
+        """The phase decision must not depend on the exception class name."""
         from types import SimpleNamespace
 
         async def noop(result):
@@ -623,8 +617,7 @@ class TestGraderOutcome:
     async def test_post_verifier_exception_does_not_preempt_verifier(
         self, template_task, tmp_path
     ):
-        """An exception recorded after the verifier finished (teardown noise)
-        must not preempt the verifier branch, whatever its class name."""
+        """Teardown noise recorded after the verifier must not preempt it."""
         from types import SimpleNamespace
 
         async def noop(result):
@@ -708,9 +701,7 @@ class TestTaskResolver:
     async def test_resolver_task_instruction_replacement_warns(
         self, template_task, tmp_path, caplog
     ):
-        """Any task that is not the configured template dir loses its authored
-        instruction.md to the template-mode prompt; the warning keys on what
-        is being destroyed, not on how the task was selected."""
+        """The warning keys on what is destroyed, not how the task was selected."""
         import logging
         from types import SimpleNamespace
 
@@ -746,8 +737,7 @@ class TestTaskResolver:
     async def test_configured_template_instruction_stays_silent(
         self, template_task, caplog
     ):
-        """The configured template dir's own instruction.md is a fallback by
-        design; replacing it with the prompt is the intended flow."""
+        """Replacing the template dir's own instruction.md is the intended flow."""
         import logging
         from types import SimpleNamespace
 
@@ -824,8 +814,7 @@ class TestDiagnostics:
         assert failure_phase(None) == "setup"
 
     def test_agent_phase_failure_compares_mixed_timezone_timestamps(self):
-        """harbor records occurred_at naive-local but timings aware-UTC; the
-        phase decision must normalize instead of raising TypeError."""
+        """Mixed naive/aware timestamps must normalize, not raise TypeError."""
         from types import SimpleNamespace
 
         from osmosis_ai.rollout.backend.harbor.diagnostics import agent_phase_failure
@@ -1023,9 +1012,8 @@ class TestPrewarm:
 
 
 class FakeQueue:
-    """Stands in for harbor's TrialQueue: fires the registered hooks like a
-    real trial, then simulates harbor's secret scrub *after* the END hook and
-    *before* submit() resolves — the ordering the backend must respect."""
+    """A TrialQueue that fires hooks, then simulates harbor's secret scrub
+    after the END hook and before submit() resolves."""
 
     def __init__(self, run=None):
         self.hooks = {}
@@ -1090,8 +1078,7 @@ class TestConfigValidation:
         assert backend.agent_setup_timeout_sec == 120.0
 
     def test_max_queue_depth_zero_rejected(self, template_task):
-        """Depth 0 used to mean reject-everything (429 on an idle server); the
-        backend cannot see queue concurrency, so it cannot mean anything else."""
+        """Depth 0 used to mean reject-everything (429 on an idle server)."""
         with pytest.raises(ValueError, match="max_queue_depth"):
             self.backend_for(template_task, agent="oracle", max_queue_depth=0)
         assert (
@@ -1150,8 +1137,7 @@ class TestConfigValidation:
 
     @pytest.mark.parametrize("agent", ["terminus-2", "mini-swe-agent"])
     def test_empty_endpoint_refused_for_wired_agents(self, template_task, agent):
-        """An empty api_base makes litellm fall back to the provider's public
-        endpoint, sending the rollout credential off-host."""
+        """An empty api_base sends the rollout credential to the public endpoint."""
         backend = self.backend_for(template_task, agent=agent)
         with pytest.raises(ValueError, match="no chat_completions_url"):
             backend.build_agent_config(
@@ -1167,8 +1153,7 @@ class TestConfigValidation:
         assert config.name == "oracle"
 
     def test_env_wiring_sets_both_base_url_spellings(self, template_task):
-        """mini-swe-agent reads OPENAI_BASE_URL before OPENAI_API_BASE; both
-        must carry the rollout endpoint so host values cannot outrank it."""
+        """Both OPENAI_* spellings must carry the rollout endpoint."""
         backend = self.backend_for(template_task, agent="mini-swe-agent")
         config = backend.build_agent_config(
             template_task,
@@ -1182,8 +1167,7 @@ class TestConfigValidation:
 
 class TestDuplicateRolloutIds:
     async def test_duplicate_active_id_rejected(self, template_task):
-        """A duplicate would overwrite live pending state and rewrite the
-        active trial's staged input files; it must never be admitted."""
+        """A duplicate must not overwrite live pending state or staged files."""
         backend = HarborBackendV2(
             orchestrator=TrialQueue(n_concurrent=1),
             tasks_dir=template_task,
@@ -1215,8 +1199,7 @@ class TestArtifactLifecycle:
     async def test_artifacts_relocate_only_after_harbor_scrub(
         self, template_task, tmp_path
     ):
-        """Harbor scrubs the trial dir after the END hook and before submit()
-        resolves; the durable copy must be taken from the scrubbed tree."""
+        """The durable copy must be taken from the post-scrub tree."""
         from osmosis_ai.rollout.context import RolloutContext
 
         async def run(queue, config):
@@ -1251,8 +1234,7 @@ class TestArtifactLifecycle:
     async def test_cancellation_cleans_rollout_and_trial_residue(
         self, template_task, tmp_path
     ):
-        """Cancelled rollouts must not leave credential-bearing staging or
-        trial directories behind; harbor's scrub never ran for them."""
+        """Cancelled rollouts must not leave credential-bearing directories."""
         from osmosis_ai.rollout.context import RolloutContext
 
         started = asyncio.Event()
@@ -1365,8 +1347,7 @@ class TestPrewarmIdentity:
                 agent=agent,
                 trials_dir=tmp_path / "trials",
             )
-            # Even with an ambient rollout context, prewarm must not pick up
-            # its endpoint or credential.
+            # Prewarm must not pick up the ambient context's endpoint or key.
             with RolloutContext(
                 chat_completions_url="http://t/v1", api_key="rk-1", rollout_id="x"
             ):
@@ -1378,8 +1359,7 @@ class TestPrewarmIdentity:
     async def test_prewarm_named_rollout_id_is_not_treated_as_prewarm(
         self, template_task
     ):
-        """'prewarm-...' is a legal controller-supplied rollout id; dispatch
-        must key on the backend-generated registry, not the id pattern."""
+        """Dispatch must key on the registry, not a 'prewarm-' id pattern."""
         from types import SimpleNamespace
 
         backend = HarborBackendV2(
@@ -1413,8 +1393,7 @@ class TestPrewarmIdentity:
             )
             await queue.fire("start", event)
             await queue.fire("end", event)
-            # The END hook must not have removed anything: harbor's scrub
-            # (simulated here) still needs the tree.
+            # The END hook must leave the tree for harbor's scrub.
             seen_dirs[config.trial_name] = trial_dir.exists()
             return trial_result()
 
@@ -1512,9 +1491,7 @@ class TestContainerInputGating:
 
 
 class TestCallbackOutcomes:
-    """Addendum §7: a channel's semantic outcome is produced once and stays
-    immutable; retries resend it byte-identical, and fabrication is allowed
-    only when no outcome was ever produced."""
+    """A channel's outcome is produced once; retries resend it byte-identical."""
 
     def backend_for(self, template_task, tmp_path, queue):
         backend = HarborBackendV2(
@@ -1538,9 +1515,7 @@ class TestCallbackOutcomes:
     async def test_workflow_delivery_failure_resends_same_outcome(
         self, template_task, tmp_path
     ):
-        """Transient delivery failure: the END-hook retry must resend the
-        cached outcome instead of fabricating 'Trial ended before agent
-        completed' for a trial that succeeded."""
+        """The END-hook retry must resend the cached outcome, not fabricate."""
         from types import SimpleNamespace
 
         attempts = []
@@ -1602,8 +1577,7 @@ class TestCallbackOutcomes:
         assert all(r.status == RolloutStatus.SUCCESS for r in attempts)
 
     async def test_setup_failure_reaches_both_channels(self, template_task, tmp_path):
-        """A controller waiting on the grader callback must not burn its full
-        deadline when the rollout dies before submission."""
+        """Pre-submit failures must reach the grader channel too."""
         workflow_results = []
         grader_results = []
 
@@ -1639,8 +1613,7 @@ class TestCallbackOutcomes:
     async def test_setup_failure_callback_exception_stays_contained(
         self, template_task, tmp_path
     ):
-        """Callback delivery exceptions must never escape execute() into the
-        server's outcome-fabrication path."""
+        """Delivery exceptions must not escape into the fabrication path."""
 
         async def raising_workflow(result):
             raise RuntimeError("delivery failed")
@@ -1663,8 +1636,7 @@ class TestCallbackOutcomes:
     async def test_post_end_exception_does_not_double_deliver(
         self, template_task, tmp_path
     ):
-        """Once both channels delivered, a later submit-level exception must
-        not produce a second, contradictory outcome on either channel."""
+        """A post-delivery exception must not double-post either channel."""
         from types import SimpleNamespace
 
         workflow_results = []
@@ -1695,8 +1667,7 @@ class TestCallbackOutcomes:
         assert len(grader_results) == 1
 
     async def test_external_cancellation_reraises(self, template_task, tmp_path):
-        """Only a requested rollout cancellation may be swallowed; process or
-        task-group cancellation must propagate to its owner."""
+        """Only requested cancellations may be swallowed."""
         started = asyncio.Event()
 
         async def run(queue, config):
@@ -1748,9 +1719,7 @@ class TestFailureCategorization:
         )
 
     def test_failure_phase_blames_agent_for_pre_verifier_exception(self):
-        """The workflow and grader callbacks must attribute the same failure
-        to the same phase; an exception recorded before verification belongs
-        to the agent side even though the verifier span exists."""
+        """Both callbacks must attribute the same failure to the agent side."""
         from types import SimpleNamespace
 
         from osmosis_ai.rollout.backend.harbor.diagnostics import failure_phase
@@ -1779,8 +1748,7 @@ class TestFailureCategorization:
     async def test_grader_outcome_no_reward_source_is_validation_error(
         self, template_task, tmp_path
     ):
-        """A task with no tests/ and no grader ends with no verifier result
-        and no exception; the terminal outcome must say what is missing."""
+        """No reward source: the terminal outcome must say what is missing."""
         from types import SimpleNamespace
 
         backend = HarborBackendV2(

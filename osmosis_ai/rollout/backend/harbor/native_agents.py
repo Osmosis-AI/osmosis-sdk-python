@@ -14,10 +14,8 @@ class NativeAgentBinding:
     trainable: bool = True
     env: dict[str, str] = field(default_factory=dict)
     kwargs: dict[str, Any] = field(default_factory=dict)
-    # Model providers whose wire protocol the rollout endpoint serves; the
-    # model prefix selects litellm's protocol (and, for env-wired agents,
-    # which provider's key variables the agent derives). None = unrestricted,
-    # for agents that emit no model traffic.
+    # Providers the rollout endpoint can serve; the model prefix selects
+    # litellm's protocol. None = unrestricted (no model traffic).
     providers: frozenset[str] | None = None
 
 
@@ -98,9 +96,8 @@ def native_agent_config(
             kwargs=dict(binding.kwargs),
         )
     if binding.wiring == "env":
-        # mini-swe-agent reads OPENAI_BASE_URL before OPENAI_API_BASE; set
-        # both spellings so a host-level value can never outrank the rollout
-        # endpoint the credential belongs to.
+        # mini-swe-agent reads OPENAI_BASE_URL before OPENAI_API_BASE; set both
+        # so a host-level value can never outrank the rollout endpoint.
         env = {
             **binding.env,
             "OPENAI_API_BASE": url,
@@ -110,11 +107,9 @@ def native_agent_config(
         return HarborAgentConfig(
             name=name, model_name=model_name, env=env, kwargs=dict(binding.kwargs)
         )
-    # Kwargs-wired agents (terminus-2) pass llm_kwargs through to the LLM
-    # constructor and silently drop a top-level api_key, so the rollout key
-    # must ride inside llm_kwargs. Controllers also require non-streaming
-    # JSON responses. User-provided llm_kwargs/extra_body are merged copies —
-    # never mutated — with the controller-owned values taking precedence.
+    # Kwargs-wired agents (terminus-2) silently drop a top-level api_key, so
+    # the rollout key rides inside llm_kwargs; controllers require
+    # non-streaming responses. Controller-owned values win over user ones.
     kwargs = {**binding.kwargs, "api_base": url}
     llm_kwargs = dict(kwargs.get("llm_kwargs") or {})
     extra_body = dict(llm_kwargs.get("extra_body") or {})
