@@ -95,15 +95,22 @@ def agent_phase_failure(result: Any) -> Any | None:
 
 
 def failure_phase(result: Any) -> str:
-    """The furthest phase the trial reached; a failure happened there."""
+    """The phase a failure belongs to.
+
+    Normally the furthest phase the trial reached, but a pre-verification
+    exception belongs to the agent-side phase that produced it.
+    """
     if result is None:
         return "setup"
-    for name, info in (
+    spans = [
         ("verifier", result.verifier),
         ("agent", result.agent_execution),
         ("agent_setup", result.agent_setup),
         ("environment_setup", result.environment_setup),
-    ):
+    ]
+    if agent_phase_failure(result) is not None:
+        spans = spans[1:]
+    for name, info in spans:
         if info is not None:
             return name
     return "setup"

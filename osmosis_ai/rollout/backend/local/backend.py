@@ -18,10 +18,10 @@ from osmosis_ai.rollout.types import (
     ExecutionRequest,
     ExecutionResult,
     GraderConfig,
-    RolloutErrorCategory,
     RolloutStatus,
 )
 from osmosis_ai.rollout.utils.concurrency import ConcurrencyLimiter
+from osmosis_ai.rollout.utils.errors import categorize_exception
 from osmosis_ai.rollout.utils.file_artifacts import (
     create_rollout_artifacts_dir,
     default_artifact_root,
@@ -120,7 +120,7 @@ class LocalBackend(ExecutionBackend):
             return ExecutionResult(
                 status=RolloutStatus.FAILURE,
                 err_message=str(e),
-                err_category=_categorize_exception(e),
+                err_category=categorize_exception(e),
             )
 
         return ExecutionResult(
@@ -156,13 +156,5 @@ class LocalBackend(ExecutionBackend):
                 status=RolloutStatus.FAILURE,
                 sample=result.sample,
                 err_message=str(e),
-                err_category=_categorize_exception(e),
+                err_category=categorize_exception(e),
             )
-
-
-def _categorize_exception(exc: Exception) -> RolloutErrorCategory:
-    if isinstance(exc, TimeoutError):
-        return RolloutErrorCategory.TIMEOUT
-    if isinstance(exc, (ValueError, TypeError, AssertionError)):
-        return RolloutErrorCategory.VALIDATION_ERROR
-    return RolloutErrorCategory.AGENT_ERROR

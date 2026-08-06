@@ -1438,3 +1438,303 @@ class TestContainerInputGating:
         )
         assert not (task_dir / "container_input.json").exists()
         assert (task_dir / "tests" / "container_input.json").exists()
+
+
+class TestCallbackOutcomes:
+    """A channel's outcome is produced once; retries resend it byte-identical."""
+
+    def backend_for(self, template_task, tmp_path, queue):
+        backend = HarborBackendV2(
+            orchestrator=queue,
+            tasks_dir=template_task,
+            agent="terminus-2",
+            trials_dir=tmp_path / "trials",
+        )
+        backend.rollouts_dir = tmp_path / "rollouts"
+        backend.rollouts_dir.mkdir(parents=True, exist_ok=True)
+        backend.artifact_root = tmp_path / "durable"
+        return backend
+
+    def execute_ctx(self):
+        from osmosis_ai.rollout.context import RolloutContext
+
+        return RolloutContext(
+            chat_completions_url="http://t/v1", api_key="rk-1", rollout_id="r1"
+        )
+
+    async def test_workflow_delivery_failure_resends_same_outcome(
+        self, template_task, tmp_path
+    ):
+        """The END-hook retry must resend the cached outcome, not fabricate."""
+        from types import SimpleNamespace
+
+        attempts = []
+        fail_first = [True]
+
+        async def flaky_workflow(result):
+            attempts.append(result)
+            if fail_first[0]:
+                fail_first[0] = False
+                raise RuntimeError("transient network failure")
+
+        async def run(queue, config):
+            result = trial_result(
+                verifier_result=SimpleNamespace(rewards={"reward": 1.0})
+            )
+            event = SimpleNamespace(config=config, result=result)
+            await queue.fire("verification-start", event)
+            await queue.fire("end", event)
+            return result
+
+        queue = FakeQueue(run)
+        backend = self.backend_for(template_task, tmp_path, queue)
+        request = ExecutionRequest(id="r1", prompt=[{"role": "user", "content": "x"}])
+        with self.execute_ctx():
+            await backend.execute(request, flaky_workflow, noop_callback)
+
+        assert len(attempts) == 2
+        assert attempts[0] is attempts[1]
+        assert attempts[0].status == RolloutStatus.SUCCESS
+
+    async def test_permanent_delivery_failure_never_fabricates(
+        self, template_task, tmp_path
+    ):
+        from types import SimpleNamespace
+
+        attempts = []
+
+        async def dead_workflow(result):
+            attempts.append(result)
+            raise RuntimeError("controller unreachable")
+
+        async def run(queue, config):
+            result = trial_result(
+                verifier_result=SimpleNamespace(rewards={"reward": 1.0})
+            )
+            event = SimpleNamespace(config=config, result=result)
+            await queue.fire("verification-start", event)
+            await queue.fire("end", event)
+            return result
+
+        queue = FakeQueue(run)
+        backend = self.backend_for(template_task, tmp_path, queue)
+        request = ExecutionRequest(id="r1", prompt=[{"role": "user", "content": "x"}])
+        with self.execute_ctx():
+            await backend.execute(request, dead_workflow)
+
+        # Every attempt carried the same semantic outcome; no fabrication.
+        assert len({id(result) for result in attempts}) == 1
+        assert all(r.status == RolloutStatus.SUCCESS for r in attempts)
+
+    async def test_setup_failure_reaches_both_channels(self, template_task, tmp_path):
+        """Pre-submit failures must reach the grader channel too."""
+        workflow_results = []
+        grader_results = []
+
+        async def on_workflow(result):
+            workflow_results.append(result)
+
+        async def on_grader(result):
+            grader_results.append(result)
+
+        async def failing_resolve(request):
+            raise ValueError("harbor_task metadata is malformed")
+
+        backend = HarborBackendV2(
+            orchestrator=FakeQueue(),
+            tasks_dir=template_task,
+            agent="terminus-2",
+            trials_dir=tmp_path / "trials",
+        )
+        backend.resolve_task = failing_resolve
+        backend.rollouts_dir = tmp_path / "rollouts"
+        request = ExecutionRequest(id="r1", prompt=[{"role": "user", "content": "x"}])
+        with self.execute_ctx():
+            await backend.execute(request, on_workflow, on_grader)
+
+        assert workflow_results and grader_results
+        assert workflow_results[0] is grader_results[0]
+        failure = workflow_results[0]
+        assert failure.status == RolloutStatus.FAILURE
+        assert failure.err_category == RolloutErrorCategory.VALIDATION_ERROR
+        assert failure.extra_fields["phase"] == "setup"
+        assert failure.extra_fields["harbor_exception_type"] == "ValueError"
+
+    async def test_setup_failure_callback_exception_stays_contained(
+        self, template_task, tmp_path
+    ):
+        """Delivery exceptions must not escape into the fabrication path."""
+
+        async def raising_workflow(result):
+            raise RuntimeError("delivery failed")
+
+        async def failing_resolve(request):
+            raise RuntimeError("setup failed")
+
+        backend = HarborBackendV2(
+            orchestrator=FakeQueue(),
+            tasks_dir=template_task,
+            agent="terminus-2",
+            trials_dir=tmp_path / "trials",
+        )
+        backend.resolve_task = failing_resolve
+        backend.rollouts_dir = tmp_path / "rollouts"
+        request = ExecutionRequest(id="r1", prompt=[{"role": "user", "content": "x"}])
+        with self.execute_ctx():
+            await backend.execute(request, raising_workflow, raising_workflow)
+
+    async def test_post_end_exception_does_not_double_deliver(
+        self, template_task, tmp_path
+    ):
+        """A post-delivery exception must not double-post either channel."""
+        from types import SimpleNamespace
+
+        workflow_results = []
+        grader_results = []
+
+        async def on_workflow(result):
+            workflow_results.append(result)
+
+        async def on_grader(result):
+            grader_results.append(result)
+
+        async def run(queue, config):
+            result = trial_result(
+                verifier_result=SimpleNamespace(rewards={"reward": 1.0})
+            )
+            event = SimpleNamespace(config=config, result=result)
+            await queue.fire("verification-start", event)
+            await queue.fire("end", event)
+            raise RuntimeError("harbor teardown exploded")
+
+        queue = FakeQueue(run)
+        backend = self.backend_for(template_task, tmp_path, queue)
+        request = ExecutionRequest(id="r1", prompt=[{"role": "user", "content": "x"}])
+        with self.execute_ctx():
+            await backend.execute(request, on_workflow, on_grader)
+
+        assert len(workflow_results) == 1
+        assert len(grader_results) == 1
+
+    async def test_external_cancellation_reraises(self, template_task, tmp_path):
+        """Only requested cancellations may be swallowed."""
+        started = asyncio.Event()
+
+        async def run(queue, config):
+            started.set()
+            await asyncio.Event().wait()
+
+        queue = FakeQueue(run)
+        backend = self.backend_for(template_task, tmp_path, queue)
+        request = ExecutionRequest(id="r1", prompt=[{"role": "user", "content": "x"}])
+
+        async def execute():
+            with self.execute_ctx():
+                await backend.execute(request, noop_callback)
+
+        task = asyncio.create_task(execute())
+        await started.wait()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+        # Residue is still cleaned and the outcome recorded on the way out.
+        assert "r1" not in backend.pending
+        assert backend.rollout_status("r1") == {
+            "status": "cancelled",
+            "reward": None,
+            "err_message": None,
+        }
+
+
+class TestFailureCategorization:
+    def test_categorize_exception_maps_wire_vocabulary(self):
+        from osmosis_ai.rollout.utils.errors import categorize_exception
+
+        assert categorize_exception(TimeoutError()) == RolloutErrorCategory.TIMEOUT
+        assert (
+            categorize_exception(ValueError("x"))
+            == RolloutErrorCategory.VALIDATION_ERROR
+        )
+        assert (
+            categorize_exception(TypeError("x"))
+            == RolloutErrorCategory.VALIDATION_ERROR
+        )
+        assert (
+            categorize_exception(AssertionError())
+            == RolloutErrorCategory.VALIDATION_ERROR
+        )
+        assert (
+            categorize_exception(RuntimeError("x")) == RolloutErrorCategory.AGENT_ERROR
+        )
+
+    def test_failure_phase_blames_agent_for_pre_verifier_exception(self):
+        """Both callbacks must attribute the same failure to the agent side."""
+        from types import SimpleNamespace
+
+        from osmosis_ai.rollout.backend.harbor.diagnostics import failure_phase
+
+        base = datetime.now()
+        verifier_span = SimpleNamespace(
+            started_at=(base + timedelta(seconds=30)).astimezone(UTC),
+            finished_at=(base + timedelta(seconds=60)).astimezone(UTC),
+        )
+        agent_span = SimpleNamespace(started_at=base, finished_at=base)
+        result = SimpleNamespace(
+            exception_info=SimpleNamespace(occurred_at=base),
+            verifier=verifier_span,
+            agent_execution=agent_span,
+            agent_setup=None,
+            environment_setup=None,
+        )
+        assert failure_phase(result) == "agent"
+
+        # An exception after the verifier finished keeps the furthest span.
+        result.exception_info = SimpleNamespace(
+            occurred_at=base + timedelta(seconds=120)
+        )
+        assert failure_phase(result) == "verifier"
+
+    async def test_grader_outcome_no_reward_source_is_validation_error(
+        self, template_task, tmp_path
+    ):
+        """No reward source: the terminal outcome must say what is missing."""
+        from types import SimpleNamespace
+
+        backend = HarborBackendV2(
+            orchestrator=TrialQueue(n_concurrent=1),
+            tasks_dir=template_task,
+            agent="terminus-2",
+            trials_dir=tmp_path / "trials",
+        )
+        event = SimpleNamespace(
+            config=SimpleNamespace(trial_name="trial-r1"), result=trial_result()
+        )
+        outcome = backend.grader_outcome(event, "r1", PendingTrial(noop_callback, None))
+
+        assert outcome.status == RolloutStatus.FAILURE
+        assert outcome.err_category == RolloutErrorCategory.VALIDATION_ERROR
+        assert "no reward source" in outcome.err_message
+        assert outcome.extra_fields["phase"] == "grading"
+
+    async def test_grader_outcome_reward_validation_reports_grading_phase(
+        self, template_task, tmp_path
+    ):
+        from types import SimpleNamespace
+
+        backend = HarborBackendV2(
+            orchestrator=TrialQueue(n_concurrent=1),
+            tasks_dir=template_task,
+            agent="terminus-2",
+            trials_dir=tmp_path / "trials",
+        )
+        event = SimpleNamespace(
+            config=SimpleNamespace(trial_name="trial-r1"),
+            result=trial_result(
+                verifier_result=SimpleNamespace(rewards={"accuracy": 1.0})
+            ),
+        )
+        outcome = backend.grader_outcome(event, "r1", PendingTrial(noop_callback, None))
+
+        assert outcome.err_category == RolloutErrorCategory.VALIDATION_ERROR
+        assert outcome.extra_fields["phase"] == "grading"

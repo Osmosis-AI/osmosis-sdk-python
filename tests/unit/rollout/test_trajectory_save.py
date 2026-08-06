@@ -94,6 +94,59 @@ async def test_save_never_raises(tmp_path: Path) -> None:
     )
 
 
+async def test_sample_less_failure_writes_diagnostics_sidecar(tmp_path: Path) -> None:
+    """A failed rollout with no sample must still leave a durable record."""
+    await save_trajectories(
+        rollout_id="r1",
+        result=ExecutionResult(
+            status=RolloutStatus.FAILURE,
+            extra_fields={"backend": "harbor-v2", "phase": "setup"},
+        ),
+        artifact_root=tmp_path,
+    )
+
+    sidecar = json.loads((tmp_path / "r1" / "diagnostics.json").read_text())
+    assert sidecar["phase"] == "setup"
+    assert not (tmp_path / "r1" / "trajectory.json").exists()
+
+
+async def test_diagnostics_override_wins_over_result_extra_fields(
+    tmp_path: Path,
+) -> None:
+    """The explicit diagnostics override must win over result.extra_fields."""
+    await save_trajectories(
+        rollout_id="r1",
+        result=ExecutionResult(
+            status=RolloutStatus.SUCCESS,
+            sample=make_sample(reward=1.0),
+            extra_fields={"phase": "agent"},
+        ),
+        diagnostics={"phase": "grading"},
+        artifact_root=tmp_path,
+    )
+
+    sidecar = json.loads((tmp_path / "r1" / "diagnostics.json").read_text())
+    assert sidecar["phase"] == "grading"
+
+
+async def test_diagnostics_live_in_sidecar_not_trajectory(tmp_path: Path) -> None:
+    """The sidecar is the sole home for backend diagnostics."""
+    await save_trajectories(
+        rollout_id="r1",
+        result=ExecutionResult(
+            status=RolloutStatus.SUCCESS,
+            sample=make_sample(reward=0.5),
+            extra_fields={"backend": "harbor-v2", "timings_sec": {"agent": 3.0}},
+        ),
+        artifact_root=tmp_path,
+    )
+
+    sidecar = json.loads((tmp_path / "r1" / "diagnostics.json").read_text())
+    assert sidecar["backend"] == "harbor-v2"
+    doc = json.loads((tmp_path / "r1" / "trajectory.json").read_text())
+    assert "result_extra_fields" not in doc["extra"]["osmosis"]
+
+
 async def test_report_metrics_land_in_document(tmp_path: Path) -> None:
     report = TrajectoryReport(
         model_name="rollout-model",
