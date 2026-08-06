@@ -17,6 +17,7 @@ _SUPPORTED_TOP_LEVEL_COMMANDS = {
 
 _SUPPORTED_COMMAND_GROUPS = {
     "auth",
+    "benchmark",
     "dataset",
     "eval",
     "model",
@@ -130,6 +131,8 @@ def _argv_command_path(argv: list[str]) -> str:
         return command
     if (command, tokens[1]) in _REMOVED_TWO_TOKEN_COMMANDS:
         return " ".join(tokens[:2])
+    if command == "benchmark" and tokens[1] == "runs" and len(tokens) >= 3:
+        return " ".join(tokens[:3])
     if command == "eval" and tokens[1] == "cache" and len(tokens) >= 3:
         return " ".join(tokens[:3])
     if command in _SUPPORTED_COMMAND_GROUPS:

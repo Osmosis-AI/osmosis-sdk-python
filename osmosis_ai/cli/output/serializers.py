@@ -6,6 +6,7 @@ from typing import Any
 
 from osmosis_ai.platform.api.models import (
     BaseModelInfo,
+    BenchmarkRun,
     DatasetFile,
     DevRolloutServerInfo,
     EnvironmentSecretInfo,
@@ -16,6 +17,29 @@ from osmosis_ai.platform.api.models import (
     TrainingRun,
     wire_to_display_scope,
 )
+
+
+def serialize_benchmark_run(run: BenchmarkRun) -> dict[str, Any]:
+    """Serialize a benchmark run for the public JSON contract."""
+    data: dict[str, Any] = {
+        "id": run.id,
+        "name": run.name,
+        "status": run.status,
+        "benchmark_id": run.benchmark_id,
+        "benchmark_name": run.benchmark_name,
+        "agent_count": run.agent_count,
+        "best_pass_at_1": run.best_pass_at_1,
+        "ingested_results": run.ingested_results,
+        "expected_results": run.expected_results,
+        "creator_name": run.creator_name,
+        "creator_email": run.creator_email,
+        "created_at": run.created_at,
+        "started_at": run.started_at,
+        "completed_at": run.completed_at,
+    }
+    if run.platform_url:
+        data["platform_url"] = run.platform_url
+    return data
 
 
 def serialize_dataset(df: DatasetFile) -> dict[str, Any]:
