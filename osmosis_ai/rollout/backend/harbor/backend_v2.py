@@ -22,13 +22,12 @@ content-addressed hb__ image across trials.
 from __future__ import annotations
 
 import asyncio
-import inspect
 import json
 import logging
 import shutil
 import traceback
 import uuid
-from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
+from collections.abc import AsyncIterator, Callable, Sequence
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from pathlib import Path
 from typing import Any
@@ -116,8 +115,6 @@ class HarborBackendV2(ExecutionBackend):
         tasks_dir: Path,
         agent: str | type | None = None,
         task_mode: TaskMode | str = TaskMode.TEMPLATE,
-        task_resolver: Callable[[ExecutionRequest], HarborTask | Awaitable[HarborTask]]
-        | None = None,
         model_name: str = "openai/osmosis-rollout",
         grader: type | str | None = None,
         workflow_config: Any = None,
@@ -134,7 +131,6 @@ class HarborBackendV2(ExecutionBackend):
         self.orchestrator = orchestrator
         self.tasks_dir: Path = Path(tasks_dir)
         self.task_mode: TaskMode = TaskMode(task_mode)
-        self.task_resolver = task_resolver
         self.model_name = model_name
         self.agent = agent
         self.agent_setup_timeout_sec = agent_setup_timeout_sec
@@ -232,10 +228,6 @@ class HarborBackendV2(ExecutionBackend):
         }
 
     async def resolve_task(self, request: ExecutionRequest) -> HarborTask:
-        # A caller-supplied resolver bypasses metadata and task-mode resolution.
-        if self.task_resolver is not None:
-            task = self.task_resolver(request)
-            return await task if inspect.isawaitable(task) else task
         metadata = request.metadata or {}
         if ref := metadata.get("harbor_task"):
             return await self.fetch_task(str(ref), metadata)
