@@ -62,6 +62,7 @@ class OsmosisHarnessInstalledAgent(BaseInstalledAgent):
         container_input = ContainerInput.read(self.input_path)
         if not container_input.prompt:
             container_input.prompt = [{"role": "user", "content": instruction}]
+        container_input.label = None
 
         host_input = self.logs_dir / INPUT_FILENAME
         container_input.write(host_input)
