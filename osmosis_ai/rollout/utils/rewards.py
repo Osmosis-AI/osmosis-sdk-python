@@ -1,4 +1,32 @@
+import logging
+from collections.abc import Mapping
+
 from osmosis_ai.rollout.types import RolloutSample
+
+logger: logging.Logger = logging.getLogger(__name__)
+
+
+def pick_reward(
+    rewards: Mapping[str, float | int] | None, reward_key: str
+) -> float | int | None:
+    """Select the reward channel from a verifier's rewards dict.
+
+    Harbor's convention: prefer the named key; otherwise a sole channel is
+    unambiguous. Multiple channels without the named key cannot be guessed —
+    an unrelated custom dimension must not silently become the reward.
+    """
+    if not rewards:
+        return None
+    if reward_key in rewards:
+        return rewards[reward_key]
+    if len(rewards) == 1:
+        return next(iter(rewards.values()))
+    logger.warning(
+        "verifier rewards %s carry no %r channel; reward left unset",
+        sorted(rewards),
+        reward_key,
+    )
+    return None
 
 
 def validate_sample_has_reward(sample: RolloutSample | None) -> None:

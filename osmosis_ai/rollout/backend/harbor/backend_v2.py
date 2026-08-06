@@ -100,7 +100,7 @@ from osmosis_ai.rollout.types import (
     RolloutStatus,
 )
 from osmosis_ai.rollout.utils.file_artifacts import default_artifact_root
-from osmosis_ai.rollout.utils.rewards import validate_sample_has_reward
+from osmosis_ai.rollout.utils.rewards import pick_reward, validate_sample_has_reward
 from osmosis_ai.rollout.utils.ttl_cache import TtlCache
 
 logger: logging.Logger = logging.getLogger(__name__)
@@ -123,6 +123,7 @@ class HarborBackendV2(ExecutionBackend):
         task_resolver: Callable[[ExecutionRequest], HarborTask | Awaitable[HarborTask]]
         | None = None,
         model_name: str = "openai/osmosis-rollout",
+        reward_key: str = "reward",
         grader: type | str | None = None,
         workflow_config: Any = None,
         grader_config: Any = None,
@@ -140,6 +141,9 @@ class HarborBackendV2(ExecutionBackend):
         self.task_mode: TaskMode = TaskMode(task_mode)
         self.task_resolver = task_resolver
         self.model_name = model_name
+        # Which verifier reward channel is the sample's reward; harbor's own
+        # convention (prefer this key, else accept a sole channel) applies.
+        self.reward_key = reward_key
         self.agent = agent
         if agent_setup_timeout_sec is not None and not (
             math.isfinite(agent_setup_timeout_sec) and agent_setup_timeout_sec > 0
@@ -415,6 +419,7 @@ class HarborBackendV2(ExecutionBackend):
                 "submissions are rejected"
             )
         pending = PendingTrial(on_workflow_complete, on_grader_complete)
+        pending.label = request.label
         self.pending[request.id] = pending
         try:
             container_input = self.build_input(request)
@@ -704,9 +709,14 @@ class HarborBackendV2(ExecutionBackend):
         except ValueError:
             return None
 
-    def native_sample(
-        self, event: TrialHookEvent, rollout_id: str, pending: PendingTrial
-    ) -> RolloutSample | None:
+    def load_native_trajectory(
+        self, rollout_id: str, pending: PendingTrial
+    ) -> dict[str, Any] | None:
+        """The redacted Harbor-authored ATIF document for this trial.
+
+        Returns None — preserving the trial directory — when a document
+        exists but cannot be used verbatim (invalid, or several of them).
+        """
         trial_dir = self.trials_dir / f"{TRIAL_NAME_PREFIX}{rollout_id}"
         paths = [p for p in (trial_dir / "agent" / "trajectory.json",) if p.is_file()]
         paths += sorted(trial_dir.glob("steps/*/agent/trajectory.json"))
@@ -735,27 +745,101 @@ class HarborBackendV2(ExecutionBackend):
             trajectory.agent.extra = redact_secrets(
                 trajectory.agent.extra, pending.api_key
             )
-        messages = messages_from_trajectory(trajectory.to_json_dict(exclude_none=True))
-        if not messages:
-            return None
-        return RolloutSample(messages=messages, metrics=trial_metrics(event.result))
+        return trajectory.to_json_dict(exclude_none=True)
 
-    def primary_sample(
+    def native_result_parts(
+        self, event: TrialHookEvent, rollout_id: str, pending: PendingTrial
+    ) -> tuple[RolloutSample | None, dict[str, Any] | None]:
+        """Sample and authoritative ATIF document for a native-agent trial.
+
+        The document is archived verbatim — harbor's step structure, token
+        ids, logprobs, tool definitions, subagent trajectories, and metrics
+        stay authoritative — while the sample carries the chat-shaped
+        projection for the wire callbacks. Reward-only bindings (oracle)
+        yield a trajectoryless sample so their verifier outcome can succeed;
+        trainable bindings missing a document keep failing validation.
+        """
+        assert self.native is not None
+        document = self.load_native_trajectory(rollout_id, pending)
+        if document is None:
+            if not self.native.trainable:
+                return (
+                    RolloutSample(
+                        trajectory_messages=None,
+                        label=pending.label,
+                        metrics=trial_metrics(event.result),
+                    ),
+                    None,
+                )
+            return None, None
+        messages = messages_from_trajectory(document)
+        if not messages:
+            return None, document
+        return (
+            RolloutSample(
+                messages=messages,
+                # The document is the training trajectory; the converter must
+                # not rebuild a lossy one from these wire messages.
+                trajectory_messages=None,
+                label=pending.label,
+                metrics=trial_metrics(event.result),
+            ),
+            document,
+        )
+
+    def bundle_sample(
         self, event: TrialHookEvent, rollout_id: str, pending: PendingTrial
     ) -> RolloutSample | None:
-        if self.native is not None:
-            return self.native_sample(event, rollout_id, pending)
         result = self.container_result(event)
-        output = result.output if result else None
+        if result is None:
+            return None
+        if result.sample is not None:
+            # The workflow's sample round-trips field-for-field (explicit
+            # trajectory_messages=None included); the host adds only
+            # backend-owned data: trial metrics and the request-label
+            # fallback. model_copy skips validators, so the resolved
+            # trajectory_messages value is untouched.
+            sample = result.sample
+            return sample.model_copy(
+                update={
+                    "metrics": {
+                        **trial_metrics(event.result),
+                        **(sample.metrics or {}),
+                    },
+                    "label": sample.label
+                    if sample.label is not None
+                    else pending.label,
+                }
+            )
+        output = result.output
         if output is None:
+            return None
+        if len(output.samples) > 1:
+            # In-container validation rejects this for current bundles; a
+            # stale container SDK must still not have samples silently
+            # dropped — fail the rollout loudly instead.
+            logger.error(
+                "rollout %s returned %d named samples; multiple samples per "
+                "rollout are unsupported",
+                rollout_id,
+                len(output.samples),
+            )
             return None
         messages = output.primary_messages()
         if messages is None:
             return None
         return RolloutSample(
             messages=messages,
+            label=pending.label,
             metrics={**trial_metrics(event.result), **output.metrics},
         )
+
+    def primary_result_parts(
+        self, event: TrialHookEvent, rollout_id: str, pending: PendingTrial
+    ) -> tuple[RolloutSample | None, dict[str, Any] | None]:
+        if self.native is not None:
+            return self.native_result_parts(event, rollout_id, pending)
+        return self.bundle_sample(event, rollout_id, pending), None
 
     def agent_succeeded(self, event: TrialHookEvent) -> tuple[bool, str | None]:
         if event.result and event.result.exception_info:
@@ -778,10 +862,12 @@ class HarborBackendV2(ExecutionBackend):
         pending.grading = True
 
         succeeded, err_message = self.agent_succeeded(event)
+        sample, document = self.primary_result_parts(event, rollout_id, pending)
         if succeeded:
             outcome = ExecutionResult(
                 status=RolloutStatus.SUCCESS,
-                sample=self.primary_sample(event, rollout_id, pending),
+                sample=sample,
+                trajectory_document=document,
                 extra_fields=self.event_diagnostics(event),
             )
         else:
@@ -789,6 +875,7 @@ class HarborBackendV2(ExecutionBackend):
                 status=RolloutStatus.FAILURE,
                 err_message=err_message,
                 err_category=RolloutErrorCategory.AGENT_ERROR,
+                trajectory_document=document,
                 extra_fields=self.event_diagnostics(
                     event, RolloutErrorCategory.AGENT_ERROR
                 ),
@@ -802,7 +889,7 @@ class HarborBackendV2(ExecutionBackend):
     def grader_outcome(
         self, event: TrialHookEvent, rollout_id: str, pending: PendingTrial
     ) -> ExecutionResult:
-        sample = self.primary_sample(event, rollout_id, pending)
+        sample, document = self.primary_result_parts(event, rollout_id, pending)
         err = event.result.exception_info if event.result else None
 
         # An agent-phase failure is the actionable error; the verifier branch
@@ -813,6 +900,7 @@ class HarborBackendV2(ExecutionBackend):
             return ExecutionResult(
                 status=RolloutStatus.FAILURE,
                 sample=sample,
+                trajectory_document=document,
                 err_message=agent_err.exception_message,
                 err_category=RolloutErrorCategory.AGENT_ERROR,
                 extra_fields=self.event_diagnostics(
@@ -822,7 +910,7 @@ class HarborBackendV2(ExecutionBackend):
 
         if event.result and event.result.verifier_result:
             rewards = event.result.verifier_result.rewards or {}
-            reward = rewards.get("reward")
+            reward = pick_reward(rewards, self.reward_key)
             if sample is not None and reward is not None:
                 sample.reward = float(reward)
             try:
@@ -836,6 +924,7 @@ class HarborBackendV2(ExecutionBackend):
                 return ExecutionResult(
                     status=RolloutStatus.FAILURE,
                     sample=sample,
+                    trajectory_document=document,
                     err_message=str(e),
                     err_category=RolloutErrorCategory.VALIDATION_ERROR,
                     extra_fields=self.event_diagnostics(
@@ -845,6 +934,7 @@ class HarborBackendV2(ExecutionBackend):
             return ExecutionResult(
                 status=RolloutStatus.SUCCESS,
                 sample=sample,
+                trajectory_document=document,
                 extra_fields=self.event_diagnostics(event),
             )
 
@@ -853,6 +943,7 @@ class HarborBackendV2(ExecutionBackend):
             return ExecutionResult(
                 status=RolloutStatus.FAILURE,
                 sample=sample,
+                trajectory_document=document,
                 err_message=err.exception_message,
                 err_category=RolloutErrorCategory.AGENT_ERROR,
                 extra_fields=self.event_diagnostics(
@@ -864,6 +955,7 @@ class HarborBackendV2(ExecutionBackend):
         return ExecutionResult(
             status=RolloutStatus.FAILURE,
             sample=sample,
+            trajectory_document=document,
             err_message=(
                 "trial ended with no verifier result and no recorded error; "
                 "the task has no reward source (no tests/ and no grader)"

@@ -129,6 +129,8 @@ class PendingTrial:
         # Set by cancel_rollouts before cancelling, so execute() can tell a
         # requested cancellation from process/task-group cancellation.
         self.cancel_requested = False
+        # Request label, the fallback when the sample carries none.
+        self.label: str | None = None
         self.preserve_trial = False
         self.started = False
         self.grading = False

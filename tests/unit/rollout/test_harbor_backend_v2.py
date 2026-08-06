@@ -1820,3 +1820,336 @@ class TestFailureCategorization:
 
         assert outcome.err_category == RolloutErrorCategory.VALIDATION_ERROR
         assert outcome.extra_fields["phase"] == "grading"
+
+
+def atif_document(**overrides):
+    """A minimal valid ATIF document with the fields RL training needs."""
+    doc = {
+        "schema_version": "ATIF-v1.7",
+        "session_id": "harbor-session-9",
+        "trajectory_id": "harbor-traj-9",
+        "agent": {
+            "name": "terminus-2",
+            "version": "1.0",
+            "tool_definitions": [{"name": "bash", "parameters": {}}],
+        },
+        "steps": [
+            {
+                "step_id": 1,
+                "source": "user",
+                "message": "fix the bug",
+            },
+            {
+                "step_id": 2,
+                "source": "agent",
+                "message": "running the tests",
+                "reasoning_content": "reproduce first",
+                "tool_calls": [
+                    {
+                        "tool_call_id": "c1",
+                        "function_name": "bash",
+                        "arguments": {"cmd": "pytest"},
+                    }
+                ],
+                "observation": {
+                    "results": [{"source_call_id": "c1", "content": "1 failed"}]
+                },
+                "metrics": {
+                    "prompt_tokens": 10,
+                    "completion_tokens": 5,
+                    "prompt_token_ids": [1, 2, 3],
+                    "completion_token_ids": [4, 5],
+                    "logprobs": [-0.1, -0.2],
+                },
+            },
+        ],
+    }
+    doc.update(overrides)
+    return doc
+
+
+class TestNativeAtif:
+    def backend_for(self, template_task, tmp_path, agent="terminus-2", **kwargs):
+        return HarborBackendV2(
+            orchestrator=TrialQueue(n_concurrent=1),
+            tasks_dir=template_task,
+            agent=agent,
+            trials_dir=tmp_path / "trials",
+            **kwargs,
+        )
+
+    def write_trajectory(self, backend, rollout_id, document):
+        agent_dir = backend.trials_dir / f"trial-{rollout_id}" / "agent"
+        agent_dir.mkdir(parents=True, exist_ok=True)
+        (agent_dir / "trajectory.json").write_text(json.dumps(document))
+
+    def pending_with_label(self, label=None):
+        pending = PendingTrial(noop_callback, None)
+        pending.label = label
+        return pending
+
+    def graded_event(self, rewards):
+        from types import SimpleNamespace
+
+        return SimpleNamespace(
+            config=SimpleNamespace(trial_name="trial-r1"),
+            result=trial_result(verifier_result=SimpleNamespace(rewards=rewards)),
+        )
+
+    async def test_native_atif_document_is_authoritative(self, template_task, tmp_path):
+        """The Harbor-authored document rides the result for archival; the
+        wire sample is a chat projection that keeps tool turns, and the
+        converter is told not to rebuild a lossy trajectory from it."""
+        backend = self.backend_for(template_task, tmp_path)
+        self.write_trajectory(backend, "r1", atif_document())
+        pending = self.pending_with_label("row-7")
+
+        outcome = backend.grader_outcome(
+            self.graded_event({"reward": 1.0}), "r1", pending
+        )
+
+        assert outcome.status == RolloutStatus.SUCCESS
+        document = outcome.trajectory_document
+        assert document is not None
+        agent_step = document["steps"][1]
+        assert agent_step["metrics"]["prompt_token_ids"] == [1, 2, 3]
+        assert agent_step["metrics"]["logprobs"] == [-0.1, -0.2]
+        assert agent_step["tool_calls"][0]["function_name"] == "bash"
+        assert document["agent"]["tool_definitions"] == [
+            {"name": "bash", "parameters": {}}
+        ]
+        sample = outcome.sample
+        assert sample is not None
+        assert sample.reward == 1.0
+        assert sample.label == "row-7"
+        assert sample.trajectory_messages is None
+        roles = [m["role"] for m in sample.messages]
+        assert roles == ["user", "assistant", "tool"]
+
+    async def test_wire_result_excludes_document(self, template_task, tmp_path):
+        backend = self.backend_for(template_task, tmp_path)
+        self.write_trajectory(backend, "r1", atif_document())
+        outcome = backend.grader_outcome(
+            self.graded_event({"reward": 1.0}), "r1", self.pending_with_label()
+        )
+
+        assert "trajectory_document" not in outcome.model_dump()
+
+    async def test_reward_only_binding_succeeds_without_trajectory(
+        self, template_task, tmp_path
+    ):
+        """Oracle writes no trajectory by design; its verifier outcome must
+        become a graded SUCCESS with a trajectoryless sample."""
+        backend = self.backend_for(template_task, tmp_path, agent="oracle")
+        pending = self.pending_with_label("row-1")
+
+        outcome = backend.grader_outcome(
+            self.graded_event({"reward": 1.0}), "r1", pending
+        )
+
+        assert outcome.status == RolloutStatus.SUCCESS
+        assert outcome.trajectory_document is None
+        assert outcome.sample is not None
+        assert outcome.sample.reward == 1.0
+        assert outcome.sample.trajectory_messages is None
+        assert outcome.sample.label == "row-1"
+
+    async def test_trainable_binding_missing_atif_still_fails(
+        self, template_task, tmp_path
+    ):
+        backend = self.backend_for(template_task, tmp_path)
+
+        outcome = backend.grader_outcome(
+            self.graded_event({"reward": 1.0}), "r1", self.pending_with_label()
+        )
+
+        assert outcome.status == RolloutStatus.FAILURE
+        assert outcome.err_category == RolloutErrorCategory.VALIDATION_ERROR
+
+    async def test_reward_key_selects_named_channel(self, template_task, tmp_path):
+        backend = self.backend_for(template_task, tmp_path, reward_key="accuracy")
+        self.write_trajectory(backend, "r1", atif_document())
+
+        outcome = backend.grader_outcome(
+            self.graded_event({"accuracy": 0.5, "style": 0.9}),
+            "r1",
+            self.pending_with_label(),
+        )
+
+        assert outcome.status == RolloutStatus.SUCCESS
+        assert outcome.sample.reward == 0.5
+
+    async def test_sole_reward_channel_is_accepted(self, template_task, tmp_path):
+        """Harbor's convention: a single channel is unambiguous even when it
+        is not named 'reward'."""
+        backend = self.backend_for(template_task, tmp_path)
+        self.write_trajectory(backend, "r1", atif_document())
+
+        outcome = backend.grader_outcome(
+            self.graded_event({"accuracy": 1.0}), "r1", self.pending_with_label()
+        )
+
+        assert outcome.status == RolloutStatus.SUCCESS
+        assert outcome.sample.reward == 1.0
+
+    async def test_ambiguous_reward_channels_fail_validation(
+        self, template_task, tmp_path
+    ):
+        backend = self.backend_for(template_task, tmp_path)
+        self.write_trajectory(backend, "r1", atif_document())
+
+        outcome = backend.grader_outcome(
+            self.graded_event({"accuracy": 1.0, "style": 0.2}),
+            "r1",
+            self.pending_with_label(),
+        )
+
+        assert outcome.status == RolloutStatus.FAILURE
+        assert outcome.err_category == RolloutErrorCategory.VALIDATION_ERROR
+
+
+class TestBundleSampleBoundary:
+    def backend_for(self, bundle, template_task, tmp_path):
+        return HarborBackendV2(
+            orchestrator=TrialQueue(n_concurrent=1),
+            tasks_dir=template_task,
+            bundle=bundle,
+            trials_dir=tmp_path / "trials",
+        )
+
+    def event_for(self, container_result, rewards=None):
+        from types import SimpleNamespace
+
+        result = trial_result(
+            agent_result=SimpleNamespace(
+                metadata=json.loads(container_result.model_dump_json())
+            ),
+            verifier_result=SimpleNamespace(rewards=rewards)
+            if rewards is not None
+            else None,
+        )
+        return SimpleNamespace(
+            config=SimpleNamespace(trial_name="trial-r1"), result=result
+        )
+
+    def pending_with_label(self, label=None):
+        pending = PendingTrial(noop_callback, None)
+        pending.label = label
+        return pending
+
+    async def test_full_sample_round_trips_through_grading(
+        self, bundle, template_task, tmp_path
+    ):
+        from osmosis_ai.rollout.types import RolloutSample
+
+        backend = self.backend_for(bundle, template_task, tmp_path)
+        sample = RolloutSample(
+            messages=[{"role": "assistant", "content": "done"}],
+            trajectory_messages=None,
+            label="workflow-owned",
+            remove_sample=True,
+            metrics={"verdict": "pass"},
+            extra_fields={"run": "a"},
+        )
+        container_result = ContainerResult(status=RolloutStatus.SUCCESS, sample=sample)
+
+        outcome = backend.grader_outcome(
+            self.event_for(container_result, rewards={"reward": 1.0}),
+            "r1",
+            self.pending_with_label("request-label"),
+        )
+
+        assert outcome.status == RolloutStatus.SUCCESS
+        graded = outcome.sample
+        assert graded is not None
+        # Explicit None survived the boundary: persistence stays disabled.
+        assert graded.trajectory_messages is None
+        assert graded.label == "workflow-owned"
+        assert graded.remove_sample is True
+        assert graded.metrics["verdict"] == "pass"
+        assert graded.extra_fields == {"run": "a"}
+
+    async def test_request_label_fallback(self, bundle, template_task, tmp_path):
+        from osmosis_ai.rollout.types import RolloutSample
+
+        backend = self.backend_for(bundle, template_task, tmp_path)
+        container_result = ContainerResult(
+            status=RolloutStatus.SUCCESS,
+            sample=RolloutSample(messages=[{"role": "assistant", "content": "x"}]),
+        )
+
+        outcome = backend.grader_outcome(
+            self.event_for(container_result, rewards={"reward": 1.0}),
+            "r1",
+            self.pending_with_label("request-label"),
+        )
+
+        assert outcome.sample.label == "request-label"
+
+    async def test_preset_reward_survives_when_verifier_has_no_channel(
+        self, bundle, template_task, tmp_path
+    ):
+        from osmosis_ai.rollout.types import RolloutSample
+
+        backend = self.backend_for(bundle, template_task, tmp_path)
+        container_result = ContainerResult(
+            status=RolloutStatus.SUCCESS,
+            sample=RolloutSample(
+                messages=[{"role": "assistant", "content": "x"}], reward=0.75
+            ),
+        )
+
+        outcome = backend.grader_outcome(
+            self.event_for(container_result, rewards={"a": 1.0, "b": 0.0}),
+            "r1",
+            self.pending_with_label(),
+        )
+
+        assert outcome.status == RolloutStatus.SUCCESS
+        assert outcome.sample.reward == 0.75
+
+    async def test_remove_sample_passes_reward_validation(
+        self, bundle, template_task, tmp_path
+    ):
+        from osmosis_ai.rollout.types import RolloutSample
+
+        backend = self.backend_for(bundle, template_task, tmp_path)
+        container_result = ContainerResult(
+            status=RolloutStatus.SUCCESS,
+            sample=RolloutSample(
+                messages=[{"role": "assistant", "content": "x"}],
+                remove_sample=True,
+            ),
+        )
+
+        outcome = backend.grader_outcome(
+            self.event_for(container_result, rewards={}),
+            "r1",
+            self.pending_with_label(),
+        )
+
+        assert outcome.status == RolloutStatus.SUCCESS
+        assert outcome.sample.remove_sample is True
+
+    async def test_stale_multi_sample_output_fails_loudly(
+        self, bundle, template_task, tmp_path
+    ):
+        backend = self.backend_for(bundle, template_task, tmp_path)
+        container_result = ContainerResult(
+            status=RolloutStatus.SUCCESS,
+            output=AgentWorkflowOutput(
+                samples={
+                    "solver": [{"role": "assistant", "content": "a"}],
+                    "critic": [{"role": "assistant", "content": "b"}],
+                }
+            ),
+        )
+
+        outcome = backend.grader_outcome(
+            self.event_for(container_result, rewards={"reward": 1.0}),
+            "r1",
+            self.pending_with_label(),
+        )
+
+        assert outcome.status == RolloutStatus.FAILURE
+        assert outcome.err_category == RolloutErrorCategory.VALIDATION_ERROR
