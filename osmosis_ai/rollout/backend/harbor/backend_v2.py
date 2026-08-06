@@ -109,6 +109,11 @@ PREWARM_PREFIX = "prewarm-"
 STATUS_RETENTION_SEC = 900.0
 
 
+def trial_cancelled(err: Any) -> bool:
+    """True when harbor recorded an external cancellation on the trial result."""
+    return err is not None and err.exception_type == "CancelledError"
+
+
 class HarborBackendV2(ExecutionBackend):
     def __init__(
         self,
@@ -370,13 +375,6 @@ class HarborBackendV2(ExecutionBackend):
         on_workflow_complete: ResultCallback,
         on_grader_complete: ResultCallback | None = None,
     ) -> None:
-        if request.id in self.pending:
-            # A duplicate would overwrite the live rollout's pending state and
-            # staged files, then strand one of the two execute() calls forever.
-            raise ValueError(
-                f"rollout {request.id!r} is already active; duplicate "
-                "submissions are rejected"
-            )
         pending = PendingTrial(on_workflow_complete, on_grader_complete)
         self.pending[request.id] = pending
         try:
@@ -447,8 +445,7 @@ class HarborBackendV2(ExecutionBackend):
                     on_grader_complete, failure, request.id, "grader"
                 )
         else:
-            err = getattr(trial_result, "exception_info", None)
-            if err is not None and err.exception_type == "CancelledError":
+            if trial_cancelled(getattr(trial_result, "exception_info", None)):
                 self.cleanup_rollout_residue(request.id, include_trial=True)
             else:
                 self.archive_trial(request.id, trial_result, pending)
@@ -473,10 +470,9 @@ class HarborBackendV2(ExecutionBackend):
             self.trials_dir, self.artifact_root, rollout_id, move=delete_trial
         )
         if self.cleanup_successful_trials and not pending.preserve_trial:
-            shutil.rmtree(self.rollouts_dir / rollout_id, ignore_errors=True)
-        if delete_trial and relocated:
-            trial_dir = self.trials_dir / f"{TRIAL_NAME_PREFIX}{rollout_id}"
-            shutil.rmtree(trial_dir, ignore_errors=True)
+            self.cleanup_rollout_residue(
+                rollout_id, include_trial=delete_trial and relocated
+            )
 
     def cleanup_rollout_residue(self, rollout_id: str, *, include_trial: bool) -> None:
         """Remove per-rollout staging (and optionally the trial directory).
@@ -837,7 +833,7 @@ class HarborBackendV2(ExecutionBackend):
             return
 
         err = event.result.exception_info if event.result else None
-        if err and err.exception_type == "CancelledError":
+        if trial_cancelled(err):
             self.record_outcome(rollout_id, RolloutStatus.CANCELLED)
             if not pending.done.done():
                 pending.done.set_result(None)

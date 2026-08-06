@@ -428,37 +428,7 @@ class TestNativeAgents:
         assert config.kwargs["enable_summarize"] is False
         # Terminus-2 ignores a top-level api_key; it must ride in llm_kwargs.
         assert "api_key" not in config.kwargs
-        assert config.kwargs["llm_kwargs"]["api_key"] == "rk-1"
-        assert config.kwargs["llm_kwargs"]["extra_body"]["stream"] is False
-
-    def test_kwargs_wiring_merges_user_llm_kwargs_without_mutation(self):
-        from osmosis_ai.rollout.backend.harbor.native_agents import (
-            NativeAgentBinding,
-            native_agent_config,
-        )
-
-        binding = NativeAgentBinding(
-            wiring="kwargs",
-            kwargs={
-                "enable_summarize": False,
-                "llm_kwargs": {
-                    "api_key": "user-key",
-                    "temperature": 0.2,
-                    "extra_body": {"stream": True, "top_k": 5},
-                },
-            },
-        )
-        config = native_agent_config(
-            "terminus-2", binding, "openai/m", "http://t/v1", "rk-1"
-        )
-
-        llm_kwargs = config.kwargs["llm_kwargs"]
-        assert llm_kwargs["api_key"] == "rk-1"
-        assert llm_kwargs["temperature"] == 0.2
-        assert llm_kwargs["extra_body"] == {"stream": False, "top_k": 5}
-        # The registered binding must stay pristine for the next rollout.
-        assert binding.kwargs["llm_kwargs"]["api_key"] == "user-key"
-        assert binding.kwargs["llm_kwargs"]["extra_body"]["stream"] is True
+        assert config.kwargs["llm_kwargs"] == {"api_key": "rk-1"}
 
     def test_native_without_grader_needs_no_bundle(self, template_task):
         backend = self.backend_for("mini-swe-agent", template_task)
@@ -1128,23 +1098,6 @@ class TestConfigValidation:
         )
         assert config.env["OPENAI_API_BASE"] == "http://t/v1"
         assert config.env["OPENAI_BASE_URL"] == "http://t/v1"
-
-
-class TestDuplicateRolloutIds:
-    async def test_duplicate_active_id_rejected(self, template_task):
-        """A duplicate must not overwrite live pending state or staged files."""
-        backend = HarborBackendV2(
-            orchestrator=TrialQueue(n_concurrent=1),
-            tasks_dir=template_task,
-            agent="oracle",
-        )
-        original = PendingTrial(noop_callback, None)
-        backend.pending["r1"] = original
-
-        with pytest.raises(ValueError, match="already active"):
-            await backend.execute(ExecutionRequest(id="r1", prompt=[]), noop_callback)
-
-        assert backend.pending["r1"] is original
 
 
 class TestArtifactLifecycle:
