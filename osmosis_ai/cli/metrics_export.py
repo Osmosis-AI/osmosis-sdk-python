@@ -83,18 +83,18 @@ def resolve_default_metrics_output(
     return metrics_dir / default_metrics_filename(run_name, run_id)
 
 
-def resolve_eval_output_dir(
+def _resolve_run_output_dir(
     run_name: str | None,
     run_id: str,
     *,
+    scope: str,
     workspace_directory: Path,
     output: str | None = None,
     create: bool = True,
 ) -> Path:
-    """Resolve the fixed eval-scoped output root used by ``info`` and download.
+    """Resolve a fixed run-scoped output root under ``.osmosis/<scope>``.
 
     ``output`` relocates the run root itself; the layout below it is fixed.
-    Without an explicit root, evals live under ``.osmosis/evals/<name>``.
     Unnamed runs fall back to their full ID so separate runs never share the
     unnamed directory.
     """
@@ -115,7 +115,7 @@ def resolve_eval_output_dir(
             safe_run_id = safe_name(run_id).strip("_") or "run"
             suffix = f"--{safe_run_id}"
             safe_run_name = f"{safe_run_name[: 255 - len(suffix)]}{suffix}"
-        root = workspace_directory / ".osmosis" / "evals" / (safe_run_name or run_id)
+        root = workspace_directory / ".osmosis" / scope / (safe_run_name or run_id)
 
     try:
         if root.exists() and not root.is_dir():
@@ -125,6 +125,44 @@ def resolve_eval_output_dir(
     except OSError as exc:
         raise CLIError(f"Cannot create output directory: {exc}") from exc
     return root
+
+
+def resolve_eval_output_dir(
+    run_name: str | None,
+    run_id: str,
+    *,
+    workspace_directory: Path,
+    output: str | None = None,
+    create: bool = True,
+) -> Path:
+    """Resolve the fixed eval-scoped output root used by ``info`` and download."""
+    return _resolve_run_output_dir(
+        run_name,
+        run_id,
+        scope="evals",
+        workspace_directory=workspace_directory,
+        output=output,
+        create=create,
+    )
+
+
+def resolve_benchmark_output_dir(
+    run_name: str | None,
+    run_id: str,
+    *,
+    workspace_directory: Path,
+    output: str | None = None,
+    create: bool = True,
+) -> Path:
+    """Resolve the fixed benchmark-scoped output root used by download."""
+    return _resolve_run_output_dir(
+        run_name,
+        run_id,
+        scope="benchmarks",
+        workspace_directory=workspace_directory,
+        output=output,
+        create=create,
+    )
 
 
 def resolve_eval_metrics_output(

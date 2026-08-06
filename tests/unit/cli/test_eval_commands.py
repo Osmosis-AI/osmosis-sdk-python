@@ -422,7 +422,7 @@ class TestEvalLogs:
             monkeypatch, LogsPage(logs=self.LOG_ENTRIES, next_cursor=None)
         )
 
-        result = eval_module.eval_logs(name_or_id="eval-1", limit=50, cursor=None)
+        result = eval_module.eval_logs(name="eval-1", limit=50, cursor=None)
 
         assert captured == {"name_or_id": "eval-1", "limit": 50, "cursor": None}
         assert isinstance(result, ListResult)
@@ -462,7 +462,7 @@ class TestEvalLogs:
             LogsPage(logs=self.LOG_ENTRIES, next_cursor="2026-06-01T00:00:00Z|log-1"),
         )
 
-        result = eval_module.eval_logs(name_or_id="eval-1", limit=2)
+        result = eval_module.eval_logs(name="eval-1", limit=2)
 
         assert isinstance(result, ListResult)
         assert result.has_more is True
@@ -476,7 +476,7 @@ class TestEvalLogs:
         )
 
         eval_module.eval_logs(
-            name_or_id="eval-1", limit=50, cursor="2026-06-01T00:00:00Z|log-1"
+            name="eval-1", limit=50, cursor="2026-06-01T00:00:00Z|log-1"
         )
 
         assert captured["cursor"] == "2026-06-01T00:00:00Z|log-1"
@@ -486,7 +486,7 @@ class TestEvalLogs:
     ) -> None:
         self._install_client(monkeypatch, LogsPage(logs=[], next_cursor=None))
 
-        result = eval_module.eval_logs(name_or_id="eval-1", limit=50)
+        result = eval_module.eval_logs(name="eval-1", limit=50)
 
         assert isinstance(result, ListResult)
         assert result.items == []

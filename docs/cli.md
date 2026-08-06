@@ -7,7 +7,7 @@
 The console script is `osmosis_ai.cli.main:main` (aliases: `osmosis`, `osmosis-ai`, `osmosis_ai`). [../osmosis_ai/cli/main.py](../osmosis_ai/cli/main.py):
 
 - `main()` calls `_register_commands()` once, then runs the Typer `app` with `standalone_mode=False` so it can map exceptions to exit codes itself.
-- `_register_commands()` imports each command group **lazily inside the function**. Groups attach via `app.add_typer(...)`; the standalone `doctor` / `upgrade` commands attach via `app.command(...)`. Two `rich_help_panel`s split the help: `Workflow Commands` (`dataset`, `train`, `model`, `eval`, `rollout`, `template`, `doctor`) and `Platform Commands` (`auth`, `secret`, `upgrade`).
+- `_register_commands()` imports each command group **lazily inside the function**. Groups attach via `app.add_typer(...)`; the standalone `doctor` / `upgrade` commands attach via `app.command(...)`. Two `rich_help_panel`s split the help: `Workflow Commands` (`dataset`, `train`, `model`, `eval`, `benchmark`, `rollout`, `template`, `doctor`) and `Platform Commands` (`auth`, `secret`, `upgrade`).
 - The root `_callback` resolves `--json` / `--plain`, builds an `OutputContext`, installs it on the Typer context, registers `verify_output_emitted` on close, and loads `.env` via `python-dotenv`. `hoist_format_selectors` lets the format flags appear anywhere on the line.
 
 ## Command shells delegate; they don't do work
@@ -18,6 +18,16 @@ Files in [../osmosis_ai/cli/commands/](../osmosis_ai/cli/commands/) are thin Typ
 - eval/rubric logic lives in [../osmosis_ai/eval/](../osmosis_ai/eval/).
 
 Module-level imports in `commands/` are kept light: `typer`, `cli.console`, `cli.errors`, the lightweight `osmosis_ai.platform.constants` (pagination limits), and stdlib. Everything heavy (`rollout.*`, `platform.api.*`, `platform.cli.*`, `eval.*`) must be imported **inside the function** to keep CLI startup fast — see the lazy-loading section of [architecture.md](./architecture.md).
+
+`osmosis benchmark` puts the benchmark first, mirroring the platform's
+Benchmarks pages: top-level `list` and `info` act on benchmarks (the workspace
+list and one benchmark's page - `info` shows its metadata, leaderboard, and
+runs), `submit` starts a run, and run lifecycle lives under the nested
+`benchmark runs list|info|logs|stop|download` namespace.
+
+List output includes a shell-safe benchmark `Key`, such as
+`terminal-bench-2-1`. Pass that key to `osmosis benchmark info <key>`;
+exact display names and UUIDs remain supported for compatibility.
 
 ## Commands return results; they don't print
 

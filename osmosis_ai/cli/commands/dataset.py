@@ -36,7 +36,7 @@ def upload(
 
 @app.command("download")
 def download(
-    name: str = typer.Argument(..., help="Dataset name or ID."),
+    name: str = typer.Argument(..., help="Dataset name."),
     output: str | None = typer.Option(
         None,
         "--output",
@@ -84,7 +84,7 @@ def info(
 
 @app.command("logs")
 def logs(
-    name: str = typer.Argument(..., help="Dataset name or ID."),
+    name: str = typer.Argument(..., help="Dataset name."),
     limit: int = typer.Option(
         DEFAULT_PAGE_SIZE,
         "--limit",
