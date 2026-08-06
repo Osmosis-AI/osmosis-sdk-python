@@ -65,13 +65,6 @@ def native_agent_config(
             name=name, model_name=model_name, env=env, kwargs=dict(binding.kwargs)
         )
     # Kwargs-wired agents (terminus-2) silently drop a top-level api_key, so
-    # the rollout key rides inside llm_kwargs; controllers require
-    # non-streaming responses. Controller-owned values win over user ones.
-    kwargs = {**binding.kwargs, "api_base": url}
-    llm_kwargs = dict(kwargs.get("llm_kwargs") or {})
-    extra_body = dict(llm_kwargs.get("extra_body") or {})
-    extra_body["stream"] = False
-    llm_kwargs["api_key"] = api_key
-    llm_kwargs["extra_body"] = extra_body
-    kwargs["llm_kwargs"] = llm_kwargs
+    # the rollout key rides inside llm_kwargs.
+    kwargs = {**binding.kwargs, "api_base": url, "llm_kwargs": {"api_key": api_key}}
     return HarborAgentConfig(name=name, model_name=model_name, kwargs=kwargs)
