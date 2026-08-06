@@ -25,7 +25,6 @@ import asyncio
 import inspect
 import json
 import logging
-import math
 import shutil
 import traceback
 import uuid
@@ -140,12 +139,6 @@ class HarborBackendV2(ExecutionBackend):
         self.task_resolver = task_resolver
         self.model_name = model_name
         self.agent = agent
-        if agent_setup_timeout_sec is not None and not (
-            math.isfinite(agent_setup_timeout_sec) and agent_setup_timeout_sec > 0
-        ):
-            # Harbor feeds this straight into asyncio.wait_for; 0/negative/NaN
-            # break it.
-            raise ValueError("agent_setup_timeout_sec must be a finite value > 0")
         self.agent_setup_timeout_sec = agent_setup_timeout_sec
         self.native: NativeAgentBinding | None = native_binding(agent)
         if self.native is not None and isinstance(agent, str):
