@@ -68,7 +68,6 @@ from osmosis_ai.rollout.backend.harbor.backend import (
 from osmosis_ai.rollout.backend.harbor.bundling import resolve_backend_bundle
 from osmosis_ai.rollout.backend.harbor.diagnostics import (
     agent_phase_failure,
-    categorize_exception,
     diagnostic_payload,
     failure_phase,
     redact_secrets,
@@ -96,6 +95,7 @@ from osmosis_ai.rollout.types import (
     RolloutSample,
     RolloutStatus,
 )
+from osmosis_ai.rollout.utils.errors import categorize_exception
 from osmosis_ai.rollout.utils.file_artifacts import default_artifact_root
 from osmosis_ai.rollout.utils.rewards import validate_sample_has_reward
 from osmosis_ai.rollout.utils.ttl_cache import TtlCache

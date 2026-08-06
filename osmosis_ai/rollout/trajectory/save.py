@@ -127,7 +127,6 @@ async def _save(
         request_label=request_label,
         request_metadata=request_metadata,
         request_extra_fields=request_extra_fields,
-        result_extra_fields=result.extra_fields,
         report=matched_report,
         default_model_name=report.model_name if report else None,
         unmatched_sample_reports=unmatched_reports or None,

@@ -1664,7 +1664,7 @@ class TestCallbackOutcomes:
 
 class TestFailureCategorization:
     def test_categorize_exception_maps_wire_vocabulary(self):
-        from osmosis_ai.rollout.backend.harbor.diagnostics import categorize_exception
+        from osmosis_ai.rollout.utils.errors import categorize_exception
 
         assert categorize_exception(TimeoutError()) == RolloutErrorCategory.TIMEOUT
         assert (
