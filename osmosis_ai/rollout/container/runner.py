@@ -51,12 +51,6 @@ def validate_workflow_output(output: AgentWorkflowOutput) -> None:
             f"({sorted(output.samples)}); a rollout carries exactly one "
             "sample — return a single message list or one samples entry"
         )
-    if output.info:
-        raise ValueError(
-            "AgentWorkflowOutput.info is not delivered to graders on this "
-            "backend; put grader context in the rollout metadata or in "
-            "sample extra_fields"
-        )
 
 
 async def run_agent(workflow_cls: Any, workflow_config: Any) -> ContainerResult:

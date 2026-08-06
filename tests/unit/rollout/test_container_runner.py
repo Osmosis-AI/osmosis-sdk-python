@@ -120,17 +120,6 @@ class TestUnsupportedOutputs:
         with pytest.raises(ValueError, match="named samples"):
             await runner.run_agent(workflow_returning(output), None)
 
-    async def test_nonempty_info_rejected(self, monkeypatch, tmp_path):
-        monkeypatch.setattr(runner, "AGENT_LOGS_DIR", tmp_path)
-        stage_input(tmp_path)
-        output = AgentWorkflowOutput(
-            samples={"default": [{"role": "assistant", "content": "y"}]},
-            info={"hint": "for the grader"},
-        )
-
-        with pytest.raises(ValueError, match="info"):
-            await runner.run_agent(workflow_returning(output), None)
-
     async def test_single_entry_output_accepted(self, monkeypatch, tmp_path):
         monkeypatch.setattr(runner, "AGENT_LOGS_DIR", tmp_path)
         stage_input(tmp_path)

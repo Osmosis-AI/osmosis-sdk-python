@@ -722,7 +722,7 @@ class HarborBackendV2(ExecutionBackend):
         )
 
     def bundle_sample(
-        self, event: TrialHookEvent, rollout_id: str, pending: PendingTrial
+        self, event: TrialHookEvent, pending: PendingTrial
     ) -> RolloutSample | None:
         result = self.container_result(event)
         if result is None:
@@ -746,16 +746,6 @@ class HarborBackendV2(ExecutionBackend):
         output = result.output
         if output is None:
             return None
-        if len(output.samples) > 1:
-            # A stale container SDK must not have samples silently dropped;
-            # fail the rollout loudly instead.
-            logger.error(
-                "rollout %s returned %d named samples; multiple samples per "
-                "rollout are unsupported",
-                rollout_id,
-                len(output.samples),
-            )
-            return None
         messages = output.primary_messages()
         if messages is None:
             return None
@@ -770,7 +760,7 @@ class HarborBackendV2(ExecutionBackend):
     ) -> RolloutSample | None:
         if self.native is not None:
             return self.native_sample(event, rollout_id, pending)
-        return self.bundle_sample(event, rollout_id, pending)
+        return self.bundle_sample(event, pending)
 
     def agent_succeeded(self, event: TrialHookEvent) -> tuple[bool, str | None]:
         if event.result and event.result.exception_info:

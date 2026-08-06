@@ -2012,26 +2012,3 @@ class TestBundleSampleBoundary:
 
         assert outcome.status == RolloutStatus.SUCCESS
         assert outcome.sample.remove_sample is True
-
-    async def test_stale_multi_sample_output_fails_loudly(
-        self, bundle, template_task, tmp_path
-    ):
-        backend = self.backend_for(bundle, template_task, tmp_path)
-        container_result = ContainerResult(
-            status=RolloutStatus.SUCCESS,
-            output=AgentWorkflowOutput(
-                samples={
-                    "solver": [{"role": "assistant", "content": "a"}],
-                    "critic": [{"role": "assistant", "content": "b"}],
-                }
-            ),
-        )
-
-        outcome = backend.grader_outcome(
-            self.event_for(container_result, rewards={"reward": 1.0}),
-            "r1",
-            self.pending_with_label(),
-        )
-
-        assert outcome.status == RolloutStatus.FAILURE
-        assert outcome.err_category == RolloutErrorCategory.VALIDATION_ERROR
