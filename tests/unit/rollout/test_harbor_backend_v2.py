@@ -10,7 +10,6 @@ import pytest
 from harbor.trial.queue import TrialQueue
 
 from osmosis_ai.packaging import build_bundle, inspect_bundle
-from osmosis_ai.rollout.backend.harbor.backend import PendingTrial
 from osmosis_ai.rollout.backend.harbor.backend_v2 import HarborBackendV2
 from osmosis_ai.rollout.backend.harbor.tasks import (
     SDK_REQUIREMENTS_FILENAME,
@@ -19,6 +18,7 @@ from osmosis_ai.rollout.backend.harbor.tasks import (
     patch_dockerfile_with_sdk,
     venv_or_fallback_script,
 )
+from osmosis_ai.rollout.backend.harbor.trial import PendingTrial
 from osmosis_ai.rollout.container.files import ContainerInput, ContainerResult
 from osmosis_ai.rollout.types import (
     ExecutionRequest,
@@ -457,7 +457,9 @@ class TestNativeAgents:
         config = backend.build_agent_config(template_task, container_input)
         assert config.kwargs["api_base"] == "http://t/v1"
 
-    def test_native_agent_kwargs_rejected_for_workflow_agents(self, bundle, template_task):
+    def test_native_agent_kwargs_rejected_for_workflow_agents(
+        self, bundle, template_task
+    ):
         with pytest.raises(ValueError, match="native_agent_kwargs"):
             HarborBackendV2(
                 orchestrator=TrialQueue(n_concurrent=1),
