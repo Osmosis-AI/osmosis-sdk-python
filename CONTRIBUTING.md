@@ -101,6 +101,12 @@ For breaking changes, add `[BREAKING]` before the modules:
 [BREAKING][module] type: description
 ```
 
+For a stacked PR, prefix the whole title with its position in the stack:
+
+```
+[N/M][module] type: description
+```
+
 **Examples:**
 
 ```
@@ -109,6 +115,7 @@ For breaking changes, add `[BREAKING]` before the modules:
 [server] fix: handle timeout in rollout init
 [cli] chore: update dependency versions
 [BREAKING][rollout] refactor: change Grader.grade signature
+[2/5][rollout] fix: surface harbor agent failures
 ```
 
 PR titles appear directly in auto-generated GitHub Release Notes, so keep them clear and descriptive.

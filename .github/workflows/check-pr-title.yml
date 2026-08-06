@@ -13,16 +13,21 @@ jobs:
     timeout-minutes: 5
     steps:
       - name: Validate PR title format
-        if: ${{ !endsWith(github.actor, '[bot]') && (github.event.action != 'edited' || github.event.changes.title) }}
+        # Gate on the PR author, not github.actor. github.actor is whoever
+        # triggered *this run*, so a bot touching a human's PR (a review app
+        # pushing a commit, for example) skipped the check — and a skipped step
+        # reports the job as success, silently turning a failing title green.
+        if: ${{ !endsWith(github.event.pull_request.user.login, '[bot]') && (github.event.action != 'edited' || github.event.changes.title) }}
         env:
           PR_TITLE: ${{ github.event.pull_request.title }}
         run: |
-          PATTERN='^(\[BREAKING\])?(\[(rollout|server|cli|auth|eval|misc|ci|doc)\]){1,3} (feat|fix|refactor|chore|test|doc): .+'
+          PATTERN='^(\[[0-9]+/[0-9]+\])?(\[BREAKING\])?(\[(rollout|server|cli|auth|eval|misc|ci|doc)\]){1,3} (feat|fix|refactor|chore|test|doc): .+'
           if [[ ! "$PR_TITLE" =~ $PATTERN ]]; then
             echo "::error::PR title does not match required format."
             echo ""
             echo "Expected format: [module] type: description"
             echo "  Multi-module:  [mod1][mod2] type: description (up to 3 modules)"
+            echo "  Stacked PR:    [N/M] prefixes the whole title"
             echo "  modules: rollout, server, cli, auth, eval, misc, ci, doc"
             echo "  types:   feat, fix, refactor, chore, test, doc"
             echo ""
@@ -30,6 +35,7 @@ jobs:
             echo "  [rollout] feat: add streaming support for chat completions"
             echo "  [rollout][auth] refactor: extract LifecycleManager"
             echo "  [BREAKING][rollout] refactor: change Grader.grade signature"
+            echo "  [2/5][rollout] fix: surface harbor agent failures"
             echo "  [ci] chore: update GitHub Actions versions"
             echo ""
             echo "Got: $PR_TITLE"

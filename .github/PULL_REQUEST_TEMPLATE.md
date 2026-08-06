@@ -2,10 +2,12 @@
 PR Title Format: [module] type: description
   modules: rollout, server, cli, auth, eval, misc, ci, doc
   types:   feat, fix, refactor, chore, test, doc
+  stacked: prefix the whole title with [N/M]
 
 Examples:
   [rollout] feat: add streaming support for chat completions
   [BREAKING][rollout] refactor: change Grader.grade signature
+  [2/5][rollout] fix: surface harbor agent failures
   [ci] chore: update GitHub Actions versions
 -->
 
