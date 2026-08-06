@@ -232,9 +232,7 @@ class HarborBackendV2(ExecutionBackend):
         }
 
     async def resolve_task(self, request: ExecutionRequest) -> HarborTask:
-        # A caller-supplied resolver owns task selection entirely (including
-        # any path-containment policy); it bypasses metadata and task-mode
-        # resolution.
+        # A caller-supplied resolver bypasses metadata and task-mode resolution.
         if self.task_resolver is not None:
             task = self.task_resolver(request)
             return await task if inspect.isawaitable(task) else task
@@ -631,9 +629,8 @@ class HarborBackendV2(ExecutionBackend):
         sample = self.primary_sample(event, rollout_id, pending)
         err = event.result.exception_info if event.result else None
 
-        # An agent-phase failure is the actionable error; the verifier branch
-        # below would otherwise bury it under a secondary missing-sample or
-        # missing-reward validation error.
+        # Report agent-phase failures before the verifier branch buries them
+        # under a secondary validation error.
         if (agent_err := agent_phase_failure(event.result)) is not None:
             log_trial_exception(rollout_id, agent_err, phase="during the agent run")
             return ExecutionResult(
