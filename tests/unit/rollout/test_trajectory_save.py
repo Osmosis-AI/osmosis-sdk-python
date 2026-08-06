@@ -100,7 +100,7 @@ async def test_sample_less_failure_writes_diagnostics_sidecar(tmp_path: Path) ->
         rollout_id="r1",
         result=ExecutionResult(
             status=RolloutStatus.FAILURE,
-            extra_fields={"backend": "harbor-v2", "phase": "setup"},
+            extra_fields={"backend": "harbor", "phase": "setup"},
         ),
         artifact_root=tmp_path,
     )
@@ -136,13 +136,13 @@ async def test_diagnostics_live_in_sidecar_not_trajectory(tmp_path: Path) -> Non
         result=ExecutionResult(
             status=RolloutStatus.SUCCESS,
             sample=make_sample(reward=0.5),
-            extra_fields={"backend": "harbor-v2", "timings_sec": {"agent": 3.0}},
+            extra_fields={"backend": "harbor", "timings_sec": {"agent": 3.0}},
         ),
         artifact_root=tmp_path,
     )
 
     sidecar = json.loads((tmp_path / "r1" / "diagnostics.json").read_text())
-    assert sidecar["backend"] == "harbor-v2"
+    assert sidecar["backend"] == "harbor"
     doc = json.loads((tmp_path / "r1" / "trajectory.json").read_text())
     assert "result_extra_fields" not in doc["extra"]["osmosis"]
 

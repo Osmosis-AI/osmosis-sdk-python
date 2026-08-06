@@ -4,7 +4,7 @@
 
 ## Rollout timeouts
 
-The controller sends per-rollout `agent_timeout_sec` / `grader_timeout_sec` in the `RolloutInitRequest` ([../osmosis_ai/rollout/types/protocol.py](../osmosis_ai/rollout/types/protocol.py)). The Harbor backend enforces them per execution via `override_timeout_sec` ([../osmosis_ai/rollout/backend/harbor/backend_v2.py](../osmosis_ai/rollout/backend/harbor/backend_v2.py)); the in-process `LocalBackend` does **not** impose these per-rollout timeouts itself — it only maps a raised `TimeoutError` to `RolloutErrorCategory.TIMEOUT` ([../osmosis_ai/rollout/types/sample.py](../osmosis_ai/rollout/types/sample.py)).
+The controller sends per-rollout `agent_timeout_sec` / `grader_timeout_sec` in the `RolloutInitRequest` ([../osmosis_ai/rollout/types/protocol.py](../osmosis_ai/rollout/types/protocol.py)). The Harbor backend enforces them per execution via `override_timeout_sec` ([../osmosis_ai/rollout/backend/harbor/backend.py](../osmosis_ai/rollout/backend/harbor/backend.py)); the in-process `LocalBackend` does **not** impose these per-rollout timeouts itself — it only maps a raised `TimeoutError` to `RolloutErrorCategory.TIMEOUT` ([../osmosis_ai/rollout/types/sample.py](../osmosis_ai/rollout/types/sample.py)).
 
 ### All rollouts time out / zero reward across the board
 
