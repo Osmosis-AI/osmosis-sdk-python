@@ -1,4 +1,4 @@
-"""Harbor execution backend v2. Host-side only.
+"""Harbor execution backend. Host-side only.
 
 ``agent=`` selects the track: a registered native agent name ("terminus-2",
 "mini-swe-agent", "oracle") runs Harbor's own agent with the rollout endpoint
@@ -110,13 +110,43 @@ HARNESS_AGENT_IMPORT_PATH = (
 PREWARM_PREFIX = "prewarm-"
 STATUS_RETENTION_SEC = 900.0
 
+# Constructor keywords belonging to the backend v0.3 removed. This class kept
+# that class's name but not its signature, so a stale call site would otherwise
+# fail on the argument it does *not* pass ("missing a required argument:
+# 'tasks_dir'") rather than on the ones it does. Drop once v0.3 has shipped.
+# TODO(OSM-1713): point at the published migration page once the docs land.
+MIGRATION_DOCS_URL = "https://docs.osmosis.ai/cli/rollout/overview"
+PRE_V03_KWARGS = frozenset(
+    {
+        "task_dir",
+        "user_code_dir",
+        "workflow",
+        "custom_tests_dir",
+        "prebuild_local_image",
+        "symlink_environment",
+        "_sdk_source_dir",
+    }
+)
+
 
 def trial_cancelled(err: Any) -> bool:
     """True when harbor recorded an external cancellation on the trial result."""
     return err is not None and err.exception_type == "CancelledError"
 
 
-class HarborBackendV2(ExecutionBackend):
+class HarborBackend(ExecutionBackend):
+    def __new__(cls, *args: Any, **kwargs: Any) -> HarborBackend:
+        # In __new__, whose arguments bind permissively, so this runs before
+        # __init__ can reject the call for the tasks_dir it never received.
+        if stale := sorted(PRE_V03_KWARGS & kwargs.keys()):
+            raise TypeError(
+                f"HarborBackend no longer takes {', '.join(stale)}. v0.3 removed "
+                "the backend those belonged to and gave its name to the one that "
+                "packages your project into a wheel and installs it in the task "
+                f"container; port the call with {MIGRATION_DOCS_URL}"
+            )
+        return super().__new__(cls)
+
     def __init__(
         self,
         *,
@@ -249,7 +279,7 @@ class HarborBackendV2(ExecutionBackend):
     def health(self) -> dict[str, Any]:
         return {
             "status": "ok",
-            "backend": "harbor-v2",
+            "backend": "harbor",
             "agent": self.agent
             if isinstance(self.agent, str)
             else ensure_import_path(self.agent),

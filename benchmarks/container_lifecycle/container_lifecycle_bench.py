@@ -35,7 +35,7 @@ import uvicorn
 from fastapi import FastAPI, Request
 from harbor.trial.queue import TrialQueue
 
-from osmosis_ai.rollout.backend.harbor import HarborBackendV2
+from osmosis_ai.rollout.backend.harbor import HarborBackend
 from osmosis_ai.rollout.server import create_rollout_server
 
 HARNESS_DIR = Path(__file__).resolve().parent / "bench_harness"
@@ -152,7 +152,7 @@ def make_backend(
     keep_trials: bool,
     patch_dockerfile_with_sdk: bool = True,
 ):
-    return HarborBackendV2(
+    return HarborBackend(
         orchestrator=TrialQueue(n_concurrent=concurrency),
         tasks_dir=task_dir,
         agent=WORKFLOW,
