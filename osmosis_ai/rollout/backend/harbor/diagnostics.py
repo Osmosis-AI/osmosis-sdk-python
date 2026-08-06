@@ -97,10 +97,8 @@ def agent_phase_failure(result: Any) -> Any | None:
 def failure_phase(result: Any) -> str:
     """The phase a failure belongs to.
 
-    Normally the furthest phase the trial reached — but an exception recorded
-    before verification started belongs to the agent-side phase that produced
-    it, not to the verifier harbor ran anyway. Without that, the workflow and
-    grader callbacks blame different phases for the same failure.
+    Normally the furthest phase the trial reached, but a pre-verification
+    exception belongs to the agent-side phase that produced it.
     """
     if result is None:
         return "setup"

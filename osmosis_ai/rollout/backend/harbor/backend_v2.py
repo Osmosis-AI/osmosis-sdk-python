@@ -211,8 +211,8 @@ class HarborBackendV2(ExecutionBackend):
 
     @property
     def capture_final_result(self) -> bool:
-        # Harbor verification computes the final reward backend-side; the
-        # server should archive it even when no grader callback URL exists.
+        # The reward is computed backend-side; archive it even without a
+        # grader callback URL.
         return True
 
     def queued(self) -> int:
@@ -441,9 +441,8 @@ class HarborBackendV2(ExecutionBackend):
             self.record_outcome(request.id, RolloutStatus.CANCELLED)
             self.cleanup_rollout_residue(request.id, include_trial=True)
             if not pending.cancel_requested:
-                # Not a requested rollout cancellation: uvicorn shutdown or an
-                # enclosing task group owns this; swallowing it would corrupt
-                # the canceller's bookkeeping.
+                # An external canceller (uvicorn shutdown, task group) owns
+                # this; swallowing it would corrupt its bookkeeping.
                 raise
             logger.info("Rollout %s cancelled", request.id)
         except Exception as e:
@@ -464,8 +463,7 @@ class HarborBackendV2(ExecutionBackend):
                 ),
             )
             # Both channels get a terminal outcome, so a controller waiting on
-            # the grader callback does not burn its full deadline; wrapped
-            # deliveries keep exceptions out of the server's fabrication path.
+            # the grader callback does not burn its full deadline.
             if not pending.workflow_complete_called:
                 await self.try_callback(
                     on_workflow_complete,
@@ -843,8 +841,7 @@ class HarborBackendV2(ExecutionBackend):
                     event, RolloutErrorCategory.AGENT_ERROR
                 ),
             )
-        # Reachable in normal operation: a task without tests/ and without a
-        # grader disables the verifier, so no reward source ever runs.
+        # A task without tests/ and without a grader has no reward source.
         return ExecutionResult(
             status=RolloutStatus.FAILURE,
             sample=sample,
@@ -889,9 +886,8 @@ class HarborBackendV2(ExecutionBackend):
 
             if not pending.workflow_complete_called:
                 if pending.workflow_result is not None:
-                    # The semantic outcome was produced but delivery failed;
-                    # resend it byte-identical instead of fabricating a
-                    # failure for a trial that may have succeeded.
+                    # The outcome was produced but delivery failed; resend it
+                    # byte-identical instead of fabricating a failure.
                     result = pending.workflow_result
                 elif event.result and event.result.exception_info:
                     err = event.result.exception_info

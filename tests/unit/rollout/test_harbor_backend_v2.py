@@ -1491,9 +1491,7 @@ class TestContainerInputGating:
 
 
 class TestCallbackOutcomes:
-    """Addendum §7: a channel's semantic outcome is produced once and stays
-    immutable; retries resend it byte-identical, and fabrication is allowed
-    only when no outcome was ever produced."""
+    """A channel's outcome is produced once; retries resend it byte-identical."""
 
     def backend_for(self, template_task, tmp_path, queue):
         backend = HarborBackendV2(
@@ -1517,9 +1515,7 @@ class TestCallbackOutcomes:
     async def test_workflow_delivery_failure_resends_same_outcome(
         self, template_task, tmp_path
     ):
-        """Transient delivery failure: the END-hook retry must resend the
-        cached outcome instead of fabricating 'Trial ended before agent
-        completed' for a trial that succeeded."""
+        """The END-hook retry must resend the cached outcome, not fabricate."""
         from types import SimpleNamespace
 
         attempts = []
@@ -1581,8 +1577,7 @@ class TestCallbackOutcomes:
         assert all(r.status == RolloutStatus.SUCCESS for r in attempts)
 
     async def test_setup_failure_reaches_both_channels(self, template_task, tmp_path):
-        """A controller waiting on the grader callback must not burn its full
-        deadline when the rollout dies before submission."""
+        """Pre-submit failures must reach the grader channel too."""
         workflow_results = []
         grader_results = []
 
@@ -1618,8 +1613,7 @@ class TestCallbackOutcomes:
     async def test_setup_failure_callback_exception_stays_contained(
         self, template_task, tmp_path
     ):
-        """Callback delivery exceptions must never escape execute() into the
-        server's outcome-fabrication path."""
+        """Delivery exceptions must not escape into the fabrication path."""
 
         async def raising_workflow(result):
             raise RuntimeError("delivery failed")
@@ -1642,8 +1636,7 @@ class TestCallbackOutcomes:
     async def test_post_end_exception_does_not_double_deliver(
         self, template_task, tmp_path
     ):
-        """Once both channels delivered, a later submit-level exception must
-        not produce a second, contradictory outcome on either channel."""
+        """A post-delivery exception must not double-post either channel."""
         from types import SimpleNamespace
 
         workflow_results = []
@@ -1674,8 +1667,7 @@ class TestCallbackOutcomes:
         assert len(grader_results) == 1
 
     async def test_external_cancellation_reraises(self, template_task, tmp_path):
-        """Only a requested rollout cancellation may be swallowed; process or
-        task-group cancellation must propagate to its owner."""
+        """Only requested cancellations may be swallowed."""
         started = asyncio.Event()
 
         async def run(queue, config):
@@ -1727,9 +1719,7 @@ class TestFailureCategorization:
         )
 
     def test_failure_phase_blames_agent_for_pre_verifier_exception(self):
-        """The workflow and grader callbacks must attribute the same failure
-        to the same phase; an exception recorded before verification belongs
-        to the agent side even though the verifier span exists."""
+        """Both callbacks must attribute the same failure to the agent side."""
         from types import SimpleNamespace
 
         from osmosis_ai.rollout.backend.harbor.diagnostics import failure_phase
@@ -1758,8 +1748,7 @@ class TestFailureCategorization:
     async def test_grader_outcome_no_reward_source_is_validation_error(
         self, template_task, tmp_path
     ):
-        """A task with no tests/ and no grader ends with no verifier result
-        and no exception; the terminal outcome must say what is missing."""
+        """No reward source: the terminal outcome must say what is missing."""
         from types import SimpleNamespace
 
         backend = HarborBackendV2(

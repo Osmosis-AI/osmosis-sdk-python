@@ -55,9 +55,7 @@ async def save_trajectories(
 ) -> None:
     """Save the rollout's sample as an ATIF document. Never raises.
 
-    ``diagnostics`` overrides ``result.extra_fields`` for the diagnostics
-    sidecar, so the caller can retain the latest diagnostics payload
-    independently of which result carries the archived sample.
+    ``diagnostics`` overrides ``result.extra_fields`` for the sidecar.
     """
     try:
         await _save(
@@ -89,8 +87,7 @@ async def _save(
     artifact_root: Path,
     diagnostics: dict[str, Any] | None = None,
 ) -> None:
-    # Diagnostics are written before the sample-None early return: a failed
-    # rollout with no sample must still leave a durable record on disk.
+    # Written before the sample-None early return so failures leave a record.
     payload = diagnostics if diagnostics is not None else result.extra_fields
     if payload is not None:
         diagnostics_dest = artifact_root / rollout_id / "diagnostics.json"

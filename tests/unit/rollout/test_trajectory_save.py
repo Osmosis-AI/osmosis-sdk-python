@@ -113,8 +113,7 @@ async def test_sample_less_failure_writes_diagnostics_sidecar(tmp_path: Path) ->
 async def test_diagnostics_override_wins_over_result_extra_fields(
     tmp_path: Path,
 ) -> None:
-    """The retained latest diagnostics may come from a different result than
-    the archived sample; the explicit override must win."""
+    """The explicit diagnostics override must win over result.extra_fields."""
     await save_trajectories(
         rollout_id="r1",
         result=ExecutionResult(

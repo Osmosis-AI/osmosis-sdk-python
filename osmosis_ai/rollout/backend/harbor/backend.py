@@ -118,16 +118,13 @@ class PendingTrial:
     ):
         self.on_workflow_complete = on_workflow_complete
         self.on_grader_complete = on_grader_complete
-        # Each channel's semantic outcome is produced once and cached here;
-        # the *_called flags mean "delivered", never "produced". A retry must
-        # resend the cached outcome byte-identical, and fabricating a new one
-        # is allowed only when no outcome was ever produced.
+        # Each channel's outcome is produced once and cached; *_called means
+        # "delivered". Retries resend the cached outcome byte-identical.
         self.workflow_complete_called = False
         self.workflow_result: ExecutionResult | None = None
         self.grader_complete_called = False
         self.grader_result: ExecutionResult | None = None
-        # Set by cancel_rollouts before cancelling, so execute() can tell a
-        # requested cancellation from process/task-group cancellation.
+        # Lets execute() tell a requested cancellation from an external one.
         self.cancel_requested = False
         self.preserve_trial = False
         self.started = False
