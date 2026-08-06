@@ -201,10 +201,9 @@ def validate_rollout_backend(
                 f"({'; '.join(unsatisfied)}). The server validates it after installing them."
             ]
 
-    # Importing the entrypoint constructs module-level backends and servers,
-    # so genuine misconfigurations surface as import-time errors. The CLI does
-    # no validation of its own and never guesses requirements by scanning for
-    # classes; running `osmosis eval` locally is the real smoke test.
+    # Importing the entrypoint constructs module-level backends and servers;
+    # misconfigurations surface as import-time errors. The CLI validates
+    # nothing itself and never scans the namespace for classes.
     try:
         load_rollout_entrypoint(rollout_dir, entrypoint)
     except ModuleNotFoundError as exc:

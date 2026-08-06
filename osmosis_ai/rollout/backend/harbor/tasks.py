@@ -160,9 +160,8 @@ class HarborTask:
         Harbor agents); the container input ships in tests/ for the same reason.
         With sdk_requirements the copied Dockerfile pre-installs them into an
         isolated venv, so per-trial installs stop downloading dependencies.
-        ``write_input=False`` skips the top-level container input file for
-        tracks where no bundled harness reads it — the file carries the rollout
-        api_key in cleartext, so it must not be staged without a consumer.
+        ``write_input=False`` skips the top-level container input file — it
+        carries the api_key in cleartext, so it is not staged without a consumer.
         """
         task_dir = out_dir / self.path.name
         shutil.rmtree(task_dir, ignore_errors=True)

@@ -252,9 +252,8 @@ def _make_rollout(
 _SATISFIED = '"osmosis-ai"'
 _UNSATISFIED = '"osmosis-ai>=999.0.0"'
 
-# A native Harbor entrypoint: the backend runs Harbor's own agent and the
-# task verifier supplies the reward, so no AgentWorkflow or Grader exists.
-# The load counter proves preflight executes module-level side effects once.
+# A native Harbor entrypoint: no AgentWorkflow or Grader exists; the load
+# counter records how many times the module executed.
 _NATIVE_V2_ENTRYPOINT = """\
 from pathlib import Path
 
@@ -276,8 +275,7 @@ backend = HarborBackendV2(
 app = create_rollout_server(backend=backend)
 """
 
-# A backend with no workflow or grader: CLI preflight must not infer either
-# requirement from classes present (or absent) in the module namespace.
+# Preflight must not infer requirements from the module namespace.
 _COMPONENT_FREE_BACKEND_ENTRYPOINT = """\
 from osmosis_ai.rollout.backend.base import ExecutionBackend
 from osmosis_ai.rollout.server import create_rollout_server
@@ -291,8 +289,8 @@ class ComponentFreeBackend(ExecutionBackend):
 app = create_rollout_server(backend=ComponentFreeBackend())
 """
 
-# A script-style entrypoint with no module-level backend. Importability is the
-# only CLI concern; the script validates its backend when it constructs one.
+# Script-style entrypoint, no module-level backend; importability is the
+# only CLI concern.
 _WORKFLOW_WITHOUT_GRADER_ENTRYPOINT = """\
 from osmosis_ai.rollout.agent_workflow import AgentWorkflow
 
@@ -302,8 +300,7 @@ class DemoWorkflow(AgentWorkflow):
         return None
 """
 
-# A backend whose constructor rejects its configuration: preflight surfaces
-# the import-time error instead of running any validation of its own.
+# A rejecting constructor: preflight surfaces the import-time error.
 _INVALID_BACKEND_ENTRYPOINT = """\
 from osmosis_ai.rollout.backend.base import ExecutionBackend
 from osmosis_ai.rollout.server import create_rollout_server
@@ -410,8 +407,7 @@ def test_unsatisfied_requirements_empty_without_pyproject(tmp_path: Path) -> Non
 def test_validate_rollout_backend_accepts_native_backend_without_workflow(
     tmp_path: Path,
 ) -> None:
-    """A backend that runs Harbor's own agent with verifier rewards needs no
-    dummy AgentWorkflow or Grader to pass preflight."""
+    """Native backends need no dummy AgentWorkflow or Grader to pass preflight."""
     project = _make_workspace_directory(tmp_path / "project")
     _make_rollout(
         project,
