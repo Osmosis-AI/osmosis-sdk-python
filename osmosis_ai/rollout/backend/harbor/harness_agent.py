@@ -39,9 +39,9 @@ class OsmosisHarnessInstalledAgent(BaseInstalledAgent):
         **kwargs: Any,
     ):
         super().__init__(logs_dir, *args, **kwargs)
-        self.bundle_path = Path(bundle_path)
+        self.bundle_path: Path = Path(bundle_path)
         self.agent_script = agent_script
-        self.input_path = Path(input_path)
+        self.input_path: Path = Path(input_path)
 
     @staticmethod
     def name() -> str:

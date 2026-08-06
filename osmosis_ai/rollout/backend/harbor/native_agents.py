@@ -63,9 +63,12 @@ def native_agent_config(
         return HarborAgentConfig(
             name=name, model_name=model_name, env=env, kwargs=kwargs
         )
-    # Endpoint wiring wins over user kwargs: the rollout URL is not optional.
+    # Kwargs-wired agents (terminus-2) silently drop a top-level api_key, so
+    # the rollout key rides inside llm_kwargs. Endpoint wiring wins over user
+    # kwargs: the rollout URL is not optional.
+    llm_kwargs = {**kwargs.pop("llm_kwargs", {}), "api_key": api_key}
     return HarborAgentConfig(
         name=name,
         model_name=model_name,
-        kwargs={**kwargs, "api_base": url, "api_key": api_key},
+        kwargs={**kwargs, "api_base": url, "llm_kwargs": llm_kwargs},
     )

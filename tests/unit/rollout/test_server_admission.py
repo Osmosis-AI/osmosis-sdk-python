@@ -73,9 +73,7 @@ def test_cancel_requires_exactly_one_selector():
     client = TestClient(create_rollout_server(backend=StubBackend()))
     assert client.post("/rollout/cancel", json={}).status_code == 422
     assert (
-        client.post(
-            "/rollout/cancel", json={"ids": ["a"], "all": True}
-        ).status_code
+        client.post("/rollout/cancel", json={"ids": ["a"], "all": True}).status_code
         == 422
     )
 

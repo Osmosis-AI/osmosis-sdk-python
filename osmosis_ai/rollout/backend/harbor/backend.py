@@ -123,7 +123,7 @@ class PendingTrial:
         self.started = False
         self.grading = False
         self.api_key: str | None = None
-        self.task: asyncio.Task | None = None
+        self.task: asyncio.Task[Any] | None = None
         self.done: asyncio.Future[None] = asyncio.get_event_loop().create_future()
 
 

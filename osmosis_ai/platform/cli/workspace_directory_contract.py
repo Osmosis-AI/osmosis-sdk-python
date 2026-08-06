@@ -10,7 +10,6 @@ import tomllib
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as installed_version
 from pathlib import Path
-from typing import Any
 
 from packaging.requirements import InvalidRequirement, Requirement
 
@@ -120,10 +119,6 @@ def ensure_workspace_directory_config_path(
     )
 
 
-def _format_backend_validation_errors(errors: list[Any]) -> str:
-    return "\n".join(f"  - [{error.code}] {error.message}" for error in errors)
-
-
 def _unsatisfied_rollout_requirements(rollout_dir: Path) -> list[str]:
     """Declared requirements this environment does not satisfy.
 
@@ -177,17 +172,14 @@ def validate_rollout_backend(
     rollout: str,
     entrypoint: str,
     command_label: str,
-    grader_module: str | None = None,
-    grader_config_ref: str | None = None,
 ) -> list[str]:
-    """Load and validate a rollout backend against the workspace directory contract.
+    """Load a rollout entrypoint and let its backend validate itself.
 
     Returns warnings for checks that could not run. Raises :class:`CLIError`
     only when the rollout is genuinely invalid.
     """
-    from osmosis_ai.eval.common.cli import _resolve_grader, load_workflow
+    from osmosis_ai.platform.cli.rollout_entrypoint import load_rollout_entrypoint
     from osmosis_ai.platform.cli.shared_config import validate_workspace_rollout_paths
-    from osmosis_ai.rollout.validator import validate_backend
 
     # The path check below allows `<name>/..`, which points at `rollouts/`
     # itself and loads the wrong pyproject.toml.
@@ -209,58 +201,27 @@ def validate_rollout_backend(
                 f"({'; '.join(unsatisfied)}). The server validates it after installing them."
             ]
 
+    # Importing the entrypoint constructs module-level backends and servers;
+    # misconfigurations surface as import-time errors. The CLI validates
+    # nothing itself and never scans the namespace for classes.
     try:
-        workflow_cls, workflow_config, entrypoint_module, workflow_error = (
-            load_workflow(
-                rollout=rollout,
-                entrypoint=entrypoint,
-                quiet=True,
-                console=None,
-                workspace_directory=workspace_directory,
-            )
-        )
+        load_rollout_entrypoint(rollout_dir, entrypoint)
     except ModuleNotFoundError as exc:
         # An undeclared dependency, which the gate above cannot see.
         return [
             f"Skipped the `rollouts/{rollout}` backend preflight: {exc}. "
             "The server validates it after installing the rollout's dependencies."
         ]
-    if workflow_error or workflow_cls is None or entrypoint_module is None:
+    except Exception as exc:
+        detail = str(exc)
+        if not isinstance(exc, (CLIError, ImportError, TypeError, ValueError)):
+            detail = f"{type(exc).__name__}: {detail}"
         raise CLIError(
             f"{command_label} preflight failed for `rollouts/{rollout}/{entrypoint}`.\n"
-            f"  {workflow_error or 'Failed to load workflow.'}"
-        )
-
-    try:
-        grader_cls, grader_config = _resolve_grader(
-            entrypoint_module,
-            explicit_grader=grader_module,
-            explicit_config=grader_config_ref,
-        )
-    except (CLIError, ImportError, TypeError, ValueError) as exc:
-        raise CLIError(
-            f"{command_label} preflight failed while resolving the grader.\n  {exc}"
+            f"  {detail}"
         ) from exc
 
-    if grader_cls is None:
-        raise CLIError(
-            f"{command_label} requires a concrete `Grader` for `rollouts/{rollout}/{entrypoint}`.\n"
-            "  Define a Grader in the entrypoint module or configure `[grader].module`."
-        )
-
-    validation_result = validate_backend(
-        workflow_cls,
-        workflow_config,
-        grader_cls=grader_cls,
-        grader_config=grader_config,
-    )
-    if validation_result.valid:
-        return []
-
-    raise CLIError(
-        f"{command_label} preflight failed for `rollouts/{rollout}/{entrypoint}`.\n"
-        f"{_format_backend_validation_errors(validation_result.errors)}"
-    )
+    return []
 
 
 __all__ = [

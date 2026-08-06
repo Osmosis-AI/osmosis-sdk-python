@@ -48,6 +48,7 @@ from harbor.tasks.client import TaskClient
 from harbor.trial.hooks import TrialEvent, TrialHookEvent
 from harbor.trial.queue import TrialQueue
 
+from osmosis_ai.packaging import BundleInfo
 from osmosis_ai.rollout.backend.base import ExecutionBackend, ResultCallback
 from osmosis_ai.rollout.backend.harbor.artifacts import (
     merge_grader_artifacts,
@@ -66,6 +67,7 @@ from osmosis_ai.rollout.backend.harbor.backend import (
 )
 from osmosis_ai.rollout.backend.harbor.bundling import resolve_backend_bundle
 from osmosis_ai.rollout.backend.harbor.diagnostics import (
+    agent_phase_failure,
     diagnostic_payload,
     failure_phase,
     redact_secrets,
@@ -73,6 +75,7 @@ from osmosis_ai.rollout.backend.harbor.diagnostics import (
     trial_timings,
 )
 from osmosis_ai.rollout.backend.harbor.native_agents import (
+    NativeAgentBinding,
     native_agent_config,
     native_binding,
 )
@@ -127,12 +130,12 @@ class HarborBackendV2(ExecutionBackend):
         max_queue_depth: int | None = None,
     ) -> None:
         self.orchestrator = orchestrator
-        self.tasks_dir = Path(tasks_dir)
-        self.task_mode = TaskMode(task_mode)
+        self.tasks_dir: Path = Path(tasks_dir)
+        self.task_mode: TaskMode = TaskMode(task_mode)
         self.model_name = model_name
         self.agent = agent
         self.agent_setup_timeout_sec = agent_setup_timeout_sec
-        self.native = native_binding(agent)
+        self.native: NativeAgentBinding | None = native_binding(agent)
         if native_agent_kwargs and self.native is None:
             raise ValueError(
                 "native_agent_kwargs configures native harbor agents; "
@@ -147,7 +150,7 @@ class HarborBackendV2(ExecutionBackend):
                 "datasets and verifiers, never for training",
                 agent,
             )
-        self.bundle = resolve_backend_bundle(
+        self.bundle: BundleInfo | None = resolve_backend_bundle(
             agent=agent,
             grader=grader,
             workflow_config=workflow_config,
@@ -156,8 +159,10 @@ class HarborBackendV2(ExecutionBackend):
             bundle=bundle,
             native=self.native is not None,
         )
-        self.environment_config = apply_managed_skypilot_placement(
-            environment_config or HarborEnvironmentConfig()
+        self.environment_config: HarborEnvironmentConfig = (
+            apply_managed_skypilot_placement(
+                environment_config or HarborEnvironmentConfig()
+            )
         )
         if patch_dockerfile_with_sdk and self.bundle is None:
             raise ValueError("patch_dockerfile_with_sdk requires a bundle")
@@ -165,24 +170,24 @@ class HarborBackendV2(ExecutionBackend):
             patch_dockerfile_with_sdk = self.bundle is not None
         # The bundle's declared dependencies (stable) are pre-installed into the
         # task image; the bundle itself (volatile user code) installs per trial.
-        self.sdk_requirements = (
+        self.sdk_requirements: list[str] | None = (
             self.bundle.requirements
             if patch_dockerfile_with_sdk and self.bundle
             else None
         )
 
         root = Path(f"/tmp/osmosis-harbor-{self.tasks_dir.name}")
-        self.rollouts_dir = root / "rollouts"
+        self.rollouts_dir: Path = root / "rollouts"
         self.rollouts_dir.mkdir(parents=True, exist_ok=True)
-        self.trials_dir = trials_dir or root / "trials"
-        self.artifact_root = default_artifact_root()
+        self.trials_dir: Path = trials_dir or root / "trials"
+        self.artifact_root: Path = default_artifact_root()
         self.cleanup_successful_trials = cleanup_successful_trials
         if max_queue_depth is not None and max_queue_depth < 0:
             raise ValueError("max_queue_depth must be >= 0")
         self.max_queue_depth = max_queue_depth
         self.pending: dict[str, PendingTrial] = {}
         self.fetch_locks: dict[str, asyncio.Lock] = {}
-        self.running = 0
+        self.running: int = 0
         self.finished: TtlCache[str, dict[str, Any]] = TtlCache(STATUS_RETENTION_SEC)
 
         orchestrator.add_hook(TrialEvent.START, self.on_trial_started)
@@ -346,6 +351,18 @@ class HarborBackendV2(ExecutionBackend):
             container_input = self.build_input(request)
             pending.api_key = container_input.api_key
             task = await self.resolve_task(request)
+            if (
+                container_input.prompt
+                and (request.metadata or {}).get("harbor_task")
+                and (task.path / "instruction.md").is_file()
+            ):
+                logger.warning(
+                    "rollout %s: template mode replaces the instruction.md that "
+                    "task %s ships with the request prompt; use "
+                    "task_mode='dataset' to keep the task's own instruction",
+                    request.id,
+                    task.path.name,
+                )
             task_dir = self.materialize_task(task, request.id, container_input)
             pending.task = asyncio.create_task(
                 self.orchestrator.submit(
@@ -612,6 +629,21 @@ class HarborBackendV2(ExecutionBackend):
         self, event: TrialHookEvent, rollout_id: str, pending: PendingTrial
     ) -> ExecutionResult:
         sample = self.primary_sample(event, rollout_id, pending)
+        err = event.result.exception_info if event.result else None
+
+        # Report agent-phase failures before the verifier branch buries them
+        # under a secondary validation error.
+        if (agent_err := agent_phase_failure(event.result)) is not None:
+            log_trial_exception(rollout_id, agent_err, phase="during the agent run")
+            return ExecutionResult(
+                status=RolloutStatus.FAILURE,
+                sample=sample,
+                err_message=agent_err.exception_message,
+                err_category=RolloutErrorCategory.AGENT_ERROR,
+                extra_fields=self.event_diagnostics(
+                    event, RolloutErrorCategory.AGENT_ERROR
+                ),
+            )
 
         if event.result and event.result.verifier_result:
             rewards = event.result.verifier_result.rewards or {}
@@ -641,8 +673,7 @@ class HarborBackendV2(ExecutionBackend):
                 extra_fields=self.event_diagnostics(event),
             )
 
-        if event.result and event.result.exception_info:
-            err = event.result.exception_info
+        if err:
             log_trial_exception(rollout_id, err, phase="during grading")
             return ExecutionResult(
                 status=RolloutStatus.FAILURE,
