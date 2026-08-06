@@ -57,6 +57,7 @@ async def run_agent(workflow_cls: Any, workflow_config: Any) -> ContainerResult:
         artifacts_dir=HARBOR_ARTIFACTS_DIR,
     )
     workflow = workflow_cls(workflow_config)
+    sample = None
     with rollout_ctx:
         returned = await workflow.run(ctx)
         output = coerce_output(returned)
@@ -69,7 +70,34 @@ async def run_agent(workflow_cls: Any, workflow_config: Any) -> ContainerResult:
                 )
             else:
                 output = AgentWorkflowOutput()
+    write_trajectory_json(sample, output, container_input.rollout_id)
     return ContainerResult(status=RolloutStatus.SUCCESS, output=output)
+
+
+def write_trajectory_json(
+    sample: RolloutSample | None, output: AgentWorkflowOutput, rollout_id: str
+) -> None:
+    """Best-effort ATIF trajectory at agent/trajectory.json, where native
+    harbor agents leave theirs."""
+    if sample is None:
+        messages = output.primary_messages()
+        if messages:
+            sample = RolloutSample(messages=messages)
+    if sample is None or sample.trajectory_messages is None:
+        return
+    try:
+        from harbor.utils.trajectory_utils import format_trajectory_json
+
+        from osmosis_ai.rollout.trajectory.converter import (
+            convert_sample_to_trajectory,
+        )
+
+        trajectory = convert_sample_to_trajectory(sample, rollout_id=rollout_id)
+        (AGENT_LOGS_DIR / "trajectory.json").write_text(
+            format_trajectory_json(trajectory.to_json_dict())
+        )
+    except Exception as e:
+        print(f"Failed to write trajectory.json (best-effort): {e}", file=sys.stderr)
 
 
 def agent_main(workflow_cls: Any, workflow_config: Any = None) -> None:
@@ -105,12 +133,12 @@ TESTS_DIR = Path("/tests")
 
 
 def read_container_input() -> ContainerInput:
-    for directory in (AGENT_LOGS_DIR, TESTS_DIR):
+    for directory in (TESTS_DIR, AGENT_LOGS_DIR):
         path = directory / INPUT_FILENAME
         if path.exists():
             return ContainerInput.read(path)
     raise FileNotFoundError(
-        f"{INPUT_FILENAME} not found in {AGENT_LOGS_DIR} or {TESTS_DIR}"
+        f"{INPUT_FILENAME} not found in {TESTS_DIR} or {AGENT_LOGS_DIR}"
     )
 
 
