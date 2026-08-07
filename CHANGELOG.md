@@ -17,6 +17,10 @@ This file records changes to `osmosis-ai`. For earlier versions, see [GitHub Rel
 - `evaluate_rubric` is no longer included by `from osmosis_ai import *`. Import it explicitly from `osmosis_ai.eval.rubric` and install the `rubric` extra.
 - The Harbor extra no longer installs Daytona or SkyPilot. Daytona support is retired; the rollout runtime must provide SkyPilot when it is used.
 
+### Added
+
+- `AgentWorkflowOutput` and `Messages` are exported from `osmosis_ai.rollout` / `osmosis_ai.rollout.types`, and `AgentWorkflow.run` is now typed to return `AgentWorkflowOutput | Messages | None`: the return value is the primary trajectory source, and `None` falls back to the sample collected on the active `RolloutContext`.
+
 ## 0.3.0rc1 - 2026-07-28
 
 ### Breaking Changes

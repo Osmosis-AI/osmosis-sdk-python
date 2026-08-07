@@ -12,6 +12,7 @@ from osmosis_ai.rollout.context import (
 from osmosis_ai.rollout.grader import Grader
 from osmosis_ai.rollout.types import (
     AgentWorkflowConfig,
+    AgentWorkflowOutput,
     BaseConfig,
     ConcurrencyConfig,
     ExecutionRequest,
@@ -34,6 +35,7 @@ __all__ = [
     "AgentWorkflow",
     "AgentWorkflowConfig",
     "AgentWorkflowContext",
+    "AgentWorkflowOutput",
     "BaseConfig",
     "ConcurrencyConfig",
     "ExecutionBackend",

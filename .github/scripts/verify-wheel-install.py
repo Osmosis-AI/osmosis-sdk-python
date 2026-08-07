@@ -243,6 +243,7 @@ def _smoke_bare() -> None:
         "osmosis_ai.rollout",
         (
             "AgentWorkflow",
+            "AgentWorkflowOutput",
             "ExecutionBackend",
             "Grader",
             "LocalBackend",

@@ -34,14 +34,17 @@ The `harbor` extra installs plain Harbor for an externally provided SkyPilot run
 class AgentWorkflow[TConfig: AgentWorkflowConfig](ABC):
     def __init__(self, config: TConfig | None = None): ...
     @abstractmethod
-    async def run(self, ctx: AgentWorkflowContext[TConfig]) -> Any: ...
+    async def run(
+        self, ctx: AgentWorkflowContext[TConfig]
+    ) -> AgentWorkflowOutput | Messages | None: ...
 ```
 
 [../osmosis_ai/rollout/agent_workflow.py](../osmosis_ai/rollout/agent_workflow.py)
 
 - `run` is **async** — the backend awaits it.
 - `ctx.prompt` is the initial message list; `ctx.config` is your typed config.
-- The return value is not the trajectory. Samples are collected from the active `RolloutContext` (see [Samples](#samples)); the integrations register sources for you.
+- The return value is the primary trajectory source. Return an `AgentWorkflowOutput` (importable from `osmosis_ai.rollout`) with per-agent message histories in `samples`, numeric `metrics`, and grader-facing `info`; a bare message list is wrapped as the single `"default"` sample.
+- Return `None` to fall back to the sample collected on the active `RolloutContext` (see [Samples](#samples)); the integrations register sources for you, and `LocalBackend` always uses this path.
 
 ## Grader
 

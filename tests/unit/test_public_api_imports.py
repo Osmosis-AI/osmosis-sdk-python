@@ -33,6 +33,7 @@ def test_rollout_root_exports_only_framework_neutral_core() -> None:
             "AgentWorkflow",
             "AgentWorkflowConfig",
             "AgentWorkflowContext",
+            "AgentWorkflowOutput",
             "BaseConfig",
             "ConcurrencyConfig",
             "ExecutionBackend",
