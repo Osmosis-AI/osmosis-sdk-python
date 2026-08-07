@@ -148,7 +148,7 @@ class HarborBackendV2(ExecutionBackend):
                 "native_agent_kwargs configures native harbor agents; "
                 "workflow agents take workflow_config"
             )
-        self.native_agent_kwargs = (
+        self.native_agent_kwargs: dict[str, Any] | None = (
             dict(native_agent_kwargs) if native_agent_kwargs else None
         )
         if self.native and not self.native.trainable:
