@@ -46,7 +46,8 @@ class ContainerResult(BaseModel):
     """How the agent phase went: status, error, and the workflow's output.
 
     ``sample`` round-trips the full RolloutSample across the container
-    boundary; the lossy ``output`` projection remains for older readers.
+    boundary; the lossy ``output`` projection is kept for readers that
+    consult it before the full sample.
     """
 
     status: RolloutStatus

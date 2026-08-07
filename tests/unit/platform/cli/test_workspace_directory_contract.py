@@ -254,19 +254,19 @@ _UNSATISFIED = '"osmosis-ai>=999.0.0"'
 
 # A native Harbor entrypoint: no AgentWorkflow or Grader exists; the load
 # counter records how many times the module executed.
-_NATIVE_V2_ENTRYPOINT = """\
+_NATIVE_HARBOR_ENTRYPOINT = """\
 from pathlib import Path
 
 from harbor.trial.queue import TrialQueue
 
-from osmosis_ai.rollout.backend.harbor.backend_v2 import HarborBackendV2
+from osmosis_ai.rollout.backend.harbor.backend import HarborBackend
 from osmosis_ai.rollout.server import create_rollout_server
 
 _count_file = Path(__file__).with_name("load_count")
 _count = int(_count_file.read_text()) if _count_file.exists() else 0
 _count_file.write_text(str(_count + 1))
 
-backend = HarborBackendV2(
+backend = HarborBackend(
     orchestrator=TrialQueue(n_concurrent=1),
     tasks_dir=Path(__file__).parent / "tasks",
     agent="terminus-2",
@@ -367,6 +367,76 @@ def test_unsatisfied_requirements_reports_missing_distribution(
     assert "not installed" in unsatisfied[0]
 
 
+def test_unsatisfied_requirements_reports_missing_extra_dependency(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project = _make_workspace_directory(tmp_path / "project")
+    _make_rollout(
+        project,
+        "demo",
+        dependencies='"osmosis-ai[strands]"',
+        entrypoint="",
+    )
+    real_version = workspace_directory_contract.installed_version
+
+    def fake_version(name: str) -> str:
+        if name == "strands-agents":
+            raise workspace_directory_contract.PackageNotFoundError(name)
+        return real_version(name)
+
+    monkeypatch.setattr(workspace_directory_contract, "installed_version", fake_version)
+    monkeypatch.setattr(
+        workspace_directory_contract,
+        "installed_requirements",
+        lambda name: (
+            [
+                'strands-agents[litellm]>=1.29.0; extra == "strands"',
+                'fastapi>=0.100.0; extra == "server"',
+            ]
+            if name == "osmosis-ai"
+            else []
+        ),
+    )
+
+    unsatisfied = workspace_directory_contract._unsatisfied_rollout_requirements(
+        project / "rollouts" / "demo"
+    )
+
+    assert unsatisfied == [
+        "osmosis-ai[strands] requires strands-agents, which is not installed"
+    ]
+
+
+def test_unsatisfied_requirements_ignores_unrequested_extra_dependency(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project = _make_workspace_directory(tmp_path / "project")
+    _make_rollout(
+        project,
+        "demo",
+        dependencies='"osmosis-ai[server]"',
+        entrypoint="",
+    )
+    monkeypatch.setattr(
+        workspace_directory_contract,
+        "installed_requirements",
+        lambda name: (
+            [
+                'strands-agents[litellm]>=1.29.0; extra == "strands"',
+            ]
+            if name == "osmosis-ai"
+            else []
+        ),
+    )
+
+    assert (
+        workspace_directory_contract._unsatisfied_rollout_requirements(
+            project / "rollouts" / "demo"
+        )
+        == []
+    )
+
+
 @pytest.mark.parametrize(
     "dependency",
     [
@@ -413,7 +483,7 @@ def test_validate_rollout_backend_accepts_native_backend_without_workflow(
         project,
         "demo",
         dependencies=_SATISFIED,
-        entrypoint=_NATIVE_V2_ENTRYPOINT,
+        entrypoint=_NATIVE_HARBOR_ENTRYPOINT,
     )
 
     warnings = workspace_directory_contract.validate_rollout_backend(
@@ -454,7 +524,7 @@ def test_validate_rollout_backend_loads_entrypoint_once(tmp_path: Path) -> None:
         project,
         "demo",
         dependencies=_SATISFIED,
-        entrypoint=_NATIVE_V2_ENTRYPOINT,
+        entrypoint=_NATIVE_HARBOR_ENTRYPOINT,
     )
 
     workspace_directory_contract.validate_rollout_backend(

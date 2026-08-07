@@ -4,7 +4,7 @@ import json
 import logging
 from pathlib import Path
 
-from osmosis_ai.rollout.trajectory import save_trajectories
+from osmosis_ai.rollout.trajectory import save_trajectory
 from osmosis_ai.rollout.trajectory.report import (
     LlmCallMetrics,
     SampleReport,
@@ -32,7 +32,7 @@ async def test_save_writes_trajectory_next_to_artifacts(tmp_path: Path) -> None:
     artifact_file.parent.mkdir(parents=True)
     artifact_file.write_text("hello")
 
-    await save_trajectories(
+    await save_trajectory(
         rollout_id="r1",
         result=make_result(make_sample(reward=1.0)),
         request_extra_fields={"eval_run_id": "er-1"},
@@ -47,7 +47,7 @@ async def test_save_writes_trajectory_next_to_artifacts(tmp_path: Path) -> None:
 
 
 async def test_save_without_sample_writes_nothing(tmp_path: Path) -> None:
-    await save_trajectories(
+    await save_trajectory(
         rollout_id="r1",
         result=ExecutionResult(status=RolloutStatus.FAILURE),
         artifact_root=tmp_path,
@@ -68,7 +68,7 @@ async def test_save_skips_sample_without_trajectory_messages(
         trajectory_messages=None,
     )
 
-    await save_trajectories(
+    await save_trajectory(
         rollout_id="r1",
         result=make_result(sample),
         artifact_root=tmp_path,
@@ -87,7 +87,7 @@ async def test_save_never_raises(tmp_path: Path) -> None:
     # A file where the rollout directory should be makes writes fail.
     (tmp_path / "r1").write_text("not a directory")
 
-    await save_trajectories(
+    await save_trajectory(
         rollout_id="r1",
         result=make_result(make_sample()),
         artifact_root=tmp_path,
@@ -96,11 +96,11 @@ async def test_save_never_raises(tmp_path: Path) -> None:
 
 async def test_sample_less_failure_writes_diagnostics_sidecar(tmp_path: Path) -> None:
     """A failed rollout with no sample must still leave a durable record."""
-    await save_trajectories(
+    await save_trajectory(
         rollout_id="r1",
         result=ExecutionResult(
             status=RolloutStatus.FAILURE,
-            extra_fields={"backend": "harbor-v2", "phase": "setup"},
+            extra_fields={"backend": "harbor", "phase": "setup"},
         ),
         artifact_root=tmp_path,
     )
@@ -114,7 +114,7 @@ async def test_diagnostics_override_wins_over_result_extra_fields(
     tmp_path: Path,
 ) -> None:
     """The explicit diagnostics override must win over result.extra_fields."""
-    await save_trajectories(
+    await save_trajectory(
         rollout_id="r1",
         result=ExecutionResult(
             status=RolloutStatus.SUCCESS,
@@ -131,18 +131,18 @@ async def test_diagnostics_override_wins_over_result_extra_fields(
 
 async def test_diagnostics_live_in_sidecar_not_trajectory(tmp_path: Path) -> None:
     """The sidecar is the sole home for backend diagnostics."""
-    await save_trajectories(
+    await save_trajectory(
         rollout_id="r1",
         result=ExecutionResult(
             status=RolloutStatus.SUCCESS,
             sample=make_sample(reward=0.5),
-            extra_fields={"backend": "harbor-v2", "timings_sec": {"agent": 3.0}},
+            extra_fields={"backend": "harbor", "timings_sec": {"agent": 3.0}},
         ),
         artifact_root=tmp_path,
     )
 
     sidecar = json.loads((tmp_path / "r1" / "diagnostics.json").read_text())
-    assert sidecar["backend"] == "harbor-v2"
+    assert sidecar["backend"] == "harbor"
     doc = json.loads((tmp_path / "r1" / "trajectory.json").read_text())
     assert "result_extra_fields" not in doc["extra"]["osmosis"]
 
@@ -157,7 +157,7 @@ async def test_report_metrics_land_in_document(tmp_path: Path) -> None:
         },
     )
 
-    await save_trajectories(
+    await save_trajectory(
         rollout_id="r1",
         result=make_result(make_sample()),
         report=report,
@@ -180,7 +180,7 @@ async def test_single_entry_report_matches_sample_regardless_of_key(
         }
     )
 
-    await save_trajectories(
+    await save_trajectory(
         rollout_id="r1",
         result=make_result(make_sample()),
         report=report,
@@ -202,7 +202,7 @@ async def test_multi_entry_report_is_preserved_not_guessed(
         }
     )
 
-    await save_trajectories(
+    await save_trajectory(
         rollout_id="r1",
         result=make_result(make_sample()),
         report=report,

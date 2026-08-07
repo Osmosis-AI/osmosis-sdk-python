@@ -11,8 +11,7 @@ from osmosis_ai.packaging import (
     inspect_bundle,
     project_dir_for,
 )
-from osmosis_ai.rollout.backend.harbor.backend import ensure_import_path
-from osmosis_ai.rollout.utils.imports import resolve_object
+from osmosis_ai.rollout.utils.imports import ensure_import_path, resolve_object
 
 
 def resolve_backend_bundle(

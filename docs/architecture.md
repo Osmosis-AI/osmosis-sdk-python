@@ -21,15 +21,20 @@ osmosis_ai/
 │   ├── grader.py          # Grader ABC
 │   ├── context.py         # RolloutContext / AgentWorkflowContext / GraderContext
 │   ├── driver.py          # RolloutDriver — eval-facing execution contract
-│   ├── server/            # create_rollout_server (FastAPI) + ControllerAuth
-│   ├── backend/           # ExecutionBackend ABC + Local / Harbor backends
-│   ├── types/             # protocol.py, config.py, sample.py
-│   └── integrations/      # Strands / OpenAI Agents adapters
+│   ├── server/            # optional generic FastAPI server (`[server]`) + ControllerAuth
+│   ├── backend/           # ExecutionBackend ABC + Local / optional Harbor backend
+│   ├── container/         # in-container agent + grader runner and its file contract
+│   ├── trajectory/        # ATIF models, conversion, and best-effort persistence
+│   ├── types/             # protocol.py, config.py, output.py, sample.py
+│   ├── utils/             # framework-neutral helpers (errors, http, ttl_cache, …)
+│   └── integrations/agents/  # Strands / OpenAI Agents adapters
 ├── eval/              # Eval helpers
 │   └── rubric/        # evaluate_rubric() LLM-as-judge engine
 ├── templates/         # `osmosis template` recipe catalog + source resolution
+├── packaging.py       # Build an installable wheel bundle from a rollout project
 ├── __init__.py        # Top-level exports (lazy __getattr__)
-├── _litellm_compat.py # LiteLLM import shim (shared by rubric + eval)
+├── _imports.py        # Lazy-export + missing-extra helpers shared by every facade
+├── _litellm_compat.py # LiteLLM import shim (used by eval/rubric/engine.py)
 └── consts.py          # PACKAGE_VERSION
 ```
 
@@ -37,8 +42,8 @@ osmosis_ai/
 
 - `cli/` — the CLI framework layer plus every command group. Files in [../osmosis_ai/cli/commands/](../osmosis_ai/cli/commands/) are thin shells that delegate to business logic; see [cli.md](./cli.md).
 - `platform/` — anything that calls the Osmosis Platform API. Business-logic helpers (no Typer registration) live in [../osmosis_ai/platform/cli/](../osmosis_ai/platform/cli/).
-- `rollout/` — the remote rollout protocol SDK: the `AgentWorkflow` + `Grader` abstraction, execution backends, and the FastAPI server. See [rollout-sdk.md](./rollout-sdk.md).
-- `eval/` — `rubric/` powers `osmosis eval rubric`; see [eval.md](./eval.md).
+- `rollout/` — the remote rollout protocol SDK: the `AgentWorkflow` + `Grader` abstraction and the framework-neutral execution core (`LocalBackend`, contexts, trajectory persistence, the in-container runner). The generic FastAPI server and the framework/back-end adapters are explicit optional modules gated behind extras; see [rollout-sdk.md](./rollout-sdk.md).
+- `eval/` — `rubric/` powers `osmosis eval rubric`; see [eval.md](./eval.md). The workflow/grader loader that cloud `eval submit` / `train submit` preflight uses lives in [../osmosis_ai/platform/cli/rollout_entrypoint.py](../osmosis_ai/platform/cli/rollout_entrypoint.py).
 
 ## Key import paths
 
@@ -47,10 +52,14 @@ from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.cli.console import Console
 from osmosis_ai.platform.auth import load_credentials
 from osmosis_ai.eval.rubric import evaluate_rubric, RubricResult
-from osmosis_ai.rollout import AgentWorkflow, Grader, create_rollout_server
+from osmosis_ai.rollout import AgentWorkflow, Grader, LocalBackend, SampleSource
+from osmosis_ai.rollout.server import create_rollout_server
+from osmosis_ai.rollout.backend.harbor import HarborBackend
+from osmosis_ai.rollout.integrations.agents.strands import OsmosisStrandsAgent
+from osmosis_ai.rollout.integrations.agents.openai_agents import OsmosisAgent
 ```
 
-`osmosis_ai.rollout` is **not** re-exported at the package top level — import it directly.
+`osmosis_ai.rollout` is **not** re-exported at the package top level — import it directly. Its public surface is framework-neutral core only; it does not export the server or Strands integration. `server`, `harbor`, `strands`, and `openai-agents` each require their matching installation extra. The generic server has no Harbor dependency.
 
 ## Lazy loading
 

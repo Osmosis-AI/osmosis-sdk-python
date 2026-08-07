@@ -144,7 +144,7 @@ def diagnostic_payload(
     timings: dict[str, float],
 ) -> dict[str, Any]:
     return {
-        "backend": "harbor-v2",
+        "backend": "harbor",
         "phase": phase,
         "harbor_exception_type": exception_type,
         "category": category.value if category else None,
