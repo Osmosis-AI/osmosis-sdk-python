@@ -24,7 +24,6 @@ _HARNESS_API_KEY_ENV = {
 }
 _RESERVED_MODEL_API_KEY_SECRET_NAMES = frozenset(
     {
-        "HF_TOKEN",
         "DAYTONA_API_KEY",
         "DAYTONA_API_URL",
         "SKYPILOT_SERVICE_ACCOUNT_TOKEN",
@@ -191,8 +190,7 @@ def _validate_secret_references(config: BenchmarkSubmitConfig, path: Path) -> No
     runner removes before model-key aliasing. Harness credentials travel
     through a separate reserved channel; a credentialed harness must reference
     a secret record named exactly for the variable it reads, and cannot also
-    set that name as a literal env var. ``HF_TOKEN`` is always runner-reserved
-    as a literal env.
+    set that name as a literal env var.
     """
     for name in config.required_secrets:
         if not SECRET_NAME_RE.match(name):
@@ -241,15 +239,6 @@ def _validate_secret_references(config: BenchmarkSubmitConfig, path: Path) -> No
                     f"of {path}. The platform injects the secret value under "
                     "that name; remove the env var or rename it."
                 )
-        if "HF_TOKEN" in effective_env:
-            source = _env_source_label("HF_TOKEN", index, agent.env)
-            raise CLIError(
-                f"'HF_TOKEN' appears in {source} but is reserved by the "
-                f"benchmark runner in {path}. The runner removes this literal "
-                "env var before starting the agent; remove it from the config. "
-                "A gated benchmark's dataset credential is platform "
-                "infrastructure, so a run never supplies it."
-            )
         harness_env_name = _HARNESS_API_KEY_ENV.get(agent.harness or "")
         if harness_env_name and harness_env_name in effective_env:
             source = _env_source_label(harness_env_name, index, agent.env)

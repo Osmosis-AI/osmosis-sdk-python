@@ -441,7 +441,6 @@ judge_api_key_secret = 42
 @pytest.mark.parametrize(
     "secret_name",
     [
-        "HF_TOKEN",
         "DAYTONA_API_KEY",
         "DAYTONA_API_URL",
         "SKYPILOT_SERVICE_ACCOUNT_TOKEN",
@@ -486,11 +485,11 @@ api_key_secret = "{secret_name}"
 @pytest.mark.parametrize(
     "env_section",
     [
-        '[env]\nHF_TOKEN = "literal-token"',
-        '[agents.env]\nHF_TOKEN = "literal-token"',
+        '[env]\nHF_TOKEN = "agent-token"',
+        '[agents.env]\nHF_TOKEN = "agent-token"',
     ],
 )
-def test_load_benchmark_submit_config_rejects_literal_hf_token_for_every_benchmark(
+def test_load_benchmark_submit_config_accepts_an_agents_own_hf_token(
     tmp_path: Path,
     benchmark: str,
     env_section: str,
@@ -513,8 +512,9 @@ lora_model_name = "benchmark-agent"
 """,
     )
 
-    with pytest.raises(CLIError, match=r"reserved by the benchmark runner"):
-        load_benchmark_submit_config(path)
+    config = load_benchmark_submit_config(path)
+
+    assert {**config.env, **config.agents[0].env}["HF_TOKEN"] == "agent-token"
 
 
 def test_load_benchmark_submit_config_validates_harness_secret_name(
