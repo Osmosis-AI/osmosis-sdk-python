@@ -109,6 +109,12 @@ For a stacked PR, prefix the whole title with its position in the stack:
 
 Use positive integers without leading zeroes, with `1 <= N <= M` and `M >= 2`.
 
+A title prefix alone does not create a stack. Each PR must be based on the branch directly below it, with only `[1/M]` targeting `main`, and the PRs must be linked in GitHub from bottom to top. Use `gh stack submit` from the `github/gh-stack` extension when managing the stack locally, or link existing PRs without local tracking state:
+
+```bash
+gh stack link 291 292
+```
+
 **Examples:**
 
 ```
