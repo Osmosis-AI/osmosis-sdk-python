@@ -2,7 +2,7 @@ name: Auto Label PR
 
 on:
   pull_request_target:
-    types: [opened, edited, reopened]
+    types: [opened, edited, reopened, ready_for_review, converted_to_draft]
 
 jobs:
   label:
@@ -10,103 +10,109 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
+      # Covers both the timeline read and the label write: GitHub lists
+      # GET /issues/{n}/timeline and PUT /issues/{n}/labels under either the
+      # Issues or the Pull requests permission.
       pull-requests: write
     steps:
-      - name: Reconcile labels based on PR title
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          PR_TITLE: ${{ github.event.pull_request.title }}
-          REPOSITORY: ${{ github.repository }}
-        run: |
-          labels=()
-          managed_labels=(
-            auth breaking bug chore ci cli documentation enhancement eval refactor
-            rollout server stacked-pr
-          )
-          remaining="$PR_TITLE"
+      - name: Reconcile labels from PR title and draft state
+        uses: actions/github-script@v9
+        with:
+          script: |
+            // Grammar mirrors check-pr-title.yml, which is the source of truth
+            // and additionally validates the [N/M] range. Keep the two in sync.
+            const TITLE_PATTERN =
+              /^(\[\d+\/\d+\])?(\[BREAKING\])?((?:\[(?:rollout|server|cli|auth|eval|misc|ci|doc)\]){1,3}) (feat|fix|refactor|chore|test|doc): .+/;
 
-          # Stacked PR
-          if [[ "$remaining" =~ ^\[[0-9]+/[0-9]+\] ]]; then
-            labels+=("stacked-pr")
-            remaining="${remaining#*]}"
-          fi
+            // [misc] deliberately maps to no label.
+            const MODULE_LABELS = {
+              auth: 'auth',
+              ci: 'ci',
+              cli: 'cli',
+              doc: 'documentation',
+              eval: 'eval',
+              rollout: 'rollout',
+              server: 'server',
+            };
+            // Maps to the categories in .github/release.yml.
+            const TYPE_LABELS = {
+              chore: 'chore',
+              doc: 'documentation',
+              feat: 'enhancement',
+              fix: 'bug',
+              refactor: 'refactor',
+              test: 'chore',
+            };
 
-          # Breaking change
-          if [[ "$remaining" == "[BREAKING]"* ]]; then
-            labels+=("breaking")
-            remaining="${remaining#*]}"
-          fi
+            // Labels this job is allowed to remove. github-actions[bot] is a
+            // shared identity, so bot attribution on its own would let this job
+            // delete labels some future workflow owns. A label must be both in
+            // this set and bot-applied before it is removed.
+            const MANAGED = new Set([
+              ...Object.values(MODULE_LABELS),
+              ...Object.values(TYPE_LABELS),
+              'breaking',
+              'stacked-pr',
+              'wip',
+            ]);
+            const BOT = 'github-actions[bot]';
 
-          # Module labels from [module] tags in title (supports multi-module like [rollout][auth])
-          while [[ "$remaining" =~ ^\[([a-z]+)\] ]]; do
-            module="${BASH_REMATCH[1]}"
-            remaining="${remaining#*]}"
-            case "$module" in
-              doc) labels+=("documentation") ;;
-              auth|ci|cli|eval|rollout|server) labels+=("$module") ;;
-            esac
-          done
+            const pr = context.payload.pull_request;
+            const match = TITLE_PATTERN.exec(pr.title);
+            if (!match) {
+              core.setFailed(
+                'PR title does not match the required format, so labels were ' +
+                  'left untouched. Fix the title (see the check-title job) and ' +
+                  'labels reconcile on the next edit.\n' +
+                  `Got: ${pr.title}`,
+              );
+              return;
+            }
 
-          # Type-based labels (maps to release.yml categories)
-          case "$remaining" in
-            " feat: "*) labels+=("enhancement") ;;
-            " fix: "*) labels+=("bug") ;;
-            " doc: "*) labels+=("documentation") ;;
-            " chore: "*) labels+=("chore") ;;
-            " refactor: "*) labels+=("refactor") ;;
-            " test: "*) labels+=("chore") ;;
-          esac
+            const [, stack, breaking, modules, type] = match;
+            const desired = new Set([TYPE_LABELS[type]]);
+            if (stack) desired.add('stacked-pr');
+            if (breaking) desired.add('breaking');
+            if (pr.draft) desired.add('wip');
+            for (const [, module] of modules.matchAll(/\[([a-z]+)\]/g)) {
+              if (MODULE_LABELS[module]) desired.add(MODULE_LABELS[module]);
+            }
 
-          # Deduplicate
-          labels=($(printf '%s\n' "${labels[@]}" | sort -u))
+            // Who applied each label currently on the PR. A label a human added
+            // stays even once the title stops implying it. An unknown applier
+            // (no timeline entry yet) is treated as human, so the conservative
+            // outcome of a race is to keep the label rather than drop it.
+            const timeline = await github.paginate(
+              github.rest.issues.listEventsForTimeline,
+              { ...context.repo, issue_number: pr.number, per_page: 100 },
+            );
+            const appliedBy = new Map();
+            for (const event of timeline) {
+              if (event.event === 'labeled') {
+                appliedBy.set(event.label.name, event.actor?.login);
+              } else if (event.event === 'unlabeled') {
+                appliedBy.delete(event.label.name);
+              }
+            }
 
-          has_label() {
-            local needle="$1"
-            shift
-            local label
-            for label in "$@"; do
-              if [[ "$label" == "$needle" ]]; then
-                return 0
-              fi
-            done
-            return 1
-          }
+            const current = new Set(pr.labels.map((label) => label.name));
+            const final = new Set(desired);
+            for (const name of current) {
+              if (!MANAGED.has(name) || appliedBy.get(name) !== BOT) {
+                final.add(name);
+              }
+            }
 
-          current_labels=()
-          while IFS= read -r label; do
-            if [[ -n "$label" ]]; then
-              current_labels+=("$label")
-            fi
-          done < <(
-            gh pr view "$PR_NUMBER" --repo "$REPOSITORY" \
-              --json labels --jq '.labels[].name'
-          )
-          add_labels=()
-          remove_labels=()
-
-          for label in "${labels[@]}"; do
-            if ! has_label "$label" "${current_labels[@]}"; then
-              add_labels+=("$label")
-            fi
-          done
-          for label in "${current_labels[@]}"; do
-            if has_label "$label" "${managed_labels[@]}" \
-              && ! has_label "$label" "${labels[@]}"; then
-              remove_labels+=("$label")
-            fi
-          done
-
-          if [ ${#remove_labels[@]} -gt 0 ]; then
-            echo "Removing stale title labels: ${remove_labels[*]}"
-            gh pr edit "$PR_NUMBER" --repo "$REPOSITORY" \
-              --remove-label "$(IFS=,; echo "${remove_labels[*]}")"
-          fi
-          if [ ${#add_labels[@]} -gt 0 ]; then
-            echo "Adding title labels: ${add_labels[*]}"
-            gh pr edit "$PR_NUMBER" --repo "$REPOSITORY" \
-              --add-label "$(IFS=,; echo "${add_labels[*]}")"
-          fi
-          if [ ${#remove_labels[@]} -eq 0 ] && [ ${#add_labels[@]} -eq 0 ]; then
-            echo "Title labels are already up to date"
-          fi
+            const added = [...final].filter((name) => !current.has(name)).sort();
+            const removed = [...current].filter((name) => !final.has(name)).sort();
+            if (added.length === 0 && removed.length === 0) {
+              core.info(`Labels already up to date: ${[...current].sort().join(', ') || '(none)'}`);
+              return;
+            }
+            if (added.length > 0) core.info(`Adding: ${added.join(', ')}`);
+            if (removed.length > 0) core.info(`Removing stale bot labels: ${removed.join(', ')}`);
+            await github.rest.issues.setLabels({
+              ...context.repo,
+              issue_number: pr.number,
+              labels: [...final],
+            });

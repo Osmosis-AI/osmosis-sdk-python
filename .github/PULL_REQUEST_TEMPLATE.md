@@ -27,7 +27,7 @@ Examples:
 ## Checklist
 
 - [ ] PR title follows `[module] type: description` format
-- [ ] Appropriate labels added (e.g. `enhancement`, `bug`, `breaking`)
+      (labels are derived from it automatically — no need to add them by hand)
 - [ ] `ruff check .` and `ruff format --check .` pass
 - [ ] `pyright osmosis_ai/` passes
 - [ ] `pytest` passes (new tests added if applicable)

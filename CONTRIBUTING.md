@@ -122,19 +122,25 @@ PR titles appear directly in auto-generated GitHub Release Notes, so keep them c
 
 ### Labels
 
-PR title labels are automatically reconciled whenever the title changes so the PR is categorized correctly in Release Notes:
+**You do not need to add labels.** They are derived from the PR title and draft state and re-derived whenever the title changes, which is what keeps Release Notes categorized correctly:
 
-| Label | Use when |
-|-------|----------|
-| `enhancement` | New feature |
-| `bug` | Bug fix |
-| `breaking` | Breaking change |
-| `documentation` | Docs update |
-| `chore` / `ci` / `refactor` / `dependencies` | Maintenance work |
+| Label | Derived from |
+|-------|--------------|
+| `enhancement` | `feat:` |
+| `bug` | `fix:` |
+| `documentation` | `doc:` or `[doc]` |
+| `refactor` | `refactor:` |
+| `chore` | `chore:` or `test:` |
+| `breaking` | a leading `[BREAKING]` |
+| `stacked-pr` | a leading `[N/M]` |
+| `wip` | the PR being a draft |
+| `rollout` / `server` / `cli` / `auth` / `eval` / `ci` | the matching `[module]` bracket |
 
-Module-specific labels (`rollout`, `server`, `cli`, `auth`, `eval`) are also derived from the title for filtering. Rollout work typically touches `osmosis_ai.rollout` and related CLI commands. Labels outside the title convention, such as priority and triage labels, are preserved and can be managed manually.
+`[misc]` has no label of its own. `stacked-pr` and `wip` are filtering metadata and do not change the Release Notes category. Rollout work typically touches `osmosis_ai.rollout` and related CLI commands.
 
-The `stacked-pr` label is automatically added when a title starts with `[N/M]`. It is filtering metadata and does not change the Release Notes category.
+Labels you add yourself are never removed — priority and triage labels, `dependencies`, `reward`, and also any label the table above can produce. Adding `documentation` to a `[ci] fix:` PR that happens to touch the docs works and sticks; the workflow only reaps labels it applied itself. The flip side is that a label you add by hand is yours to remove by hand.
+
+If the title does not match the convention, the labeling job fails rather than reconciling, so a malformed title cannot strip a PR's labels.
 
 ### Workflow
 

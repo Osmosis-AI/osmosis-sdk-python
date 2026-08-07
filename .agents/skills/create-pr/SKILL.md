@@ -1,6 +1,6 @@
 ---
 name: create-pr
-description: 'Create a GitHub pull request for this repository with a title and body that follow the repo''s PULL_REQUEST_TEMPLATE.md conventions. Use when the user says "create a PR", "open a PR", "submit a PR", "make a pull request", or asks to push the current branch as a PR. Enforces the `[module] type: description` title format with 1-3 module brackets, the What/Why/How to Test/Checklist body, and repo-specific labels.'
+description: 'Create a GitHub pull request for this repository with a title and body that follow the repo''s PULL_REQUEST_TEMPLATE.md conventions. Use when the user says "create a PR", "open a PR", "submit a PR", "make a pull request", or asks to push the current branch as a PR. Enforces the `[module] type: description` title format with 1-3 module brackets, and the What/Why/How to Test/Checklist body.'
 ---
 
 # Create Pull Request (osmosis-sdk-python)
@@ -103,7 +103,7 @@ Fill in every section. Keep it concise and specific to the diff — do NOT keep 
 ## Checklist
 
 - [x] PR title follows `[module] type: description` format
-- [x] Appropriate labels added (e.g. `enhancement`, `bug`, `breaking`)
+      (labels are derived from it automatically — no need to add them by hand)
 - [x] `ruff check .` and `ruff format --check .` pass
 - [x] `pyright osmosis_ai/` passes
 - [x] `pytest` passes (new tests added if applicable)
@@ -123,30 +123,20 @@ Fill in every section. Keep it concise and specific to the diff — do NOT keep 
 
 ## Labels
 
-After creating the PR, apply labels that match the change. Available repo labels:
+**Do not apply type, module, `breaking`, or `stacked-pr` labels.** The `auto-label-pr` workflow derives all of them from the title, and `wip` from draft state. Do not pass `--label` to `gh pr create` and do not follow up with `gh pr edit --add-label`.
+
+This is not merely redundant — it breaks the workflow. Reconciliation removes only labels it applied itself, identified by their `github-actions[bot]` timeline attribution. A label applied by you is attributed to you and is therefore treated as a deliberate manual override that survives every later title change. Applying the labels by hand at creation time permanently pins the PR to whatever the title said on day one.
+
+Labels the workflow never touches, and which you may set when the user asks for them:
 
 | Category | Labels |
 |----------|--------|
-| Type | `enhancement`, `bug`, `refactor`, `chore`, `ci`, `documentation`, `dependencies`, `breaking` |
-| Module | `reward`, `rollout`, `cli`, `server`, `auth`, `eval` |
-| Workflow | `stacked-pr` |
 | Triage | `priority: high`, `good first issue`, `help wanted`, `question`, `duplicate`, `invalid`, `wontfix` |
+| Other | `dependencies`, `reward` |
 
-Guidelines:
-- Always add one **type** label matching the PR type (`feat` → `enhancement`, `fix` → `bug`, otherwise match name).
-- Add one or more **module** labels matching the `[module]` brackets in the title when those labels exist.
-- `misc` does **not** have a matching GitHub label in this repo. If the title uses `[misc]`, keep the type label and optionally add specific module labels only when they materially help triage a cross-cutting PR.
-- Add `breaking` whenever the title carries `[BREAKING]`.
-- Add `stacked-pr` whenever the title carries an `[N/M]` prefix. The auto-label workflow normally applies it, but verify it is present.
-- Do not invent labels; only use ones returned by `gh label list`.
+For reference, what the title produces: `feat:` → `enhancement`, `fix:` → `bug`, `doc:`/`[doc]` → `documentation`, `refactor:` → `refactor`, `chore:`/`test:` → `chore`, `[BREAKING]` → `breaking`, `[N/M]` → `stacked-pr`, and `[rollout]`/`[server]`/`[cli]`/`[auth]`/`[eval]`/`[ci]` → the matching module label. `[misc]` produces none.
 
-Apply labels with:
-
-```bash
-gh pr edit <pr-number> --add-label "cli,refactor"
-```
-
-Or pass `--label` repeatedly on `gh pr create`.
+If the labels look wrong after the workflow runs, fix the **title** — that is the input.
 
 ## Workflow
 
@@ -235,15 +225,14 @@ Users asked for a way to pull training metrics into spreadsheets for post-hoc an
 ## Checklist
 
 - [x] PR title follows `[module] type: description` format
-- [x] Appropriate labels added (e.g. `enhancement`, `bug`, `breaking`)
+      (labels are derived from it automatically — no need to add them by hand)
 - [x] `ruff check .` and `ruff format --check .` pass
 - [x] `pyright osmosis_ai/` passes
 - [x] `pytest` passes (new tests added if applicable)
 - [x] Public API changes are documented
 - [x] No secrets or credentials included
 EOF
-)" \
-  --label "cli" --label "enhancement"
+)"
 ```
 
 ### 7. Verify and report
@@ -258,7 +247,7 @@ After `gh pr create` succeeds:
 Given a branch that renamed `rollout_v2` → `rollout` across the codebase, the correct invocation is:
 
 - **Title**: `[BREAKING][rollout] refactor: rename rollout_v2 package to rollout`
-- **Labels**: `rollout`, `refactor`, `breaking`
+- **Labels**: none passed to `gh pr create`; the workflow derives `rollout`, `refactor`, and `breaking` from that title
 - **Body**: What bullets list the rename + import updates; Why explains namespace cleanup + migration note; How to Test includes `uv run pytest`, `uv run ruff check .`, `uv run pyright osmosis_ai/`, and `rg "rollout_v2" .` sanity check.
 
 ## Anti-Patterns
@@ -271,3 +260,4 @@ Given a branch that renamed `rollout_v2` → `rollout` across the codebase, the 
 - Do NOT include AI attribution/footer text such as `Made with [Cursor](https://cursor.com)`, `Made with Claude`, or auto-generated sections like `Summary by cubic` in the body you author.
 - Do NOT force-push or amend already-pushed commits without explicit user approval.
 - Do NOT invent labels that don't exist in `gh label list`.
+- Do NOT pass `--label` to `gh pr create` or run `gh pr edit --add-label` for type/module/`breaking`/`stacked-pr` labels — a manually applied label is pinned forever and stops tracking the title.
