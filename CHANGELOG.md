@@ -4,24 +4,26 @@ This file records changes to `osmosis-ai`. For earlier versions, see [GitHub Rel
 
 ## Unreleased
 
+## 0.3.0rc2 - 2026-08-07
+
 ### Breaking Changes
 
-- Runtime features now use independent installation extras: `server`, `strands`, `openai-agents`, `harbor`, `rubric`, and `parquet`; `full` installs all of them. The former `platform` extra is replaced by `parquet`.
-- Development tools are no longer published through the `dev` extra. From a source checkout, install the PEP 735 dependency group with `uv sync --all-extras --group dev` or `python -m pip install -e ".[full]" --group dev`.
-- Rollout feature imports moved out of `osmosis_ai.rollout`:
-  - Server: `from osmosis_ai.rollout.server import create_rollout_server, ControllerAuth`
-  - Strands: `from osmosis_ai.rollout.integrations.agents.strands import OsmosisStrandsAgent, OsmosisRolloutModel`
-  - OpenAI Agents: `from osmosis_ai.rollout.integrations.agents.openai_agents import OsmosisAgent`
-  - Harbor: `from osmosis_ai.rollout.backend.harbor import HarborBackend, TaskMode`
-- The legacy Harbor backend is gone and `HarborBackend` is now the implementation previously called `HarborBackendV2`, with a different constructor. `HarborAgentWorkflowContext` no longer exists — the workflow runs inside the container. See "Migrating from the pre-v0.3 Harbor backend" in [docs/rollout-sdk.md](docs/rollout-sdk.md).
-- `evaluate_rubric` is no longer included by `from osmosis_ai import *`. Import it explicitly from `osmosis_ai.eval.rubric` and install the `rubric` extra.
-- The Harbor extra no longer installs Daytona or SkyPilot. Daytona support is retired; the rollout runtime must provide SkyPilot when it is used.
+- Runtime features now use the `server`, `strands`, `openai-agents`, `harbor`, `rubric`, and `parquet` extras, with `full` aggregating them; replace the former `platform` extra with `parquet`, use the source dependency group instead of the published `dev` extra, and provide SkyPilot through the rollout runtime because Daytona support is retired ([#270](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/270)).
+- Import server, Harbor, Strands, and OpenAI Agents features from their explicit submodules instead of `osmosis_ai.rollout`, and import `evaluate_rubric` explicitly from `osmosis_ai.eval.rubric` instead of relying on `from osmosis_ai import *` ([#270](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/270)).
+- `AgentWorkflow.run()` now returns `AgentWorkflowOutput | Messages | None` for one message history; replace the pre-v0.3 `samples` mapping with `messages`, return `None` for ambient sample fallback, and ensure output metrics are finite ([#270](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/270)).
+- The legacy `HarborBackend` is removed and its name now refers to the container-native implementation previously called `HarborBackendV2`; migrate constructor arguments and replace `HarborAgentWorkflowContext` with `AgentWorkflowContext` ([#291](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/291), [#292](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/292)).
 
 ### Added
 
-- `AgentWorkflowOutput` is exported from `osmosis_ai.rollout`; it and `Messages` are exported from `osmosis_ai.rollout.types`. `AgentWorkflow.run` is now typed to return `AgentWorkflowOutput | Messages | None`: the return value carries the rollout's single message history in `messages` and is the primary trajectory source, while `None` falls back to the sample collected on the active `RolloutContext`. Unknown output fields (including the pre-v0.3 `samples` mapping) and non-finite metric values are rejected.
-- `osmosis benchmark submit`, `osmosis eval submit`, and `osmosis train submit` accept `--secrets-file` to supply per-run values for `[secrets]` names without saving them to the secret store. Each name resolves by first hit: the dotenv file (`-` reads stdin), the process environment, the platform secret store, then an interactive prompt when stdin is a TTY. Outside a TTY all unresolved names are reported at once. See "Secret resolution" in [docs/eval.md](docs/eval.md).
-- Benchmark configs accept `[verifier].required`, the secret record names a dataset's verifier reads, which submit forwards as `execution.verifier_secrets`. A name cannot also appear in `[env]` or an agent's `[agents.env]`, since the platform injects the secret value under that name. `osmosis benchmark info` reports `requires_judge_api_key` in JSON output.
+- Added benchmark catalog, submission, run inspection, logs, cancellation, and output downloads through the `osmosis benchmark` CLI, with strict TOML validation and structured Rich/JSON output ([#265](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/265)).
+- Added the container-native Harbor backend with installable workflow bundles, native Harbor agents, template and dataset task modes, prewarming, lifecycle diagnostics, artifact collection, and cancellation ([#272](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/272)).
+- Rollout servers now return `202` for accepted work, reject full queues with `429` and `Retry-After`, and expose status polling and cancellation endpoints ([#287](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/287)).
+
+### Fixed
+
+- Hardened Harbor credential and artifact handling, surfaced agent failures and native-agent authentication errors, preserved callback outcomes and diagnostics, and retained complete samples, tool turns, rewards, and ATIF trajectories across container boundaries ([#277](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/277), [#279](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/279), [#280](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/280), [#281](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/281)).
+
+[Full changelog](https://github.com/Osmosis-AI/osmosis-sdk-python/compare/v0.3.0rc1...v0.3.0rc2)
 
 ## 0.3.0rc1 - 2026-07-28
 
