@@ -122,7 +122,7 @@ PR titles appear directly in auto-generated GitHub Release Notes, so keep them c
 
 ### Labels
 
-Add a label to your PR so it gets categorized correctly in Release Notes:
+PR title labels are automatically reconciled whenever the title changes so the PR is categorized correctly in Release Notes:
 
 | Label | Use when |
 |-------|----------|
@@ -132,7 +132,7 @@ Add a label to your PR so it gets categorized correctly in Release Notes:
 | `documentation` | Docs update |
 | `chore` / `ci` / `refactor` / `dependencies` | Maintenance work |
 
-Module-specific labels (`rollout`, `server`, `cli`, `auth`, `eval`) can also be added for filtering. Rollout work typically touches `osmosis_ai.rollout` and related CLI commands.
+Module-specific labels (`rollout`, `server`, `cli`, `auth`, `eval`) are also derived from the title for filtering. Rollout work typically touches `osmosis_ai.rollout` and related CLI commands. Labels outside the title convention, such as priority and triage labels, are preserved and can be managed manually.
 
 The `stacked-pr` label is automatically added when a title starts with `[N/M]`. It is filtering metadata and does not change the Release Notes category.
 

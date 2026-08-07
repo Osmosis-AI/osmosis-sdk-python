@@ -12,60 +12,101 @@ jobs:
     permissions:
       pull-requests: write
     steps:
-      - name: Apply labels based on PR title
+      - name: Reconcile labels based on PR title
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           PR_TITLE: ${{ github.event.pull_request.title }}
+          REPOSITORY: ${{ github.repository }}
         run: |
           labels=()
+          managed_labels=(
+            auth breaking bug chore ci cli documentation enhancement eval refactor
+            rollout server stacked-pr
+          )
+          remaining="$PR_TITLE"
 
           # Stacked PR
-          if [[ "$PR_TITLE" =~ ^\[[0-9]+/[0-9]+\] ]]; then
+          if [[ "$remaining" =~ ^\[[0-9]+/[0-9]+\] ]]; then
             labels+=("stacked-pr")
+            remaining="${remaining#*]}"
           fi
 
-          # Breaking change, after an optional stack position
-          if [[ "$PR_TITLE" =~ ^(\[[0-9]+/[0-9]+\])?\[BREAKING\] ]]; then
+          # Breaking change
+          if [[ "$remaining" == "[BREAKING]"* ]]; then
             labels+=("breaking")
-          fi
-
-          # Type-based labels (maps to release.yml categories)
-          if [[ "$PR_TITLE" =~ \]\ feat: ]]; then
-            labels+=("enhancement")
-          elif [[ "$PR_TITLE" =~ \]\ fix: ]]; then
-            labels+=("bug")
-          elif [[ "$PR_TITLE" =~ \]\ doc: ]]; then
-            labels+=("documentation")
-          elif [[ "$PR_TITLE" =~ \]\ chore: ]]; then
-            labels+=("chore")
-          elif [[ "$PR_TITLE" =~ \]\ refactor: ]]; then
-            labels+=("refactor")
-          elif [[ "$PR_TITLE" =~ \]\ test: ]]; then
-            labels+=("chore")
+            remaining="${remaining#*]}"
           fi
 
           # Module labels from [module] tags in title (supports multi-module like [rollout][auth])
-          remaining="$PR_TITLE"
-          while [[ "$remaining" =~ \[([a-z]+)\] ]]; do
+          while [[ "$remaining" =~ ^\[([a-z]+)\] ]]; do
             module="${BASH_REMATCH[1]}"
             remaining="${remaining#*]}"
-            if [[ "$module" == "doc" ]]; then
-              labels+=("documentation")
-            elif [[ "$module" != "misc" ]]; then
-              labels+=("$module")
-            fi
+            case "$module" in
+              doc) labels+=("documentation") ;;
+              auth|ci|cli|eval|rollout|server) labels+=("$module") ;;
+            esac
           done
 
-          if [ ${#labels[@]} -eq 0 ]; then
-            echo "No labels to apply"
-            exit 0
-          fi
+          # Type-based labels (maps to release.yml categories)
+          case "$remaining" in
+            " feat: "*) labels+=("enhancement") ;;
+            " fix: "*) labels+=("bug") ;;
+            " doc: "*) labels+=("documentation") ;;
+            " chore: "*) labels+=("chore") ;;
+            " refactor: "*) labels+=("refactor") ;;
+            " test: "*) labels+=("chore") ;;
+          esac
 
           # Deduplicate
           labels=($(printf '%s\n' "${labels[@]}" | sort -u))
 
-          echo "Applying labels: ${labels[*]}"
-          gh pr edit "$PR_NUMBER" \
-            --repo "${{ github.repository }}" \
-            --add-label "$(IFS=,; echo "${labels[*]}")"
+          has_label() {
+            local needle="$1"
+            shift
+            local label
+            for label in "$@"; do
+              if [[ "$label" == "$needle" ]]; then
+                return 0
+              fi
+            done
+            return 1
+          }
+
+          current_labels=()
+          while IFS= read -r label; do
+            if [[ -n "$label" ]]; then
+              current_labels+=("$label")
+            fi
+          done < <(
+            gh pr view "$PR_NUMBER" --repo "$REPOSITORY" \
+              --json labels --jq '.labels[].name'
+          )
+          add_labels=()
+          remove_labels=()
+
+          for label in "${labels[@]}"; do
+            if ! has_label "$label" "${current_labels[@]}"; then
+              add_labels+=("$label")
+            fi
+          done
+          for label in "${current_labels[@]}"; do
+            if has_label "$label" "${managed_labels[@]}" \
+              && ! has_label "$label" "${labels[@]}"; then
+              remove_labels+=("$label")
+            fi
+          done
+
+          if [ ${#remove_labels[@]} -gt 0 ]; then
+            echo "Removing stale title labels: ${remove_labels[*]}"
+            gh pr edit "$PR_NUMBER" --repo "$REPOSITORY" \
+              --remove-label "$(IFS=,; echo "${remove_labels[*]}")"
+          fi
+          if [ ${#add_labels[@]} -gt 0 ]; then
+            echo "Adding title labels: ${add_labels[*]}"
+            gh pr edit "$PR_NUMBER" --repo "$REPOSITORY" \
+              --add-label "$(IFS=,; echo "${add_labels[*]}")"
+          fi
+          if [ ${#remove_labels[@]} -eq 0 ] && [ ${#add_labels[@]} -eq 0 ]; then
+            echo "Title labels are already up to date"
+          fi
