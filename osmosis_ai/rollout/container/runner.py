@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 import shutil
 import sys
 import traceback
@@ -63,16 +64,20 @@ async def run_agent(workflow_cls: Any, workflow_config: Any) -> ContainerResult:
         output = coerce_output(returned)
         if output is None:
             # The documented fallback: the ambient context's sample is the
-            # output. The projection below stays for older hosts.
+            # output. The lossy projection below keeps ContainerResult.output
+            # populated for readers that consult it before the full sample.
             sample = await rollout_ctx.get_sample()
             if sample is not None:
                 output = AgentWorkflowOutput(
-                    samples={"default": [dict(m) for m in sample.messages]},
+                    messages=[dict(m) for m in sample.messages],
                     metrics={
                         key: value
                         for key, value in (sample.metrics or {}).items()
                         if isinstance(value, (int, float))
                         and not isinstance(value, bool)
+                        # Non-finite ambient telemetry would fail output
+                        # validation; drop it rather than fail the rollout.
+                        and math.isfinite(value)
                     },
                 )
             else:
@@ -86,10 +91,8 @@ def write_trajectory_json(
 ) -> None:
     """Best-effort ATIF trajectory at agent/trajectory.json, where native
     harbor agents leave theirs."""
-    if sample is None:
-        messages = output.primary_messages()
-        if messages:
-            sample = RolloutSample(messages=messages)
+    if sample is None and output.messages:
+        sample = RolloutSample(messages=output.messages)
     if sample is None or sample.trajectory_messages is None:
         return
     try:
@@ -161,10 +164,8 @@ def load_sample() -> RolloutSample | None:
         if result.sample is not None:
             return result.sample
         output = result.output
-        if output is not None:
-            messages = output.primary_messages()
-            if messages is not None:
-                return RolloutSample(messages=messages, metrics=dict(output.metrics))
+        if output is not None and output.messages is not None:
+            return RolloutSample(messages=output.messages, metrics=dict(output.metrics))
     for name in sorted(AGENT_LOGS_DIR.glob("*trajectory*.json")):
         try:
             messages = messages_from_trajectory(json.loads(name.read_text()))

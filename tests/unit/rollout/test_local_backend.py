@@ -207,7 +207,7 @@ class TestLocalBackend:
                     StaticSampleSource([{"role": "assistant", "content": "ambient"}]),
                 )
                 return AgentWorkflowOutput(
-                    samples={"result": [{"role": "assistant", "content": "returned"}]},
+                    messages=[{"role": "assistant", "content": "returned"}],
                     metrics={"quality": 0.75},
                 )
 
@@ -251,11 +251,11 @@ class TestLocalBackend:
         assert result.sample is not None
         assert result.sample.messages == [{"role": "assistant", "content": "returned"}]
 
-    async def test_mutated_multiple_named_samples_fail_validation(self):
+    async def test_mutated_non_finite_metrics_fail_validation(self):
         class ReturningWorkflow(AgentWorkflow):
             async def run(self, ctx: AgentWorkflowContext) -> AgentWorkflowOutput:
-                output = AgentWorkflowOutput(samples={"solver": []})
-                output.samples["critic"] = []
+                output = AgentWorkflowOutput(metrics={"score": 1.0})
+                output.metrics["score"] = float("nan")
                 return output
 
         backend = LocalBackend(
@@ -273,7 +273,7 @@ class TestLocalBackend:
         assert result.status == RolloutStatus.FAILURE
         assert result.err_category == RolloutErrorCategory.VALIDATION_ERROR
         assert result.err_message is not None
-        assert "named samples" in result.err_message
+        assert "finite" in result.err_message
 
     async def test_execute_failure_calls_callback_with_error(self):
         backend = LocalBackend(
@@ -297,7 +297,7 @@ class TestLocalBackend:
         class ReturningWorkflow(AgentWorkflow):
             async def run(self, ctx: AgentWorkflowContext) -> AgentWorkflowOutput:
                 return AgentWorkflowOutput(
-                    samples={"result": [{"role": "assistant", "content": "returned"}]},
+                    messages=[{"role": "assistant", "content": "returned"}],
                     metrics={"quality": 0.75},
                     info={"workflow_only": True},
                 )

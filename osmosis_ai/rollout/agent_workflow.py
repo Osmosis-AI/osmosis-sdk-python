@@ -15,8 +15,8 @@ class AgentWorkflow[TConfig: AgentWorkflowConfig](ABC):
         """Run the workflow and hand its output back to the backend.
 
         Return an ``AgentWorkflowOutput`` (or a bare message list, which is
-        wrapped as its single ``"default"`` sample) to make the return value
-        the trajectory source. Return ``None`` to fall back to the sample
-        collected on the active ``RolloutContext``.
+        wrapped as its ``messages``) to make the return value the trajectory
+        source. Return ``None`` to fall back to the sample collected on the
+        active ``RolloutContext``.
         """
         raise NotImplementedError

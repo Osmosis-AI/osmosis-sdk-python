@@ -41,7 +41,7 @@ def _resolve_sample_report(
     return None, dict(report.samples)
 
 
-async def save_trajectories(
+async def save_trajectory(
     *,
     rollout_id: str,
     result: ExecutionResult,
@@ -69,7 +69,7 @@ async def save_trajectories(
         )
     except Exception:
         logger.warning(
-            "Failed to save trajectories for rollout %s (best-effort)",
+            "Failed to save the trajectory for rollout %s (best-effort)",
             rollout_id,
             exc_info=True,
         )

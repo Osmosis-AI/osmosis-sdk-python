@@ -120,14 +120,13 @@ class LocalBackend(ExecutionBackend):
                 if output is None:
                     sample = await rollout_ctx.get_sample()
                 else:
-                    messages = output.primary_messages()
                     sample = (
                         RolloutSample(
-                            messages=messages,
+                            messages=output.messages,
                             label=request.label,
                             metrics=dict(output.metrics),
                         )
-                        if messages is not None
+                        if output.messages is not None
                         else None
                     )
         except Exception as e:

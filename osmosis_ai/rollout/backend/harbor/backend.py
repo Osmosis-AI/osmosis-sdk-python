@@ -788,13 +788,10 @@ class HarborBackend(ExecutionBackend):
                 }
             )
         output = result.output
-        if output is None:
-            return None
-        messages = output.primary_messages()
-        if messages is None:
+        if output is None or output.messages is None:
             return None
         return RolloutSample(
-            messages=messages,
+            messages=output.messages,
             label=pending.label,
             metrics={**trial_metrics(event.result), **output.metrics},
         )

@@ -46,7 +46,7 @@ class AgentWorkflow[TConfig: AgentWorkflowConfig](ABC):
 
 - `run` is **async** — the backend awaits it.
 - `ctx.prompt` is the initial message list; `ctx.config` is your typed config.
-- The return value is the primary trajectory source. Return an `AgentWorkflowOutput` (importable from `osmosis_ai.rollout`) with zero or one named message history in `samples` and optional finite numeric `metrics`; unknown top-level fields and non-finite metric values are rejected. A bare message list is wrapped as the single `"default"` sample. The `info` field is reserved and is not currently passed to graders.
+- The return value is the primary trajectory source. Return an `AgentWorkflowOutput` (importable from `osmosis_ai.rollout`) with the rollout's single message history in `messages` and optional finite numeric `metrics`; unknown top-level fields and non-finite metric values are rejected. A bare message list is wrapped as `messages`. The `info` field is reserved and is not currently passed to graders.
 - Return `None` to fall back to the sample collected on the active `RolloutContext` (see [Samples](#samples)); the integrations register sources for you.
 
 ## Grader

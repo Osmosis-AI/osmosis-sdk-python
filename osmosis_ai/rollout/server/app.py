@@ -11,7 +11,7 @@ from osmosis_ai.rollout.server.auth import ControllerAuth
 from osmosis_ai.rollout.trajectory import (
     TrajectoryReport,
     report_from_response,
-    save_trajectories,
+    save_trajectory,
 )
 from osmosis_ai.rollout.types import (
     CancelRolloutsRequest,
@@ -233,7 +233,7 @@ async def _handle_rollout(
     finally:
         # Best-effort archive once execute() has finished.
         if result_to_save is not None or last_diagnostics is not None:
-            await save_trajectories(
+            await save_trajectory(
                 rollout_id=rollout_id,
                 result=result_to_save or ExecutionResult(status=RolloutStatus.FAILURE),
                 request_label=request.label,
