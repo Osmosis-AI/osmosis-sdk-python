@@ -457,7 +457,9 @@ class TestNativeAgents:
         config = backend.build_agent_config(template_task, container_input)
         assert config.kwargs["api_base"] == "http://t/v1"
 
-    def test_native_agent_kwargs_rejected_for_workflow_agents(self, bundle, template_task):
+    def test_native_agent_kwargs_rejected_for_workflow_agents(
+        self, bundle, template_task
+    ):
         with pytest.raises(ValueError, match="native_agent_kwargs"):
             HarborBackendV2(
                 orchestrator=TrialQueue(n_concurrent=1),
