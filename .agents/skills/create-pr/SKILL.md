@@ -37,6 +37,15 @@ For multi-module changes, the title may include **1-3 module brackets total**:
 [BREAKING][mod1][mod2][mod3] type: description
 ```
 
+For a PR that is one link in a stack, prefix the **whole** title with its position, ahead of `[BREAKING]`:
+
+```
+[N/M][module] type: description
+[N/M][BREAKING][mod1][mod2] type: description
+```
+
+Number the stack bottom-to-top, so `[1/M]` is the PR based on `main` and `[M/M]` sits at the top. Use it only for a genuine stack (each PR based on the one below it); a lone PR takes no prefix.
+
 ### Allowed modules
 
 `rollout`, `server`, `cli`, `auth`, `eval`, `misc`, `ci`, `doc`
@@ -60,12 +69,16 @@ Good:
 - `[BREAKING][misc] chore: align codebase with Python 3.12`
 - `[ci] chore: update GitHub Actions versions`
 - `[eval] fix: handle empty rubric response`
+- `[2/5][rollout] fix: surface harbor agent failures` (second of a five-PR stack)
+- `[1/2][BREAKING][rollout] refactor: remove the legacy Harbor backend` (stack position precedes `[BREAKING]`)
 
 Bad:
 - `Add streaming support` (no module/type)
 - `[rollout] Feat: Add streaming support.` (capitalized type, trailing period)
 - `feat(rollout): add streaming` (conventional-commits style; this repo uses bracket style)
 - `[cli][auth][eval][rollout] chore: align codebase with Python 3.12` (too many module brackets)
+- `[BREAKING][1/2][rollout] refactor: drop the old backend` (stack position must come first)
+- `[1/2] feat: add a thing` (stack position does not replace the module bracket)
 
 ## Body Template
 
@@ -153,6 +166,17 @@ If there are uncommitted changes, STOP and ask the user whether to commit them f
 ### 2. Determine base branch
 
 Default base is `main`. If the user specifies otherwise (e.g. a release branch) or if `gh repo view --json defaultBranchRef` returns a different default, use that.
+
+For a stack, each PR's base is the branch below it, and only the bottom one targets `main`. Pointing the bases at each other is necessary but not sufficient: GitHub also models the stack as its own object, which drives the stack navigation UI and rebases the remaining bases when one link merges. Create that with the `gh stack` extension (`github/gh-stack`) rather than by hand.
+
+`gh stack submit` is the primary path but opens an interactive editor. When that is unavailable — a non-interactive shell, or PRs that already exist — use `gh stack link`, which takes PR numbers or branch names bottom-to-top, needs no local tracking state, and reuses any PRs that are already open:
+
+```bash
+gh stack link 291 292        # existing PRs, bottom first
+gh stack link feat/a feat/b  # or branch names; missing PRs are created
+```
+
+Also give each PR an `[N/M]` title prefix (see Title Format above).
 
 ### 3. Classify the change
 
