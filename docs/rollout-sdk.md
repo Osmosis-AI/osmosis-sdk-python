@@ -14,6 +14,7 @@ A rollout has two halves you provide: an `AgentWorkflow` (the agent loop) and a 
 | `Grader` | [grader.py](../osmosis_ai/rollout/grader.py) | ABC you subclass; implement `async grade(ctx)` |
 | `AgentWorkflowContext`, `GraderContext`, `RolloutContext`, `SampleSource`, `get_rollout_context` | [context.py](../osmosis_ai/rollout/context.py) | Execution contexts and sample-source contract |
 | `AgentWorkflowConfig`, `GraderConfig`, `ConcurrencyConfig` | [types/config.py](../osmosis_ai/rollout/types/config.py) | Pydantic config models |
+| `AgentWorkflowOutput` | [types/output.py](../osmosis_ai/rollout/types/output.py) | Single-sample workflow return model |
 | `RolloutSample`, `RolloutStatus`, `RolloutErrorCategory` | [types/sample.py](../osmosis_ai/rollout/types/sample.py) | Sample + status types |
 | `ExecutionBackend`, `LocalBackend` | [backend/](../osmosis_ai/rollout/backend/) | Execution backends |
 
@@ -25,6 +26,8 @@ Optional features use these canonical modules:
 | `harbor` | `from osmosis_ai.rollout.backend.harbor import HarborBackend, TaskMode` | Harbor execution backend |
 | `strands` | `from osmosis_ai.rollout.integrations.agents.strands import OsmosisStrandsAgent, OsmosisRolloutModel` | Strands integration |
 | `openai-agents` | `from osmosis_ai.rollout.integrations.agents.openai_agents import OsmosisAgent` | OpenAI Agents integration |
+
+The `Messages` return type is available from `osmosis_ai.rollout.types`.
 
 The `harbor` extra installs plain Harbor for an externally provided SkyPilot runtime. Daytona is retired, and do not install Harbor's `skypilot` extra. It is a host-side extra: it also carries what [../osmosis_ai/packaging.py](../osmosis_ai/packaging.py) needs to build the bundle wheel (and `uv` must be on `PATH`). Inside the task container only the framework-neutral core runs, so a bundle never installs the `harbor` extra — which is why the in-container runner and ATIF persistence must work on a bare install.
 
@@ -43,8 +46,8 @@ class AgentWorkflow[TConfig: AgentWorkflowConfig](ABC):
 
 - `run` is **async** — the backend awaits it.
 - `ctx.prompt` is the initial message list; `ctx.config` is your typed config.
-- The return value is the primary trajectory source. Return an `AgentWorkflowOutput` (importable from `osmosis_ai.rollout`) with per-agent message histories in `samples`, numeric `metrics`, and grader-facing `info`; a bare message list is wrapped as the single `"default"` sample.
-- Return `None` to fall back to the sample collected on the active `RolloutContext` (see [Samples](#samples)); the integrations register sources for you, and `LocalBackend` always uses this path.
+- The return value is the primary trajectory source. Return an `AgentWorkflowOutput` (importable from `osmosis_ai.rollout`) with zero or one named message history in `samples` and optional numeric `metrics`; a bare message list is wrapped as the single `"default"` sample. The `info` field is reserved and is not currently passed to graders.
+- Return `None` to fall back to the sample collected on the active `RolloutContext` (see [Samples](#samples)); the integrations register sources for you.
 
 ## Grader
 
@@ -57,7 +60,7 @@ class Grader(ABC):
 
 [../osmosis_ai/rollout/grader.py](../osmosis_ai/rollout/grader.py)
 
-- `ctx.sample` is the single `RolloutSample` produced by the workflow; it may be `None` if no source was registered.
+- `ctx.sample` is the single `RolloutSample` produced by the workflow; it is `None` when an explicit output contains no sample or when a `None` return has no registered ambient source.
 - Attach its scalar reward with `ctx.set_reward(reward)`; this raises `ValueError` when `ctx.sample` is `None` ([context.py](../osmosis_ai/rollout/context.py)).
 - `ctx.label` carries the dataset row's label (the ground-truth string).
 - `ctx.metadata` is the read-only input-side dataset row metadata.
@@ -72,7 +75,7 @@ class Grader(ABC):
 
 ### Samples
 
-The workflow does not return samples; instead a `SampleSource` is registered on the **ambient** `RolloutContext` (fetched with `get_rollout_context()`, not the `ctx` passed to `run`) and called lazily at collection time:
+A workflow may return one sample directly as `AgentWorkflowOutput` or a bare message list. When it returns `None`, a `SampleSource` registered on the **ambient** `RolloutContext` (fetched with `get_rollout_context()`, not the `ctx` passed to `run`) is called lazily at collection time:
 
 ```python
 from osmosis_ai.rollout import get_rollout_context

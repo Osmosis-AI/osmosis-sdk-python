@@ -35,6 +35,10 @@ The single `osmosis-ai` distribution always includes the CLI and framework-neutr
 - [cli.md](./cli.md) — CLI internals for contributors (command shells, lazy imports, JSON envelopes).
 - [run-downloads.md](./run-downloads.md) — eval and benchmark download commands, platform route contracts, fixed local layouts, resume, confirmation, and retry behavior.
 
+## Review records
+
+- [PR #270 dependency modularization review](./reviews/pr-270-dependency-modularization.md) — historical findings, dispositions, reproductions, and follow-up acceptance criteria for the dependency split and semantic merge with Harbor V2.
+
 ## See also
 
 - [CONTRIBUTING.md](../CONTRIBUTING.md) — dev environment, tests, lint, type checking, PR conventions

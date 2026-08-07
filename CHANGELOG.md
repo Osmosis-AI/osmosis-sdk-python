@@ -19,7 +19,7 @@ This file records changes to `osmosis-ai`. For earlier versions, see [GitHub Rel
 
 ### Added
 
-- `AgentWorkflowOutput` and `Messages` are exported from `osmosis_ai.rollout` / `osmosis_ai.rollout.types`, and `AgentWorkflow.run` is now typed to return `AgentWorkflowOutput | Messages | None`: the return value is the primary trajectory source, and `None` falls back to the sample collected on the active `RolloutContext`.
+- `AgentWorkflowOutput` is exported from `osmosis_ai.rollout`; it and `Messages` are exported from `osmosis_ai.rollout.types`. `AgentWorkflow.run` is now typed to return `AgentWorkflowOutput | Messages | None`: the return value carries at most one sample and is the primary trajectory source, while `None` falls back to the sample collected on the active `RolloutContext`.
 
 ## 0.3.0rc1 - 2026-07-28
 

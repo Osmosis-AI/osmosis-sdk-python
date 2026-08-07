@@ -8,6 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 from harbor.trial.queue import TrialQueue
+from pydantic import ValidationError
 
 from osmosis_ai.packaging import build_bundle, inspect_bundle
 from osmosis_ai.rollout.backend.harbor.backend import (
@@ -154,8 +155,15 @@ class TestAgentWorkflowOutput:
         assert output.primary_messages() == messages
 
     def test_coerce_output_object_passes_through(self):
-        output = AgentWorkflowOutput(samples={"solver": [], "critic": []})
+        output = AgentWorkflowOutput(samples={"solver": []})
         assert coerce_output(output) is output
+
+    def test_multiple_samples_rejected_by_model(self):
+        with pytest.raises(ValidationError) as exc_info:
+            AgentWorkflowOutput(samples={"solver": [], "critic": []})
+        error = exc_info.value.errors()[0]
+        assert error["type"] == "too_long"
+        assert error["loc"] == ("samples",)
 
     def test_coerce_rejects_other_types(self):
         import pytest as pytest_module
@@ -163,10 +171,10 @@ class TestAgentWorkflowOutput:
         with pytest_module.raises(TypeError, match="run\\(\\) must return"):
             coerce_output("a string")
 
-    def test_primary_prefers_default_key(self):
-        default = [{"role": "assistant", "content": "d"}]
-        output = AgentWorkflowOutput(samples={"z": [], "default": default})
-        assert output.primary_messages() == default
+    def test_primary_returns_the_named_sample(self):
+        messages = [{"role": "assistant", "content": "d"}]
+        output = AgentWorkflowOutput(samples={"solver": messages})
+        assert output.primary_messages() == messages
 
     def test_empty_output_has_no_primary(self):
         assert AgentWorkflowOutput().primary_messages() is None

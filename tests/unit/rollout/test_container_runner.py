@@ -112,10 +112,11 @@ class TestFallbackSampleBoundary:
 
 
 class TestUnsupportedOutputs:
-    async def test_multiple_named_samples_rejected(self, monkeypatch, tmp_path):
+    async def test_mutated_multiple_named_samples_rejected(self, monkeypatch, tmp_path):
         monkeypatch.setattr(runner, "AGENT_LOGS_DIR", tmp_path)
         stage_input(tmp_path)
-        output = AgentWorkflowOutput(samples={"solver": [], "critic": []})
+        output = AgentWorkflowOutput(samples={"solver": []})
+        output.samples["critic"] = []
 
         with pytest.raises(ValueError, match="named samples"):
             await runner.run_agent(workflow_returning(output), None)

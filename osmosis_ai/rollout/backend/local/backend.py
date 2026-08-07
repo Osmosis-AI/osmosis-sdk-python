@@ -18,8 +18,10 @@ from osmosis_ai.rollout.types import (
     ExecutionRequest,
     ExecutionResult,
     GraderConfig,
+    RolloutSample,
     RolloutStatus,
 )
+from osmosis_ai.rollout.types.output import coerce_output
 from osmosis_ai.rollout.utils.concurrency import ConcurrencyLimiter
 from osmosis_ai.rollout.utils.errors import categorize_exception
 from osmosis_ai.rollout.utils.file_artifacts import (
@@ -114,7 +116,20 @@ class LocalBackend(ExecutionBackend):
         workflow = self.workflow_cls(config)
         try:
             with rollout_ctx:
-                await workflow.run(ctx)
+                output = coerce_output(await workflow.run(ctx))
+                if output is None:
+                    sample = await rollout_ctx.get_sample()
+                else:
+                    messages = output.primary_messages()
+                    sample = (
+                        RolloutSample(
+                            messages=messages,
+                            label=request.label,
+                            metrics=dict(output.metrics),
+                        )
+                        if messages is not None
+                        else None
+                    )
         except Exception as e:
             logger.error(traceback.format_exc())
             return ExecutionResult(
@@ -125,7 +140,7 @@ class LocalBackend(ExecutionBackend):
 
         return ExecutionResult(
             status=RolloutStatus.SUCCESS,
-            sample=await rollout_ctx.get_sample(),
+            sample=sample,
         )
 
     async def run_grader(

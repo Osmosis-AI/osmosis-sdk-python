@@ -43,16 +43,6 @@ from osmosis_ai.rollout.utils.file_artifacts import (
 )
 
 
-def validate_workflow_output(output: AgentWorkflowOutput) -> None:
-    """Reject shapes the single-sample rollout protocol cannot represent."""
-    if len(output.samples) > 1:
-        raise ValueError(
-            f"run() returned {len(output.samples)} named samples "
-            f"({sorted(output.samples)}); a rollout carries exactly one "
-            "sample — return a single message list or one samples entry"
-        )
-
-
 async def run_agent(workflow_cls: Any, workflow_config: Any) -> ContainerResult:
     container_input = ContainerInput.read(AGENT_LOGS_DIR / INPUT_FILENAME)
     rollout_ctx = RolloutContext(
@@ -87,8 +77,6 @@ async def run_agent(workflow_cls: Any, workflow_config: Any) -> ContainerResult:
                 )
             else:
                 output = AgentWorkflowOutput()
-        else:
-            validate_workflow_output(output)
     write_trajectory_json(sample, output, container_input.rollout_id)
     return ContainerResult(status=RolloutStatus.SUCCESS, output=output, sample=sample)
 
