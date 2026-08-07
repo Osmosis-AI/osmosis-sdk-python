@@ -3,8 +3,8 @@
 from typing import Any
 
 import pytest
-from harbor.models.trajectories import Metrics
 
+from osmosis_ai.rollout.trajectory.atif import Metrics
 from osmosis_ai.rollout.trajectory.converter import (
     _messages_to_steps,
     convert_sample_to_trajectory,
@@ -347,9 +347,8 @@ def two_turn_messages() -> list[dict[str, Any]]:
     ]
 
 
-def test_llm_call_metrics_mirrors_harbor_metrics() -> None:
-    """Guards the wire/storage schema boundary: if a harbor upgrade adds a
-    Metrics field, LlmCallMetrics (and its conversion) must follow suit."""
+def test_llm_call_metrics_mirrors_atif_metrics() -> None:
+    """Keep the controller wire report and persisted ATIF schema in lockstep."""
     assert set(LlmCallMetrics.model_fields) - {"model_name"} == set(
         Metrics.model_fields
     )

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 import shutil
 import sys
 import traceback
@@ -43,16 +44,6 @@ from osmosis_ai.rollout.utils.file_artifacts import (
 )
 
 
-def validate_workflow_output(output: AgentWorkflowOutput) -> None:
-    """Reject shapes the single-sample rollout protocol cannot represent."""
-    if len(output.samples) > 1:
-        raise ValueError(
-            f"run() returned {len(output.samples)} named samples "
-            f"({sorted(output.samples)}); a rollout carries exactly one "
-            "sample — return a single message list or one samples entry"
-        )
-
-
 async def run_agent(workflow_cls: Any, workflow_config: Any) -> ContainerResult:
     container_input = ContainerInput.read(AGENT_LOGS_DIR / INPUT_FILENAME)
     rollout_ctx = RolloutContext(
@@ -73,22 +64,24 @@ async def run_agent(workflow_cls: Any, workflow_config: Any) -> ContainerResult:
         output = coerce_output(returned)
         if output is None:
             # The documented fallback: the ambient context's sample is the
-            # output. The projection below stays for older hosts.
+            # output. The lossy projection below keeps ContainerResult.output
+            # populated for readers that consult it before the full sample.
             sample = await rollout_ctx.get_sample()
             if sample is not None:
                 output = AgentWorkflowOutput(
-                    samples={"default": [dict(m) for m in sample.messages]},
+                    messages=[dict(m) for m in sample.messages],
                     metrics={
                         key: value
                         for key, value in (sample.metrics or {}).items()
                         if isinstance(value, (int, float))
                         and not isinstance(value, bool)
+                        # Non-finite ambient telemetry would fail output
+                        # validation; drop it rather than fail the rollout.
+                        and math.isfinite(value)
                     },
                 )
             else:
                 output = AgentWorkflowOutput()
-        else:
-            validate_workflow_output(output)
     write_trajectory_json(sample, output, container_input.rollout_id)
     return ContainerResult(status=RolloutStatus.SUCCESS, output=output, sample=sample)
 
@@ -98,15 +91,14 @@ def write_trajectory_json(
 ) -> None:
     """Best-effort ATIF trajectory at agent/trajectory.json, where native
     harbor agents leave theirs."""
-    if sample is None:
-        messages = output.primary_messages()
-        if messages:
-            sample = RolloutSample(messages=messages)
+    if sample is None and output.messages:
+        sample = RolloutSample(messages=output.messages)
     if sample is None or sample.trajectory_messages is None:
         return
     try:
-        from harbor.utils.trajectory_utils import format_trajectory_json
-
+        # The SDK owns ATIF formatting: Harbor is a host-side extra and is not
+        # installed inside the task container.
+        from osmosis_ai.rollout.trajectory.atif import format_trajectory_json
         from osmosis_ai.rollout.trajectory.converter import (
             convert_sample_to_trajectory,
         )
@@ -172,10 +164,8 @@ def load_sample() -> RolloutSample | None:
         if result.sample is not None:
             return result.sample
         output = result.output
-        if output is not None:
-            messages = output.primary_messages()
-            if messages is not None:
-                return RolloutSample(messages=messages, metrics=dict(output.metrics))
+        if output is not None and output.messages is not None:
+            return RolloutSample(messages=output.messages, metrics=dict(output.metrics))
     for name in sorted(AGENT_LOGS_DIR.glob("*trajectory*.json")):
         try:
             messages = messages_from_trajectory(json.loads(name.read_text()))

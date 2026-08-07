@@ -8,10 +8,12 @@ from __future__ import annotations
 
 import tomllib
 from importlib.metadata import PackageNotFoundError
+from importlib.metadata import requires as installed_requirements
 from importlib.metadata import version as installed_version
 from pathlib import Path
 
 from packaging.requirements import InvalidRequirement, Requirement
+from packaging.utils import canonicalize_name
 
 from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.templates.catalog import required_workspace_paths
@@ -119,13 +121,81 @@ def ensure_workspace_directory_config_path(
     )
 
 
+def _requirement_problem(
+    requirement: Requirement,
+    *,
+    requested_by: str | None = None,
+) -> str | None:
+    """Return why an installed requirement is unusable, if applicable."""
+    if requirement.url:
+        return None
+    try:
+        have = installed_version(requirement.name)
+    except PackageNotFoundError:
+        if requested_by is not None:
+            return f"{requested_by} requires {requirement.name}, which is not installed"
+        return f"{requirement.name} is not installed"
+    else:
+        if not requirement.specifier or requirement.specifier.contains(
+            have, prereleases=True
+        ):
+            return None
+        if requested_by is not None:
+            return (
+                f"{requested_by} requires {requirement.name}{requirement.specifier}, "
+                f"but {requirement.name} {have} is installed"
+            )
+        return f"{requirement.name} {have} does not satisfy {requirement.specifier}"
+
+
+def _unsatisfied_requested_extras(requirement: Requirement) -> list[str]:
+    """Check direct dependencies activated by extras on an installed package.
+
+    Merely finding the parent distribution does not prove that dependencies for
+    a requested extra are present. Inspect its installed ``Requires-Dist``
+    metadata so submit preflight does not mistake a base-only installation for
+    one that can import the rollout's selected integration.
+    """
+    if not requirement.extras:
+        return []
+    try:
+        declared = installed_requirements(requirement.name) or []
+    except PackageNotFoundError:
+        return []  # The parent requirement reports this more clearly.
+
+    parent = requirement.name + "[" + ",".join(sorted(requirement.extras)) + "]"
+    parent_name = canonicalize_name(requirement.name)
+    unsatisfied: list[str] = []
+    for raw in declared:
+        try:
+            child = Requirement(raw)
+        except InvalidRequirement:
+            continue
+        if child.marker is None or not any(
+            child.marker.evaluate({"extra": extra}) for extra in requirement.extras
+        ):
+            continue
+
+        # Composite extras in this project self-reference another set of extras.
+        # Inspect the expanded feature set without reporting the installed parent
+        # as its own missing dependency.
+        if canonicalize_name(child.name) == parent_name:
+            unsatisfied.extend(_unsatisfied_requested_extras(child))
+            continue
+
+        problem = _requirement_problem(child, requested_by=parent)
+        if problem is not None:
+            unsatisfied.append(problem)
+    return unsatisfied
+
+
 def _unsatisfied_rollout_requirements(rollout_dir: Path) -> list[str]:
     """Declared requirements this environment does not satisfy.
 
     Preflight imports the rollout into the workspace-root environment, not the
-    rollout's own, so the two can diverge. Only declared specifiers are checked
-    against installed versions; extras and transitive resolution are left to the
-    resolver.
+    rollout's own, so the two can diverge. Declared specifiers and direct
+    dependencies activated by their extras are checked; deeper transitive
+    resolution remains the resolver's responsibility.
     """
     pyproject = rollout_dir / "pyproject.toml"
     if not pyproject.is_file():
@@ -149,20 +219,11 @@ def _unsatisfied_rollout_requirements(rollout_dir: Path) -> list[str]:
             continue
         if requirement.marker is not None and not requirement.marker.evaluate():
             continue
-        if requirement.url:
-            # A direct URL or VCS pin carries no version to compare against.
+        problem = _requirement_problem(requirement)
+        if problem is not None:
+            unsatisfied.append(problem)
             continue
-        try:
-            have = installed_version(requirement.name)
-        except PackageNotFoundError:
-            unsatisfied.append(f"{requirement.name} is not installed")
-            continue
-        if requirement.specifier and not requirement.specifier.contains(
-            have, prereleases=True
-        ):
-            unsatisfied.append(
-                f"{requirement.name} {have} does not satisfy {requirement.specifier}"
-            )
+        unsatisfied.extend(_unsatisfied_requested_extras(requirement))
     return unsatisfied
 
 

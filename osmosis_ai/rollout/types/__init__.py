@@ -4,6 +4,7 @@ from .config import (
     ConcurrencyConfig,
     GraderConfig,
 )
+from .output import AgentWorkflowOutput, Messages
 from .protocol import (
     CancelRolloutsRequest,
     CancelRolloutsResponse,
@@ -27,6 +28,7 @@ from .sample import (
 
 __all__ = [
     "AgentWorkflowConfig",
+    "AgentWorkflowOutput",
     "BaseConfig",
     "CancelRolloutsRequest",
     "CancelRolloutsResponse",
@@ -39,6 +41,7 @@ __all__ = [
     "GraderInitResponse",
     "GraderStatus",
     "MessageDict",
+    "Messages",
     "RolloutCompleteRequest",
     "RolloutErrorCategory",
     "RolloutInitRequest",

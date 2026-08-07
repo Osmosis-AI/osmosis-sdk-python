@@ -18,10 +18,22 @@ from dataclasses import dataclass
 from importlib.metadata import PathDistribution
 from pathlib import Path
 
-import platformdirs
-import toml
 from packaging.requirements import Requirement
 from packaging.utils import canonicalize_name
+
+from osmosis_ai._imports import raise_optional_dependency_error
+
+# Only the Harbor backend packages rollout projects, so these ship with that
+# extra rather than the base install.
+try:
+    import platformdirs
+    import toml
+except ModuleNotFoundError as _exc:
+    raise_optional_dependency_error(
+        _exc,
+        extra="harbor",
+        feature="Rollout bundle packaging",
+    )
 
 BUNDLES_DIR = platformdirs.user_cache_path("osmosis") / "bundles"
 

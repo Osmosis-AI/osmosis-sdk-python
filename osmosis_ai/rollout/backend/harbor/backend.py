@@ -700,6 +700,13 @@ class HarborBackend(ExecutionBackend):
 
         Returns None — preserving the trial directory — when a document
         exists but cannot be used verbatim (invalid, or several of them).
+
+        Native agents write this document with Harbor's own ATIF models, so it
+        is read back with those models rather than the SDK's copy in
+        ``rollout/trajectory/atif.py``: the writer defines the schema, and this
+        code already requires the harbor extra. The SDK copy stays authoritative
+        for every document the SDK itself writes. The two are kept in step by
+        the update note in that module.
         """
         trial_dir = self.trials_dir / f"{TRIAL_NAME_PREFIX}{rollout_id}"
         paths = [p for p in (trial_dir / "agent" / "trajectory.json",) if p.is_file()]
@@ -781,13 +788,10 @@ class HarborBackend(ExecutionBackend):
                 }
             )
         output = result.output
-        if output is None:
-            return None
-        messages = output.primary_messages()
-        if messages is None:
+        if output is None or output.messages is None:
             return None
         return RolloutSample(
-            messages=messages,
+            messages=output.messages,
             label=pending.label,
             metrics={**trial_metrics(event.result), **output.metrics},
         )

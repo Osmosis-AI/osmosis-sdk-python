@@ -3,7 +3,11 @@ name = "bench-harness"
 version = "0.1.0"
 requires-python = ">=3.12"
 dependencies = [
-    "osmosis-ai @ https://github.com/Osmosis-AI/osmosis-sdk-python/archive/refs/heads/feat/harbor-backend-v2.tar.gz",
+    # The harness runs inside the task container, which only needs the
+    # framework-neutral core, so no extra is selected. The benchmark
+    # intentionally tracks the SDK's default branch to exercise the latest
+    # in-container runner.
+    "osmosis-ai @ https://github.com/Osmosis-AI/osmosis-sdk-python/archive/refs/heads/main.tar.gz",
 ]
 
 [build-system]

@@ -2,42 +2,44 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, ClassVar
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 Messages = list[dict[str, Any]]
 
 
 class AgentWorkflowOutput(BaseModel):
-    """What a workflow hands back: message histories plus optional measurements.
+    """What a workflow hands back: one message history plus optional measurements.
 
-    ``samples`` maps a name to one agent's message history (multi-agent
-    workflows return several). ``info`` carries workflow-produced context for
-    the grader; the rollout request's ``metadata`` is a separate, input-side
-    field.
+    One rollout produces one sample, so ``messages`` is a single message
+    history (``None`` when the workflow produced none). ``info`` is reserved
+    for workflow-specific metadata; current backends do not pass it to
+    graders.
     """
 
-    samples: dict[str, Messages] = Field(default_factory=dict)
+    model_config: ClassVar[ConfigDict] = ConfigDict(
+        extra="forbid",
+        allow_inf_nan=False,
+        revalidate_instances="always",
+    )
+
+    messages: Messages | None = None
     metrics: dict[str, float] = Field(default_factory=dict)
     info: dict[str, Any] = Field(default_factory=dict)
 
-    def primary_messages(self) -> Messages | None:
-        if not self.samples:
-            return None
-        if "default" in self.samples:
-            return self.samples["default"]
-        return next(iter(self.samples.values()))
-
 
 def coerce_output(value: Any) -> AgentWorkflowOutput | None:
-    """Normalize a run() return value; None means "use the fallback source"."""
+    """Normalize and validate a run() return value.
+
+    ``None`` means "use the fallback source".
+    """
     if value is None:
         return None
     if isinstance(value, AgentWorkflowOutput):
-        return value
+        return AgentWorkflowOutput.model_validate(value)
     if isinstance(value, list):
-        return AgentWorkflowOutput(samples={"default": value})
+        return AgentWorkflowOutput(messages=value)
     raise TypeError(
         "run() must return AgentWorkflowOutput, a message list, or None; "
         f"got {type(value).__name__}"

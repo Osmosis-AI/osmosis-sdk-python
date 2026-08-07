@@ -23,10 +23,12 @@ The package (`osmosis_ai/`) is organized into top-level domains. See [architectu
 | Eval helpers | [../osmosis_ai/eval/](../osmosis_ai/eval/) | Rubric (LLM-as-judge) | `from osmosis_ai.eval.rubric import evaluate_rubric` |
 | Workspace templates | [../osmosis_ai/templates/](../osmosis_ai/templates/) | `osmosis template` recipe catalog + source resolution | (internal) |
 
+The single `osmosis-ai` distribution always includes the CLI and framework-neutral rollout core. Install extras only for the feature you use: `server`, `strands`, `openai-agents`, `harbor`, `rubric`, `parquet`, or `full`. The Harbor extra installs plain Harbor for an externally provided SkyPilot runtime; Daytona is retired, and Harbor's `skypilot` extra is intentionally unsupported.
+
 ## Pages
 
 - [architecture.md](./architecture.md) — package layout, domain boundaries, import paths, lazy-loading rules, and the remote rollout protocol (controller <-> rollout server). Start here.
-- [rollout-sdk.md](./rollout-sdk.md) — the library API you implement against: `AgentWorkflow`, `Grader`, contexts, configs, `create_rollout_server`, execution backends, and framework integrations.
+- [rollout-sdk.md](./rollout-sdk.md) — the library API you implement against: `AgentWorkflow`, `Grader`, contexts, configs, server/backends, and framework integrations.
 - [eval.md](./eval.md) — the `osmosis eval submit` config contract (SDK-vs-backend validation, submit flow), plus a brief note on the `evaluate_rubric` / `osmosis eval rubric` LLM-as-judge API.
 - [datasets.md](./datasets.md) — the dataset row contract enforced by the SDK validator.
 - [troubleshooting.md](./troubleshooting.md) — engineering issues (rollout timeouts, event-loop blocking, concurrency tuning).

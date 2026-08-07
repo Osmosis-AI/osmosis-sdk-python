@@ -8,6 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 from harbor.trial.queue import TrialQueue
+from pydantic import ValidationError
 
 from osmosis_ai.packaging import build_bundle, inspect_bundle
 from osmosis_ai.rollout.backend.harbor.backend import (
@@ -132,14 +133,15 @@ class TestContract:
 
     def test_result_round_trip(self, tmp_path):
         output = AgentWorkflowOutput(
-            samples={"default": [{"role": "assistant", "content": "y"}]},
+            messages=[{"role": "assistant", "content": "y"}],
             metrics={"turns": 1.0},
         )
         result = ContainerResult(status=RolloutStatus.SUCCESS, output=output)
         result.write(tmp_path / "result.json")
         loaded = ContainerResult.read(tmp_path / "result.json")
         assert loaded.status == RolloutStatus.SUCCESS
-        assert loaded.output.primary_messages() == output.primary_messages()
+        assert loaded.output is not None
+        assert loaded.output.messages == output.messages
         assert loaded.output.metrics == {"turns": 1.0}
 
 
@@ -147,15 +149,62 @@ class TestAgentWorkflowOutput:
     def test_coerce_none_passes_through(self):
         assert coerce_output(None) is None
 
-    def test_coerce_messages_wraps_as_default(self):
+    def test_coerce_messages_becomes_the_output_messages(self):
         messages = [{"role": "assistant", "content": "hi"}]
         output = coerce_output(messages)
-        assert output.samples == {"default": messages}
-        assert output.primary_messages() == messages
+        assert output is not None
+        assert output.messages == messages
 
-    def test_coerce_output_object_passes_through(self):
-        output = AgentWorkflowOutput(samples={"solver": [], "critic": []})
-        assert coerce_output(output) is output
+    def test_coerce_output_object_is_revalidated(self):
+        output = AgentWorkflowOutput(messages=[])
+        assert coerce_output(output) == output
+
+    def test_v2_samples_field_rejected_by_model(self):
+        """One rollout carries one sample: the v2 named mapping is gone."""
+        with pytest.raises(ValidationError) as exc_info:
+            AgentWorkflowOutput.model_validate({"samples": {"default": []}})
+        error = exc_info.value.errors()[0]
+        assert error["type"] == "extra_forbidden"
+        assert error["loc"] == ("samples",)
+
+    def test_unknown_fields_rejected_by_model(self):
+        with pytest.raises(ValidationError) as exc_info:
+            AgentWorkflowOutput.model_validate({"message": [], "metric": {}})
+        assert {error["type"] for error in exc_info.value.errors()} == {
+            "extra_forbidden"
+        }
+        assert {error["loc"] for error in exc_info.value.errors()} == {
+            ("message",),
+            ("metric",),
+        }
+
+    @pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+    def test_non_finite_metrics_rejected_by_model(self, value):
+        with pytest.raises(ValidationError) as exc_info:
+            AgentWorkflowOutput(metrics={"score": value})
+        error = exc_info.value.errors()[0]
+        assert error["type"] == "finite_number"
+        assert error["loc"] == ("metrics", "score")
+
+    def test_coerce_rejects_mutated_non_finite_metrics(self):
+        output = AgentWorkflowOutput(metrics={"score": 1.0})
+        output.metrics["score"] = float("inf")
+
+        with pytest.raises(ValidationError) as exc_info:
+            coerce_output(output)
+        error = exc_info.value.errors()[0]
+        assert error["type"] == "finite_number"
+        assert error["loc"] == ("metrics", "score")
+
+    def test_container_result_rejects_mutated_non_finite_metrics(self):
+        output = AgentWorkflowOutput(metrics={"score": 1.0})
+        output.metrics["score"] = float("inf")
+
+        with pytest.raises(ValidationError) as exc_info:
+            ContainerResult(status=RolloutStatus.SUCCESS, output=output)
+        error = exc_info.value.errors()[0]
+        assert error["type"] == "finite_number"
+        assert error["loc"] == ("output", "metrics", "score")
 
     def test_coerce_rejects_other_types(self):
         import pytest as pytest_module
@@ -163,13 +212,8 @@ class TestAgentWorkflowOutput:
         with pytest_module.raises(TypeError, match="run\\(\\) must return"):
             coerce_output("a string")
 
-    def test_primary_prefers_default_key(self):
-        default = [{"role": "assistant", "content": "d"}]
-        output = AgentWorkflowOutput(samples={"z": [], "default": default})
-        assert output.primary_messages() == default
-
-    def test_empty_output_has_no_primary(self):
-        assert AgentWorkflowOutput().primary_messages() is None
+    def test_empty_output_has_no_messages(self):
+        assert AgentWorkflowOutput().messages is None
 
 
 class TestHarborTask:

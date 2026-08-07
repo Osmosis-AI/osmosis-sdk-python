@@ -13,8 +13,11 @@ Point it at any Harbor task folder instead of the generated one:
     uv run benchmarks/container_lifecycle/container_lifecycle_bench.py \\
         --tasks-dir path/to/task
 
-The bench harness declares its SDK source in bench_harness/pyproject.toml,
-so any image with python3 and pip works; the bundle install pulls the SDK.
+This driver runs on the host and needs `osmosis-ai[server,harbor]` plus `uv` on
+PATH to build the bundle wheel. The bench harness declares its own SDK source in
+bench_harness/pyproject.toml — bare `osmosis-ai`, since only the framework-neutral
+core runs in the container — so any image with python3 and pip works; the bundle
+install pulls the SDK.
 """
 
 from __future__ import annotations

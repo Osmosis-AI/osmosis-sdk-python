@@ -106,26 +106,42 @@ class TestFallbackSampleBoundary:
 
         assert result.sample is None
         assert result.output is not None
-        assert result.output.primary_messages() == [
-            {"role": "assistant", "content": "y"}
-        ]
+        assert result.output.messages == [{"role": "assistant", "content": "y"}]
+
+    async def test_non_finite_ambient_metrics_are_dropped_from_projection(
+        self, monkeypatch, tmp_path
+    ):
+        """Bad ambient telemetry must not fail the rollout or lose the sample."""
+        monkeypatch.setattr(runner, "AGENT_LOGS_DIR", tmp_path)
+        stage_input(tmp_path)
+        sample = RolloutSample(
+            messages=[{"role": "assistant", "content": "done"}],
+            metrics={"turns": 2, "loss": float("nan")},
+        )
+
+        result = await runner.run_agent(workflow_returning(None, sample), None)
+
+        assert result.status == RolloutStatus.SUCCESS
+        assert result.sample is not None
+        assert result.sample.metrics["turns"] == 2
+        assert result.output is not None
+        assert result.output.metrics == {"turns": 2.0}
 
 
 class TestUnsupportedOutputs:
-    async def test_multiple_named_samples_rejected(self, monkeypatch, tmp_path):
+    async def test_mutated_non_finite_metrics_rejected(self, monkeypatch, tmp_path):
         monkeypatch.setattr(runner, "AGENT_LOGS_DIR", tmp_path)
         stage_input(tmp_path)
-        output = AgentWorkflowOutput(samples={"solver": [], "critic": []})
+        output = AgentWorkflowOutput(metrics={"score": 1.0})
+        output.metrics["score"] = float("nan")
 
-        with pytest.raises(ValueError, match="named samples"):
+        with pytest.raises(ValueError, match="finite"):
             await runner.run_agent(workflow_returning(output), None)
 
-    async def test_single_entry_output_accepted(self, monkeypatch, tmp_path):
+    async def test_explicit_output_accepted(self, monkeypatch, tmp_path):
         monkeypatch.setattr(runner, "AGENT_LOGS_DIR", tmp_path)
         stage_input(tmp_path)
-        output = AgentWorkflowOutput(
-            samples={"solver": [{"role": "assistant", "content": "y"}]}
-        )
+        output = AgentWorkflowOutput(messages=[{"role": "assistant", "content": "y"}])
 
         result = await runner.run_agent(workflow_returning(output), None)
         assert result.status == RolloutStatus.SUCCESS
@@ -143,7 +159,7 @@ class TestGraderSampleSource:
             status=RolloutStatus.SUCCESS,
             sample=sample,
             output=AgentWorkflowOutput(
-                samples={"default": [{"role": "assistant", "content": "projected"}]}
+                messages=[{"role": "assistant", "content": "projected"}]
             ),
         ).write(tmp_path / RESULT_FILENAME)
 
@@ -158,7 +174,7 @@ class TestGraderSampleSource:
         ContainerResult(
             status=RolloutStatus.SUCCESS,
             output=AgentWorkflowOutput(
-                samples={"default": [{"role": "assistant", "content": "projected"}]},
+                messages=[{"role": "assistant", "content": "projected"}],
                 metrics={"turns": 1.0},
             ),
         ).write(tmp_path / RESULT_FILENAME)
@@ -267,7 +283,7 @@ class TestWriteTrajectoryDocument:
 
     def test_falls_back_to_output_messages(self, tmp_path, monkeypatch):
         monkeypatch.setattr(runner, "AGENT_LOGS_DIR", tmp_path)
-        output = AgentWorkflowOutput(samples={"default": MESSAGES})
+        output = AgentWorkflowOutput(messages=MESSAGES)
 
         runner.write_trajectory_json(None, output, "r-2")
 
@@ -288,3 +304,24 @@ class TestWriteTrajectoryDocument:
         runner.write_trajectory_json(sample, AgentWorkflowOutput(), "r-4")
 
         assert not (tmp_path / "trajectory.json").exists()
+
+    def test_writes_atif_without_harbor_installed(self, tmp_path, monkeypatch):
+        """The task container installs the bundle, never the harbor extra."""
+        import builtins
+
+        real_import = builtins.__import__
+
+        def guarded_import(name, *args, **kwargs):
+            if name.partition(".")[0] == "harbor":
+                raise ModuleNotFoundError("No module named 'harbor'", name="harbor")
+            return real_import(name, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, "__import__", guarded_import)
+        monkeypatch.setattr(runner, "AGENT_LOGS_DIR", tmp_path)
+
+        runner.write_trajectory_json(
+            RolloutSample(messages=MESSAGES), AgentWorkflowOutput(), "r-5"
+        )
+
+        doc = json.loads((tmp_path / "trajectory.json").read_text())
+        assert doc["session_id"] == "r-5"
