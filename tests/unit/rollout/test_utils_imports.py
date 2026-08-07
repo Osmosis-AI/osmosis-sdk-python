@@ -2,7 +2,11 @@
 
 import pytest
 
-from osmosis_ai.rollout.utils.imports import resolve_object, to_import_path
+from osmosis_ai.rollout.utils.imports import (
+    ensure_import_path,
+    resolve_object,
+    to_import_path,
+)
 
 # ---------------------------------------------------------------------------
 # resolve_object
@@ -48,3 +52,28 @@ class TestToImportPath:
         # A locally created lambda cannot be found in any module's namespace.
         with pytest.raises(ValueError, match="Cannot resolve import path"):
             to_import_path(lambda: None)
+
+
+# ---------------------------------------------------------------------------
+# ensure_import_path
+# ---------------------------------------------------------------------------
+
+
+class TestEnsureImportPath:
+    """Backends accept either a class or an already-written import string."""
+
+    def test_string_passes_through_untouched(self):
+        assert ensure_import_path("my_rollout.workflow:Workflow") == (
+            "my_rollout.workflow:Workflow"
+        )
+
+    def test_class_is_converted(self):
+        from osmosis_ai.rollout.utils.concurrency import ConcurrencyLimiter
+
+        assert ensure_import_path(ConcurrencyLimiter) == (
+            "osmosis_ai.rollout.utils.concurrency:ConcurrencyLimiter"
+        )
+
+    def test_propagates_the_unresolvable_object_error(self):
+        with pytest.raises(ValueError, match="Cannot resolve import path"):
+            ensure_import_path(lambda: None)

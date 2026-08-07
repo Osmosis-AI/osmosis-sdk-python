@@ -5,7 +5,6 @@ from osmosis_ai.rollout.backend import ExecutionBackend, LocalBackend
 from osmosis_ai.rollout.context import (
     AgentWorkflowContext,
     GraderContext,
-    HarborAgentWorkflowContext,
     RolloutContext,
     get_rollout_context,
 )
@@ -45,7 +44,6 @@ __all__ = [
     "GraderConfig",
     "GraderContext",
     "GraderStatus",
-    "HarborAgentWorkflowContext",
     "LocalBackend",
     "OsmosisRolloutModel",
     "OsmosisStrandsAgent",

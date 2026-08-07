@@ -12,7 +12,7 @@ Everything below is re-exported from `osmosis_ai.rollout` unless noted.
 |--------|--------|---------|
 | `AgentWorkflow` | [agent_workflow.py](../osmosis_ai/rollout/agent_workflow.py) | ABC you subclass; implement `async run(ctx)` |
 | `Grader` | [grader.py](../osmosis_ai/rollout/grader.py) | ABC you subclass; implement `async grade(ctx)` |
-| `AgentWorkflowContext`, `HarborAgentWorkflowContext`, `GraderContext`, `RolloutContext`, `get_rollout_context` | [context.py](../osmosis_ai/rollout/context.py) | Execution context passed to `run` / `grade` |
+| `AgentWorkflowContext`, `GraderContext`, `RolloutContext`, `get_rollout_context` | [context.py](../osmosis_ai/rollout/context.py) | Execution context passed to `run` / `grade` |
 | `AgentWorkflowConfig`, `GraderConfig`, `ConcurrencyConfig` | [types/config.py](../osmosis_ai/rollout/types/config.py) | Pydantic config models |
 | `RolloutSample`, `RolloutStatus`, `RolloutErrorCategory`, `MultiTurnMode` | [types/sample.py](../osmosis_ai/rollout/types/sample.py) | Sample + status types |
 | `create_rollout_server`, `ControllerAuth` | [server/](../osmosis_ai/rollout/server/) | FastAPI factory + bearer auth |
@@ -55,7 +55,6 @@ class Grader(ABC):
 [../osmosis_ai/rollout/context.py](../osmosis_ai/rollout/context.py)
 
 - `AgentWorkflowContext` — `prompt: list[dict]`, `config`.
-- `HarborAgentWorkflowContext` — adds `environment` (Harbor `BaseEnvironment`) for `environment.exec()`, `environment.upload_file()`, etc. under `HarborBackend`.
 - `GraderContext` — `label`, `samples`, `metadata` (input-side, read-only), plus `get_samples()` / `set_sample_reward()` (output-side).
 - `RolloutContext` — ambient per-rollout context (chat completions URL, API key, rollout id). It is a context manager; the server enters it around execution. Local backends pass connection info directly; container runners read it from `OSMOSIS_CHAT_COMPLETIONS_URL` / `OSMOSIS_API_KEY` / `OSMOSIS_ROLLOUT_ID`. Fetch the current one with `get_rollout_context()`.
 
@@ -193,7 +192,7 @@ app = create_rollout_server(backend=backend)  # FastAPI: POST /rollout, GET /hea
 - `ControllerAuth` ([server/auth.py](../osmosis_ai/rollout/server/auth.py)) supplies the bearer headers for callbacks.
 - `ExecutionBackend` ([backend/base.py](../osmosis_ai/rollout/backend/base.py)) is the ABC; pick one:
   - `LocalBackend` ([backend/local/](../osmosis_ai/rollout/backend/local/)) — runs workflow + grader in-process. Re-exported from `osmosis_ai.rollout`. Used by the scaffold and eval.
-  - `HarborBackend` ([backend/harbor/backend.py](../osmosis_ai/rollout/backend/harbor/backend.py)) — runs the agent inside a Harbor container; pairs with `HarborAgentWorkflowContext`. It is **not** re-exported (import `from osmosis_ai.rollout.backend.harbor.backend import HarborBackend`) and requires the external `harbor` dependency.
+  - `HarborBackendV2` ([backend/harbor/backend_v2.py](../osmosis_ai/rollout/backend/harbor/backend_v2.py)) — runs the agent inside a Harbor container. It is **not** re-exported from `osmosis_ai.rollout` (import `from osmosis_ai.rollout.backend.harbor import HarborBackendV2`) and pulls in the `harbor` dependency.
 
 ### Running a server
 
