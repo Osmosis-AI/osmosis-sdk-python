@@ -154,9 +154,9 @@ class TestAgentWorkflowOutput:
         assert output.samples == {"default": messages}
         assert output.primary_messages() == messages
 
-    def test_coerce_output_object_passes_through(self):
+    def test_coerce_output_object_is_revalidated(self):
         output = AgentWorkflowOutput(samples={"solver": []})
-        assert coerce_output(output) is output
+        assert coerce_output(output) == output
 
     def test_multiple_samples_rejected_by_model(self):
         with pytest.raises(ValidationError) as exc_info:
@@ -164,6 +164,45 @@ class TestAgentWorkflowOutput:
         error = exc_info.value.errors()[0]
         assert error["type"] == "too_long"
         assert error["loc"] == ("samples",)
+
+    def test_unknown_fields_rejected_by_model(self):
+        with pytest.raises(ValidationError) as exc_info:
+            AgentWorkflowOutput.model_validate({"sample": [], "metric": {}})
+        assert {error["type"] for error in exc_info.value.errors()} == {
+            "extra_forbidden"
+        }
+        assert {error["loc"] for error in exc_info.value.errors()} == {
+            ("sample",),
+            ("metric",),
+        }
+
+    @pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+    def test_non_finite_metrics_rejected_by_model(self, value):
+        with pytest.raises(ValidationError) as exc_info:
+            AgentWorkflowOutput(metrics={"score": value})
+        error = exc_info.value.errors()[0]
+        assert error["type"] == "finite_number"
+        assert error["loc"] == ("metrics", "score")
+
+    def test_coerce_rejects_mutated_non_finite_metrics(self):
+        output = AgentWorkflowOutput(metrics={"score": 1.0})
+        output.metrics["score"] = float("inf")
+
+        with pytest.raises(ValidationError) as exc_info:
+            coerce_output(output)
+        error = exc_info.value.errors()[0]
+        assert error["type"] == "finite_number"
+        assert error["loc"] == ("metrics", "score")
+
+    def test_container_result_rejects_mutated_non_finite_metrics(self):
+        output = AgentWorkflowOutput(metrics={"score": 1.0})
+        output.metrics["score"] = float("inf")
+
+        with pytest.raises(ValidationError) as exc_info:
+            ContainerResult(status=RolloutStatus.SUCCESS, output=output)
+        error = exc_info.value.errors()[0]
+        assert error["type"] == "finite_number"
+        assert error["loc"] == ("output", "metrics", "score")
 
     def test_coerce_rejects_other_types(self):
         import pytest as pytest_module

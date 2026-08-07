@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, ClassVar
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 Messages = list[dict[str, Any]]
 
@@ -16,6 +16,12 @@ class AgentWorkflowOutput(BaseModel):
     produces one sample. ``info`` is reserved for workflow-specific metadata;
     current backends do not pass it to graders.
     """
+
+    model_config: ClassVar[ConfigDict] = ConfigDict(
+        extra="forbid",
+        allow_inf_nan=False,
+        revalidate_instances="always",
+    )
 
     samples: dict[str, Messages] = Field(default_factory=dict, max_length=1)
     metrics: dict[str, float] = Field(default_factory=dict)
@@ -43,7 +49,7 @@ def coerce_output(value: Any) -> AgentWorkflowOutput | None:
                 f"({sorted(value.samples)}); a rollout carries exactly one "
                 "sample — return a single message list or one samples entry"
             )
-        return value
+        return AgentWorkflowOutput.model_validate(value)
     if isinstance(value, list):
         return AgentWorkflowOutput(samples={"default": value})
     raise TypeError(

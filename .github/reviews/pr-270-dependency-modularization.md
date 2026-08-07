@@ -1,6 +1,6 @@
 # PR #270 dependency modularization review findings
 
-> Historical review record for PR #270, reviewed against `main` at `3acde023` and the PR head at `0efad19f` on August 7, 2026. Current code and developer documentation remain authoritative.
+> Historical review record for PR #270, originally reviewed against `main` at `3acde023` and the PR head at `0efad19f` on August 7, 2026. Dispositions were updated with the pre-merge fixes; current code and developer documentation remain authoritative.
 
 ## Summary
 
@@ -11,8 +11,8 @@
 | F3 | `AgentWorkflowOutput` advertised multiple samples although one rollout carries one sample | Fixed in PR #270 |
 | F4 | Extras-aware submit preflight can skip entrypoint existence and syntax validation | Follow-up after merge |
 | F5 | Non-finite controller per-call metrics can prevent the whole trajectory from being saved | Follow-up after merge |
-| F6 | Non-finite workflow output metrics can break `ContainerResult` JSON round-tripping | Follow-up after merge |
-| F7 | Unknown `AgentWorkflowOutput` fields are silently ignored and can suppress ambient fallback | Follow-up after merge |
+| F6 | Non-finite workflow output metrics can break `ContainerResult` JSON round-tripping | Fixed in PR #270 |
+| F7 | Unknown `AgentWorkflowOutput` fields are silently ignored and can suppress ambient fallback | Fixed in PR #270 |
 
 ## Resolved in PR #270
 
@@ -36,6 +36,20 @@
 - **Resolution:** The model now validates that `samples` contains at most one entry, while retaining the named mapping used by the container wire contract. Documentation consistently describes a single-sample return.
 - **Verification:** Model tests reject two entries, and the container runner retains a defensive check for an output mutated after validation.
 
+### F6 — Non-finite output metrics broke result round-tripping
+
+- **Reproduction:** Put `NaN` or infinity in `AgentWorkflowOutput.metrics`; Pydantic JSON serialization wrote `null`, after which [`ContainerResult.read`](../../osmosis_ai/rollout/container/files.py) rejected the value as a float.
+- **Impact:** A successful container workflow could be reported by Harbor as an agent failure with no useful underlying result.
+- **Resolution:** The output model rejects non-finite metrics and revalidates existing instances. `coerce_output` and the `ContainerResult` boundary therefore also catch invalid values introduced by mutation after construction.
+- **Verification:** Tests reject `NaN` and both infinities at construction, reject a mutated metric through both coercion and `ContainerResult`, and retain the valid JSON round-trip.
+
+### F7 — Unknown output fields could silently suppress fallback
+
+- **Reproduction:** Construct `AgentWorkflowOutput(sample=..., metric=...)`; Pydantic's former `extra="ignore"` default discarded both misspelled fields, producing a non-`None` empty output that prevented the ambient fallback.
+- **Impact:** A field typo could turn a valid workflow into a successful execution with no sample and no actionable validation error.
+- **Resolution:** The public output model now forbids unknown top-level fields.
+- **Verification:** Tests assert that common singular-field misspellings raise `extra_forbidden`.
+
 ## Follow-up after merge
 
 ### F4 — Extras preflight can skip entrypoint validation
@@ -51,20 +65,6 @@
 - **Impact:** Bad optional telemetry can discard an otherwise valid training transcript.
 - **Recommended fix:** Reject non-finite values at the report-model boundary or isolate per-entry validation so the transcript is still saved without the invalid telemetry.
 - **Acceptance criterion:** A trajectory with valid messages is saved when one reported metric is non-finite, and the invalid telemetry is logged or omitted.
-
-### F6 — Non-finite output metrics break result round-tripping
-
-- **Reproduction:** Put `NaN` or infinity in `AgentWorkflowOutput.metrics`; Pydantic JSON serialization writes `null`, after which [`ContainerResult.read`](../../osmosis_ai/rollout/container/files.py) rejects the value as a float.
-- **Impact:** A successful container workflow can be reported by Harbor as an agent failure with no useful underlying result.
-- **Recommended fix:** Reject non-finite output metrics at model construction and revalidate model instances when they cross the `ContainerResult` boundary.
-- **Acceptance criterion:** Construction rejects `NaN` and both infinities, mutation is caught at the container boundary, and valid metrics still complete a JSON write/read round-trip.
-
-### F7 — Unknown output fields can silently suppress fallback
-
-- **Reproduction:** Construct `AgentWorkflowOutput(sample=..., metric=...)`; Pydantic's default `extra="ignore"` discards both misspelled fields, producing a non-`None` empty output that prevents the ambient fallback.
-- **Impact:** A field typo can turn a valid workflow into a successful execution with no sample and no actionable validation error.
-- **Recommended fix:** Configure the public output model with `extra="forbid"` and add tests for common singular-field misspellings.
-- **Acceptance criterion:** Unknown top-level fields raise an `extra_forbidden` validation error and correctly spelled output still follows the existing container path.
 
 ## Additional observations
 
