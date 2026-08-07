@@ -247,8 +247,8 @@ def _validate_secret_references(config: BenchmarkSubmitConfig, path: Path) -> No
                 f"'HF_TOKEN' appears in {source} but is reserved by the "
                 f"benchmark runner in {path}. The runner removes this literal "
                 "env var before starting the agent; remove it from the config. "
-                "For HLE, store the dataset credential in the HF_TOKEN Platform "
-                "secret record instead."
+                "A gated benchmark's dataset credential is platform "
+                "infrastructure, so a run never supplies it."
             )
         harness_env_name = _HARNESS_API_KEY_ENV.get(agent.harness or "")
         if harness_env_name and harness_env_name in effective_env:
