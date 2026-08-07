@@ -107,6 +107,8 @@ For a stacked PR, prefix the whole title with its position in the stack:
 [N/M][module] type: description
 ```
 
+Use positive integers without leading zeroes, with `1 <= N <= M` and `M >= 2`.
+
 **Examples:**
 
 ```
@@ -147,6 +149,6 @@ If the title does not match the convention, the labeling job fails rather than r
 1. Fork the repository and create a feature branch
 2. Make your changes
 3. Run `uv run pytest` and `uv run ruff check .`
-4. Submit a pull request with a properly formatted title and label
+4. Submit a pull request with a properly formatted title; title-derived labels are added automatically
 
 CI will run linting, type checking (pyright), tests on supported Python versions (see `requires-python` in `pyproject.toml`), PR title validation, and a build validation on every PR.

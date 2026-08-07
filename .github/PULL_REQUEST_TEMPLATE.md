@@ -2,7 +2,7 @@
 PR Title Format: [module] type: description
   modules: rollout, server, cli, auth, eval, misc, ci, doc
   types:   feat, fix, refactor, chore, test, doc
-  stacked: prefix the whole title with [N/M]
+  stacked: prefix with [N/M], where 1 <= N <= M, M >= 2, with no leading zeroes
 
 Examples:
   [rollout] feat: add streaming support for chat completions

@@ -21,10 +21,10 @@ jobs:
         uses: actions/github-script@v9
         with:
           script: |
-            // Grammar mirrors check-pr-title.yml, which is the source of truth
-            // and additionally validates the [N/M] range. Keep the two in sync.
+            // Grammar and stack validation mirror check-pr-title.yml. Keep the
+            // two in sync.
             const TITLE_PATTERN =
-              /^(\[\d+\/\d+\])?(\[BREAKING\])?((?:\[(?:rollout|server|cli|auth|eval|misc|ci|doc)\]){1,3}) (feat|fix|refactor|chore|test|doc): .+/;
+              /^(\[\d+\/\d+\])?(\[BREAKING\])?((?:\[(?:rollout|server|cli|auth|eval|misc|ci|doc)\]){1,3}) (feat|fix|refactor|chore|test|doc): .+$/;
 
             // [misc] deliberately maps to no label.
             const MODULE_LABELS = {
@@ -79,6 +79,24 @@ jobs:
             }
 
             const [, stack, breaking, modules, type] = match;
+            if (stack) {
+              const [positionText, totalText] = stack.slice(1, -1).split('/');
+              const position = BigInt(positionText);
+              const total = BigInt(totalText);
+              if (
+                positionText.startsWith('0') ||
+                totalText.startsWith('0') ||
+                total < 2n ||
+                position > total
+              ) {
+                core.setFailed(
+                  `Invalid stacked PR position ${stack}. Expected 1 <= N <= M ` +
+                    'and M >= 2, without leading zeroes. Labels were left untouched.',
+                );
+                return;
+              }
+            }
+
             const desired = new Set([TYPE_LABELS[type]]);
             if (stack) desired.add('stacked-pr');
             if (breaking) desired.add('breaking');

@@ -44,7 +44,7 @@ For a PR that is one link in a stack, prefix the **whole** title with its positi
 [N/M][BREAKING][mod1][mod2] type: description
 ```
 
-Number the stack bottom-to-top, so `[1/M]` is the PR based on `main` and `[M/M]` sits at the top. Use it only for a genuine stack (each PR based on the one below it); a lone PR takes no prefix.
+Number the stack bottom-to-top, so `[1/M]` is the PR based on `main` and `[M/M]` sits at the top. Use positive integers without leading zeroes, with `1 <= N <= M` and `M >= 2`. Use the prefix only for a genuine stack (each PR based on the one below it); a lone PR takes no prefix.
 
 ### Allowed modules
 
