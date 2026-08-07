@@ -134,6 +134,8 @@ Add a label to your PR so it gets categorized correctly in Release Notes:
 
 Module-specific labels (`rollout`, `server`, `cli`, `auth`, `eval`) can also be added for filtering. Rollout work typically touches `osmosis_ai.rollout` and related CLI commands.
 
+The `stacked-pr` label is automatically added when a title starts with `[N/M]`. It is filtering metadata and does not change the Release Notes category.
+
 ### Workflow
 
 1. Fork the repository and create a feature branch

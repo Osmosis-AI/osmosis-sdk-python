@@ -41,4 +41,13 @@ jobs:
             echo "Got: $PR_TITLE"
             exit 1
           fi
+          if [[ "$PR_TITLE" =~ ^\[([0-9]+)/([0-9]+)\] ]]; then
+            position="${BASH_REMATCH[1]}"
+            total="${BASH_REMATCH[2]}"
+            if [[ "$position" == 0* || "$total" == 0* ]] \
+              || (( 10#$total < 2 || 10#$position > 10#$total )); then
+              echo "::error::Invalid stacked PR position [$position/$total]. Expected 1 <= N <= M and M >= 2, without leading zeroes."
+              exit 1
+            fi
+          fi
           echo "PR title is valid: $PR_TITLE"

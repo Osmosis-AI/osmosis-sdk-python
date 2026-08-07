@@ -129,6 +129,7 @@ After creating the PR, apply labels that match the change. Available repo labels
 |----------|--------|
 | Type | `enhancement`, `bug`, `refactor`, `chore`, `ci`, `documentation`, `dependencies`, `breaking` |
 | Module | `reward`, `rollout`, `cli`, `server`, `auth`, `eval` |
+| Workflow | `stacked-pr` |
 | Triage | `priority: high`, `good first issue`, `help wanted`, `question`, `duplicate`, `invalid`, `wontfix` |
 
 Guidelines:
@@ -136,6 +137,7 @@ Guidelines:
 - Add one or more **module** labels matching the `[module]` brackets in the title when those labels exist.
 - `misc` does **not** have a matching GitHub label in this repo. If the title uses `[misc]`, keep the type label and optionally add specific module labels only when they materially help triage a cross-cutting PR.
 - Add `breaking` whenever the title carries `[BREAKING]`.
+- Add `stacked-pr` whenever the title carries an `[N/M]` prefix. The auto-label workflow normally applies it, but verify it is present.
 - Do not invent labels; only use ones returned by `gh label list`.
 
 Apply labels with:

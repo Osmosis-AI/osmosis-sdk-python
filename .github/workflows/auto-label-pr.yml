@@ -6,7 +6,7 @@ on:
 
 jobs:
   label:
-    if: ${{ !endsWith(github.actor, '[bot]') && (github.event.action != 'edited' || github.event.changes.title) }}
+    if: ${{ !endsWith(github.event.pull_request.user.login, '[bot]') && (github.event.action != 'edited' || github.event.changes.title) }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -20,8 +20,13 @@ jobs:
         run: |
           labels=()
 
-          # Breaking change
-          if [[ "$PR_TITLE" =~ ^\[BREAKING\] ]]; then
+          # Stacked PR
+          if [[ "$PR_TITLE" =~ ^\[[0-9]+/[0-9]+\] ]]; then
+            labels+=("stacked-pr")
+          fi
+
+          # Breaking change, after an optional stack position
+          if [[ "$PR_TITLE" =~ ^(\[[0-9]+/[0-9]+\])?\[BREAKING\] ]]; then
             labels+=("breaking")
           fi
 
