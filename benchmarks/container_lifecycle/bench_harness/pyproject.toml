@@ -4,10 +4,9 @@ version = "0.1.0"
 requires-python = ">=3.12"
 dependencies = [
     # The harness runs inside the task container, which only needs the
-    # framework-neutral core, so no extra is selected. Pinned at the SDK's
-    # default branch because the in-container runner is not released yet.
-    # Re-run this benchmark once PR #270 lands: main's runner still writes
-    # trajectories through Harbor, which no-ops silently inside the container.
+    # framework-neutral core, so no extra is selected. The benchmark
+    # intentionally tracks the SDK's default branch to exercise the latest
+    # in-container runner.
     "osmosis-ai @ https://github.com/Osmosis-AI/osmosis-sdk-python/archive/refs/heads/main.tar.gz",
 ]
 
