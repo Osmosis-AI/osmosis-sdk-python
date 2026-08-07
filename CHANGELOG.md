@@ -20,6 +20,8 @@ This file records changes to `osmosis-ai`. For earlier versions, see [GitHub Rel
 ### Added
 
 - `AgentWorkflowOutput` is exported from `osmosis_ai.rollout`; it and `Messages` are exported from `osmosis_ai.rollout.types`. `AgentWorkflow.run` is now typed to return `AgentWorkflowOutput | Messages | None`: the return value carries the rollout's single message history in `messages` and is the primary trajectory source, while `None` falls back to the sample collected on the active `RolloutContext`. Unknown output fields (including the pre-v0.3 `samples` mapping) and non-finite metric values are rejected.
+- `osmosis benchmark submit`, `osmosis eval submit`, and `osmosis train submit` accept `--secrets-file` to supply per-run values for `[secrets]` names without saving them to the secret store. Each name resolves by first hit: the dotenv file (`-` reads stdin), the process environment, the platform secret store, then an interactive prompt when stdin is a TTY. Outside a TTY all unresolved names are reported at once. See "Secret resolution" in [docs/eval.md](docs/eval.md).
+- Benchmark configs accept `[verifier].required`, the secret record names a dataset's verifier reads, alongside the pinned-grader judge state reported by `osmosis benchmark info`. A name cannot appear in both `[verifier].required` and `[secrets]`/`[env]`.
 
 ## 0.3.0rc1 - 2026-07-28
 

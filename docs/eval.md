@@ -15,6 +15,10 @@ Reads an evaluation config TOML, validates its **structure** locally, and POSTs 
 ```bash
 osmosis eval submit configs/eval/<name>.toml        # interactive confirmation
 osmosis eval submit configs/eval/<name>.toml --yes  # skip the prompt
+
+# Supply per-run values for [secrets] names without saving them
+osmosis eval submit configs/eval/<name>.toml --secrets-file .env.run
+vault read -field=env secret/eval | osmosis eval submit configs/eval/<name>.toml --secrets-file -
 ```
 
 The config path must resolve under `configs/eval/` inside the current git workspace directory.
@@ -63,8 +67,19 @@ The SDK validates **structure only**; the backend owns value-level semantics. So
 3. Load + validate the TOML (`load_eval_submit_config`).
 4. Validate `rollout`/`entrypoint` resolve under `rollouts/<rollout>/`, then validate the rollout backend.
 5. Preflight a pinned `commit_sha` (fail fast on a confirmed-bad SHA before the platform clones the repo).
-6. Render the confirmation summary; if `[secrets]` are referenced, fetch workspace + personal scopes and **fail fast** on missing names with an `osmosis secret set <name>` hint.
+6. Render the confirmation summary; if `[secrets]` are referenced, fetch workspace + personal scopes and resolve each name (see [Secret resolution](#secret-resolution)), then **fail fast** on names that are neither stored nor supplied, with an `osmosis secret set <name>` hint.
 7. Confirm (skipped with `--yes`), then POST via `client.submit_evaluation_run`. A missing-secret `404` is enriched with the same add-secret hint.
+
+### Secret resolution
+
+Names listed in `[secrets]` do not have to be saved in the platform secret store. `resolve_run_secrets` ([secret_resolution.py](../osmosis_ai/platform/cli/secret_resolution.py)) resolves each name by first hit:
+
+1. `--secrets-file <path>` — a dotenv file of `NAME=value` lines; `-` reads stdin, for piping from a secret manager.
+2. The process environment.
+3. The platform secret store — a name already saved in the workspace or personal scope is left for the platform to resolve and is never sent from the CLI.
+4. An interactive `getpass` prompt, only when stdin is a TTY.
+
+Values supplied this way are never written to disk and must be re-supplied on every run. Outside a TTY, every unresolved name is reported at once so CI shows the whole gap rather than one name per retry. The same flag and ordering apply to `osmosis train submit` and `osmosis benchmark submit`.
 
 The result is an `OperationResult` whose next-steps point at `osmosis eval info <name>`, `osmosis eval list`, and the platform URL.
 
@@ -84,7 +99,7 @@ Migration notice: rich-mode metrics exports no longer write new files under `.os
 
 ## `osmosis eval rubric` (offline LLM-as-judge)
 
-Standalone, no-workspace scoring of a candidate output against a rubric via a hosted LLM judge (LiteLLM). It needs no platform auth and runs no rollout. The CLI command is `osmosis eval rubric`; the same logic is importable as `evaluate_rubric`:
+Standalone, no-workspace scoring of a candidate output against a rubric via a hosted LLM judge (LiteLLM), available with `pip install "osmosis-ai[rubric]"`. It needs no platform auth and runs no rollout. The CLI command is `osmosis eval rubric`; the same logic is importable as `evaluate_rubric`:
 
 ```python
 from osmosis_ai import evaluate_rubric, RubricResult  # lazy-loaded top-level exports

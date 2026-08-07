@@ -75,7 +75,7 @@ def benchmark_submit(
         None,
         "--secrets-file",
         help=(
-            "Dotenv file supplying values for [secrets] names; - reads stdin. "
+            "Dotenv file supplying values for \\[secrets] names; - reads stdin. "
             "Values are never saved and are re-supplied on every run."
         ),
     ),
