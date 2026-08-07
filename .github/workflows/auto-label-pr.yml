@@ -4,15 +4,17 @@ on:
   pull_request_target:
     types: [opened, edited, reopened, ready_for_review, converted_to_draft]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 jobs:
   label:
-    if: ${{ !endsWith(github.event.pull_request.user.login, '[bot]') && (github.event.action != 'edited' || github.event.changes.title) }}
+    if: ${{ !endsWith(github.event.pull_request.user.login, '[bot]') }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
-      # Covers both the timeline read and the label write: GitHub lists
-      # GET /issues/{n}/timeline and PUT /issues/{n}/labels under either the
-      # Issues or the Pull requests permission.
+      # Covers the current PR read, timeline read, and label writes.
       pull-requests: write
     steps:
       - name: Reconcile labels from PR title and draft state
@@ -57,7 +59,14 @@ jobs:
             ]);
             const BOT = 'github-actions[bot]';
 
-            const pr = context.payload.pull_request;
+            const pullNumber = context.payload.pull_request.number;
+            // Event payloads are snapshots. Read the current PR so an older
+            // queued event converges on the latest title, draft state, and
+            // labels instead of restoring stale state.
+            const { data: pr } = await github.rest.pulls.get({
+              ...context.repo,
+              pull_number: pullNumber,
+            });
             const match = TITLE_PATTERN.exec(pr.title);
             if (!match) {
               core.setFailed(
@@ -84,7 +93,7 @@ jobs:
             // outcome of a race is to keep the label rather than drop it.
             const timeline = await github.paginate(
               github.rest.issues.listEventsForTimeline,
-              { ...context.repo, issue_number: pr.number, per_page: 100 },
+              { ...context.repo, issue_number: pullNumber, per_page: 100 },
             );
             const appliedBy = new Map();
             for (const event of timeline) {
@@ -96,23 +105,44 @@ jobs:
             }
 
             const current = new Set(pr.labels.map((label) => label.name));
-            const final = new Set(desired);
-            for (const name of current) {
-              if (!MANAGED.has(name) || appliedBy.get(name) !== BOT) {
-                final.add(name);
-              }
-            }
-
-            const added = [...final].filter((name) => !current.has(name)).sort();
-            const removed = [...current].filter((name) => !final.has(name)).sort();
+            const added = [...desired].filter((name) => !current.has(name)).sort();
+            const removed = [...current]
+              .filter(
+                (name) =>
+                  MANAGED.has(name) &&
+                  !desired.has(name) &&
+                  appliedBy.get(name) === BOT,
+              )
+              .sort();
             if (added.length === 0 && removed.length === 0) {
               core.info(`Labels already up to date: ${[...current].sort().join(', ') || '(none)'}`);
               return;
             }
             if (added.length > 0) core.info(`Adding: ${added.join(', ')}`);
             if (removed.length > 0) core.info(`Removing stale bot labels: ${removed.join(', ')}`);
-            await github.rest.issues.setLabels({
-              ...context.repo,
-              issue_number: pr.number,
-              labels: [...final],
-            });
+            // Mutate only the labels this workflow owns. setLabels replaces the
+            // complete set and can erase a human label added after the PR read.
+            if (added.length > 0) {
+              await github.rest.issues.addLabels({
+                ...context.repo,
+                issue_number: pullNumber,
+                labels: added,
+              });
+            }
+            for (const name of removed) {
+              try {
+                await github.rest.issues.removeLabel({
+                  ...context.repo,
+                  issue_number: pullNumber,
+                  name,
+                });
+              } catch (error) {
+                // Another actor may remove the same stale label between our
+                // read and write. That already achieved the desired state.
+                if (error.status === 404) {
+                  core.info(`Already removed: ${name}`);
+                } else {
+                  throw error;
+                }
+              }
+            }

@@ -7,17 +7,20 @@ on:
 permissions:
   pull-requests: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 jobs:
   check-title:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - name: Validate PR title format
-        # Gate on the PR author, not github.actor. github.actor is whoever
-        # triggered *this run*, so a bot touching a human's PR (a review app
-        # pushing a commit, for example) skipped the check — and a skipped step
-        # reports the job as success, silently turning a failing title green.
-        if: ${{ !endsWith(github.event.pull_request.user.login, '[bot]') && (github.event.action != 'edited' || github.event.changes.title) }}
+        # Gate on the PR author, not github.actor. Validate every event: a
+        # conditionally skipped required check reports success, so skipping
+        # non-title edits would let a body edit turn an invalid title green.
+        if: ${{ !endsWith(github.event.pull_request.user.login, '[bot]') }}
         env:
           PR_TITLE: ${{ github.event.pull_request.title }}
         run: |
