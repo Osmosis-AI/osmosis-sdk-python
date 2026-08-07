@@ -10,7 +10,10 @@ import pytest
 from harbor.trial.queue import TrialQueue
 
 from osmosis_ai.packaging import build_bundle, inspect_bundle
-from osmosis_ai.rollout.backend.harbor.backend_v2 import HarborBackendV2
+from osmosis_ai.rollout.backend.harbor.backend import (
+    MIGRATION_DOCS_URL,
+    HarborBackend,
+)
 from osmosis_ai.rollout.backend.harbor.tasks import (
     SDK_REQUIREMENTS_FILENAME,
     HarborTask,
@@ -69,6 +72,49 @@ def template_task(tmp_path):
 
 def request_for(prompt=None, metadata=None) -> ExecutionRequest:
     return ExecutionRequest(id="r1", prompt=prompt or [], metadata=metadata)
+
+
+class TestPublicSurface:
+    """`HarborBackend` names the bundle backend as of v0.3."""
+
+    def test_package_exports(self):
+        import osmosis_ai.rollout.backend.harbor as harbor_package
+
+        assert harbor_package.__all__ == ["HarborBackend", "TaskMode"]
+        assert harbor_package.HarborBackend is HarborBackend
+
+    def test_health_identifies_the_backend(self, template_task):
+        backend = HarborBackend(
+            orchestrator=TrialQueue(n_concurrent=1),
+            tasks_dir=template_task,
+            agent="terminus-2",
+        )
+
+        assert backend.health()["backend"] == "harbor"
+
+    def test_pre_v03_call_is_told_the_constructor_changed(self, template_task):
+        # The stale call passes no tasks_dir, so without the __new__ guard this
+        # would surface as "missing a required argument: 'tasks_dir'".
+        with pytest.raises(TypeError) as excinfo:
+            HarborBackend(
+                orchestrator=TrialQueue(n_concurrent=1),
+                task_dir=template_task,
+                user_code_dir=template_task,
+                workflow="rollout.workflow:Workflow",
+            )
+
+        message = str(excinfo.value)
+        assert "no longer takes task_dir, user_code_dir, workflow" in message
+        assert MIGRATION_DOCS_URL in message
+
+    def test_a_typo_still_reads_like_a_typo(self, template_task):
+        with pytest.raises(TypeError, match="unexpected keyword argument 'taks_dir'"):
+            HarborBackend(
+                orchestrator=TrialQueue(n_concurrent=1),
+                tasks_dir=template_task,
+                agent="terminus-2",
+                taks_dir=template_task,
+            )
 
 
 class TestContract:
@@ -268,7 +314,7 @@ class TestPatchDockerfileWithSdk:
 
     def test_backend_flag_requires_bundle(self, template_task):
         with pytest.raises(ValueError, match="requires a bundle"):
-            HarborBackendV2(
+            HarborBackend(
                 orchestrator=TrialQueue(n_concurrent=1),
                 tasks_dir=template_task,
                 agent="mini-swe-agent",
@@ -276,7 +322,7 @@ class TestPatchDockerfileWithSdk:
             )
 
     def test_patch_defaults_on_with_bundle(self, bundle, template_task):
-        backend = HarborBackendV2(
+        backend = HarborBackend(
             orchestrator=TrialQueue(n_concurrent=1),
             tasks_dir=template_task,
             bundle=bundle,
@@ -284,7 +330,7 @@ class TestPatchDockerfileWithSdk:
         assert backend.sdk_requirements is not None
 
     def test_patch_defaults_off_without_bundle(self, template_task):
-        backend = HarborBackendV2(
+        backend = HarborBackend(
             orchestrator=TrialQueue(n_concurrent=1),
             tasks_dir=template_task,
             agent="mini-swe-agent",
@@ -292,7 +338,7 @@ class TestPatchDockerfileWithSdk:
         assert backend.sdk_requirements is None
 
     def test_queue_capacity_bound(self, bundle, template_task):
-        backend = HarborBackendV2(
+        backend = HarborBackend(
             orchestrator=TrialQueue(n_concurrent=1),
             tasks_dir=template_task,
             bundle=bundle,
@@ -307,7 +353,7 @@ class TestPatchDockerfileWithSdk:
         assert backend.health()["max_queue_depth"] == 2
 
     def test_unbounded_queue_always_has_capacity(self, bundle, template_task):
-        backend = HarborBackendV2(
+        backend = HarborBackend(
             orchestrator=TrialQueue(n_concurrent=1),
             tasks_dir=template_task,
             bundle=bundle,
@@ -316,7 +362,7 @@ class TestPatchDockerfileWithSdk:
         assert backend.has_capacity()
 
     def test_patch_opt_out(self, bundle, template_task):
-        backend = HarborBackendV2(
+        backend = HarborBackend(
             orchestrator=TrialQueue(n_concurrent=1),
             tasks_dir=template_task,
             bundle=bundle,
@@ -328,7 +374,7 @@ class TestPatchDockerfileWithSdk:
 class TestBundleBackend:
     @pytest.fixture
     def backend(self, bundle, template_task):
-        return HarborBackendV2(
+        return HarborBackend(
             orchestrator=TrialQueue(n_concurrent=1),
             tasks_dir=template_task,
             bundle=bundle,
@@ -354,7 +400,7 @@ class TestBundleBackend:
         assert config.verifier.disable is False  # generated test.sh enables it
 
     def test_verifier_disabled_without_tests(self, bundle, template_task):
-        backend = HarborBackendV2(
+        backend = HarborBackend(
             orchestrator=TrialQueue(n_concurrent=1),
             tasks_dir=template_task,
             bundle=bundle,
@@ -390,7 +436,7 @@ class TestBundleBackend:
 
 class TestNativeAgents:
     def backend_for(self, agent, template_task, **kwargs):
-        return HarborBackendV2(
+        return HarborBackend(
             orchestrator=TrialQueue(n_concurrent=1),
             tasks_dir=template_task,
             agent=agent,
@@ -461,7 +507,7 @@ class TestNativeAgents:
         self, bundle, template_task
     ):
         with pytest.raises(ValueError, match="native_agent_kwargs"):
-            HarborBackendV2(
+            HarborBackend(
                 orchestrator=TrialQueue(n_concurrent=1),
                 tasks_dir=template_task,
                 bundle=bundle,
@@ -473,7 +519,7 @@ class TestNativeAgents:
         task = root / "task-a"
         (task / "environment").mkdir(parents=True)
         (task / "instruction.md").write_text("real instruction")
-        backend = HarborBackendV2(
+        backend = HarborBackend(
             orchestrator=TrialQueue(n_concurrent=1),
             tasks_dir=root,
             task_mode=TaskMode.DATASET,
@@ -545,7 +591,7 @@ class TestGraderOutcome:
     BASE = datetime.now()
 
     def backend_for(self, template_task, tmp_path):
-        return HarborBackendV2(
+        return HarborBackend(
             orchestrator=TrialQueue(n_concurrent=1),
             tasks_dir=template_task,
             agent="terminus-2",
@@ -688,7 +734,7 @@ class TestGraderOutcome:
 
 class TestTaskResolution:
     def backend_for(self, template_task):
-        return HarborBackendV2(
+        return HarborBackend(
             orchestrator=TrialQueue(n_concurrent=1),
             tasks_dir=template_task,
             agent="terminus-2",
@@ -718,7 +764,7 @@ class TestTaskResolution:
         orchestrator = SimpleNamespace(
             add_hook=lambda *args: None, submit=failing_submit
         )
-        backend = HarborBackendV2(
+        backend = HarborBackend(
             orchestrator=orchestrator,
             tasks_dir=template_task,
             agent="terminus-2",
@@ -759,7 +805,7 @@ class TestTaskResolution:
         orchestrator = SimpleNamespace(
             add_hook=lambda *args: None, submit=failing_submit
         )
-        backend = HarborBackendV2(
+        backend = HarborBackend(
             orchestrator=orchestrator,
             tasks_dir=template_task,
             agent="terminus-2",
@@ -908,7 +954,7 @@ class TestTaskRefs:
 
 class TestCancellation:
     def backend(self, bundle, template_task):
-        return HarborBackendV2(
+        return HarborBackend(
             orchestrator=TrialQueue(n_concurrent=1),
             tasks_dir=template_task,
             bundle=bundle,
@@ -990,7 +1036,7 @@ class TestPrewarm:
     def test_prewarm_config_is_install_only_without_credentials(
         self, bundle, template_task
     ):
-        backend = HarborBackendV2(
+        backend = HarborBackend(
             orchestrator=TrialQueue(n_concurrent=1),
             tasks_dir=template_task,
             bundle=bundle,
@@ -1011,7 +1057,7 @@ class TestPrewarm:
     async def test_dataset_prewarm_requires_task_ids(self, bundle, tmp_path):
         root = tmp_path / "dataset"
         root.mkdir()
-        backend = HarborBackendV2(
+        backend = HarborBackend(
             orchestrator=TrialQueue(n_concurrent=1),
             tasks_dir=root,
             task_mode=TaskMode.DATASET,
@@ -1066,7 +1112,7 @@ async def noop_callback(result):
 
 class TestConfigValidation:
     def backend_for(self, template_task, **kwargs):
-        return HarborBackendV2(
+        return HarborBackend(
             orchestrator=TrialQueue(n_concurrent=1),
             tasks_dir=template_task,
             **kwargs,
@@ -1136,7 +1182,7 @@ class TestConfigValidation:
 
 class TestArtifactLifecycle:
     def backend_for(self, template_task, tmp_path, queue, **kwargs):
-        backend = HarborBackendV2(
+        backend = HarborBackend(
             orchestrator=queue,
             tasks_dir=template_task,
             agent="terminus-2",
@@ -1293,7 +1339,7 @@ class TestPrewarmIdentity:
                 lambda cfg: not any(k.startswith("OPENAI_") for k in cfg.env),
             ),
         ):
-            backend = HarborBackendV2(
+            backend = HarborBackend(
                 orchestrator=TrialQueue(n_concurrent=1),
                 tasks_dir=template_task,
                 agent=agent,
@@ -1314,7 +1360,7 @@ class TestPrewarmIdentity:
         """Dispatch must key on the registry, not a 'prewarm-' id pattern."""
         from types import SimpleNamespace
 
-        backend = HarborBackendV2(
+        backend = HarborBackend(
             orchestrator=TrialQueue(n_concurrent=1),
             tasks_dir=template_task,
             agent="oracle",
@@ -1350,7 +1396,7 @@ class TestPrewarmIdentity:
             return trial_result()
 
         queue = FakeQueue(run)
-        backend = HarborBackendV2(
+        backend = HarborBackend(
             orchestrator=queue,
             tasks_dir=template_task,
             agent="terminus-2",
@@ -1374,7 +1420,7 @@ class TestPrewarmIdentity:
             return trial_result()
 
         queue = FakeQueue(run)
-        backend = HarborBackendV2(
+        backend = HarborBackend(
             orchestrator=queue,
             tasks_dir=template_task,
             agent="terminus-2",
@@ -1391,7 +1437,7 @@ class TestPrewarmIdentity:
 
 class TestContainerInputGating:
     def test_native_track_stages_no_container_input(self, template_task, tmp_path):
-        backend = HarborBackendV2(
+        backend = HarborBackend(
             orchestrator=TrialQueue(n_concurrent=1),
             tasks_dir=template_task,
             agent="mini-swe-agent",
@@ -1409,7 +1455,7 @@ class TestContainerInputGating:
         assert not (task_dir / "container_input.json").exists()
 
     def test_bundle_track_stages_container_input(self, bundle, template_task, tmp_path):
-        backend = HarborBackendV2(
+        backend = HarborBackend(
             orchestrator=TrialQueue(n_concurrent=1),
             tasks_dir=template_task,
             bundle=bundle,
@@ -1425,7 +1471,7 @@ class TestContainerInputGating:
     def test_native_with_grader_bundle_ships_input_only_in_tests(
         self, bundle, template_task, tmp_path
     ):
-        backend = HarborBackendV2(
+        backend = HarborBackend(
             orchestrator=TrialQueue(n_concurrent=1),
             tasks_dir=template_task,
             agent="terminus-2",
@@ -1446,7 +1492,7 @@ class TestCallbackOutcomes:
     """A channel's outcome is produced once; retries resend it byte-identical."""
 
     def backend_for(self, template_task, tmp_path, queue):
-        backend = HarborBackendV2(
+        backend = HarborBackend(
             orchestrator=queue,
             tasks_dir=template_task,
             agent="terminus-2",
@@ -1542,7 +1588,7 @@ class TestCallbackOutcomes:
         async def failing_resolve(request):
             raise ValueError("harbor_task metadata is malformed")
 
-        backend = HarborBackendV2(
+        backend = HarborBackend(
             orchestrator=FakeQueue(),
             tasks_dir=template_task,
             agent="terminus-2",
@@ -1573,7 +1619,7 @@ class TestCallbackOutcomes:
         async def failing_resolve(request):
             raise RuntimeError("setup failed")
 
-        backend = HarborBackendV2(
+        backend = HarborBackend(
             orchestrator=FakeQueue(),
             tasks_dir=template_task,
             agent="terminus-2",
@@ -1703,7 +1749,7 @@ class TestFailureCategorization:
         """No reward source: the terminal outcome must say what is missing."""
         from types import SimpleNamespace
 
-        backend = HarborBackendV2(
+        backend = HarborBackend(
             orchestrator=TrialQueue(n_concurrent=1),
             tasks_dir=template_task,
             agent="terminus-2",
@@ -1724,7 +1770,7 @@ class TestFailureCategorization:
     ):
         from types import SimpleNamespace
 
-        backend = HarborBackendV2(
+        backend = HarborBackend(
             orchestrator=TrialQueue(n_concurrent=1),
             tasks_dir=template_task,
             agent="terminus-2",
@@ -1790,7 +1836,7 @@ def atif_document(**overrides):
 
 class TestNativeAtif:
     def backend_for(self, template_task, tmp_path, agent="terminus-2", **kwargs):
-        return HarborBackendV2(
+        return HarborBackend(
             orchestrator=TrialQueue(n_concurrent=1),
             tasks_dir=template_task,
             agent=agent,
@@ -1879,7 +1925,7 @@ class TestNativeAtif:
 
 class TestBundleSampleBoundary:
     def backend_for(self, bundle, template_task, tmp_path):
-        return HarborBackendV2(
+        return HarborBackend(
             orchestrator=TrialQueue(n_concurrent=1),
             tasks_dir=template_task,
             bundle=bundle,
