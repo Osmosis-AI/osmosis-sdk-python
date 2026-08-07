@@ -114,8 +114,7 @@ STATUS_RETENTION_SEC = 900.0
 # that class's name but not its signature, so a stale call site would otherwise
 # fail on the argument it does *not* pass ("missing a required argument:
 # 'tasks_dir'") rather than on the ones it does. Drop once v0.3 has shipped.
-# TODO(OSM-1713): point at the published migration page once the docs land.
-MIGRATION_DOCS_URL = "https://docs.osmosis.ai/cli/rollout/overview"
+MIGRATION_DOCS_URL = "https://docs.osmosis.ai/migration-guides/v0-3"
 PRE_V03_KWARGS = frozenset(
     {
         "task_dir",
