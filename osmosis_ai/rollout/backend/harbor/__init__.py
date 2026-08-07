@@ -9,15 +9,12 @@ from osmosis_ai._imports import (
 )
 
 if TYPE_CHECKING:
-    from osmosis_ai.rollout.backend.harbor.agent_adapter import OsmosisInstalledAgent
     from osmosis_ai.rollout.backend.harbor.backend import HarborBackend
+    from osmosis_ai.rollout.backend.harbor.tasks import TaskMode
 
 _EXPORTS: dict[str, tuple[str, str]] = {
     "HarborBackend": ("osmosis_ai.rollout.backend.harbor.backend", "HarborBackend"),
-    "OsmosisInstalledAgent": (
-        "osmosis_ai.rollout.backend.harbor.agent_adapter",
-        "OsmosisInstalledAgent",
-    ),
+    "TaskMode": ("osmosis_ai.rollout.backend.harbor.tasks", "TaskMode"),
 }
 
 
@@ -33,7 +30,9 @@ def __getattr__(name: str) -> object:
         raise_optional_dependency_error(
             exc,
             extra="harbor",
-            expected_modules=frozenset({"harbor", "toml"}),
+            # harbor is direct; platformdirs and toml arrive through
+            # osmosis_ai.packaging when the backend builds its bundle wheel.
+            expected_modules=frozenset({"harbor", "platformdirs", "toml"}),
             feature="The Harbor backend",
         )
 
@@ -44,5 +43,5 @@ def __dir__() -> list[str]:
 
 __all__ = [
     "HarborBackend",
-    "OsmosisInstalledAgent",
+    "TaskMode",
 ]

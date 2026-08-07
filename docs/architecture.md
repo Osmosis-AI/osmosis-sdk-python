@@ -21,17 +21,20 @@ osmosis_ai/
 │   ├── grader.py          # Grader ABC
 │   ├── context.py         # RolloutContext / AgentWorkflowContext / GraderContext
 │   ├── driver.py          # RolloutDriver — eval-facing execution contract
-│   ├── validator.py       # Static backend validation
-│   ├── server/            # optional generic FastAPI server (`[server]`)
+│   ├── server/            # optional generic FastAPI server (`[server]`) + ControllerAuth
 │   ├── backend/           # ExecutionBackend ABC + Local / optional Harbor backend
-│   ├── types/             # protocol.py, config.py, sample.py
+│   ├── container/         # in-container agent + grader runner and its file contract
+│   ├── trajectory/        # ATIF models, conversion, and best-effort persistence
+│   ├── types/             # protocol.py, config.py, output.py, sample.py
+│   ├── utils/             # framework-neutral helpers (errors, http, ttl_cache, …)
 │   └── integrations/agents/  # Strands / OpenAI Agents adapters
 ├── eval/              # Eval helpers
-│   ├── rubric/        # evaluate_rubric() LLM-as-judge engine
-│   └── common/cli.py  # Workflow + grader loader (used by cloud submit preflight)
+│   └── rubric/        # evaluate_rubric() LLM-as-judge engine
 ├── templates/         # `osmosis template` recipe catalog + source resolution
+├── packaging.py       # Build an installable wheel bundle from a rollout project
 ├── __init__.py        # Top-level exports (lazy __getattr__)
-├── _litellm_compat.py # LiteLLM import shim (shared by rubric + eval)
+├── _imports.py        # Lazy-export + missing-extra helpers shared by every facade
+├── _litellm_compat.py # LiteLLM import shim (used by eval/rubric/engine.py)
 └── consts.py          # PACKAGE_VERSION
 ```
 
@@ -39,8 +42,8 @@ osmosis_ai/
 
 - `cli/` — the CLI framework layer plus every command group. Files in [../osmosis_ai/cli/commands/](../osmosis_ai/cli/commands/) are thin shells that delegate to business logic; see [cli.md](./cli.md).
 - `platform/` — anything that calls the Osmosis Platform API. Business-logic helpers (no Typer registration) live in [../osmosis_ai/platform/cli/](../osmosis_ai/platform/cli/).
-- `rollout/` — the remote rollout protocol SDK: the `AgentWorkflow` + `Grader` abstraction and framework-neutral execution core. The generic FastAPI server and framework/back-end adapters are explicit optional modules; see [rollout-sdk.md](./rollout-sdk.md).
-- `eval/` — `rubric/` powers `osmosis eval rubric` (see [eval.md](./eval.md)); `common/cli.py` exposes the workflow + grader loader that cloud `eval submit` / `train submit` preflight uses.
+- `rollout/` — the remote rollout protocol SDK: the `AgentWorkflow` + `Grader` abstraction and the framework-neutral execution core (`LocalBackend`, contexts, trajectory persistence, the in-container runner). The generic FastAPI server and the framework/back-end adapters are explicit optional modules gated behind extras; see [rollout-sdk.md](./rollout-sdk.md).
+- `eval/` — `rubric/` powers `osmosis eval rubric`; see [eval.md](./eval.md). The workflow/grader loader that cloud `eval submit` / `train submit` preflight uses lives in [../osmosis_ai/platform/cli/rollout_entrypoint.py](../osmosis_ai/platform/cli/rollout_entrypoint.py).
 
 ## Key import paths
 
@@ -101,9 +104,9 @@ The controller delivers results asynchronously via the two callback URLs, so it 
 
 For local evaluation the same workflow/grader run behind a different driver. The eval-facing contract is `RolloutDriver` / `RolloutOutcome` in [../osmosis_ai/rollout/driver.py](../osmosis_ai/rollout/driver.py): eval supplies data + an LLM endpoint and consumes trace + reward, without caring whether execution was in-process or over HTTP.
 
-## Static validation
+## Backend validation
 
-During cloud `eval submit` / `train submit` **preflight**, `validate_rollout_backend` ([../osmosis_ai/platform/cli/workspace_directory_contract.py](../osmosis_ai/platform/cli/workspace_directory_contract.py)) calls `validate_backend` ([../osmosis_ai/rollout/validator.py](../osmosis_ai/rollout/validator.py)), which checks the workflow/grader classes the way `LocalBackend` instantiates them: concrete subclasses of `AgentWorkflow` / `Grader`, `async` `run` / `grade`, a resolvable agent name (1–256 chars), and successful instantiation with the provided config. It aggregates every applicable error into one `ValidationResult` instead of stopping at the first failure. (There is no separate "serve" step — see [rollout-sdk.md](./rollout-sdk.md).)
+Cloud `eval submit` / `train submit` preflight validates paths and declared dependencies, then imports the rollout entrypoint once. There is no static validation layer beyond that import: the CLI does not scan the module namespace for `AgentWorkflow` or `Grader` classes, and the server does not inspect the backend it is given. Backend constructors establish their own invariants, so genuine misconfigurations surface as import-time errors during preflight; anything subtler surfaces as an ordinary Python error on the first rollout. Running an eval (`osmosis eval submit`) exercises the rollout end to end and is the intended smoke test before training.
 
 ## See also
 

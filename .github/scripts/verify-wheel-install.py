@@ -62,6 +62,7 @@ EXTRA_REQUIREMENTS: dict[str, set[str]] = {
         "harbor",
         "litellm",
         "orjson",
+        "platformdirs",
         "toml",
     },
     "rubric": {"aiohttp", "click", "litellm", "orjson", "tqdm"},
@@ -177,6 +178,59 @@ def _assert_public_exports(module_name: str, symbols: Iterable[str]) -> None:
         assert symbol in exported, f"{module_name}.{symbol} is missing from __all__"
 
 
+# Framework-neutral modules a bare install must be able to import. The
+# container runner is on this list on purpose: bundle wheels are installed
+# inside a task container that never gets the harbor extra.
+BARE_IMPORTABLE_MODULES = (
+    "osmosis_ai.rollout.container.files",
+    "osmosis_ai.rollout.container.runner",
+    "osmosis_ai.rollout.container.trajectories",
+    "osmosis_ai.rollout.trajectory.atif",
+    "osmosis_ai.rollout.trajectory.converter",
+    "osmosis_ai.rollout.trajectory.save",
+    "osmosis_ai.rollout.types.output",
+    "osmosis_ai.rollout.types.protocol",
+    "osmosis_ai.rollout.utils.errors",
+    "osmosis_ai.rollout.utils.ttl_cache",
+)
+
+# Leaf modules that must stay unimportable until their extra is installed.
+# osmosis_ai.packaging only ever builds the bundle wheel Harbor installs in a
+# task container, so it is harbor territory despite its top-level name.
+EXTRA_ONLY_MODULES = (
+    "osmosis_ai.packaging",
+    "osmosis_ai.rollout.backend.harbor.backend",
+    "osmosis_ai.rollout.backend.harbor.tasks",
+    "osmosis_ai.rollout.integrations.agents.openai_agents",
+    "osmosis_ai.rollout.integrations.agents.strands",
+    "osmosis_ai.rollout.server.app",
+)
+
+
+def _assert_extra_only_modules_absent() -> None:
+    """Bare-install guard: no extra's leaf module may resolve, and the harbor
+    facade must translate the failure into an actionable install hint."""
+    for module_name in EXTRA_ONLY_MODULES:
+        try:
+            importlib.import_module(module_name)
+        except ModuleNotFoundError as error:
+            if module_name == "osmosis_ai.packaging":
+                assert 'pip install "osmosis-ai[harbor]"' in str(error), str(error)
+            continue
+        raise AssertionError(f"{module_name} imported without its extra")
+
+    harbor = importlib.import_module("osmosis_ai.rollout.backend.harbor")
+    for symbol in harbor.__all__:
+        try:
+            getattr(harbor, symbol)
+        except ModuleNotFoundError as error:
+            assert 'pip install "osmosis-ai[harbor]"' in str(error), str(error)
+        else:
+            raise AssertionError(
+                f"osmosis_ai.rollout.backend.harbor.{symbol} resolved without harbor"
+            )
+
+
 def _smoke_bare() -> None:
     osmosis_ai = importlib.import_module("osmosis_ai")
     assert "evaluate_rubric" not in osmosis_ai.__all__
@@ -195,8 +249,11 @@ def _smoke_bare() -> None:
             "SampleSource",
         ),
     )
+    for module_name in BARE_IMPORTABLE_MODULES:
+        importlib.import_module(module_name)
     atif = importlib.import_module("osmosis_ai.rollout.trajectory.atif")
     assert atif.Trajectory is not None
+    assert callable(atif.format_trajectory_json)
 
 
 def _smoke_server() -> None:
@@ -229,8 +286,13 @@ def _smoke_openai_agents() -> None:
 def _smoke_harbor() -> None:
     _assert_public_exports(
         "osmosis_ai.rollout.backend.harbor",
-        ("HarborBackend", "OsmosisInstalledAgent"),
+        ("HarborBackend", "TaskMode"),
     )
+    # The bundle builder is what installs a rollout project inside the task
+    # container, so the harbor extra must carry its TOML writer.
+    packaging = importlib.import_module("osmosis_ai.packaging")
+    assert callable(packaging.build_bundle)
+    importlib.import_module("toml")
 
 
 def _smoke_rubric() -> None:
@@ -267,7 +329,7 @@ SCENARIO_PRESENT: dict[str, set[str]] = {
     "server": {"fastapi", "uvicorn"},
     "strands": {"litellm", "strands-agents"},
     "openai-agents": {"litellm", "openai-agents"},
-    "harbor": {"dockerfile-parse", "harbor", "toml"},
+    "harbor": {"dockerfile-parse", "harbor", "platformdirs", "toml"},
     "rubric": {"litellm", "orjson", "tqdm"},
     "parquet": {"pyarrow"},
     "full": {
@@ -277,6 +339,7 @@ SCENARIO_PRESENT: dict[str, set[str]] = {
         "litellm",
         "openai-agents",
         "orjson",
+        "platformdirs",
         "pyarrow",
         "strands-agents",
         "toml",
@@ -296,10 +359,11 @@ SCENARIO_ABSENT: dict[str, set[str]] = {
         "litellm",
         "openai-agents",
         "orjson",
+        "platformdirs",
         "pyarrow",
         "strands-agents",
-        "tqdm",
         "toml",
+        "tqdm",
         "uvicorn",
     },
     "server": {
@@ -308,15 +372,24 @@ SCENARIO_ABSENT: dict[str, set[str]] = {
         "litellm",
         "openai-agents",
         "orjson",
+        "platformdirs",
         "pyarrow",
         "strands-agents",
         "toml",
         "tqdm",
     },
-    "strands": {"dockerfile-parse", "harbor", "openai-agents", "pyarrow", "toml"},
+    "strands": {
+        "dockerfile-parse",
+        "harbor",
+        "openai-agents",
+        "platformdirs",
+        "pyarrow",
+        "toml",
+    },
     "openai-agents": {
         "dockerfile-parse",
         "harbor",
+        "platformdirs",
         "pyarrow",
         "strands-agents",
         "toml",
@@ -327,6 +400,7 @@ SCENARIO_ABSENT: dict[str, set[str]] = {
         "fastapi",
         "harbor",
         "openai-agents",
+        "platformdirs",
         "pyarrow",
         "strands-agents",
         "toml",
@@ -339,6 +413,7 @@ SCENARIO_ABSENT: dict[str, set[str]] = {
         "litellm",
         "openai-agents",
         "orjson",
+        "platformdirs",
         "strands-agents",
         "toml",
         "tqdm",
@@ -367,6 +442,7 @@ def _assert_clean_import_state() -> None:
         "mcp",
         "openai",
         "orjson",
+        "platformdirs",
         "prompt_toolkit",
         "pyarrow",
         "questionary",
@@ -378,6 +454,7 @@ def _assert_clean_import_state() -> None:
         "uvicorn",
         "osmosis_ai.cli",
         "osmosis_ai.eval.rubric",
+        "osmosis_ai.packaging",
         "osmosis_ai.platform",
         "osmosis_ai.rollout.backend.harbor",
         "osmosis_ai.rollout.integrations",
@@ -519,6 +596,7 @@ def main() -> None:
         SCENARIO_SMOKE[args.scenario]()
 
     if args.scenario == "bare":
+        _assert_extra_only_modules_absent()
         _assert_cli_aliases(distribution.version)
 
     print(

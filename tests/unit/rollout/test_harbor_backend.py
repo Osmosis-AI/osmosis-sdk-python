@@ -1,707 +1,2047 @@
+"""Bundle backend: contract round-trip, task materialization, trial config."""
+
+import asyncio
 import json
-import logging
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
-from unittest.mock import AsyncMock
 
 import pytest
+from harbor.trial.queue import TrialQueue
 
-from osmosis_ai.rollout.agent_workflow import AgentWorkflow
+from osmosis_ai.packaging import build_bundle, inspect_bundle
 from osmosis_ai.rollout.backend.harbor.backend import (
+    MIGRATION_DOCS_URL,
     HarborBackend,
-    PendingTrial,
-    parse_sample,
 )
-from osmosis_ai.rollout.context import (
-    AgentWorkflowContext,
-    GraderContext,
-    SampleSource,
+from osmosis_ai.rollout.backend.harbor.tasks import (
+    SDK_REQUIREMENTS_FILENAME,
+    HarborTask,
+    TaskMode,
+    patch_dockerfile_with_sdk,
+    venv_or_fallback_script,
 )
-from osmosis_ai.rollout.grader import Grader
+from osmosis_ai.rollout.backend.harbor.trial import PendingTrial
+from osmosis_ai.rollout.container.files import ContainerInput, ContainerResult
 from osmosis_ai.rollout.types import (
     ExecutionRequest,
     RolloutErrorCategory,
-    RolloutSample,
     RolloutStatus,
 )
-from osmosis_ai.rollout.utils.file_artifacts import (
-    GRADER_ARTIFACTS_SNAPSHOT_DIRNAME,
-    HARBOR_ARTIFACTS_DIR,
-)
-from osmosis_ai.rollout.utils.file_artifacts import (
-    copy_artifact_tree as real_copy_artifact_tree,
-)
+from osmosis_ai.rollout.types.output import AgentWorkflowOutput, coerce_output
 
-# Module-level captures so importlib can resolve the workflow/grader by
-# "<module>:<qualname>" and round-trip them through the runners.
-_AGENT_CAPTURE: dict[str, Any] = {}
-_GRADER_CAPTURE: dict[str, Any] = {}
+PYPROJECT = """\
+[project]
+name = "bench"
+version = "0.1.0"
+dependencies = []
 
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
 
-class _StaticSampleSource(SampleSource):
-    def __init__(self, messages: list[dict[str, Any]]) -> None:
-        self.messages = messages
-
-    async def get_sample(self) -> RolloutSample:
-        return RolloutSample(messages=self.messages)
+[tool.setuptools.packages.find]
+include = ["bench*"]
+"""
 
 
-class MetadataCapturingWorkflow(AgentWorkflow):
-    async def run(self, ctx: AgentWorkflowContext) -> Any:
-        from osmosis_ai.rollout.context import get_rollout_context
+@pytest.fixture(scope="module")
+def bundle(tmp_path_factory):
+    code_dir = tmp_path_factory.mktemp("harness") / "project"
+    package = code_dir / "bench"
+    package.mkdir(parents=True)
+    (package / "__init__.py").touch()
+    (package / "solver.py").write_text("class W: pass\nclass G: pass\n")
+    (code_dir / "pyproject.toml").write_text(PYPROJECT)
+    return build_bundle(
+        code_dir,
+        workflow="bench.solver:W",
+        grader="bench.solver:G",
+        bundles_dir=tmp_path_factory.mktemp("bundles"),
+    )
 
-        _AGENT_CAPTURE["metadata"] = ctx.metadata
-        _AGENT_CAPTURE["artifacts_dir"] = ctx.artifacts_dir
-        rollout_ctx = get_rollout_context()
-        if rollout_ctx:
-            rollout_ctx.set_sample_source(
-                _StaticSampleSource([{"role": "assistant", "content": "done"}]),
+
+@pytest.fixture
+def template_task(tmp_path):
+    task = tmp_path / "template-task"
+    (task / "environment").mkdir(parents=True)
+    (task / "environment" / "Dockerfile").write_text("FROM python:3.12-slim\n")
+    (task / "task.toml").write_text('[task]\nname = "template-task"\n')
+    return task
+
+
+def request_for(prompt=None, metadata=None) -> ExecutionRequest:
+    return ExecutionRequest(id="r1", prompt=prompt or [], metadata=metadata)
+
+
+class TestPublicSurface:
+    """`HarborBackend` names the bundle backend as of v0.3."""
+
+    def test_package_exports(self):
+        import osmosis_ai.rollout.backend.harbor as harbor_package
+
+        assert harbor_package.__all__ == ["HarborBackend", "TaskMode"]
+        assert harbor_package.HarborBackend is HarborBackend
+
+    def test_health_identifies_the_backend(self, template_task):
+        backend = HarborBackend(
+            orchestrator=TrialQueue(n_concurrent=1),
+            tasks_dir=template_task,
+            agent="terminus-2",
+        )
+
+        assert backend.health()["backend"] == "harbor"
+
+    def test_pre_v03_call_is_told_the_constructor_changed(self, template_task):
+        # The stale call passes no tasks_dir, so without the __new__ guard this
+        # would surface as "missing a required argument: 'tasks_dir'".
+        with pytest.raises(TypeError) as excinfo:
+            HarborBackend(
+                orchestrator=TrialQueue(n_concurrent=1),
+                task_dir=template_task,
+                user_code_dir=template_task,
+                workflow="rollout.workflow:Workflow",
+            )
+
+        message = str(excinfo.value)
+        assert "no longer takes task_dir, user_code_dir, workflow" in message
+        assert MIGRATION_DOCS_URL in message
+
+    def test_a_typo_still_reads_like_a_typo(self, template_task):
+        with pytest.raises(TypeError, match="unexpected keyword argument 'taks_dir'"):
+            HarborBackend(
+                orchestrator=TrialQueue(n_concurrent=1),
+                tasks_dir=template_task,
+                agent="terminus-2",
+                taks_dir=template_task,
             )
 
 
-class MetadataCapturingGrader(Grader):
-    async def grade(self, ctx: GraderContext) -> Any:
-        _GRADER_CAPTURE["metadata"] = ctx.metadata
-        _GRADER_CAPTURE["label"] = ctx.label
-        _GRADER_CAPTURE["artifacts_dir"] = ctx.artifacts_dir
-        if ctx.artifacts_dir:
-            ctx.artifacts_dir.mkdir(parents=True, exist_ok=True)
-            (ctx.artifacts_dir / "grader.txt").write_text("grader")
-        ctx.set_reward(1.0)
-
-
-class ArtifactWritingFailingGrader(Grader):
-    async def grade(self, ctx: GraderContext) -> Any:
-        assert ctx.artifacts_dir is not None
-        ctx.artifacts_dir.mkdir(parents=True, exist_ok=True)
-        (ctx.artifacts_dir / "partial.txt").write_text("partial")
-        raise RuntimeError("grader exploded")
-
-
-class ArtifactWritingFailingConstructorGrader(Grader):
-    def __init__(self, _config=None):
-        import osmosis_ai.rollout.backend.harbor.grader_runner as grader_runner
-
-        grader_runner.HARBOR_ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
-        (grader_runner.HARBOR_ARTIFACTS_DIR / "constructor.txt").write_text(
-            "constructor"
+class TestContract:
+    def test_spec_round_trip(self, tmp_path):
+        container_input = ContainerInput(
+            rollout_id="r1",
+            prompt=[{"role": "user", "content": "hi"}],
+            label="4",
+            metadata={"k": 1},
+            chat_completions_url="http://x/v1",
+            api_key="secret",
         )
-        raise RuntimeError("grader constructor exploded")
+        container_input.write(tmp_path / "input.json")
+        assert ContainerInput.read(tmp_path / "input.json") == container_input
 
-    async def grade(self, _ctx: GraderContext) -> Any:
-        raise AssertionError("grade should not run")
-
-
-def _make_backend_for_config(*, grader: bool = False) -> HarborBackend:
-    """Build a HarborBackend skeleton sufficient for build_rollout_config."""
-    backend = HarborBackend.__new__(HarborBackend)
-    backend.workflow_path = (
-        f"{MetadataCapturingWorkflow.__module__}:"
-        f"{MetadataCapturingWorkflow.__qualname__}"
-    )
-    backend.workflow_config_path = None
-    backend.grader_path = (
-        f"{MetadataCapturingGrader.__module__}:{MetadataCapturingGrader.__qualname__}"
-        if grader
-        else None
-    )
-    backend.grader_config_path = None
-    return backend
+    def test_result_round_trip(self, tmp_path):
+        output = AgentWorkflowOutput(
+            samples={"default": [{"role": "assistant", "content": "y"}]},
+            metrics={"turns": 1.0},
+        )
+        result = ContainerResult(status=RolloutStatus.SUCCESS, output=output)
+        result.write(tmp_path / "result.json")
+        loaded = ContainerResult.read(tmp_path / "result.json")
+        assert loaded.status == RolloutStatus.SUCCESS
+        assert loaded.output.primary_messages() == output.primary_messages()
+        assert loaded.output.metrics == {"turns": 1.0}
 
 
-class TestHarborBackend:
-    def test_sample_round_trip_preserves_native_and_trajectory_messages(self):
-        sample = RolloutSample(
-            messages=[{"type": "function_call", "name": "f"}],
-            trajectory_messages=[{"role": "assistant", "content": "done"}],
+class TestAgentWorkflowOutput:
+    def test_coerce_none_passes_through(self):
+        assert coerce_output(None) is None
+
+    def test_coerce_messages_wraps_as_default(self):
+        messages = [{"role": "assistant", "content": "hi"}]
+        output = coerce_output(messages)
+        assert output.samples == {"default": messages}
+        assert output.primary_messages() == messages
+
+    def test_coerce_output_object_passes_through(self):
+        output = AgentWorkflowOutput(samples={"solver": [], "critic": []})
+        assert coerce_output(output) is output
+
+    def test_coerce_rejects_other_types(self):
+        import pytest as pytest_module
+
+        with pytest_module.raises(TypeError, match="run\\(\\) must return"):
+            coerce_output("a string")
+
+    def test_primary_prefers_default_key(self):
+        default = [{"role": "assistant", "content": "d"}]
+        output = AgentWorkflowOutput(samples={"z": [], "default": default})
+        assert output.primary_messages() == default
+
+    def test_empty_output_has_no_primary(self):
+        assert AgentWorkflowOutput().primary_messages() is None
+
+
+class TestHarborTask:
+    def test_template_writes_prompt_and_input(self, template_task, tmp_path):
+        prompt = [{"role": "user", "content": "solve"}]
+        container_input = ContainerInput(rollout_id="r1", prompt=prompt)
+
+        task_dir = HarborTask(template_task).materialize(
+            tmp_path / "r1", container_input
         )
 
-        parsed = parse_sample(json.loads(json.dumps(sample.model_dump(), default=str)))
+        assert json.loads((task_dir / "instruction.md").read_text()) == prompt
+        assert ContainerInput.read(task_dir / "container_input.json") == container_input
+        assert (task_dir / "environment" / "Dockerfile").exists()
 
-        assert parsed is not None
-        assert parsed.messages == sample.messages
-        assert parsed.trajectory_messages == sample.trajectory_messages
+    def test_without_prompt_or_instruction_rejected(self, template_task, tmp_path):
+        with pytest.raises(ValueError, match="no instruction"):
+            HarborTask(template_task).materialize(
+                tmp_path / "r1", ContainerInput(rollout_id="r1")
+            )
 
-    async def test_empty_verifier_rewards_logs_and_returns_validation_failure(
-        self, caplog, tmp_path
+    def test_grader_script_generates_test_sh(self, template_task, tmp_path):
+        prompt = [{"role": "user", "content": "x"}]
+        task_dir = HarborTask(template_task).materialize(
+            tmp_path / "r1",
+            ContainerInput(rollout_id="r1", prompt=prompt, label="42"),
+            grader_script="bench-grade",
+        )
+        assert "bench-grade" in (task_dir / "tests" / "test.sh").read_text()
+        staged = ContainerInput.read(task_dir / "tests" / "container_input.json")
+        assert staged.label == "42"
+
+    def test_task_native_tests_win(self, template_task, tmp_path):
+        (template_task / "tests").mkdir()
+        (template_task / "tests" / "test.sh").write_text("#!/bin/bash\nnative\n")
+        prompt = [{"role": "user", "content": "x"}]
+        task_dir = HarborTask(template_task).materialize(
+            tmp_path / "r1",
+            ContainerInput(rollout_id="r1", prompt=prompt),
+            grader_script="bench-grade",
+        )
+        assert "native" in (task_dir / "tests" / "test.sh").read_text()
+
+    def test_from_dataset_routes_by_task_id(self, tmp_path):
+        root = tmp_path / "dataset"
+        task = root / "task-a"
+        (task / "environment").mkdir(parents=True)
+        (task / "instruction.md").write_text("fix the bug")
+
+        task_dir = HarborTask.from_dataset(root, "task-a").materialize(
+            tmp_path / "r1", ContainerInput(rollout_id="r1")
+        )
+        assert (task_dir / "instruction.md").read_text() == "fix the bug"
+
+    def test_from_dataset_rejects_traversal_and_unknown_ids(self, tmp_path):
+        root = tmp_path / "dataset"
+        root.mkdir()
+        with pytest.raises(ValueError, match="unknown harbor task id"):
+            HarborTask.from_dataset(root, "../../etc")
+        with pytest.raises(ValueError, match="unknown harbor task id"):
+            HarborTask.from_dataset(root, "nope")
+
+
+class TestHarnessAgentLabelStrip:
+    async def test_agent_phase_copy_has_no_label(self, tmp_path):
+        from osmosis_ai.rollout.backend.harbor.harness_agent import (
+            OsmosisHarnessInstalledAgent,
+        )
+
+        agent = OsmosisHarnessInstalledAgent.__new__(OsmosisHarnessInstalledAgent)
+        agent.logs_dir = tmp_path / "logs"
+        agent.logs_dir.mkdir()
+        agent.input_path = tmp_path / "container_input.json"
+        agent.agent_script = "bench-agent"
+        ContainerInput(rollout_id="r1", label="42").write(agent.input_path)
+
+        async def fake_exec(environment, command):
+            pass
+
+        agent.exec_as_agent = fake_exec
+        env = SimpleNamespace(capabilities=SimpleNamespace(mounted=True))
+
+        await agent.run("do it", env, None)
+
+        staged = ContainerInput.read(agent.logs_dir / "container_input.json")
+        assert staged.label is None
+        assert staged.prompt == [{"role": "user", "content": "do it"}]
+        assert ContainerInput.read(agent.input_path).label == "42"
+
+
+class TestPatchDockerfileWithSdk:
+    def test_patch_appends_isolated_venv(self, tmp_path):
+        env = tmp_path / "environment"
+        env.mkdir()
+        (env / "Dockerfile").write_text(
+            "FROM builder AS build\nRUN make\n"
+            'FROM python:3.12-slim\nUSER agent\nCMD ["bash"]\n'
+        )
+        patch_dockerfile_with_sdk(env, ["pydantic>=2", "httpx"])
+
+        dockerfile = (env / "Dockerfile").read_text()
+        reqs = (env / SDK_REQUIREMENTS_FILENAME).read_text()
+        assert reqs == "pydantic>=2\nhttpx\n"
+        assert "uv venv /opt/osmosis/venv" in dockerfile
+        # USER root is scoped to the install; the stage's user is restored last
+        assert dockerfile.rstrip().endswith("USER agent")
+        assert dockerfile.index("USER root") < dockerfile.index("uv venv")
+
+    def test_patch_without_final_user_adds_no_restore(self, tmp_path):
+        env = tmp_path / "environment"
+        env.mkdir()
+        (env / "Dockerfile").write_text("FROM python:3.12-slim\n")
+        patch_dockerfile_with_sdk(env, ["httpx"])
+        assert (env / "Dockerfile").read_text().count("USER") == 1
+
+    def test_patch_negates_dockerignore(self, tmp_path):
+        env = tmp_path / "environment"
+        env.mkdir()
+        (env / "Dockerfile").write_text("FROM python:3.12-slim\n")
+        (env / ".dockerignore").write_text("*\n")
+        patch_dockerfile_with_sdk(env, ["httpx"])
+        assert f"!{SDK_REQUIREMENTS_FILENAME}" in (env / ".dockerignore").read_text()
+
+    def test_patch_requires_dockerfile(self, tmp_path):
+        with pytest.raises(ValueError, match="cannot patch Dockerfile"):
+            patch_dockerfile_with_sdk(tmp_path, ["httpx"])
+
+    def test_materialize_patches_dockerfile(self, template_task, tmp_path):
+        task_dir = HarborTask(template_task).materialize(
+            tmp_path / "r1",
+            ContainerInput(rollout_id="r1", prompt=[{"role": "user", "content": "x"}]),
+            sdk_requirements=["httpx"],
+        )
+        assert "uv venv" in (task_dir / "environment" / "Dockerfile").read_text()
+        # the source task stays pristine
+        assert (
+            "uv venv" not in (template_task / "environment" / "Dockerfile").read_text()
+        )
+
+    def test_bundle_requirements_skips_extras(self, bundle):
+        assert inspect_bundle(bundle).requirements == []
+
+    def test_backend_flag_requires_bundle(self, template_task):
+        with pytest.raises(ValueError, match="requires a bundle"):
+            HarborBackend(
+                orchestrator=TrialQueue(n_concurrent=1),
+                tasks_dir=template_task,
+                agent="mini-swe-agent",
+                patch_dockerfile_with_sdk=True,
+            )
+
+    def test_patch_defaults_on_with_bundle(self, bundle, template_task):
+        backend = HarborBackend(
+            orchestrator=TrialQueue(n_concurrent=1),
+            tasks_dir=template_task,
+            bundle=bundle,
+        )
+        assert backend.sdk_requirements is not None
+
+    def test_patch_defaults_off_without_bundle(self, template_task):
+        backend = HarborBackend(
+            orchestrator=TrialQueue(n_concurrent=1),
+            tasks_dir=template_task,
+            agent="mini-swe-agent",
+        )
+        assert backend.sdk_requirements is None
+
+    def test_queue_capacity_bound(self, bundle, template_task):
+        backend = HarborBackend(
+            orchestrator=TrialQueue(n_concurrent=1),
+            tasks_dir=template_task,
+            bundle=bundle,
+            max_queue_depth=2,
+        )
+        assert backend.has_capacity()
+        backend.pending = {"a": None, "b": None, "c": None}
+        backend.running = 2
+        assert backend.has_capacity()
+        backend.running = 1
+        assert not backend.has_capacity()
+        assert backend.health()["max_queue_depth"] == 2
+
+    def test_unbounded_queue_always_has_capacity(self, bundle, template_task):
+        backend = HarborBackend(
+            orchestrator=TrialQueue(n_concurrent=1),
+            tasks_dir=template_task,
+            bundle=bundle,
+        )
+        backend.pending = {str(i): None for i in range(100)}
+        assert backend.has_capacity()
+
+    def test_patch_opt_out(self, bundle, template_task):
+        backend = HarborBackend(
+            orchestrator=TrialQueue(n_concurrent=1),
+            tasks_dir=template_task,
+            bundle=bundle,
+            patch_dockerfile_with_sdk=False,
+        )
+        assert backend.sdk_requirements is None
+
+
+class TestBundleBackend:
+    @pytest.fixture
+    def backend(self, bundle, template_task):
+        return HarborBackend(
+            orchestrator=TrialQueue(n_concurrent=1),
+            tasks_dir=template_task,
+            bundle=bundle,
+        )
+
+    def prepare(self, backend, request):
+        container_input = backend.build_input(request)
+        task_dir = backend.select_task(request).materialize(
+            backend.rollouts_dir / request.id,
+            container_input,
+            grader_script=backend.bundle.grader_script if backend.bundle else None,
+        )
+        return task_dir, container_input
+
+    def test_trial_config_wires_harness_agent(self, backend):
+        request = request_for([{"role": "user", "content": "x"}])
+        task_dir, container_input = self.prepare(backend, request)
+        config = backend.build_trial_config(task_dir, request, container_input)
+
+        assert config.agent.import_path.endswith(":OsmosisHarnessInstalledAgent")
+        assert config.agent.kwargs["agent_script"] == "bench-agent"
+        assert config.agent.kwargs["bundle_path"] == str(backend.bundle.wheel)
+        assert config.verifier.disable is False  # generated test.sh enables it
+
+    def test_verifier_disabled_without_tests(self, bundle, template_task):
+        backend = HarborBackend(
+            orchestrator=TrialQueue(n_concurrent=1),
+            tasks_dir=template_task,
+            bundle=bundle,
+        )
+        request = request_for([{"role": "user", "content": "x"}])
+        container_input = backend.build_input(request)
+        task_dir = backend.select_task(request).materialize(
+            backend.rollouts_dir / request.id, container_input
+        )
+        config = backend.build_trial_config(task_dir, request, container_input)
+        assert config.verifier.disable is True
+
+    def test_build_input_carries_request_fields(self, backend):
+        request = ExecutionRequest(
+            id="r9",
+            prompt=[{"role": "user", "content": "q"}],
+            label="42",
+            metadata={"harbor_task_id": "t"},
+        )
+        container_input = backend.build_input(request)
+        assert container_input.rollout_id == "r9"
+        assert container_input.label == "42"
+        assert container_input.metadata == {"harbor_task_id": "t"}
+
+    def test_environment_config_cloned_per_trial(self, backend):
+        request = request_for([{"role": "user", "content": "x"}])
+        task_dir, container_input = self.prepare(backend, request)
+        first = backend.build_trial_config(task_dir, request, container_input)
+        second = backend.build_trial_config(task_dir, request, container_input)
+        assert first.environment is not second.environment
+        assert first.environment is not backend.environment_config
+
+
+class TestNativeAgents:
+    def backend_for(self, agent, template_task, **kwargs):
+        return HarborBackend(
+            orchestrator=TrialQueue(n_concurrent=1),
+            tasks_dir=template_task,
+            agent=agent,
+            **kwargs,
+        )
+
+    def test_unknown_native_agent_rejected(self, template_task):
+        with pytest.raises(ValueError, match="unknown native agent"):
+            self.backend_for("claude-code", template_task)
+
+    def test_env_wired_agent_receives_endpoint(self, template_task):
+        backend = self.backend_for("mini-swe-agent", template_task)
+        container_input = ContainerInput(
+            rollout_id="r1",
+            chat_completions_url="http://trainer:30000/sessions/abc/v1",
+            api_key="k",
+        )
+        config = backend.build_agent_config(template_task, container_input)
+
+        assert config.name == "mini-swe-agent"
+        assert config.env["OPENAI_API_BASE"] == "http://trainer:30000/sessions/abc/v1"
+        assert config.env["OPENAI_API_KEY"] == "k"
+        assert config.env["MSWEA_COST_TRACKING"] == "ignore_errors"
+
+    def test_kwargs_wired_agent_receives_endpoint(self, template_task):
+        backend = self.backend_for("terminus-2", template_task, model_name="openai/m")
+        container_input = ContainerInput(
+            rollout_id="r1", chat_completions_url="http://t/v1", api_key="rk-1"
+        )
+        config = backend.build_agent_config(template_task, container_input)
+
+        assert config.name == "terminus-2"
+        assert config.model_name == "openai/m"
+        assert config.kwargs["api_base"] == "http://t/v1"
+        assert config.kwargs["enable_summarize"] is False
+        # Terminus-2 ignores a top-level api_key; it must ride in llm_kwargs.
+        assert "api_key" not in config.kwargs
+        assert config.kwargs["llm_kwargs"] == {"api_key": "rk-1"}
+
+    def test_native_without_grader_needs_no_bundle(self, template_task):
+        backend = self.backend_for("mini-swe-agent", template_task)
+        assert backend.bundle is None
+
+    def test_native_agent_kwargs_merge_into_native_config(self, template_task):
+        backend = self.backend_for(
+            "mini-swe-agent",
+            template_task,
+            native_agent_kwargs={"config": {"agent": {"step_limit": 20}}},
+        )
+        container_input = ContainerInput(
+            rollout_id="r1", chat_completions_url="http://t/v1", api_key="k"
+        )
+        config = backend.build_agent_config(template_task, container_input)
+        assert config.kwargs["config"] == {"agent": {"step_limit": 20}}
+        assert config.env["OPENAI_API_BASE"] == "http://t/v1"
+
+    def test_native_agent_kwargs_cannot_override_endpoint_wiring(self, template_task):
+        backend = self.backend_for(
+            "terminus-2", template_task, native_agent_kwargs={"api_base": "http://evil"}
+        )
+        container_input = ContainerInput(
+            rollout_id="r1", chat_completions_url="http://t/v1"
+        )
+        config = backend.build_agent_config(template_task, container_input)
+        assert config.kwargs["api_base"] == "http://t/v1"
+
+    def test_native_agent_kwargs_rejected_for_workflow_agents(
+        self, bundle, template_task
     ):
-        backend = HarborBackend.__new__(HarborBackend)
-        backend.pending = {}
-        backend.cleanup_successful_trials = False
-        backend.trials_dir = tmp_path
+        with pytest.raises(ValueError, match="native_agent_kwargs"):
+            HarborBackend(
+                orchestrator=TrialQueue(n_concurrent=1),
+                tasks_dir=template_task,
+                bundle=bundle,
+                native_agent_kwargs={"config": {}},
+            )
 
-        on_workflow = AsyncMock()
-        on_grader = AsyncMock()
-        pending = PendingTrial(on_workflow, on_grader)
-        pending.workflow_complete_called = True
-        backend.pending["r1"] = pending
+    def test_dataset_mode_keeps_task_instruction(self, tmp_path, bundle):
+        root = tmp_path / "dataset"
+        task = root / "task-a"
+        (task / "environment").mkdir(parents=True)
+        (task / "instruction.md").write_text("real instruction")
+        backend = HarborBackend(
+            orchestrator=TrialQueue(n_concurrent=1),
+            tasks_dir=root,
+            task_mode=TaskMode.DATASET,
+            bundle=bundle,
+        )
+        request = request_for(
+            [{"role": "user", "content": "row prompt"}],
+            metadata={"harbor_task_id": "task-a"},
+        )
+        container_input = backend.build_input(request)
+        assert container_input.prompt == []
 
-        event = SimpleNamespace(
-            config=SimpleNamespace(trial_name="trial-r1"),
-            result=SimpleNamespace(
-                agent_result=SimpleNamespace(
-                    metadata={
-                        "status": "success",
-                        "sample": RolloutSample(messages=[]).model_dump(),
-                    }
-                ),
-                verifier_result=SimpleNamespace(rewards={}),
-                exception_info=None,
+        task_dir = backend.select_task(request).materialize(
+            backend.rollouts_dir / request.id, container_input
+        )
+        assert (task_dir / "instruction.md").read_text() == "real instruction"
+
+    def test_grader_wheel_ships_in_tests_dir(self, template_task, tmp_path, bundle):
+        from osmosis_ai.packaging import inspect_bundle
+
+        info = inspect_bundle(bundle)
+        prompt = [{"role": "user", "content": "x"}]
+        task_dir = HarborTask(template_task).materialize(
+            tmp_path / "r1",
+            ContainerInput(rollout_id="r1", prompt=prompt),
+            grader_script=info.grader_script,
+            grader_wheel=info.wheel,
+        )
+        test_sh = (task_dir / "tests" / "test.sh").read_text()
+        assert f"pip install /tests/{info.wheel.name}" in test_sh
+        # the grader script runs from the SDK venv when the image has one
+        assert test_sh.rstrip().endswith(venv_or_fallback_script(info.grader_script))
+        assert (task_dir / "tests" / info.wheel.name).exists()
+        assert (task_dir / "tests" / "container_input.json").exists()
+
+    def test_oracle_binding_gets_no_endpoint(self, template_task):
+        backend = self.backend_for("oracle", template_task)
+        config = backend.build_agent_config(
+            template_task,
+            ContainerInput(rollout_id="r1", chat_completions_url="http://t/v1"),
+        )
+        assert config.name == "oracle"
+        assert "OPENAI_API_BASE" not in config.env
+        assert "api_base" not in config.kwargs
+
+    def test_harbor_model_metadata_overrides_model(self, template_task):
+        backend = self.backend_for(
+            "terminus-2", template_task, model_name="openai/default"
+        )
+        config = backend.build_agent_config(
+            template_task,
+            ContainerInput(
+                rollout_id="r1",
+                chat_completions_url="http://t/v1",
+                metadata={"harbor_model": "openai/override"},
             ),
         )
+        assert config.model_name == "openai/override"
 
-        with caplog.at_level(
-            logging.WARNING, logger="osmosis_ai.rollout.backend.harbor.backend"
-        ):
-            await backend.on_trial_end(event)
 
-        on_grader.assert_awaited_once()
-        result = on_grader.call_args.args[0]
-        assert result.status == RolloutStatus.FAILURE
-        assert result.err_category == RolloutErrorCategory.VALIDATION_ERROR
-        assert "Harbor verifier returned empty rewards for rollout r1" in caplog.text
+class TestGraderOutcome:
+    """Failure precedence: the agent's own failure must stay primary.
 
-    def _make_trial_end_backend(self, tmp_path, *, cleanup: bool) -> HarborBackend:
-        backend = HarborBackend.__new__(HarborBackend)
-        backend.pending = {}
-        backend.cleanup_successful_trials = cleanup
-        backend.trials_dir = tmp_path / "trials"
+    Phase is decided by timestamp against the verifier's start, never by
+    class name; occurred_at is naive-local, timings aware-UTC, as in harbor.
+    """
+
+    # A naive-local base instant, as harbor's ExceptionInfo records it.
+    BASE = datetime.now()
+
+    def backend_for(self, template_task, tmp_path):
+        return HarborBackend(
+            orchestrator=TrialQueue(n_concurrent=1),
+            tasks_dir=template_task,
+            agent="terminus-2",
+            trials_dir=tmp_path / "trials",
+        )
+
+    def verifier_span(self, start_offset_sec=30, duration_sec=30):
+        from types import SimpleNamespace
+
+        started = (self.BASE + timedelta(seconds=start_offset_sec)).astimezone(UTC)
+        return SimpleNamespace(
+            started_at=started,
+            finished_at=started + timedelta(seconds=duration_sec),
+        )
+
+    def event_with(self, exception_info=None, verifier_result=None, verifier=None):
+        from types import SimpleNamespace
+
+        result = SimpleNamespace(
+            exception_info=exception_info,
+            verifier_result=verifier_result,
+            started_at=None,
+            finished_at=None,
+            environment_setup=None,
+            agent_setup=None,
+            agent_execution=None,
+            verifier=verifier,
+        )
+        return SimpleNamespace(result=result)
+
+    def exception_at(self, offset_sec, exception_type="NonZeroAgentExitCodeError"):
+        from types import SimpleNamespace
+
+        return SimpleNamespace(
+            exception_type=exception_type,
+            exception_message="Command failed (exit 1): /app/agent_runner.py",
+            exception_traceback="",
+            occurred_at=self.BASE + timedelta(seconds=offset_sec),
+        )
+
+    async def test_agent_command_failure_stays_primary(self, template_task, tmp_path):
+        """The verifier's missing-sample error must not replace the agent error."""
+        from types import SimpleNamespace
+
+        async def noop(result):
+            pass
+
+        backend = self.backend_for(template_task, tmp_path)
+        event = self.event_with(
+            exception_info=self.exception_at(0),
+            verifier_result=SimpleNamespace(rewards={"reward": 0.0}),
+            verifier=self.verifier_span(),
+        )
+
+        outcome = backend.grader_outcome(event, "r1", PendingTrial(noop, None))
+
+        assert outcome.status == RolloutStatus.FAILURE
+        assert outcome.err_category == RolloutErrorCategory.AGENT_ERROR
+        assert "Command failed" in outcome.err_message
+
+    async def test_classified_subclass_failure_stays_primary(
+        self, template_task, tmp_path
+    ):
+        """The phase decision must not depend on the exception class name."""
+        from types import SimpleNamespace
+
+        async def noop(result):
+            pass
+
+        backend = self.backend_for(template_task, tmp_path)
+        event = self.event_with(
+            exception_info=self.exception_at(
+                0, exception_type="AgentAuthenticationError"
+            ),
+            verifier_result=SimpleNamespace(rewards={"reward": 0.0}),
+            verifier=self.verifier_span(),
+        )
+
+        outcome = backend.grader_outcome(event, "r1", PendingTrial(noop, None))
+
+        assert outcome.err_category == RolloutErrorCategory.AGENT_ERROR
+
+    async def test_missing_sample_after_clean_agent_is_validation_error(
+        self, template_task, tmp_path
+    ):
+        from types import SimpleNamespace
+
+        async def noop(result):
+            pass
+
+        backend = self.backend_for(template_task, tmp_path)
+        event = self.event_with(
+            verifier_result=SimpleNamespace(rewards={"reward": 1.0}),
+            verifier=self.verifier_span(),
+        )
+
+        outcome = backend.grader_outcome(event, "r1", PendingTrial(noop, None))
+
+        assert outcome.status == RolloutStatus.FAILURE
+        assert outcome.err_category == RolloutErrorCategory.VALIDATION_ERROR
+        assert "No sample to grade" in outcome.err_message
+
+    async def test_post_verifier_exception_does_not_preempt_verifier(
+        self, template_task, tmp_path
+    ):
+        """Teardown noise recorded after the verifier must not preempt it."""
+        from types import SimpleNamespace
+
+        async def noop(result):
+            pass
+
+        backend = self.backend_for(template_task, tmp_path)
+        event = self.event_with(
+            exception_info=self.exception_at(120),
+            verifier_result=SimpleNamespace(rewards={"reward": 1.0}),
+            verifier=self.verifier_span(start_offset_sec=30, duration_sec=30),
+        )
+
+        outcome = backend.grader_outcome(event, "r1", PendingTrial(noop, None))
+
+        assert outcome.err_category == RolloutErrorCategory.VALIDATION_ERROR
+
+    async def test_exception_without_verifier_run_stays_primary(
+        self, template_task, tmp_path
+    ):
+        """When the verifier never started, any recorded exception precedes it."""
+
+        async def noop(result):
+            pass
+
+        backend = self.backend_for(template_task, tmp_path)
+        event = self.event_with(exception_info=self.exception_at(0))
+
+        outcome = backend.grader_outcome(event, "r1", PendingTrial(noop, None))
+
+        assert outcome.status == RolloutStatus.FAILURE
+        assert outcome.err_category == RolloutErrorCategory.AGENT_ERROR
+        assert "Command failed" in outcome.err_message
+
+
+class TestTaskResolution:
+    def backend_for(self, template_task):
+        return HarborBackend(
+            orchestrator=TrialQueue(n_concurrent=1),
+            tasks_dir=template_task,
+            agent="terminus-2",
+        )
+
+    async def test_template_mode_resolves_configured_dir(self, template_task):
+        backend = self.backend_for(template_task)
+
+        task = await backend.resolve_task(request_for())
+
+        assert task.path == template_task
+
+    async def test_fetched_task_instruction_replacement_warns(
+        self, template_task, tmp_path, caplog
+    ):
+        """The warning keys on what is destroyed, not how the task was selected."""
+        import logging
+        from types import SimpleNamespace
+
+        authored = tmp_path / "authored-task"
+        (authored / "environment").mkdir(parents=True)
+        (authored / "instruction.md").write_text("Task-owned instruction")
+
+        async def failing_submit(config):
+            raise RuntimeError("stop before harbor")
+
+        orchestrator = SimpleNamespace(
+            add_hook=lambda *args: None, submit=failing_submit
+        )
+        backend = HarborBackend(
+            orchestrator=orchestrator,
+            tasks_dir=template_task,
+            agent="terminus-2",
+        )
+
+        async def fetch_local(ref, metadata):
+            return HarborTask(authored)
+
+        backend.fetch_task = fetch_local
+        request = request_for(
+            prompt=[{"role": "user", "content": "row prompt"}],
+            metadata={"harbor_task": "./tasks/x"},
+        )
+
+        async def noop(result):
+            pass
+
+        with caplog.at_level(logging.WARNING):
+            await backend.execute(request, noop)
+
+        assert any(
+            "template mode replaces the instruction.md" in record.getMessage()
+            for record in caplog.records
+        )
+
+    async def test_configured_template_instruction_stays_silent(
+        self, template_task, caplog
+    ):
+        """Replacing the template dir's own instruction.md is the intended flow."""
+        import logging
+        from types import SimpleNamespace
+
+        (template_task / "instruction.md").write_text("template fallback")
+
+        async def failing_submit(config):
+            raise RuntimeError("stop before harbor")
+
+        orchestrator = SimpleNamespace(
+            add_hook=lambda *args: None, submit=failing_submit
+        )
+        backend = HarborBackend(
+            orchestrator=orchestrator,
+            tasks_dir=template_task,
+            agent="terminus-2",
+        )
+        request = request_for(prompt=[{"role": "user", "content": "row prompt"}])
+
+        async def noop(result):
+            pass
+
+        with caplog.at_level(logging.WARNING):
+            await backend.execute(request, noop)
+
+        assert not any(
+            "template mode replaces the instruction.md" in record.getMessage()
+            for record in caplog.records
+        )
+
+
+class TestDiagnostics:
+    def result_with_timings(self):
+        from datetime import UTC, datetime, timedelta
+        from types import SimpleNamespace
+
+        from harbor.models.trial.result import TimingInfo
+
+        start = datetime(2026, 1, 1, tzinfo=UTC)
+
+        def span(offset, seconds):
+            return TimingInfo(
+                started_at=start + timedelta(seconds=offset),
+                finished_at=start + timedelta(seconds=offset + seconds),
+            )
+
+        return SimpleNamespace(
+            started_at=start,
+            finished_at=start + timedelta(seconds=100),
+            environment_setup=span(0, 80),
+            agent_setup=span(80, 10),
+            agent_execution=span(90, 6),
+            verifier=span(96, 4),
+        )
+
+    def test_trial_timings_reads_harbor_spans(self):
+        from osmosis_ai.rollout.backend.harbor.diagnostics import trial_timings
+
+        assert trial_timings(self.result_with_timings()) == {
+            "environment_setup": 80.0,
+            "agent_setup": 10.0,
+            "agent": 6.0,
+            "verifier": 4.0,
+            "total": 100.0,
+        }
+
+    def test_failure_phase_is_furthest_span_reached(self):
+        from osmosis_ai.rollout.backend.harbor.diagnostics import failure_phase
+
+        result = self.result_with_timings()
+        assert failure_phase(result) == "verifier"
+        result.verifier = None
+        result.agent_execution = None
+        assert failure_phase(result) == "agent_setup"
+        assert failure_phase(None) == "setup"
+
+    def test_agent_phase_failure_compares_mixed_timezone_timestamps(self):
+        """Mixed naive/aware timestamps must normalize, not raise TypeError."""
+        from types import SimpleNamespace
+
+        from osmosis_ai.rollout.backend.harbor.diagnostics import agent_phase_failure
+
+        base = datetime.now()  # naive local, as ExceptionInfo records it
+        verifier = SimpleNamespace(
+            started_at=(base + timedelta(seconds=30)).astimezone(UTC),
+            finished_at=(base + timedelta(seconds=60)).astimezone(UTC),
+        )
+
+        def result(occurred_at):
+            return SimpleNamespace(
+                exception_info=SimpleNamespace(occurred_at=occurred_at),
+                verifier=verifier,
+            )
+
+        assert agent_phase_failure(result(base)) is not None
+        assert agent_phase_failure(result(base + timedelta(seconds=120))) is None
+        assert agent_phase_failure(None) is None
+        assert (
+            agent_phase_failure(SimpleNamespace(exception_info=None, verifier=None))
+            is None
+        )
+
+    def test_redact_secrets_scrubs_keys_and_api_key(self):
+        from osmosis_ai.rollout.backend.harbor.diagnostics import redact_secrets
+
+        redacted = redact_secrets(
+            {
+                "llm_kwargs": {"api_key": "sk-1", "extra": ["Bearer sk-1", "safe"]},
+                "model": "gpt",
+                "session_token": "t0",
+            },
+            api_key="sk-1",
+        )
+        assert redacted == {
+            "llm_kwargs": {"api_key": "[REDACTED]", "extra": ["[REDACTED]", "safe"]},
+            "model": "gpt",
+            "session_token": "[REDACTED]",
+        }
+
+
+class TestTaskRefs:
+    def test_local_path_ref(self):
+        from harbor.models.task.id import LocalTaskId
+
+        from osmosis_ai.rollout.backend.harbor.tasks import parse_task_ref
+
+        assert parse_task_ref("./tasks/t1", {}) == LocalTaskId(path=Path("./tasks/t1"))
+
+    def test_package_ref_with_version(self):
+        from harbor.models.task.id import PackageTaskId
+
+        from osmosis_ai.rollout.backend.harbor.tasks import parse_task_ref
+
+        assert parse_task_ref("laude/swe-bench@sha256:abc", {}) == PackageTaskId(
+            org="laude", name="swe-bench", ref="sha256:abc"
+        )
+
+    def test_git_ref_uses_metadata(self):
+        from harbor.models.task.id import GitTaskId
+
+        from osmosis_ai.rollout.backend.harbor.tasks import parse_task_ref
+
+        task_id = parse_task_ref(
+            "tasks/t1",
+            {"git_url": "https://github.com/org/tasks.git", "git_commit_id": "abc123"},
+        )
+        assert task_id == GitTaskId(
+            git_url="https://github.com/org/tasks.git",
+            git_commit_id="abc123",
+            path=Path("tasks/t1"),
+        )
+
+    def test_bare_name_rejected(self):
+        from osmosis_ai.rollout.backend.harbor.tasks import parse_task_ref
+
+        with pytest.raises(ValueError, match="must be a local path"):
+            parse_task_ref("not-a-ref", {})
+
+
+class TestCancellation:
+    def backend(self, bundle, template_task):
+        return HarborBackend(
+            orchestrator=TrialQueue(n_concurrent=1),
+            tasks_dir=template_task,
+            bundle=bundle,
+        )
+
+    async def hang(self):
+        await asyncio.Event().wait()
+
+    async def test_selectors_and_dispositions(self, bundle, template_task):
+        backend = self.backend(bundle, template_task)
+
+        async def noop(result):
+            pass
+
+        queued = PendingTrial(noop, None)
+        queued.task = asyncio.create_task(self.hang())
+        running = PendingTrial(noop, None)
+        running.task = asyncio.create_task(self.hang())
+        running.started = True
+        backend.pending = {
+            "job1-a": queued,
+            "job1-b": running,
+            "other": PendingTrial(noop, None),
+        }
+
+        assert backend.cancel_rollouts(ids=["missing"]) == {"missing": "not_found"}
+        assert backend.cancel_rollouts(prefix="job1-") == {
+            "job1-a": "cancelled_queued",
+            "job1-b": "cancelled_running",
+        }
+        await asyncio.sleep(0)
+        assert queued.task.cancelled()
+        assert running.task.cancelled()
+        # taskless entry: never submitted, nothing to cancel
+        assert backend.cancel_rollouts(all=True)["other"] == "not_found"
+
+    async def test_status_lifecycle(self, bundle, template_task):
+        backend = self.backend(bundle, template_task)
+
+        async def noop(result):
+            pass
+
+        assert backend.rollout_status("r1") is None
+
+        pending = PendingTrial(noop, None)
+        backend.pending["r1"] = pending
+        assert backend.rollout_status("r1") == {"status": "queued"}
+        pending.started = True
+        assert backend.rollout_status("r1") == {"status": "running"}
+        pending.grading = True
+        assert backend.rollout_status("r1") == {"status": "grading"}
+
+        backend.pending.pop("r1")
+        backend.record_outcome("r1", RolloutStatus.SUCCESS, reward=1.0)
+        assert backend.rollout_status("r1") == {
+            "status": "success",
+            "reward": 1.0,
+            "err_message": None,
+        }
+
+        backend.finished.ttl_sec = -1.0
+        backend.record_outcome("r2", RolloutStatus.FAILURE, err_message="boom")
+        assert backend.rollout_status("r2") is None
+
+    async def test_finished_task_is_not_found(self, bundle, template_task):
+        backend = self.backend(bundle, template_task)
+
+        async def noop(result):
+            pass
+
+        finished = PendingTrial(noop, None)
+        finished.task = asyncio.create_task(asyncio.sleep(0))
+        await finished.task
+        backend.pending = {"done": finished}
+        assert backend.cancel_rollouts(ids=["done"]) == {"done": "not_found"}
+
+
+class TestPrewarm:
+    def test_prewarm_config_is_install_only_without_credentials(
+        self, bundle, template_task
+    ):
+        backend = HarborBackend(
+            orchestrator=TrialQueue(n_concurrent=1),
+            tasks_dir=template_task,
+            bundle=bundle,
+            agent_setup_timeout_sec=120,
+        )
+        config = backend.prewarm_trial_config(HarborTask(template_task))
+
+        assert config.install_only is True
+        assert config.verifier.disable is True
+        assert config.trial_name.startswith("trial-prewarm-")
+        assert config.agent.override_setup_timeout_sec == 120
+        container_input = ContainerInput.read(
+            Path(config.task.path) / "container_input.json"
+        )
+        assert container_input.api_key is None
+        assert container_input.chat_completions_url in ("", None)
+
+    async def test_dataset_prewarm_requires_task_ids(self, bundle, tmp_path):
+        root = tmp_path / "dataset"
+        root.mkdir()
+        backend = HarborBackend(
+            orchestrator=TrialQueue(n_concurrent=1),
+            tasks_dir=root,
+            task_mode=TaskMode.DATASET,
+            bundle=bundle,
+        )
+        with pytest.raises(ValueError, match="requires task ids"):
+            await backend.prewarm()
+
+
+class FakeQueue:
+    """A TrialQueue that fires hooks, then simulates harbor's secret scrub
+    after the END hook and before submit() resolves."""
+
+    def __init__(self, run=None):
+        self.hooks = {}
+        self.run = run
+
+    def add_hook(self, event, hook):
+        self.hooks.setdefault(event, []).append(hook)
+
+    async def fire(self, event_name, event):
+        from harbor.trial.hooks import TrialEvent
+
+        for hook in self.hooks.get(TrialEvent(event_name), []):
+            await hook(event)
+
+    async def submit(self, config):
+        assert self.run is not None, "FakeQueue.run not configured"
+        return await self.run(self, config)
+
+
+def trial_result(**overrides):
+    from types import SimpleNamespace
+
+    fields = {
+        "exception_info": None,
+        "verifier_result": None,
+        "started_at": None,
+        "finished_at": None,
+        "environment_setup": None,
+        "agent_setup": None,
+        "agent_execution": None,
+        "verifier": None,
+    }
+    fields.update(overrides)
+    return SimpleNamespace(**fields)
+
+
+async def noop_callback(result):
+    pass
+
+
+class TestConfigValidation:
+    def backend_for(self, template_task, **kwargs):
+        return HarborBackend(
+            orchestrator=TrialQueue(n_concurrent=1),
+            tasks_dir=template_task,
+            **kwargs,
+        )
+
+    def test_max_queue_depth_zero_rejected(self, template_task):
+        """Depth 0 used to mean reject-everything (429 on an idle server)."""
+        with pytest.raises(ValueError, match="max_queue_depth"):
+            self.backend_for(template_task, agent="oracle", max_queue_depth=0)
+        assert (
+            self.backend_for(
+                template_task, agent="oracle", max_queue_depth=1
+            ).has_capacity()
+            is True
+        )
+
+    def test_environment_config_not_aliased(self, template_task):
+        from harbor.models.trial.config import (
+            EnvironmentConfig as HarborEnvironmentConfig,
+        )
+
+        caller_config = HarborEnvironmentConfig()
+        backend = self.backend_for(
+            template_task, agent="oracle", environment_config=caller_config
+        )
+        caller_config.kwargs["poison"] = True
+
+        assert backend.environment_config is not caller_config
+        assert "poison" not in backend.environment_config.kwargs
+
+    def test_missing_harbor_model_falls_back_to_default(self, template_task):
+        backend = self.backend_for(template_task, agent="terminus-2")
+        base = {"rollout_id": "r1", "chat_completions_url": "http://t/v1"}
+
+        config = backend.build_agent_config(template_task, ContainerInput(**base))
+        assert config.model_name == backend.model_name
+
+    @pytest.mark.parametrize("agent", ["terminus-2", "mini-swe-agent"])
+    def test_empty_endpoint_refused_for_wired_agents(self, template_task, agent):
+        """An empty api_base sends the rollout credential to the public endpoint."""
+        backend = self.backend_for(template_task, agent=agent)
+        with pytest.raises(ValueError, match="no chat_completions_url"):
+            backend.build_agent_config(
+                template_task,
+                ContainerInput(rollout_id="r1", api_key="rk-1"),
+            )
+
+    def test_oracle_needs_no_endpoint(self, template_task):
+        backend = self.backend_for(template_task, agent="oracle")
+        config = backend.build_agent_config(
+            template_task, ContainerInput(rollout_id="r1")
+        )
+        assert config.name == "oracle"
+
+    def test_env_wiring_sets_both_base_url_spellings(self, template_task):
+        """Both OPENAI_* spellings must carry the rollout endpoint."""
+        backend = self.backend_for(template_task, agent="mini-swe-agent")
+        config = backend.build_agent_config(
+            template_task,
+            ContainerInput(
+                rollout_id="r1", chat_completions_url="http://t/v1", api_key="k"
+            ),
+        )
+        assert config.env["OPENAI_API_BASE"] == "http://t/v1"
+        assert config.env["OPENAI_BASE_URL"] == "http://t/v1"
+
+
+class TestArtifactLifecycle:
+    def backend_for(self, template_task, tmp_path, queue, **kwargs):
+        backend = HarborBackend(
+            orchestrator=queue,
+            tasks_dir=template_task,
+            agent="terminus-2",
+            trials_dir=tmp_path / "trials",
+            **kwargs,
+        )
         backend.rollouts_dir = tmp_path / "rollouts"
-        backend.artifact_root = tmp_path / "collected"
+        backend.rollouts_dir.mkdir(parents=True, exist_ok=True)
+        backend.artifact_root = tmp_path / "durable"
         return backend
 
-    def _seed_trial_artifacts(self, backend: HarborBackend) -> None:
-        trial_artifacts = backend.trials_dir / "trial-r1" / "artifacts"
-        convention = trial_artifacts / "logs" / "artifacts"
-        convention.mkdir(parents=True)
-        (convention / "output.txt").write_text("ok")
-        (trial_artifacts / "manifest.json").write_text("[]")
+    async def test_artifacts_relocate_only_after_harbor_scrub(
+        self, template_task, tmp_path
+    ):
+        """The durable copy must be taken from the post-scrub tree."""
+        from osmosis_ai.rollout.context import RolloutContext
 
-    @staticmethod
-    def _success_event(
-        rewards: dict[str, float] | None = None,
-    ) -> SimpleNamespace:
+        async def run(queue, config):
+            artifacts = config.trials_dir / config.trial_name / "artifacts"
+            artifacts.mkdir(parents=True)
+            (artifacts / "out.txt").write_text("rk-secret")
+            result = trial_result(
+                verifier_result=__import__("types").SimpleNamespace(
+                    rewards={"reward": 1.0}
+                )
+            )
+            event = __import__("types").SimpleNamespace(config=config, result=result)
+            await queue.fire("end", event)
+            # Harbor's scrub runs here: after hooks, before submit() returns.
+            (artifacts / "out.txt").write_text("[REDACTED]")
+            return result
+
+        queue = FakeQueue(run)
+        backend = self.backend_for(template_task, tmp_path, queue)
+        request = ExecutionRequest(id="r1", prompt=[{"role": "user", "content": "go"}])
+        with RolloutContext(
+            chat_completions_url="http://t/v1", api_key="rk-secret", rollout_id="r1"
+        ):
+            await backend.execute(request, noop_callback, noop_callback)
+
+        relocated = tmp_path / "durable" / "r1" / "artifacts" / "out.txt"
+        assert relocated.read_text() == "[REDACTED]"
+        # The successful trial was moved only after the durable copy existed.
+        assert not (tmp_path / "trials" / "trial-r1").exists()
+        assert not (tmp_path / "rollouts" / "r1").exists()
+
+    async def test_cancellation_cleans_rollout_and_trial_residue(
+        self, template_task, tmp_path
+    ):
+        """Cancelled rollouts must not leave credential-bearing directories."""
+        from osmosis_ai.rollout.context import RolloutContext
+
+        started = asyncio.Event()
+
+        async def run(queue, config):
+            (config.trials_dir / config.trial_name).mkdir(parents=True)
+            started.set()
+            await asyncio.Event().wait()
+
+        queue = FakeQueue(run)
+        backend = self.backend_for(template_task, tmp_path, queue)
+        request = ExecutionRequest(id="r1", prompt=[{"role": "user", "content": "go"}])
+
+        async def execute():
+            with RolloutContext(
+                chat_completions_url="http://t/v1", api_key="rk-1", rollout_id="r1"
+            ):
+                await backend.execute(request, noop_callback)
+
+        task = asyncio.create_task(execute())
+        await started.wait()
+        assert (tmp_path / "rollouts" / "r1").exists()
+
+        assert backend.cancel_rollouts(ids=["r1"]) == {"r1": "cancelled_queued"}
+        await task
+
+        assert not (tmp_path / "rollouts" / "r1").exists()
+        assert not (tmp_path / "trials" / "trial-r1").exists()
+        assert "r1" not in backend.pending
+
+    async def test_setup_failure_cleans_staging_and_reports(
+        self, template_task, tmp_path
+    ):
+        from osmosis_ai.rollout.context import RolloutContext
+
+        async def run(queue, config):
+            raise RuntimeError("infra exploded")
+
+        queue = FakeQueue(run)
+        backend = self.backend_for(template_task, tmp_path, queue)
+        request = ExecutionRequest(id="r1", prompt=[{"role": "user", "content": "go"}])
+        delivered = []
+
+        async def on_workflow_complete(result):
+            delivered.append(result)
+
+        with RolloutContext(
+            chat_completions_url="http://t/v1", api_key="rk-1", rollout_id="r1"
+        ):
+            await backend.execute(request, on_workflow_complete)
+
+        assert not (tmp_path / "rollouts" / "r1").exists()
+        assert delivered and delivered[0].status == RolloutStatus.FAILURE
+
+    async def test_failed_trial_keeps_trial_dir_for_debugging(
+        self, template_task, tmp_path
+    ):
+        from types import SimpleNamespace
+
+        from osmosis_ai.rollout.context import RolloutContext
+
+        async def run(queue, config):
+            artifacts = config.trials_dir / config.trial_name / "artifacts"
+            artifacts.mkdir(parents=True)
+            (artifacts / "log.txt").write_text("evidence")
+            result = trial_result(
+                exception_info=SimpleNamespace(
+                    exception_type="AgentTimeoutError",
+                    exception_message="too slow",
+                    exception_traceback="",
+                    occurred_at=None,
+                )
+            )
+            event = SimpleNamespace(config=config, result=result)
+            await queue.fire("end", event)
+            return result
+
+        queue = FakeQueue(run)
+        backend = self.backend_for(template_task, tmp_path, queue)
+        request = ExecutionRequest(id="r1", prompt=[{"role": "user", "content": "go"}])
+        with RolloutContext(
+            chat_completions_url="http://t/v1", api_key="rk-1", rollout_id="r1"
+        ):
+            await backend.execute(request, noop_callback)
+
+        # Artifacts still copied for inspection; source retained on failure.
+        assert (tmp_path / "durable" / "r1" / "artifacts" / "log.txt").exists()
+        assert (tmp_path / "trials" / "trial-r1").exists()
+
+
+class TestPrewarmIdentity:
+    def test_prewarm_configs_are_credential_free(self, template_task, tmp_path):
+        from osmosis_ai.rollout.context import RolloutContext
+
+        for agent, check in (
+            (
+                "terminus-2",
+                lambda cfg: (
+                    "api_base" not in cfg.kwargs and "llm_kwargs" not in cfg.kwargs
+                ),
+            ),
+            (
+                "mini-swe-agent",
+                lambda cfg: not any(k.startswith("OPENAI_") for k in cfg.env),
+            ),
+        ):
+            backend = HarborBackend(
+                orchestrator=TrialQueue(n_concurrent=1),
+                tasks_dir=template_task,
+                agent=agent,
+                trials_dir=tmp_path / "trials",
+            )
+            # Prewarm must not pick up the ambient context's endpoint or key.
+            with RolloutContext(
+                chat_completions_url="http://t/v1", api_key="rk-1", rollout_id="x"
+            ):
+                config = backend.prewarm_trial_config(HarborTask(template_task))
+            assert config.install_only is True
+            assert check(config.agent), agent
+            assert config.trial_name in backend.prewarm_trials
+
+    async def test_prewarm_named_rollout_id_is_not_treated_as_prewarm(
+        self, template_task
+    ):
+        """Dispatch must key on the registry, not a 'prewarm-' id pattern."""
+        from types import SimpleNamespace
+
+        backend = HarborBackend(
+            orchestrator=TrialQueue(n_concurrent=1),
+            tasks_dir=template_task,
+            agent="oracle",
+        )
+        pending = PendingTrial(noop_callback, None)
+        backend.pending["prewarm-abc"] = pending
+
+        event = SimpleNamespace(
+            config=SimpleNamespace(trial_name="trial-prewarm-abc"),
+            result=trial_result(),
+        )
+        await backend.on_trial_end(event)
+
+        # The rollout resolved normally instead of wedging execute() forever.
+        assert "prewarm-abc" not in backend.pending
+        assert pending.done.done()
+
+    async def test_prewarm_cleanup_happens_at_call_site_post_scrub(
+        self, template_task, tmp_path
+    ):
+        seen_dirs = {}
+
+        async def run(queue, config):
+            trial_dir = config.trials_dir / config.trial_name
+            trial_dir.mkdir(parents=True, exist_ok=True)
+            event = __import__("types").SimpleNamespace(
+                config=config, result=trial_result()
+            )
+            await queue.fire("start", event)
+            await queue.fire("end", event)
+            # The END hook must leave the tree for harbor's scrub.
+            seen_dirs[config.trial_name] = trial_dir.exists()
+            return trial_result()
+
+        queue = FakeQueue(run)
+        backend = HarborBackend(
+            orchestrator=queue,
+            tasks_dir=template_task,
+            agent="terminus-2",
+            trials_dir=tmp_path / "trials",
+        )
+        backend.rollouts_dir = tmp_path / "rollouts"
+        backend.rollouts_dir.mkdir(parents=True, exist_ok=True)
+
+        await backend.prewarm()
+
+        assert all(seen_dirs.values())
+        assert backend.prewarm_trials == set()
+        assert list((tmp_path / "trials").iterdir()) == []
+        assert list((tmp_path / "rollouts").iterdir()) == []
+
+    async def test_prewarm_keeps_directories_when_cleanup_disabled(
+        self, template_task, tmp_path
+    ):
+        async def run(queue, config):
+            (config.trials_dir / config.trial_name).mkdir(parents=True)
+            return trial_result()
+
+        queue = FakeQueue(run)
+        backend = HarborBackend(
+            orchestrator=queue,
+            tasks_dir=template_task,
+            agent="terminus-2",
+            trials_dir=tmp_path / "trials",
+            cleanup_successful_trials=False,
+        )
+        backend.rollouts_dir = tmp_path / "rollouts"
+        backend.rollouts_dir.mkdir(parents=True, exist_ok=True)
+
+        await backend.prewarm()
+
+        assert list((tmp_path / "trials").iterdir()) != []
+
+
+class TestContainerInputGating:
+    def test_native_track_stages_no_container_input(self, template_task, tmp_path):
+        backend = HarborBackend(
+            orchestrator=TrialQueue(n_concurrent=1),
+            tasks_dir=template_task,
+            agent="mini-swe-agent",
+        )
+        backend.rollouts_dir = tmp_path / "rollouts"
+        task_dir = backend.materialize_task(
+            HarborTask(template_task),
+            "r1",
+            ContainerInput(
+                rollout_id="r1",
+                prompt=[{"role": "user", "content": "x"}],
+                api_key="rk-1",
+            ),
+        )
+        assert not (task_dir / "container_input.json").exists()
+
+    def test_bundle_track_stages_container_input(self, bundle, template_task, tmp_path):
+        backend = HarborBackend(
+            orchestrator=TrialQueue(n_concurrent=1),
+            tasks_dir=template_task,
+            bundle=bundle,
+        )
+        backend.rollouts_dir = tmp_path / "rollouts"
+        task_dir = backend.materialize_task(
+            HarborTask(template_task),
+            "r1",
+            ContainerInput(rollout_id="r1", prompt=[{"role": "user", "content": "x"}]),
+        )
+        assert (task_dir / "container_input.json").exists()
+
+    def test_native_with_grader_bundle_ships_input_only_in_tests(
+        self, bundle, template_task, tmp_path
+    ):
+        backend = HarborBackend(
+            orchestrator=TrialQueue(n_concurrent=1),
+            tasks_dir=template_task,
+            agent="terminus-2",
+            grader="bench.solver:G",
+            bundle=bundle,
+        )
+        backend.rollouts_dir = tmp_path / "rollouts"
+        task_dir = backend.materialize_task(
+            HarborTask(template_task),
+            "r1",
+            ContainerInput(rollout_id="r1", prompt=[{"role": "user", "content": "x"}]),
+        )
+        assert not (task_dir / "container_input.json").exists()
+        assert (task_dir / "tests" / "container_input.json").exists()
+
+
+class TestCallbackOutcomes:
+    """A channel's outcome is produced once; retries resend it byte-identical."""
+
+    def backend_for(self, template_task, tmp_path, queue):
+        backend = HarborBackend(
+            orchestrator=queue,
+            tasks_dir=template_task,
+            agent="terminus-2",
+            trials_dir=tmp_path / "trials",
+        )
+        backend.rollouts_dir = tmp_path / "rollouts"
+        backend.rollouts_dir.mkdir(parents=True, exist_ok=True)
+        backend.artifact_root = tmp_path / "durable"
+        return backend
+
+    def execute_ctx(self):
+        from osmosis_ai.rollout.context import RolloutContext
+
+        return RolloutContext(
+            chat_completions_url="http://t/v1", api_key="rk-1", rollout_id="r1"
+        )
+
+    async def test_workflow_delivery_failure_resends_same_outcome(
+        self, template_task, tmp_path
+    ):
+        """The END-hook retry must resend the cached outcome, not fabricate."""
+        from types import SimpleNamespace
+
+        attempts = []
+        fail_first = [True]
+
+        async def flaky_workflow(result):
+            attempts.append(result)
+            if fail_first[0]:
+                fail_first[0] = False
+                raise RuntimeError("transient network failure")
+
+        async def run(queue, config):
+            result = trial_result(
+                verifier_result=SimpleNamespace(rewards={"reward": 1.0})
+            )
+            event = SimpleNamespace(config=config, result=result)
+            await queue.fire("verification-start", event)
+            await queue.fire("end", event)
+            return result
+
+        queue = FakeQueue(run)
+        backend = self.backend_for(template_task, tmp_path, queue)
+        request = ExecutionRequest(id="r1", prompt=[{"role": "user", "content": "x"}])
+        with self.execute_ctx():
+            await backend.execute(request, flaky_workflow, noop_callback)
+
+        assert len(attempts) == 2
+        assert attempts[0] is attempts[1]
+        assert attempts[0].status == RolloutStatus.SUCCESS
+
+    async def test_permanent_delivery_failure_never_fabricates(
+        self, template_task, tmp_path
+    ):
+        from types import SimpleNamespace
+
+        attempts = []
+
+        async def dead_workflow(result):
+            attempts.append(result)
+            raise RuntimeError("controller unreachable")
+
+        async def run(queue, config):
+            result = trial_result(
+                verifier_result=SimpleNamespace(rewards={"reward": 1.0})
+            )
+            event = SimpleNamespace(config=config, result=result)
+            await queue.fire("verification-start", event)
+            await queue.fire("end", event)
+            return result
+
+        queue = FakeQueue(run)
+        backend = self.backend_for(template_task, tmp_path, queue)
+        request = ExecutionRequest(id="r1", prompt=[{"role": "user", "content": "x"}])
+        with self.execute_ctx():
+            await backend.execute(request, dead_workflow)
+
+        # Every attempt carried the same semantic outcome; no fabrication.
+        assert len({id(result) for result in attempts}) == 1
+        assert all(r.status == RolloutStatus.SUCCESS for r in attempts)
+
+    async def test_setup_failure_reaches_both_channels(self, template_task, tmp_path):
+        """Pre-submit failures must reach the grader channel too."""
+        workflow_results = []
+        grader_results = []
+
+        async def on_workflow(result):
+            workflow_results.append(result)
+
+        async def on_grader(result):
+            grader_results.append(result)
+
+        async def failing_resolve(request):
+            raise ValueError("harbor_task metadata is malformed")
+
+        backend = HarborBackend(
+            orchestrator=FakeQueue(),
+            tasks_dir=template_task,
+            agent="terminus-2",
+            trials_dir=tmp_path / "trials",
+        )
+        backend.resolve_task = failing_resolve
+        backend.rollouts_dir = tmp_path / "rollouts"
+        request = ExecutionRequest(id="r1", prompt=[{"role": "user", "content": "x"}])
+        with self.execute_ctx():
+            await backend.execute(request, on_workflow, on_grader)
+
+        assert workflow_results and grader_results
+        assert workflow_results[0] is grader_results[0]
+        failure = workflow_results[0]
+        assert failure.status == RolloutStatus.FAILURE
+        assert failure.err_category == RolloutErrorCategory.VALIDATION_ERROR
+        assert failure.extra_fields["phase"] == "setup"
+        assert failure.extra_fields["harbor_exception_type"] == "ValueError"
+
+    async def test_setup_failure_callback_exception_stays_contained(
+        self, template_task, tmp_path
+    ):
+        """Delivery exceptions must not escape into the fabrication path."""
+
+        async def raising_workflow(result):
+            raise RuntimeError("delivery failed")
+
+        async def failing_resolve(request):
+            raise RuntimeError("setup failed")
+
+        backend = HarborBackend(
+            orchestrator=FakeQueue(),
+            tasks_dir=template_task,
+            agent="terminus-2",
+            trials_dir=tmp_path / "trials",
+        )
+        backend.resolve_task = failing_resolve
+        backend.rollouts_dir = tmp_path / "rollouts"
+        request = ExecutionRequest(id="r1", prompt=[{"role": "user", "content": "x"}])
+        with self.execute_ctx():
+            await backend.execute(request, raising_workflow, raising_workflow)
+
+    async def test_post_end_exception_does_not_double_deliver(
+        self, template_task, tmp_path
+    ):
+        """A post-delivery exception must not double-post either channel."""
+        from types import SimpleNamespace
+
+        workflow_results = []
+        grader_results = []
+
+        async def on_workflow(result):
+            workflow_results.append(result)
+
+        async def on_grader(result):
+            grader_results.append(result)
+
+        async def run(queue, config):
+            result = trial_result(
+                verifier_result=SimpleNamespace(rewards={"reward": 1.0})
+            )
+            event = SimpleNamespace(config=config, result=result)
+            await queue.fire("verification-start", event)
+            await queue.fire("end", event)
+            raise RuntimeError("harbor teardown exploded")
+
+        queue = FakeQueue(run)
+        backend = self.backend_for(template_task, tmp_path, queue)
+        request = ExecutionRequest(id="r1", prompt=[{"role": "user", "content": "x"}])
+        with self.execute_ctx():
+            await backend.execute(request, on_workflow, on_grader)
+
+        assert len(workflow_results) == 1
+        assert len(grader_results) == 1
+
+    async def test_external_cancellation_reraises(self, template_task, tmp_path):
+        """Only requested cancellations may be swallowed."""
+        started = asyncio.Event()
+
+        async def run(queue, config):
+            started.set()
+            await asyncio.Event().wait()
+
+        queue = FakeQueue(run)
+        backend = self.backend_for(template_task, tmp_path, queue)
+        request = ExecutionRequest(id="r1", prompt=[{"role": "user", "content": "x"}])
+
+        async def execute():
+            with self.execute_ctx():
+                await backend.execute(request, noop_callback)
+
+        task = asyncio.create_task(execute())
+        await started.wait()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+        # Residue is still cleaned and the outcome recorded on the way out.
+        assert "r1" not in backend.pending
+        assert backend.rollout_status("r1") == {
+            "status": "cancelled",
+            "reward": None,
+            "err_message": None,
+        }
+
+
+class TestFailureCategorization:
+    def test_categorize_exception_maps_wire_vocabulary(self):
+        from osmosis_ai.rollout.utils.errors import categorize_exception
+
+        assert categorize_exception(TimeoutError()) == RolloutErrorCategory.TIMEOUT
+        assert (
+            categorize_exception(ValueError("x"))
+            == RolloutErrorCategory.VALIDATION_ERROR
+        )
+        assert (
+            categorize_exception(TypeError("x"))
+            == RolloutErrorCategory.VALIDATION_ERROR
+        )
+        assert (
+            categorize_exception(AssertionError())
+            == RolloutErrorCategory.VALIDATION_ERROR
+        )
+        assert (
+            categorize_exception(RuntimeError("x")) == RolloutErrorCategory.AGENT_ERROR
+        )
+
+    def test_failure_phase_blames_agent_for_pre_verifier_exception(self):
+        """Both callbacks must attribute the same failure to the agent side."""
+        from types import SimpleNamespace
+
+        from osmosis_ai.rollout.backend.harbor.diagnostics import failure_phase
+
+        base = datetime.now()
+        verifier_span = SimpleNamespace(
+            started_at=(base + timedelta(seconds=30)).astimezone(UTC),
+            finished_at=(base + timedelta(seconds=60)).astimezone(UTC),
+        )
+        agent_span = SimpleNamespace(started_at=base, finished_at=base)
+        result = SimpleNamespace(
+            exception_info=SimpleNamespace(occurred_at=base),
+            verifier=verifier_span,
+            agent_execution=agent_span,
+            agent_setup=None,
+            environment_setup=None,
+        )
+        assert failure_phase(result) == "agent"
+
+        # An exception after the verifier finished keeps the furthest span.
+        result.exception_info = SimpleNamespace(
+            occurred_at=base + timedelta(seconds=120)
+        )
+        assert failure_phase(result) == "verifier"
+
+    async def test_grader_outcome_no_reward_source_is_validation_error(
+        self, template_task, tmp_path
+    ):
+        """No reward source: the terminal outcome must say what is missing."""
+        from types import SimpleNamespace
+
+        backend = HarborBackend(
+            orchestrator=TrialQueue(n_concurrent=1),
+            tasks_dir=template_task,
+            agent="terminus-2",
+            trials_dir=tmp_path / "trials",
+        )
+        event = SimpleNamespace(
+            config=SimpleNamespace(trial_name="trial-r1"), result=trial_result()
+        )
+        outcome = backend.grader_outcome(event, "r1", PendingTrial(noop_callback, None))
+
+        assert outcome.status == RolloutStatus.FAILURE
+        assert outcome.err_category == RolloutErrorCategory.VALIDATION_ERROR
+        assert "no reward source" in outcome.err_message
+        assert outcome.extra_fields["phase"] == "grading"
+
+    async def test_grader_outcome_reward_validation_reports_grading_phase(
+        self, template_task, tmp_path
+    ):
+        from types import SimpleNamespace
+
+        backend = HarborBackend(
+            orchestrator=TrialQueue(n_concurrent=1),
+            tasks_dir=template_task,
+            agent="terminus-2",
+            trials_dir=tmp_path / "trials",
+        )
+        event = SimpleNamespace(
+            config=SimpleNamespace(trial_name="trial-r1"),
+            result=trial_result(
+                verifier_result=SimpleNamespace(rewards={"accuracy": 1.0})
+            ),
+        )
+        outcome = backend.grader_outcome(event, "r1", PendingTrial(noop_callback, None))
+
+        assert outcome.err_category == RolloutErrorCategory.VALIDATION_ERROR
+        assert outcome.extra_fields["phase"] == "grading"
+
+
+def atif_document(**overrides):
+    """A minimal valid ATIF document with the fields RL training needs."""
+    doc = {
+        "schema_version": "ATIF-v1.7",
+        "session_id": "harbor-session-9",
+        "trajectory_id": "harbor-traj-9",
+        "agent": {
+            "name": "terminus-2",
+            "version": "1.0",
+            "tool_definitions": [{"name": "bash", "parameters": {}}],
+        },
+        "steps": [
+            {
+                "step_id": 1,
+                "source": "user",
+                "message": "fix the bug",
+            },
+            {
+                "step_id": 2,
+                "source": "agent",
+                "message": "running the tests",
+                "reasoning_content": "reproduce first",
+                "tool_calls": [
+                    {
+                        "tool_call_id": "c1",
+                        "function_name": "bash",
+                        "arguments": {"cmd": "pytest"},
+                    }
+                ],
+                "observation": {
+                    "results": [{"source_call_id": "c1", "content": "1 failed"}]
+                },
+                "metrics": {
+                    "prompt_tokens": 10,
+                    "completion_tokens": 5,
+                    "prompt_token_ids": [1, 2, 3],
+                    "completion_token_ids": [4, 5],
+                    "logprobs": [-0.1, -0.2],
+                },
+            },
+        ],
+    }
+    doc.update(overrides)
+    return doc
+
+
+class TestNativeAtif:
+    def backend_for(self, template_task, tmp_path, agent="terminus-2", **kwargs):
+        return HarborBackend(
+            orchestrator=TrialQueue(n_concurrent=1),
+            tasks_dir=template_task,
+            agent=agent,
+            trials_dir=tmp_path / "trials",
+            **kwargs,
+        )
+
+    def write_trajectory(self, backend, rollout_id, document):
+        agent_dir = backend.trials_dir / f"trial-{rollout_id}" / "agent"
+        agent_dir.mkdir(parents=True, exist_ok=True)
+        (agent_dir / "trajectory.json").write_text(json.dumps(document))
+
+    def pending_with_label(self, label=None):
+        pending = PendingTrial(noop_callback, None)
+        pending.label = label
+        return pending
+
+    def graded_event(self, rewards):
+        from types import SimpleNamespace
+
         return SimpleNamespace(
             config=SimpleNamespace(trial_name="trial-r1"),
-            result=SimpleNamespace(
-                agent_result=SimpleNamespace(
-                    metadata={
-                        "status": "success",
-                        "sample": RolloutSample(messages=[]).model_dump(),
-                    }
-                ),
-                verifier_result=SimpleNamespace(
-                    rewards={"reward": 1.0} if rewards is None else rewards
-                ),
-                exception_info=None,
+            result=trial_result(verifier_result=SimpleNamespace(rewards=rewards)),
+        )
+
+    async def test_native_sample_projected_from_atif(self, template_task, tmp_path):
+        """The trial's ATIF document projects to a chat-shaped sample."""
+        backend = self.backend_for(template_task, tmp_path)
+        self.write_trajectory(backend, "r1", atif_document())
+        pending = self.pending_with_label("row-7")
+
+        outcome = backend.grader_outcome(
+            self.graded_event({"reward": 1.0}), "r1", pending
+        )
+
+        assert outcome.status == RolloutStatus.SUCCESS
+        sample = outcome.sample
+        assert sample is not None
+        assert sample.reward == 1.0
+        assert sample.label == "row-7"
+        assert sample.trajectory_messages is not None
+        roles = [m["role"] for m in sample.messages]
+        assert roles == ["user", "assistant", "tool"]
+
+    async def test_reward_only_binding_succeeds_without_trajectory(
+        self, template_task, tmp_path
+    ):
+        """Oracle writes no trajectory; it must still reach graded SUCCESS."""
+        backend = self.backend_for(template_task, tmp_path, agent="oracle")
+        pending = self.pending_with_label("row-1")
+
+        outcome = backend.grader_outcome(
+            self.graded_event({"reward": 1.0}), "r1", pending
+        )
+
+        assert outcome.status == RolloutStatus.SUCCESS
+        assert outcome.sample is not None
+        assert outcome.sample.reward == 1.0
+        assert outcome.sample.trajectory_messages is None
+        assert outcome.sample.label == "row-1"
+
+    async def test_trainable_binding_missing_atif_still_fails(
+        self, template_task, tmp_path
+    ):
+        backend = self.backend_for(template_task, tmp_path)
+
+        outcome = backend.grader_outcome(
+            self.graded_event({"reward": 1.0}), "r1", self.pending_with_label()
+        )
+
+        assert outcome.status == RolloutStatus.FAILURE
+        assert outcome.err_category == RolloutErrorCategory.VALIDATION_ERROR
+
+    async def test_non_reward_channels_fail_validation(self, template_task, tmp_path):
+        """Only the 'reward' channel counts; custom channels are never guessed."""
+        backend = self.backend_for(template_task, tmp_path)
+        self.write_trajectory(backend, "r1", atif_document())
+
+        outcome = backend.grader_outcome(
+            self.graded_event({"accuracy": 1.0}), "r1", self.pending_with_label()
+        )
+
+        assert outcome.status == RolloutStatus.FAILURE
+        assert outcome.err_category == RolloutErrorCategory.VALIDATION_ERROR
+
+
+class TestBundleSampleBoundary:
+    def backend_for(self, bundle, template_task, tmp_path):
+        return HarborBackend(
+            orchestrator=TrialQueue(n_concurrent=1),
+            tasks_dir=template_task,
+            bundle=bundle,
+            trials_dir=tmp_path / "trials",
+        )
+
+    def event_for(self, container_result, rewards=None):
+        from types import SimpleNamespace
+
+        result = trial_result(
+            agent_result=SimpleNamespace(
+                metadata=json.loads(container_result.model_dump_json())
+            ),
+            verifier_result=SimpleNamespace(rewards=rewards)
+            if rewards is not None
+            else None,
+        )
+        return SimpleNamespace(
+            config=SimpleNamespace(trial_name="trial-r1"), result=result
+        )
+
+    def pending_with_label(self, label=None):
+        pending = PendingTrial(noop_callback, None)
+        pending.label = label
+        return pending
+
+    async def test_full_sample_round_trips_through_grading(
+        self, bundle, template_task, tmp_path
+    ):
+        from osmosis_ai.rollout.types import RolloutSample
+
+        backend = self.backend_for(bundle, template_task, tmp_path)
+        sample = RolloutSample(
+            messages=[{"role": "assistant", "content": "done"}],
+            trajectory_messages=None,
+            label="workflow-owned",
+            remove_sample=True,
+            metrics={"verdict": "pass"},
+            extra_fields={"run": "a"},
+        )
+        container_result = ContainerResult(status=RolloutStatus.SUCCESS, sample=sample)
+
+        outcome = backend.grader_outcome(
+            self.event_for(container_result, rewards={"reward": 1.0}),
+            "r1",
+            self.pending_with_label("request-label"),
+        )
+
+        assert outcome.status == RolloutStatus.SUCCESS
+        graded = outcome.sample
+        assert graded is not None
+        # Explicit None survived the boundary: persistence stays disabled.
+        assert graded.trajectory_messages is None
+        assert graded.label == "workflow-owned"
+        assert graded.remove_sample is True
+        assert graded.metrics["verdict"] == "pass"
+        assert graded.extra_fields == {"run": "a"}
+
+    async def test_request_label_fallback(self, bundle, template_task, tmp_path):
+        from osmosis_ai.rollout.types import RolloutSample
+
+        backend = self.backend_for(bundle, template_task, tmp_path)
+        container_result = ContainerResult(
+            status=RolloutStatus.SUCCESS,
+            sample=RolloutSample(messages=[{"role": "assistant", "content": "x"}]),
+        )
+
+        outcome = backend.grader_outcome(
+            self.event_for(container_result, rewards={"reward": 1.0}),
+            "r1",
+            self.pending_with_label("request-label"),
+        )
+
+        assert outcome.sample.label == "request-label"
+
+    async def test_preset_reward_survives_when_verifier_has_no_channel(
+        self, bundle, template_task, tmp_path
+    ):
+        from osmosis_ai.rollout.types import RolloutSample
+
+        backend = self.backend_for(bundle, template_task, tmp_path)
+        container_result = ContainerResult(
+            status=RolloutStatus.SUCCESS,
+            sample=RolloutSample(
+                messages=[{"role": "assistant", "content": "x"}], reward=0.75
             ),
         )
 
-    async def test_on_trial_end_uses_named_reward_dimension(self, tmp_path):
-        backend = self._make_trial_end_backend(tmp_path, cleanup=False)
-        on_grader = AsyncMock()
-        pending = PendingTrial(AsyncMock(), on_grader)
-        pending.workflow_complete_called = True
-        backend.pending["r1"] = pending
-
-        await backend.on_trial_end(
-            self._success_event(rewards={"aux_score": 0.1, "reward": 0.9})
+        outcome = backend.grader_outcome(
+            self.event_for(container_result, rewards={"a": 1.0, "b": 0.0}),
+            "r1",
+            self.pending_with_label(),
         )
 
-        result = on_grader.call_args.args[0]
-        assert result.status == RolloutStatus.SUCCESS
-        assert result.sample is not None
-        assert result.sample.reward == 0.9
+        assert outcome.status == RolloutStatus.SUCCESS
+        assert outcome.sample.reward == 0.75
 
-    async def test_on_trial_end_rejects_rewards_without_named_dimension(self, tmp_path):
-        backend = self._make_trial_end_backend(tmp_path, cleanup=False)
-        on_grader = AsyncMock()
-        pending = PendingTrial(AsyncMock(), on_grader)
-        pending.workflow_complete_called = True
-        backend.pending["r1"] = pending
-
-        await backend.on_trial_end(self._success_event(rewards={"aux_score": 0.1}))
-
-        result = on_grader.call_args.args[0]
-        assert result.status == RolloutStatus.FAILURE
-        assert result.err_category == RolloutErrorCategory.VALIDATION_ERROR
-        assert result.sample is not None
-        assert result.sample.reward is None
-
-    async def test_on_trial_end_relocates_artifacts_before_cleanup(self, tmp_path):
-        backend = self._make_trial_end_backend(tmp_path, cleanup=True)
-        self._seed_trial_artifacts(backend)
-
-        on_grader = AsyncMock()
-        pending = PendingTrial(AsyncMock(), on_grader)
-        pending.workflow_complete_called = True
-        backend.pending["r1"] = pending
-
-        await backend.on_trial_end(self._success_event())
-
-        result = on_grader.call_args.args[0]
-        assert result.status == RolloutStatus.SUCCESS
-        relocated = backend.artifact_root / "r1" / "artifacts"
-        assert (relocated / "logs" / "artifacts" / "output.txt").read_text() == "ok"
-        assert (relocated / "manifest.json").exists()
-        assert not (backend.trials_dir / "trial-r1").exists()
-
-    async def test_on_trial_end_copies_artifacts_when_trial_kept(self, tmp_path):
-        backend = self._make_trial_end_backend(tmp_path, cleanup=False)
-        self._seed_trial_artifacts(backend)
-
-        pending = PendingTrial(AsyncMock(), AsyncMock())
-        pending.workflow_complete_called = True
-        backend.pending["r1"] = pending
-
-        await backend.on_trial_end(self._success_event())
-
-        relocated = backend.artifact_root / "r1" / "artifacts"
-        assert (relocated / "logs" / "artifacts" / "output.txt").read_text() == "ok"
-        source = backend.trials_dir / "trial-r1" / "artifacts"
-        assert (source / "logs" / "artifacts" / "output.txt").exists()
-
-    async def test_on_trial_end_skips_symlinks_when_relocating(self, tmp_path):
-        backend = self._make_trial_end_backend(tmp_path, cleanup=False)
-        self._seed_trial_artifacts(backend)
-        source = backend.trials_dir / "trial-r1" / "artifacts"
-        host_file = tmp_path / "host-secret.txt"
-        host_file.write_text("host secret")
-        (source / "logs" / "artifacts" / "user-link.txt").symlink_to(host_file)
-
-        pending = PendingTrial(AsyncMock(), AsyncMock())
-        pending.workflow_complete_called = True
-        backend.pending["r1"] = pending
-
-        await backend.on_trial_end(self._success_event())
-
-        relocated = backend.artifact_root / "r1" / "artifacts"
-        assert not (relocated / "logs" / "artifacts" / "user-link.txt").exists()
-        assert host_file.read_text() == "host secret"
-
-    async def test_on_trial_end_merges_staged_grader_artifacts(self, tmp_path):
-        backend = self._make_trial_end_backend(tmp_path, cleanup=True)
-        self._seed_trial_artifacts(backend)
-        staged = (
-            backend.trials_dir
-            / "trial-r1"
-            / "verifier"
-            / GRADER_ARTIFACTS_SNAPSHOT_DIRNAME
-        )
-        staged.mkdir(parents=True)
-        (staged / "output.txt").write_text("updated by grader")
-        (staged / "grader.json").write_text('{"reward": 1}')
-
-        pending = PendingTrial(AsyncMock(), AsyncMock())
-        pending.workflow_complete_called = True
-        backend.pending["r1"] = pending
-
-        await backend.on_trial_end(self._success_event())
-
-        relocated = backend.artifact_root / "r1" / "artifacts" / "logs" / "artifacts"
-        assert (relocated / "output.txt").read_text() == "updated by grader"
-        assert (relocated / "grader.json").read_text() == '{"reward": 1}'
-
-    async def test_on_trial_end_rejects_symlinked_grader_merge_parent(
-        self, tmp_path, caplog
+    async def test_remove_sample_passes_reward_validation(
+        self, bundle, template_task, tmp_path
     ):
-        backend = self._make_trial_end_backend(tmp_path, cleanup=False)
-        trial_dir = backend.trials_dir / "trial-r1"
-        trial_artifacts = trial_dir / "artifacts"
-        outside = tmp_path / "outside"
-        trial_artifacts.mkdir(parents=True)
-        outside.mkdir()
-        (trial_artifacts / "logs").symlink_to(outside, target_is_directory=True)
-        staged = trial_dir / "verifier" / GRADER_ARTIFACTS_SNAPSHOT_DIRNAME
-        staged.mkdir(parents=True)
-        (staged / "grader.json").write_text("{}")
+        from osmosis_ai.rollout.types import RolloutSample
 
-        pending = PendingTrial(AsyncMock(), AsyncMock())
-        pending.workflow_complete_called = True
-        backend.pending["r1"] = pending
-
-        with caplog.at_level(
-            logging.WARNING, logger="osmosis_ai.rollout.backend.harbor.backend"
-        ):
-            await backend.on_trial_end(self._success_event())
-
-        assert not (outside / "artifacts" / "grader.json").exists()
-        assert "Failed to merge grader artifacts for rollout r1" in caplog.text
-
-    async def test_on_trial_end_keeps_result_when_grader_merge_fails(
-        self, tmp_path, monkeypatch, caplog
-    ):
-        backend = self._make_trial_end_backend(tmp_path, cleanup=True)
-        self._seed_trial_artifacts(backend)
-        staged = (
-            backend.trials_dir
-            / "trial-r1"
-            / "verifier"
-            / GRADER_ARTIFACTS_SNAPSHOT_DIRNAME
-        )
-        staged.mkdir(parents=True)
-        (staged / "grader.json").write_text("{}")
-
-        def _boom_for_staged_snapshot(source, destination, **kwargs):
-            if source == staged:
-                raise RuntimeError("bad artifact tree")
-            return real_copy_artifact_tree(source, destination, **kwargs)
-
-        monkeypatch.setattr(
-            "osmosis_ai.rollout.backend.harbor.backend.copy_artifact_tree",
-            _boom_for_staged_snapshot,
-        )
-        on_grader = AsyncMock()
-        pending = PendingTrial(AsyncMock(), on_grader)
-        pending.workflow_complete_called = True
-        backend.pending["r1"] = pending
-
-        with caplog.at_level(
-            logging.WARNING, logger="osmosis_ai.rollout.backend.harbor.backend"
-        ):
-            await backend.on_trial_end(self._success_event())
-
-        assert on_grader.call_args.args[0].status == RolloutStatus.SUCCESS
-        relocated = backend.artifact_root / "r1" / "artifacts"
-        assert (relocated / "logs" / "artifacts" / "output.txt").read_text() == "ok"
-        assert "Failed to merge grader artifacts for rollout r1" in caplog.text
-
-    async def test_on_trial_end_keeps_trial_when_relocation_fails(
-        self, tmp_path, monkeypatch, caplog
-    ):
-        backend = self._make_trial_end_backend(tmp_path, cleanup=True)
-        self._seed_trial_artifacts(backend)
-
-        def _boom(*_args, **_kwargs):
-            raise OSError("disk full")
-
-        monkeypatch.setattr(
-            "osmosis_ai.rollout.backend.harbor.backend.copy_artifact_tree", _boom
+        backend = self.backend_for(bundle, template_task, tmp_path)
+        container_result = ContainerResult(
+            status=RolloutStatus.SUCCESS,
+            sample=RolloutSample(
+                messages=[{"role": "assistant", "content": "x"}],
+                remove_sample=True,
+            ),
         )
 
-        pending = PendingTrial(AsyncMock(), AsyncMock())
-        pending.workflow_complete_called = True
-        backend.pending["r1"] = pending
-
-        with caplog.at_level(
-            logging.WARNING, logger="osmosis_ai.rollout.backend.harbor.backend"
-        ):
-            await backend.on_trial_end(self._success_event())
-
-        # Relocation failed: the source artifacts must survive cleanup.
-        source = backend.trials_dir / "trial-r1" / "artifacts"
-        assert (source / "logs" / "artifacts" / "output.txt").read_text() == "ok"
-        assert "Failed to relocate trial artifacts for rollout r1" in caplog.text
-
-
-class TestBuildRolloutConfigMetadata:
-    def test_metadata_written_when_present(self):
-        backend = _make_backend_for_config()
-        request = ExecutionRequest(
-            id="r1",
-            prompt=[{"role": "user", "content": "hi"}],
-            metadata={"tools": ["search"], "difficulty": 3},
-        )
-        config = backend.build_rollout_config(request)
-        assert config["metadata"] == {"tools": ["search"], "difficulty": 3}
-
-    def test_metadata_omitted_when_none(self):
-        backend = _make_backend_for_config()
-        request = ExecutionRequest(
-            id="r1",
-            prompt=[{"role": "user", "content": "hi"}],
-            metadata=None,
-        )
-        config = backend.build_rollout_config(request)
-        assert "metadata" not in config
-
-
-class TestAgentRunnerRoundTrip:
-    async def test_metadata_surfaces_on_ctx(self, tmp_path, monkeypatch):
-        import osmosis_ai.rollout.backend.harbor.agent_runner as agent_runner
-
-        _AGENT_CAPTURE.clear()
-        monkeypatch.setattr(agent_runner, "AGENT_LOGS_DIR", tmp_path)
-
-        backend = _make_backend_for_config()
-        metadata = {"tools": ["search"], "difficulty": 3}
-        request = ExecutionRequest(
-            id="r1",
-            prompt=[{"role": "user", "content": "hi"}],
-            metadata=metadata,
+        outcome = backend.grader_outcome(
+            self.event_for(container_result, rewards={}),
+            "r1",
+            self.pending_with_label(),
         )
 
-        # Round-trip the config through JSON, as the on-disk file would.
-        raw = json.dumps(backend.build_rollout_config(request), default=str)
-        config = json.loads(raw)
-        prompt = json.loads(json.dumps(request.prompt, default=str))
-
-        meta = await agent_runner.run_workflow(config, prompt)
-
-        assert meta["status"] == "success"
-        assert _AGENT_CAPTURE["metadata"] == metadata
-        assert _AGENT_CAPTURE["artifacts_dir"] == HARBOR_ARTIFACTS_DIR
-
-
-class TestGraderRunnerRoundTrip:
-    def _write_sample(self, path):
-        sample = RolloutSample(messages=[])
-        path.write_text(json.dumps(sample.model_dump(), default=str))
-
-    def test_grader_ctx_receives_metadata(self, tmp_path, monkeypatch):
-        import osmosis_ai.rollout.backend.harbor.grader_runner as grader_runner
-
-        _GRADER_CAPTURE.clear()
-        verifier_dir = tmp_path / "verifier"
-        artifacts_dir = tmp_path / "artifacts"
-        artifacts_dir.mkdir()
-        (artifacts_dir / "workflow.txt").write_text("workflow")
-        monkeypatch.setattr(grader_runner, "VERIFIER_LOGS_DIR", verifier_dir)
-        monkeypatch.setattr(grader_runner, "HARBOR_ARTIFACTS_DIR", artifacts_dir)
-
-        backend = _make_backend_for_config(grader=True)
-        metadata = {"tools": ["search"]}
-        request = ExecutionRequest(
-            id="r1",
-            prompt=[{"role": "user", "content": "hi"}],
-            label="test-label",
-            metadata=metadata,
-        )
-        config_path = tmp_path / "rollout_config.json"
-        config_path.write_text(
-            json.dumps(backend.build_rollout_config(request), default=str)
-        )
-        sample_path = tmp_path / "sample.json"
-        self._write_sample(sample_path)
-
-        monkeypatch.setattr(
-            grader_runner,
-            "parse_args",
-            lambda: SimpleNamespace(config=config_path, sample=sample_path),
-        )
-
-        grader_runner.main()
-
-        assert _GRADER_CAPTURE["metadata"] == metadata
-        assert _GRADER_CAPTURE["artifacts_dir"] == artifacts_dir
-        rewards = json.loads((verifier_dir / "reward.json").read_text())
-        assert rewards == {"reward": 1.0}
-        snapshot = verifier_dir / GRADER_ARTIFACTS_SNAPSHOT_DIRNAME
-        assert not (snapshot / "workflow.txt").exists()
-        assert (snapshot / "grader.txt").read_text() == "grader"
-
-    def test_metadata_only_config_still_grades(self, tmp_path, monkeypatch):
-        """A config with metadata but no label still triggers grading."""
-        import osmosis_ai.rollout.backend.harbor.grader_runner as grader_runner
-
-        _GRADER_CAPTURE.clear()
-        verifier_dir = tmp_path / "verifier"
-        artifacts_dir = tmp_path / "artifacts"
-        artifacts_dir.mkdir()
-        monkeypatch.setattr(grader_runner, "VERIFIER_LOGS_DIR", verifier_dir)
-        monkeypatch.setattr(grader_runner, "HARBOR_ARTIFACTS_DIR", artifacts_dir)
-
-        backend = _make_backend_for_config(grader=True)
-        request = ExecutionRequest(
-            id="r1",
-            prompt=[{"role": "user", "content": "hi"}],
-            label=None,
-            metadata={"tools": ["search"]},
-        )
-        config_path = tmp_path / "rollout_config.json"
-        config_path.write_text(
-            json.dumps(backend.build_rollout_config(request), default=str)
-        )
-        sample_path = tmp_path / "sample.json"
-        self._write_sample(sample_path)
-
-        monkeypatch.setattr(
-            grader_runner,
-            "parse_args",
-            lambda: SimpleNamespace(config=config_path, sample=sample_path),
-        )
-
-        grader_runner.main()
-
-        assert _GRADER_CAPTURE["label"] is None
-        assert _GRADER_CAPTURE["metadata"] == {"tools": ["search"]}
-        rewards = json.loads((verifier_dir / "reward.json").read_text())
-        assert rewards == {"reward": 1.0}
-
-    def test_grader_failure_still_stages_artifacts(self, tmp_path, monkeypatch):
-        """The finally-block snapshot preserves files written before the crash."""
-        import osmosis_ai.rollout.backend.harbor.grader_runner as grader_runner
-
-        verifier_dir = tmp_path / "verifier"
-        artifacts_dir = tmp_path / "artifacts"
-        artifacts_dir.mkdir()
-        monkeypatch.setattr(grader_runner, "VERIFIER_LOGS_DIR", verifier_dir)
-        monkeypatch.setattr(grader_runner, "HARBOR_ARTIFACTS_DIR", artifacts_dir)
-
-        backend = _make_backend_for_config(grader=True)
-        backend.grader_path = (
-            f"{ArtifactWritingFailingGrader.__module__}:"
-            f"{ArtifactWritingFailingGrader.__qualname__}"
-        )
-        request = ExecutionRequest(
-            id="r1",
-            prompt=[{"role": "user", "content": "hi"}],
-            label="test-label",
-        )
-        config_path = tmp_path / "rollout_config.json"
-        config_path.write_text(
-            json.dumps(backend.build_rollout_config(request), default=str)
-        )
-        sample_path = tmp_path / "sample.json"
-        self._write_sample(sample_path)
-
-        monkeypatch.setattr(
-            grader_runner,
-            "parse_args",
-            lambda: SimpleNamespace(config=config_path, sample=sample_path),
-        )
-
-        with pytest.raises(RuntimeError, match="grader exploded"):
-            grader_runner.main()
-
-        snapshot = verifier_dir / GRADER_ARTIFACTS_SNAPSHOT_DIRNAME
-        assert (snapshot / "partial.txt").read_text() == "partial"
-        assert not (verifier_dir / "reward.json").exists()
-
-    def test_grader_constructor_failure_still_stages_artifacts(
-        self, tmp_path, monkeypatch
-    ):
-        import osmosis_ai.rollout.backend.harbor.grader_runner as grader_runner
-
-        verifier_dir = tmp_path / "verifier"
-        artifacts_dir = tmp_path / "artifacts"
-        artifacts_dir.mkdir()
-        monkeypatch.setattr(grader_runner, "VERIFIER_LOGS_DIR", verifier_dir)
-        monkeypatch.setattr(grader_runner, "HARBOR_ARTIFACTS_DIR", artifacts_dir)
-
-        backend = _make_backend_for_config(grader=True)
-        backend.grader_path = (
-            f"{ArtifactWritingFailingConstructorGrader.__module__}:"
-            f"{ArtifactWritingFailingConstructorGrader.__qualname__}"
-        )
-        request = ExecutionRequest(
-            id="r1",
-            prompt=[{"role": "user", "content": "hi"}],
-            label="test-label",
-        )
-        config_path = tmp_path / "rollout_config.json"
-        config_path.write_text(
-            json.dumps(backend.build_rollout_config(request), default=str)
-        )
-        sample_path = tmp_path / "sample.json"
-        self._write_sample(sample_path)
-
-        monkeypatch.setattr(
-            grader_runner,
-            "parse_args",
-            lambda: SimpleNamespace(config=config_path, sample=sample_path),
-        )
-
-        with pytest.raises(RuntimeError, match="grader constructor exploded"):
-            grader_runner.main()
-
-        snapshot = verifier_dir / GRADER_ARTIFACTS_SNAPSHOT_DIRNAME
-        assert (snapshot / "constructor.txt").read_text() == "constructor"
-        assert not (verifier_dir / "reward.json").exists()
-
-
-class TestStageGraderArtifacts:
-    def test_drops_snapshot_when_grader_wrote_nothing(self, tmp_path, monkeypatch):
-        import osmosis_ai.rollout.backend.harbor.grader_runner as grader_runner
-
-        verifier_dir = tmp_path / "verifier"
-        artifacts_dir = tmp_path / "artifacts"
-        (artifacts_dir / "nested").mkdir(parents=True)
-        (artifacts_dir / "nested" / "workflow.txt").write_text("workflow")
-        monkeypatch.setattr(grader_runner, "VERIFIER_LOGS_DIR", verifier_dir)
-        monkeypatch.setattr(grader_runner, "HARBOR_ARTIFACTS_DIR", artifacts_dir)
-
-        baseline = grader_runner.capture_artifact_baseline()
-        grader_runner.stage_grader_artifacts(baseline)
-
-        assert not (verifier_dir / GRADER_ARTIFACTS_SNAPSHOT_DIRNAME).exists()
-
-    def test_replaces_stale_snapshot_from_previous_run(self, tmp_path, monkeypatch):
-        import osmosis_ai.rollout.backend.harbor.grader_runner as grader_runner
-
-        verifier_dir = tmp_path / "verifier"
-        artifacts_dir = tmp_path / "artifacts"
-        artifacts_dir.mkdir()
-        (artifacts_dir / "grader.txt").write_text("fresh")
-        stale = verifier_dir / GRADER_ARTIFACTS_SNAPSHOT_DIRNAME
-        stale.mkdir(parents=True)
-        (stale / "stale.txt").write_text("stale")
-        monkeypatch.setattr(grader_runner, "VERIFIER_LOGS_DIR", verifier_dir)
-        monkeypatch.setattr(grader_runner, "HARBOR_ARTIFACTS_DIR", artifacts_dir)
-
-        grader_runner.stage_grader_artifacts({})
-
-        snapshot = verifier_dir / GRADER_ARTIFACTS_SNAPSHOT_DIRNAME
-        assert (snapshot / "grader.txt").read_text() == "fresh"
-        assert not (snapshot / "stale.txt").exists()
-
-
-class TestManagedSkypilotPlacement:
-    """Placement comes from the run environment so rollouts name no infrastructure."""
-
-    @staticmethod
-    def _config(env_type, **kwargs):
-        from harbor.models.trial.config import EnvironmentConfig
-
-        return EnvironmentConfig(type=env_type, kwargs=kwargs)
-
-    def test_fills_context_name_from_environment(self, monkeypatch):
-        from harbor.models.environment_type import EnvironmentType
-
-        from osmosis_ai.rollout.backend.harbor.backend import (
-            apply_managed_skypilot_placement,
-        )
-
-        monkeypatch.setenv("HARBOR_SKYPILOT_CONTEXT", "managed-context")
-        config = self._config(EnvironmentType.SKYPILOT)
-
-        assert (
-            apply_managed_skypilot_placement(config).kwargs["context_name"]
-            == "managed-context"
-        )
-
-    def test_explicit_context_name_wins(self, monkeypatch):
-        from harbor.models.environment_type import EnvironmentType
-
-        from osmosis_ai.rollout.backend.harbor.backend import (
-            apply_managed_skypilot_placement,
-        )
-
-        monkeypatch.setenv("HARBOR_SKYPILOT_CONTEXT", "managed-context")
-        config = self._config(EnvironmentType.SKYPILOT, context_name="mine")
-
-        assert apply_managed_skypilot_placement(config).kwargs["context_name"] == "mine"
-
-    def test_unset_environment_leaves_kwargs_untouched(self, monkeypatch):
-        from harbor.models.environment_type import EnvironmentType
-
-        from osmosis_ai.rollout.backend.harbor.backend import (
-            apply_managed_skypilot_placement,
-        )
-
-        monkeypatch.delenv("HARBOR_SKYPILOT_CONTEXT", raising=False)
-        config = self._config(EnvironmentType.SKYPILOT)
-
-        assert apply_managed_skypilot_placement(config).kwargs == {}
-
-    def test_ignores_non_skypilot_environments(self, monkeypatch):
-        from harbor.models.environment_type import EnvironmentType
-
-        from osmosis_ai.rollout.backend.harbor.backend import (
-            apply_managed_skypilot_placement,
-        )
-
-        monkeypatch.setenv("HARBOR_SKYPILOT_CONTEXT", "managed-context")
-        config = self._config(EnvironmentType.DAYTONA)
-
-        assert apply_managed_skypilot_placement(config).kwargs == {}
+        assert outcome.status == RolloutStatus.SUCCESS
+        assert outcome.sample.remove_sample is True

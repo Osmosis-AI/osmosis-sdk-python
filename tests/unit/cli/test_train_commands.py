@@ -1394,7 +1394,7 @@ dataset = "d"
         with pytest.raises(CLIError, match="configs/training"):
             train_module.submit(config_path=path, yes=True)
 
-    def test_submit_requires_concrete_grader(
+    def test_submit_does_not_discover_grader_from_entrypoint(
         self,
         monkeypatch: pytest.MonkeyPatch,
         tmp_path: Path,
@@ -1428,8 +1428,15 @@ rollout_batch_size = 64
             encoding="utf-8",
         )
 
-        with pytest.raises(CLIError, match="Grader"):
-            train_module.submit(config_path=path, yes=True)
+        class FakeClient:
+            def submit_training_run(self, **kwargs):
+                return TestSubmit.SUBMIT_RESULT
+
+        monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr(platform_train_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr(shared_submit_module, "OsmosisClient", FakeClient)
+
+        train_module.submit(config_path=path, yes=True)
 
     def test_submit_prints_remote_fetch_notice(
         self,

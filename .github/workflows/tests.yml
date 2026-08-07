@@ -48,12 +48,14 @@ jobs:
           output=$(uv run --no-editable pyright --verifytypes osmosis_ai --ignoreexternal 2>&1) || true
           echo "$output"
           # Known --verifytypes baselines we intentionally skip:
-          #   * agent_adapter: inherits from harbor's BaseInstalledAgent which
-          #     has no type stubs ("base class unknown").
+          #   * harbor.harness_agent: inherits harbor's BaseInstalledAgent which
+          #     has no type stubs ("base class / metaclass unknown"). Anchored to
+          #     that module so errors elsewhere (e.g. a harness_agent_config
+          #     member) are still reported.
           unexpected=$(echo "$output" | awk '
             /^osmosis_ai\./ { sym = $0 }
             /error:/ {
-              if (sym ~ /agent_adapter/) next
+              if (sym ~ /harbor\.harness_agent\./) next
               print $0
             }
           ')

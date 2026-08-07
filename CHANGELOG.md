@@ -12,8 +12,8 @@ This file records changes to `osmosis-ai`. For earlier versions, see [GitHub Rel
   - Server: `from osmosis_ai.rollout.server import create_rollout_server, ControllerAuth`
   - Strands: `from osmosis_ai.rollout.integrations.agents.strands import OsmosisStrandsAgent, OsmosisRolloutModel`
   - OpenAI Agents: `from osmosis_ai.rollout.integrations.agents.openai_agents import OsmosisAgent`
-  - Harbor: `from osmosis_ai.rollout.backend.harbor import HarborBackend`
-  - Harbor workflow context: `from osmosis_ai.rollout.context import HarborAgentWorkflowContext`
+  - Harbor: `from osmosis_ai.rollout.backend.harbor import HarborBackend, TaskMode`
+- The legacy Harbor backend is gone and `HarborBackend` is now the implementation previously called `HarborBackendV2`, with a different constructor. `HarborAgentWorkflowContext` no longer exists — the workflow runs inside the container. See "Migrating from the pre-v0.3 Harbor backend" in [docs/rollout-sdk.md](docs/rollout-sdk.md).
 - `evaluate_rubric` is no longer included by `from osmosis_ai import *`. Import it explicitly from `osmosis_ai.eval.rubric` and install the `rubric` extra.
 - The Harbor extra no longer installs Daytona or SkyPilot. Daytona support is retired; the rollout runtime must provide SkyPilot when it is used.
 

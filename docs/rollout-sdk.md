@@ -22,11 +22,11 @@ Optional features use these canonical modules:
 | Extra | Import | Purpose |
 |-------|--------|---------|
 | `server` | `from osmosis_ai.rollout.server import create_rollout_server, ControllerAuth` | Generic FastAPI rollout server |
-| `harbor` | `from osmosis_ai.rollout.backend.harbor import HarborBackend` | Harbor execution backend |
+| `harbor` | `from osmosis_ai.rollout.backend.harbor import HarborBackend, TaskMode` | Harbor execution backend |
 | `strands` | `from osmosis_ai.rollout.integrations.agents.strands import OsmosisStrandsAgent, OsmosisRolloutModel` | Strands integration |
 | `openai-agents` | `from osmosis_ai.rollout.integrations.agents.openai_agents import OsmosisAgent` | OpenAI Agents integration |
 
-The `harbor` extra installs plain Harbor for an externally provided SkyPilot runtime. Daytona is retired, and do not install Harbor's `skypilot` extra.
+The `harbor` extra installs plain Harbor for an externally provided SkyPilot runtime. Daytona is retired, and do not install Harbor's `skypilot` extra. It is a host-side extra: it also carries what [../osmosis_ai/packaging.py](../osmosis_ai/packaging.py) needs to build the bundle wheel (and `uv` must be on `PATH`). Inside the task container only the framework-neutral core runs, so a bundle never installs the `harbor` extra — which is why the in-container runner and ATIF persistence must work on a bare install.
 
 ## AgentWorkflow
 
@@ -39,7 +39,7 @@ class AgentWorkflow[TConfig: AgentWorkflowConfig](ABC):
 
 [../osmosis_ai/rollout/agent_workflow.py](../osmosis_ai/rollout/agent_workflow.py)
 
-- `run` is **async** (enforced by [validator.py](../osmosis_ai/rollout/validator.py)).
+- `run` is **async** — the backend awaits it.
 - `ctx.prompt` is the initial message list; `ctx.config` is your typed config.
 - The return value is not the trajectory. Samples are collected from the active `RolloutContext` (see [Samples](#samples)); the integrations register sources for you.
 
@@ -63,8 +63,7 @@ class Grader(ABC):
 
 [../osmosis_ai/rollout/context.py](../osmosis_ai/rollout/context.py)
 
-- `AgentWorkflowContext` — `prompt: list[dict]`, `config`.
-- Under `HarborBackend`, the workflow receives a Harbor-specific context that additionally exposes `environment` (a Harbor `BaseEnvironment`) for `environment.exec()`, `environment.upload_file()`, and related operations.
+- `AgentWorkflowContext` — `prompt: list[dict]`, `config`. `HarborBackend` runs the workflow *inside* the task container, so it receives the same context and reaches the environment with ordinary process calls.
 - `GraderContext` — `label`, singular `sample`, and input-side `metadata`, plus `set_reward()` for grading output.
 - `RolloutContext` — ambient per-rollout context (chat completions URL, API key, rollout id). It is a context manager; the server enters it around execution. Local backends pass connection info directly; container runners read it from `OSMOSIS_CHAT_COMPLETIONS_URL` / `OSMOSIS_API_KEY` / `OSMOSIS_ROLLOUT_ID`. Fetch the current one with `get_rollout_context()`.
 
@@ -178,7 +177,7 @@ class AgentWorkflowConfig(BaseConfig):  # also GraderConfig
 ```
 
 - `BaseConfig` sets `extra="allow"` and `validate_assignment=True`, so you can add your own fields (model paths, tool flags) and read them off `self.config` in `run` / `grade`.
-- `name` becomes the resolved agent name (1–256 chars; see `validate_backend`).
+- `name` becomes the resolved agent name.
 - `concurrency.max_concurrent` caps in-flight executions — raise/lower it to avoid saturating an MCP-based rollout server (see [troubleshooting.md](./troubleshooting.md)).
 
 ## Server and backends
@@ -202,7 +201,51 @@ app = create_rollout_server(backend=backend)  # FastAPI: POST /rollout, GET /hea
 - `ControllerAuth` ([server/auth.py](../osmosis_ai/rollout/server/auth.py)) supplies the bearer headers for callbacks.
 - `ExecutionBackend` ([backend/base.py](../osmosis_ai/rollout/backend/base.py)) is the ABC; pick one:
   - `LocalBackend` ([backend/local/](../osmosis_ai/rollout/backend/local/)) — runs workflow + grader in-process. Re-exported from `osmosis_ai.rollout`. Used by the scaffold and eval.
-  - `HarborBackend` ([backend/harbor/backend.py](../osmosis_ai/rollout/backend/harbor/backend.py)) — runs the agent inside a Harbor container and is available with the `harbor` extra: `from osmosis_ai.rollout.backend.harbor import HarborBackend`.
+  - `HarborBackend` ([backend/harbor/backend.py](../osmosis_ai/rollout/backend/harbor/backend.py)) — runs the agent inside a Harbor container. It is **not** re-exported from `osmosis_ai.rollout`; import it from its canonical module (`from osmosis_ai.rollout.backend.harbor import HarborBackend`), which requires the `harbor` extra.
+
+### Harbor backend
+
+[../osmosis_ai/rollout/backend/harbor/](../osmosis_ai/rollout/backend/harbor/)
+
+`agent=` picks the track. A registered native agent name (`"terminus-2"`, `"mini-swe-agent"`, `"oracle"`) runs Harbor's own agent with the rollout endpoint injected; an `AgentWorkflow` class (or `"module:Class"` path) is packaged into a wheel and installed in the task container at trial start. `grader=None` makes the task's own `tests/` the reward source; a `Grader` class is delivered as the verifier instead.
+
+```python
+from pathlib import Path
+
+from harbor.trial.queue import TrialQueue
+
+from osmosis_ai.rollout.backend.harbor import HarborBackend
+from osmosis_ai.rollout.server import create_rollout_server
+
+backend = HarborBackend(
+    orchestrator=TrialQueue(n_concurrent=4),
+    tasks_dir=Path("tasks"),
+    agent=MyWorkflow,  # or a native agent name
+    grader=MyGrader,  # or None to score with the task's own tests/
+)
+app = create_rollout_server(backend=backend, lifespan=backend.prewarm_lifespan())
+```
+
+- Tasks come from `tasks_dir` (`task_mode="template"` or `"dataset"`), or per rollout via `metadata["harbor_task"]` — a local path, a registry package `"org/name[@ref]"`, or a git checkout (`metadata["git_url"]`, ideally with a pinned `metadata["git_commit_id"]`).
+- `prewarm()` builds every task image and runs agent setup before the server accepts traffic; `prewarm_lifespan()` wraps it as an ASGI lifespan.
+- `max_queue_depth` bounds admission (`has_capacity()`), and `cancel_rollouts()` cancels queued or running rollouts by id, prefix, or all.
+
+#### Migrating from the pre-v0.3 Harbor backend
+
+v0.3 removed the original Harbor backend and gave its name to the implementation that had been called `HarborBackendV2`. The old one mounted the SDK and your source tree into the task environment and ran the workflow through an installed-agent adapter; `HarborBackend` builds a wheel from your project instead, so task images stay pure task environments.
+
+Note that `HarborBackend` still resolves — with a different constructor. A call site passing the old keywords raises a `TypeError` naming them and pointing here; port it with this table:
+
+| Pre-v0.3 | v0.3 |
+|----------|------|
+| `task_dir=` (one task) | `tasks_dir=` plus `task_mode=` (`"template"` or `"dataset"`) |
+| `workflow=` | `agent=` — an `AgentWorkflow` **or** a native Harbor agent name |
+| `user_code_dir=` | `code_dir=` (defaults to the agent's project dir) or a prebuilt `bundle=` |
+| `grader=` or `custom_tests_dir=` (the two reward sources) | `grader=`, or `grader=None` to score with the task's own `tests/` — `custom_tests_dir=` is gone |
+| `prebuild_local_image=`, `symlink_environment=` | dropped — image reuse is Harbor's, and `prewarm()` warms it |
+| `HarborAgentWorkflowContext.environment` | gone: the workflow runs *inside* the container, so use ordinary process calls |
+
+`workflow_config`, `grader_config`, `trials_dir`, `environment_config`, and `cleanup_successful_trials` carry over unchanged.
 
 ### Running a server
 

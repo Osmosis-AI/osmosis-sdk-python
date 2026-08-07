@@ -1649,6 +1649,7 @@ full = [
     { name = "mcp" },
     { name = "openai-agents", extra = ["litellm"] },
     { name = "orjson" },
+    { name = "platformdirs" },
     { name = "pyarrow" },
     { name = "strands-agents", extra = ["litellm"] },
     { name = "toml" },
@@ -1662,6 +1663,7 @@ harbor = [
     { name = "harbor" },
     { name = "litellm" },
     { name = "orjson" },
+    { name = "platformdirs" },
     { name = "toml" },
 ]
 openai-agents = [
@@ -1737,6 +1739,7 @@ requires-dist = [
     { name = "orjson", marker = "extra == 'strands'", specifier = ">=3.11.6,<4.0" },
     { name = "osmosis-ai", extras = ["harbor", "openai-agents", "parquet", "rubric", "server", "strands"], marker = "extra == 'full'" },
     { name = "packaging", specifier = ">=24.0" },
+    { name = "platformdirs", marker = "extra == 'harbor'", specifier = ">=4.0" },
     { name = "prompt-toolkit", specifier = ">=3.0.0,<4.0.0" },
     { name = "pyarrow", marker = "extra == 'parquet'", specifier = ">=23.0.1" },
     { name = "pydantic", specifier = ">=2.0.0,<3.0.0" },

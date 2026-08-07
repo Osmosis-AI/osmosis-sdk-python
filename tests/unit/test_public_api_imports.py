@@ -118,6 +118,63 @@ def test_integration_namespaces_do_not_select_a_framework() -> None:
     assert result.returncode == 0, result.stderr
 
 
+def test_framework_neutral_core_imports_without_optional_dependencies() -> None:
+    """A bare install must reach everything a rollout container needs.
+
+    Bundle wheels install `osmosis-ai` inside the task container without the
+    harbor extra, so the in-container runner, its file contract, and ATIF
+    persistence have to resolve with only the base dependencies.
+    """
+    result = _run_python(
+        """
+        import builtins
+        import importlib
+
+        blocked = {
+            "agents",
+            "aiohttp",
+            "dockerfile_parse",
+            "fastapi",
+            "harbor",
+            "litellm",
+            "mcp",
+            "openai",
+            "orjson",
+            "platformdirs",
+            "pyarrow",
+            "strands",
+            "toml",
+            "tqdm",
+            "uvicorn",
+        }
+        real_import = builtins.__import__
+
+        def guarded_import(name, globals=None, locals=None, fromlist=(), level=0):
+            root = name.partition(".")[0]
+            if root in blocked:
+                raise ModuleNotFoundError("No module named " + repr(root), name=root)
+            return real_import(name, globals, locals, fromlist, level)
+
+        builtins.__import__ = guarded_import
+        for module_name in (
+            "osmosis_ai.rollout",
+            "osmosis_ai.rollout.container.files",
+            "osmosis_ai.rollout.container.runner",
+            "osmosis_ai.rollout.container.trajectories",
+            "osmosis_ai.rollout.trajectory.atif",
+            "osmosis_ai.rollout.trajectory.converter",
+            "osmosis_ai.rollout.trajectory.save",
+            "osmosis_ai.rollout.types.output",
+            "osmosis_ai.rollout.types.protocol",
+            "osmosis_ai.rollout.utils.errors",
+            "osmosis_ai.rollout.utils.ttl_cache",
+        ):
+            importlib.import_module(module_name)
+        """
+    )
+    assert result.returncode == 0, result.stderr
+
+
 def test_facades_resolve_each_symbol_from_its_leaf_module() -> None:
     result = _run_python(
         """
@@ -186,6 +243,26 @@ def test_facades_resolve_each_symbol_from_its_leaf_module() -> None:
             "osmosis_ai.rollout.backend.harbor",
             "HarborBackend",
             "harbor",
+            "harbor",
+        ),
+        (
+            "osmosis_ai.rollout.backend.harbor",
+            "TaskMode",
+            "harbor",
+            "harbor",
+        ),
+        # The bundle builder reaches osmosis_ai.packaging, whose toml and
+        # platformdirs imports ship with the harbor extra.
+        (
+            "osmosis_ai.rollout.backend.harbor",
+            "HarborBackend",
+            "toml",
+            "harbor",
+        ),
+        (
+            "osmosis_ai.rollout.backend.harbor",
+            "HarborBackend",
+            "platformdirs",
             "harbor",
         ),
         (

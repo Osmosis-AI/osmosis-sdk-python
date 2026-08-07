@@ -14,6 +14,12 @@ need general-purpose ATIF models should use Harbor's implementation directly.
 When updating ATIF support, compare this module with both the upstream ATIF RFC
 and those Harbor paths. Preserve SDK-specific hardening such as rejecting
 non-finite floats, which prevents invalid JSON documents.
+
+Every document the SDK writes goes through these models — including the one the
+in-container runner leaves for the Harbor backend to collect. The one place that
+reads back Harbor's own models is ``HarborBackend.load_native_trajectory``,
+which parses documents that Harbor's native agents authored; keep the two in
+step when bumping the pinned Harbor line.
 """
 
 from __future__ import annotations
