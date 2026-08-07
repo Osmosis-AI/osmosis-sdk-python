@@ -79,7 +79,9 @@ Names listed in `[secrets]` do not have to be saved in the platform secret store
 3. The platform secret store — a name already saved in the workspace or personal scope is left for the platform to resolve and is never sent from the CLI.
 4. An interactive `getpass` prompt, only when stdin is a TTY.
 
-Values supplied this way are never written to disk and must be re-supplied on every run. Outside a TTY, every unresolved name is reported at once so CI shows the whole gap rather than one name per retry. The same flag and ordering apply to `osmosis train submit` and `osmosis benchmark submit`.
+Values supplied this way are never written to disk and must be re-supplied on every run. Outside a TTY, every unresolved name is reported at once so CI shows the whole gap rather than one name per retry.
+
+`osmosis train submit` shares this flow exactly. `osmosis benchmark submit` uses the same flag and ordering, but its configs reference secrets from several places and only `[secrets]` names may be supplied per run — see [benchmark.md](./benchmark.md#secret-references).
 
 The result is an `OperationResult` whose next-steps point at `osmosis eval info <name>`, `osmosis eval list`, and the platform URL.
 
@@ -111,3 +113,4 @@ from osmosis_ai import evaluate_rubric, RubricResult  # lazy-loaded top-level ex
 
 - [datasets.md](./datasets.md) — dataset row contract
 - [rollout-sdk.md](./rollout-sdk.md) — the workflow + grader API graded during eval runs
+- [benchmark.md](./benchmark.md) — the `osmosis benchmark submit` config contract
