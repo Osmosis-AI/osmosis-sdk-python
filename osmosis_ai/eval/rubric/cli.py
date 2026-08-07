@@ -18,7 +18,6 @@ except ModuleNotFoundError as _exc:
     raise_optional_dependency_error(
         _exc,
         extra="rubric",
-        expected_modules=frozenset({"litellm", "orjson"}),
         feature="Rubric evaluation",
     )
 

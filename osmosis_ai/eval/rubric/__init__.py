@@ -35,12 +35,9 @@ def __getattr__(name: str) -> object:
             exports=_EXPORTS,
         )
     except ModuleNotFoundError as exc:
-        if name != "evaluate_rubric":
-            raise
         raise_optional_dependency_error(
             exc,
             extra="rubric",
-            expected_modules=frozenset({"litellm", "orjson"}),
             feature="Rubric evaluation",
         )
 

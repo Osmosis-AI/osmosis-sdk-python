@@ -4,9 +4,36 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from importlib import import_module
-from typing import NoReturn
+from typing import Final, NoReturn
 
 LazyExports = Mapping[str, tuple[str, str]]
+
+# Top-level import names installed by each optional extra's direct
+# dependencies. Each set is deliberately complete: the install hint is correct
+# advice for any module the extra provides, so a boundary never has to guess
+# which subset it imports. tests/unit/test_public_api_imports.py asserts each
+# set matches the extra declared in pyproject.toml.
+EXTRA_MODULES: Final[Mapping[str, frozenset[str]]] = {
+    "server": frozenset({"click", "fastapi", "uvicorn"}),
+    "strands": frozenset({"aiohttp", "click", "litellm", "mcp", "orjson", "strands"}),
+    "openai-agents": frozenset(
+        {"agents", "aiohttp", "click", "litellm", "mcp", "orjson"}
+    ),
+    "harbor": frozenset(
+        {
+            "aiohttp",
+            "click",
+            "dockerfile_parse",
+            "harbor",
+            "litellm",
+            "orjson",
+            "platformdirs",
+            "toml",
+        }
+    ),
+    "rubric": frozenset({"aiohttp", "click", "litellm", "orjson", "tqdm"}),
+    "parquet": frozenset({"pyarrow"}),
+}
 
 
 def import_attribute(module_name: str, attribute_name: str) -> object:
@@ -45,16 +72,15 @@ def raise_optional_dependency_error(
     error: ModuleNotFoundError,
     *,
     extra: str,
-    expected_modules: frozenset[str],
     feature: str,
 ) -> NoReturn:
-    """Add an install hint only when an expected optional module is absent.
+    """Add an install hint only when a module owned by ``extra`` is absent.
 
     A missing SDK module or a missing submodule inside an installed dependency
     is left untouched. Those indicate a packaging bug or an incompatible
     dependency rather than an omitted extra and should retain their traceback.
     """
-    if error.name not in expected_modules:
+    if error.name not in EXTRA_MODULES[extra]:
         raise error
 
     message = (

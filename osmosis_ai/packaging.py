@@ -32,7 +32,6 @@ except ModuleNotFoundError as _exc:
     raise_optional_dependency_error(
         _exc,
         extra="harbor",
-        expected_modules=frozenset({"platformdirs", "toml"}),
         feature="Rollout bundle packaging",
     )
 

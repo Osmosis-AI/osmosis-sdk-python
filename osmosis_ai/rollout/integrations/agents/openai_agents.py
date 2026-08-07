@@ -22,7 +22,6 @@ except ModuleNotFoundError as _exc:
     raise_optional_dependency_error(
         _exc,
         extra="openai-agents",
-        expected_modules=frozenset({"agents", "litellm"}),
         feature="The OpenAI Agents integration",
     )
 except ImportError as _exc:
@@ -35,7 +34,6 @@ except ImportError as _exc:
     raise_optional_dependency_error(
         _cause,
         extra="openai-agents",
-        expected_modules=frozenset({"litellm"}),
         feature="The OpenAI Agents integration",
     )
 

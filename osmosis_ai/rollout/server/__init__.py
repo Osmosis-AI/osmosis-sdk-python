@@ -30,12 +30,9 @@ def __getattr__(name: str) -> object:
             exports=_EXPORTS,
         )
     except ModuleNotFoundError as exc:
-        if name != "create_rollout_server":
-            raise
         raise_optional_dependency_error(
             exc,
             extra="server",
-            expected_modules=frozenset({"fastapi", "uvicorn"}),
             feature="The rollout server",
         )
 

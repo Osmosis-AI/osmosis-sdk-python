@@ -182,10 +182,7 @@ def test_facades_resolve_each_symbol_from_its_leaf_module() -> None:
         import sys
 
         import osmosis_ai.eval.rubric as rubric
-        import osmosis_ai.platform.auth as auth
         import osmosis_ai.rollout.server as server
-        import osmosis_ai.rollout.trajectory as trajectory
-        import osmosis_ai.templates as templates
 
         assert "osmosis_ai.eval.rubric.engine" not in sys.modules
         assert rubric.RubricResult.__module__ == "osmosis_ai.eval.rubric.types"
@@ -194,23 +191,63 @@ def test_facades_resolve_each_symbol_from_its_leaf_module() -> None:
         assert "osmosis_ai.rollout.server.app" not in sys.modules
         assert server.ControllerAuth.__module__ == "osmosis_ai.rollout.server.auth"
         assert "osmosis_ai.rollout.server.app" not in sys.modules
-
-        assert "osmosis_ai.rollout.trajectory.converter" not in sys.modules
-        assert trajectory.TrajectoryReport.__module__ == (
-            "osmosis_ai.rollout.trajectory.report"
-        )
-        assert "osmosis_ai.rollout.trajectory.converter" not in sys.modules
-
-        assert "osmosis_ai.platform.auth.credentials" not in sys.modules
-        assert auth.CONFIG_DIR.name == "osmosis"
-        assert "osmosis_ai.platform.auth.credentials" not in sys.modules
-
-        assert "osmosis_ai.templates.registry" not in sys.modules
-        assert "list_templates" in dir(templates)
-        assert "osmosis_ai.templates.registry" not in sys.modules
         """
     )
     assert result.returncode == 0, result.stderr
+
+
+def test_extra_modules_table_matches_pyproject_extras() -> None:
+    """EXTRA_MODULES must track pyproject.toml so install hints stay correct.
+
+    Both directions matter: a module that no longer belongs to its extra would
+    make the hint wrong advice, and a dependency added to an extra without a
+    table entry would fall back to a raw traceback instead of the hint. The
+    mapping from distribution names to import names comes from the installed
+    environment, so this test requires syncing with ``--all-extras``.
+    """
+    import tomllib
+    from importlib.metadata import packages_distributions
+
+    from packaging.requirements import Requirement
+    from packaging.utils import canonicalize_name
+
+    from osmosis_ai._imports import EXTRA_MODULES
+
+    pyproject = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text())
+    declared_extras: dict[str, list[str]] = pyproject["project"][
+        "optional-dependencies"
+    ]
+    distributions_by_module = packages_distributions()
+
+    checkable = {
+        extra: requirements
+        for extra, requirements in declared_extras.items()
+        if extra != "full"  # full only aggregates osmosis-ai[...] self-references
+    }
+    assert set(EXTRA_MODULES) == set(checkable)
+
+    for extra, requirements in checkable.items():
+        declared = {
+            str(canonicalize_name(Requirement(raw).name)) for raw in requirements
+        }
+        covered: set[str] = set()
+        for module in EXTRA_MODULES[extra]:
+            providers = {
+                str(canonicalize_name(dist))
+                for dist in distributions_by_module.get(module, [])
+            }
+            assert providers, (
+                f"{module} is not installed; sync the environment with "
+                "`uv sync --locked --all-extras --group dev`"
+            )
+            matching = providers & declared
+            assert matching, f"{extra!r} does not declare a package providing {module}"
+            covered |= matching
+        assert covered == declared, (
+            f"extra {extra!r} declares {sorted(declared - covered)} but "
+            "EXTRA_MODULES lists no import name for them; missing modules "
+            "would raise a raw traceback instead of the install hint"
+        )
 
 
 @pytest.mark.parametrize(

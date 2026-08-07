@@ -18,7 +18,6 @@ except ModuleNotFoundError as _exc:
     raise_optional_dependency_error(
         _exc,
         extra="strands",
-        expected_modules=frozenset({"litellm", "strands"}),
         feature="The Strands integration",
     )
 

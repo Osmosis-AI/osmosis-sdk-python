@@ -30,9 +30,6 @@ def __getattr__(name: str) -> object:
         raise_optional_dependency_error(
             exc,
             extra="harbor",
-            # harbor is direct; platformdirs and toml arrive through
-            # osmosis_ai.packaging when the backend builds its bundle wheel.
-            expected_modules=frozenset({"harbor", "platformdirs", "toml"}),
             feature="The Harbor backend",
         )
 
