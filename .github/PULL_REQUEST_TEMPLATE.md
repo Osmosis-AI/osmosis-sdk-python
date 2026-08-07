@@ -2,10 +2,12 @@
 PR Title Format: [module] type: description
   modules: rollout, server, cli, auth, eval, misc, ci, doc
   types:   feat, fix, refactor, chore, test, doc
+  stacked: prefix with [N/M], where 1 <= N <= M, M >= 2, with no leading zeroes
 
 Examples:
   [rollout] feat: add streaming support for chat completions
   [BREAKING][rollout] refactor: change Grader.grade signature
+  [2/5][rollout] fix: surface harbor agent failures
   [ci] chore: update GitHub Actions versions
 -->
 
@@ -25,7 +27,7 @@ Examples:
 ## Checklist
 
 - [ ] PR title follows `[module] type: description` format
-- [ ] Appropriate labels added (e.g. `enhancement`, `bug`, `breaking`)
+      (labels are derived from it automatically — no need to add them by hand)
 - [ ] `ruff check .` and `ruff format --check .` pass
 - [ ] `pyright osmosis_ai/` passes
 - [ ] `pytest` passes (new tests added if applicable)
