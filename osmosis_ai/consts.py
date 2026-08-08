@@ -1,3 +1,3 @@
 # package metadata
 package_name = "osmosis-ai"
-PACKAGE_VERSION = "0.3.0rc2"
+PACKAGE_VERSION = "0.3.0rc3"

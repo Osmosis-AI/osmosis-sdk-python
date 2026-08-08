@@ -4,6 +4,24 @@ This file records changes to `osmosis-ai`. For earlier versions, see [GitHub Rel
 
 ## Unreleased
 
+## 0.3.0rc3 - 2026-08-07
+
+### Breaking Changes
+
+- Datasets must now use one uniform schema: prompt datasets require `user_prompt` and `ground_truth` (`label` remains an alias), while metadata datasets require a non-empty `metadata` object on every row; `system_prompt` is optional in both modes ([#282](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/282)).
+- Benchmark detail consumers must replace `required_secret_names` with `requires_judge_api_key` in `BenchmarkCatalogDetail` and `osmosis benchmark info --json` output ([#290](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/290)).
+
+### Added
+
+- `osmosis train submit`, `eval submit`, and `benchmark submit` can supply per-run `[secrets]` values from `--secrets-file`, the process environment, or an interactive prompt without saving them to the platform secret store ([#290](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/290)).
+- Benchmark configs now support `[verifier].required` stored secrets and `[secrets].required` per-run values, and agent environments may set `HF_TOKEN` ([#290](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/290)).
+
+### Changed
+
+- Dataset validation now scans every JSONL and CSV row plus every Parquet metadata value, rejecting inconsistent JSONL fields or invalid metadata anywhere in the file ([#282](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/282)).
+
+[Full changelog](https://github.com/Osmosis-AI/osmosis-sdk-python/compare/v0.3.0rc2...v0.3.0rc3)
+
 ## 0.3.0rc2 - 2026-08-07
 
 ### Breaking Changes
