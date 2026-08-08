@@ -1,0 +1,19 @@
+uv.lock
+  s_ce0c85736d79d7::t_84526b6607726f 2391,2398,2400
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.3",
+  "base_commit_sha": "6a436b565d7550b20e721dae380933ed5db4c9da",
+  "prompts": {},
+  "sessions": {
+    "s_ce0c85736d79d7": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "7e7ab647-c9e2-4879-bae6-31db6195edcd",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Jacob Trock <jgh@geocrypt.me>"
+    }
+  }
+}
