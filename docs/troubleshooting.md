@@ -53,7 +53,7 @@ Cloud `osmosis eval submit` / `osmosis train submit` validate rollout paths and 
 
 ## Dataset validation
 
-Local validation requires the columns `system_prompt` and `user_prompt` (exact, case-sensitive), at least 4 rows, and a `.csv` / `.jsonl` / `.parquet` extension. `ground_truth` is optional. See [datasets.md](./datasets.md) for the full contract; a "missing required columns" error means the header/keys don't match exactly.
+Local validation requires at least 4 rows and a `.csv` / `.jsonl` / `.parquet` extension. Without a `metadata` column, the dataset must contain `user_prompt` and `ground_truth` (`label` is accepted as an alias); with a `metadata` column, every row must contain a valid, non-empty JSON object. `system_prompt` is always optional, and JSONL rows must use identical top-level fields. See [datasets.md](./datasets.md) for the full contract.
 
 ## Rubric (`osmosis eval rubric` / `evaluate_rubric`)
 

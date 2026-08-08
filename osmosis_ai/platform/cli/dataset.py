@@ -769,36 +769,40 @@ def _validate_file(file_path: Path, ext: str) -> list[str]:
     return []
 
 
+def _normalize_dataset_columns(columns: Iterable[str]) -> set[str]:
+    normalized = set(columns)
+    if "label" in normalized:
+        normalized.add("ground_truth")
+    return normalized
+
+
 def _check_required_columns(columns: Iterable[str]) -> list[str]:
-    """Check that required columns are present."""
-    missing = REQUIRED_COLUMNS - set(columns)
+    """Validate the dataset's column-selected schema mode."""
+    normalized = _normalize_dataset_columns(columns)
+    if METADATA_COLUMN in normalized:
+        return []
+
+    missing = REQUIRED_COLUMNS - normalized
     if missing:
         return [
             f"Missing required columns: {', '.join(sorted(missing))}. "
-            f"Required: {', '.join(sorted(REQUIRED_COLUMNS))}"
+            "Datasets without a metadata column must include "
+            "user_prompt and ground_truth (label is accepted as an alias)."
         ]
     return []
 
 
-# ── Optional "metadata" column validation ─────────────────────────
-# Datasets may carry an optional per-row "metadata" column. Its
-# canonical form is a JSON object (dict). Users may author it as a
-# native object (JSONL/Parquet) or as a JSON-object string (CSV;
-# tolerated in JSONL). String->object normalization happens only in
-# the platform; the SDK mirrors the platform's user-error rules over
-# the sampled rows for early feedback: a cell must be a JSON object
-# without empty nested objects, per-key value types must agree across
-# rows, and the sampled objects must not all be empty ({}).
+# ── "metadata" mode validation ────────────────────────────────────
+# The presence of a metadata column selects metadata mode for the
+# entire dataset. Every row must then carry a non-empty JSON object.
+# Users may author it as a native object (JSONL/Parquet) or as a
+# JSON-object string (CSV; tolerated in JSONL).
 
 METADATA_COLUMN = "metadata"
 
 
 def _metadata_is_absent(value: Any) -> bool:
-    """Return True when a metadata cell should be treated as absent.
-
-    None and empty / whitespace-only strings are all "absent" and skip
-    further shape validation.
-    """
+    """Return True when a metadata cell is missing or blank."""
     if value is None:
         return True
     return isinstance(value, str) and not value.strip()
@@ -858,25 +862,17 @@ def _json_type_name(value: Any) -> str:
 
 
 class _MetadataCrossRowTracker:
-    """Cross-row metadata checks over the sampled rows.
+    """Cross-row metadata checks over all rows.
 
-    Mirrors the platform normalizer's user-error rules that cannot be
-    checked per cell: per-key JSON value types must agree across rows, and
-    metadata objects must not all be empty ({}) — an all-empty column has
-    no keys and cannot be stored as a parquet struct.
+    Mirrors the platform normalizer's user-error rule that cannot be
+    checked per cell: per-key JSON value types must agree across rows.
     """
 
     def __init__(self) -> None:
         self._types: dict[str, str] = {}
-        self._saw_empty_object = False
-        self._saw_keyed_object = False
 
     def observe(self, value: dict, *, location: str) -> list[str]:
         """Record one metadata object; return cross-row type errors."""
-        if value:
-            self._saw_keyed_object = True
-        else:
-            self._saw_empty_object = True
         return self._collect(value, "$", location)
 
     def _collect(self, value: Any, path: str, location: str) -> list[str]:
@@ -898,16 +894,6 @@ class _MetadataCrossRowTracker:
                 errors.extend(self._collect(child, f"{path}[]", location))
         return errors
 
-    def finish(self) -> list[str]:
-        """Return errors only determinable after all sampled rows are seen."""
-        if self._saw_empty_object and not self._saw_keyed_object:
-            return [
-                "Invalid metadata column: all sampled metadata objects are "
-                "empty ({}); they carry no keys and cannot be stored. Remove "
-                "the metadata column or add at least one key."
-            ]
-        return []
-
 
 def _check_metadata_value(
     value: Any,
@@ -925,7 +911,10 @@ def _check_metadata_value(
     import json
 
     if _metadata_is_absent(value):
-        return []
+        return [
+            f"{location}: invalid metadata - metadata mode requires a "
+            "non-empty JSON object in every row"
+        ]
     if isinstance(value, str):
         try:
             value = json.loads(value)
@@ -935,6 +924,11 @@ def _check_metadata_value(
         return [
             f"{location}: invalid metadata - must be a JSON object, "
             f"got {type(value).__name__}"
+        ]
+    if not value:
+        return [
+            f"{location}: invalid metadata - metadata mode requires a "
+            "non-empty JSON object in every row"
         ]
     if _contains_nested_empty_object(value):
         return [
@@ -952,55 +946,8 @@ def _check_metadata_value(
     return []
 
 
-def _read_tail_lines(
-    file_path: Path, n: int, chunk_size: int = 1024 * 1024
-) -> list[str]:
-    """Read approximately the last *n* lines of a text file.
-
-    Seeks to the end and reads a chunk backwards. If the file is smaller
-    than *chunk_size* the entire content is returned (caller should handle
-    overlap with head validation).
-    """
-    with open(file_path, "rb") as f:
-        f.seek(0, 2)
-        file_size = f.tell()
-        if file_size == 0:
-            return []
-        read_size = min(chunk_size, file_size)
-        f.seek(file_size - read_size)
-        data = f.read(read_size)
-
-    # If we read a chunk that doesn't start at the beginning of the file,
-    # it may begin mid-way through a multi-byte UTF-8 character.  Strip
-    # leading continuation bytes (10xxxxxx, i.e. 0x80-0xBF) so the
-    # decode doesn't fail on a perfectly valid UTF-8 file.
-    if read_size < file_size:
-        start = 0
-        while start < len(data) and 0x80 <= data[start] <= 0xBF:
-            start += 1
-        data = data[start:]
-
-    text = data.decode("utf-8")
-
-    lines = text.split("\n")
-    # If we didn't read from the start, the first "line" may be partial
-    if read_size < file_size:
-        lines = lines[1:]
-    # Drop trailing empty string produced by a final newline
-    if lines and not lines[-1]:
-        lines = lines[:-1]
-    return lines[-n:]
-
-
 def _check_parquet_metadata_column(pf: Any) -> list[str]:
-    """Validate the optional "metadata" column of a parquet file.
-
-    A struct dtype is accepted as-is: parquet enforces one uniform struct
-    schema per column and cannot store empty structs, so the cross-row
-    user-error rules cannot be violated. A string / large_string dtype is
-    accepted only when every cell in the first batch parses to a JSON
-    object (absent cells are skipped). Any other dtype is rejected.
-    """
+    """Validate every row of a parquet metadata column."""
     import pyarrow as pa
 
     schema = pf.schema_arrow
@@ -1008,31 +955,32 @@ def _check_parquet_metadata_column(pf: Any) -> list[str]:
         return []
 
     field_type = schema.field(METADATA_COLUMN).type
-    # A struct column is already an object; an all-null column means every
-    # cell is absent. Both are accepted without per-cell inspection.
-    if pa.types.is_struct(field_type) or pa.types.is_null(field_type):
-        return []
-    if not (pa.types.is_string(field_type) or pa.types.is_large_string(field_type)):
+    if not (
+        pa.types.is_struct(field_type)
+        or pa.types.is_string(field_type)
+        or pa.types.is_large_string(field_type)
+    ):
         return [
             f"Invalid metadata column: must be a struct or JSON-object string, "
             f"got dtype {field_type}"
         ]
 
-    # String dtype: validate parseability on the first batch.
     errors: list[str] = []
     tracker = _MetadataCrossRowTracker()
+    row_index = 0
     for batch in pf.iter_batches(columns=[METADATA_COLUMN]):
         for value in batch.column(0).to_pylist():
+            row_index += 1
             errors.extend(
                 _check_metadata_value(
-                    value, location="metadata column", tracker=tracker
+                    value,
+                    location=f"metadata row {row_index}",
+                    tracker=tracker,
                 )
             )
             if len(errors) >= 5:
                 errors.append("... (showing first 5 errors)")
                 return errors
-        break
-    errors.extend(tracker.finish())
     return errors
 
 
@@ -1068,120 +1016,73 @@ def _validate_parquet(file_path: Path) -> list[str]:
 
 
 def _validate_jsonl(file_path: Path) -> list[str]:
-    """Validate JSONL: required columns + first/last 100 lines."""
+    """Validate every JSONL row and require one uniform top-level schema."""
     import json
 
-    errors = []
-    columns_checked = False
-    file_fully_read = False
+    errors: list[str] = []
+    expected_fields: frozenset[str] | None = None
+    metadata_mode = False
     tracker = _MetadataCrossRowTracker()
-
     row_count = 0
+
     with open(file_path, encoding="utf-8") as f:
         for i, line in enumerate(f, 1):
-            if i > 100:
-                break
             stripped = line.strip()
             if not stripped:
                 continue
             row_count += 1
             try:
                 obj = json.loads(stripped)
-                if not columns_checked and isinstance(obj, dict):
+                if not isinstance(obj, dict):
+                    errors.append(
+                        f"Line {i}: invalid JSONL row - top-level value must be an object"
+                    )
+                elif expected_fields is None:
+                    expected_fields = frozenset(obj)
                     errors.extend(_check_required_columns(obj.keys()))
-                    columns_checked = True
-                if isinstance(obj, dict) and METADATA_COLUMN in obj:
+                    metadata_mode = METADATA_COLUMN in expected_fields
+                elif frozenset(obj) != expected_fields:
+                    missing = sorted(expected_fields - frozenset(obj))
+                    extra = sorted(frozenset(obj) - expected_fields)
+                    details = []
+                    if missing:
+                        details.append(f"missing: {', '.join(missing)}")
+                    if extra:
+                        details.append(f"extra: {', '.join(extra)}")
+                    errors.append(
+                        f"Line {i}: top-level fields differ from the first row "
+                        f"({'; '.join(details)})"
+                    )
+
+                if isinstance(obj, dict) and metadata_mode:
                     errors.extend(
                         _check_metadata_value(
-                            obj[METADATA_COLUMN],
+                            obj.get(METADATA_COLUMN),
                             location=f"Line {i}",
                             tracker=tracker,
                         )
                     )
-                    if len(errors) >= 5:
-                        errors.append("... (showing first 5 errors)")
-                        return errors
             except json.JSONDecodeError as e:
                 errors.append(f"Line {i}: invalid JSON - {e}")
-                if len(errors) >= 5:
-                    errors.append("... (showing first 5 errors)")
-                    return errors
-        else:
-            # Loop completed without break — entire file was read
-            file_fully_read = True
-
-    if file_fully_read:
-        errors.extend(tracker.finish())
-        if row_count < MIN_ROW_COUNT:
-            errors.append(
-                f"Dataset too small: {row_count} rows. "
-                f"A minimum of {MIN_ROW_COUNT} rows is required."
-            )
-        return errors
-
-    if len(errors) >= 5:
-        return errors
-
-    # Validate last 100 lines
-    try:
-        tail_lines = _read_tail_lines(file_path, 100)
-    except UnicodeDecodeError:
-        errors.append("File contains invalid UTF-8 encoding near end of file")
-        return errors
-    for line in tail_lines:
-        stripped = line.strip()
-        if not stripped:
-            continue
-        try:
-            obj = json.loads(stripped)
-            if not columns_checked and isinstance(obj, dict):
-                errors.extend(_check_required_columns(obj.keys()))
-                columns_checked = True
-            if isinstance(obj, dict) and METADATA_COLUMN in obj:
-                errors.extend(
-                    _check_metadata_value(
-                        obj[METADATA_COLUMN],
-                        location="Near end of file",
-                        tracker=tracker,
-                    )
-                )
-                if len(errors) >= 5:
-                    errors.append("... (showing first 5 errors)")
-                    break
-        except json.JSONDecodeError as e:
-            errors.append(f"Near end of file: invalid JSON - {e}")
             if len(errors) >= 5:
                 errors.append("... (showing first 5 errors)")
-                break
-
-    if len(errors) < 5:
-        errors.extend(tracker.finish())
+                return errors
 
     if row_count < MIN_ROW_COUNT:
-        total = 0
-        with open(file_path, encoding="utf-8") as fh:
-            for line in fh:
-                if line.strip():
-                    total += 1
-                    if total >= MIN_ROW_COUNT:
-                        break
-        if total < MIN_ROW_COUNT:
-            errors.append(
-                f"Dataset too small: {total} rows. "
-                f"A minimum of {MIN_ROW_COUNT} rows is required."
-            )
+        errors.append(
+            f"Dataset too small: {row_count} rows. "
+            f"A minimum of {MIN_ROW_COUNT} rows is required."
+        )
 
     return errors
 
 
 def _validate_csv(file_path: Path) -> list[str]:
-    """Validate CSV: required columns + first/last 100 rows."""
+    """Validate every CSV row against its fixed header schema."""
     import csv
 
     errors = []
-    num_cols = 0
     row_count = 0
-    file_fully_read = False
     tracker = _MetadataCrossRowTracker()
 
     try:
@@ -1198,8 +1099,6 @@ def _validate_csv(file_path: Path) -> list[str]:
             )
 
             for i, row in enumerate(reader, 2):
-                if i > 101:
-                    break
                 row_count += 1
                 if len(row) != num_cols:
                     errors.append(
@@ -1218,8 +1117,6 @@ def _validate_csv(file_path: Path) -> list[str]:
                     if len(errors) >= 5:
                         errors.append("... (showing first 5 errors)")
                         return errors
-            else:
-                file_fully_read = True
     except UnicodeDecodeError as e:
         errors.append(f"File encoding error: {e}")
         return errors
@@ -1227,50 +1124,10 @@ def _validate_csv(file_path: Path) -> list[str]:
         errors.append(f"CSV parse error: {e}")
         return errors
 
-    if file_fully_read:
-        errors.extend(tracker.finish())
-        if row_count < MIN_ROW_COUNT:
-            errors.append(
-                f"Dataset too small: {row_count} rows. "
-                f"A minimum of {MIN_ROW_COUNT} rows is required."
-            )
-        return errors
-
-    if len(errors) >= 5:
-        return errors
-
-    # Validate last 100 rows
-    try:
-        tail_lines = _read_tail_lines(file_path, 100)
-    except UnicodeDecodeError:
-        errors.append("File contains invalid UTF-8 encoding near end of file")
-        return errors
-    try:
-        reader = csv.reader(tail_lines)
-        for row in reader:
-            if len(row) != num_cols:
-                errors.append(
-                    f"Near end of file: expected {num_cols} columns, got {len(row)}"
-                )
-                if len(errors) >= 5:
-                    errors.append("... (showing first 5 errors)")
-                    break
-                continue
-            if metadata_idx is not None:
-                errors.extend(
-                    _check_metadata_value(
-                        row[metadata_idx],
-                        location="Near end of file",
-                        tracker=tracker,
-                    )
-                )
-                if len(errors) >= 5:
-                    errors.append("... (showing first 5 errors)")
-                    break
-    except csv.Error as e:
-        errors.append(f"Near end of file: CSV parse error - {e}")
-
-    if len(errors) < 5:
-        errors.extend(tracker.finish())
+    if row_count < MIN_ROW_COUNT:
+        errors.append(
+            f"Dataset too small: {row_count} rows. "
+            f"A minimum of {MIN_ROW_COUNT} rows is required."
+        )
 
     return errors
