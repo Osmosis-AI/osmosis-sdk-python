@@ -56,20 +56,23 @@ def test_benchmark_submit_delegates_to_handler(
     captured: dict[str, object] = {}
     expected = object()
 
-    def fake_submit(config_path: Path, *, yes: bool) -> object:
-        captured.update(config_path=config_path, yes=yes)
+    def fake_submit(
+        config_path: Path, *, yes: bool, secrets_file: str | None
+    ) -> object:
+        captured.update(config_path=config_path, yes=yes, secrets_file=secrets_file)
         return expected
 
     monkeypatch.setattr(benchmark_handler, "submit", fake_submit)
 
     result = benchmark_commands.benchmark_submit(
-        Path("configs/benchmark/smoke.toml"), yes=True
+        Path("configs/benchmark/smoke.toml"), yes=True, secrets_file=None
     )
 
     assert result is expected
     assert captured == {
         "config_path": Path("configs/benchmark/smoke.toml"),
         "yes": True,
+        "secrets_file": None,
     }
 
 

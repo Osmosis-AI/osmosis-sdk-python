@@ -292,6 +292,7 @@ class OsmosisClient:
         advanced_config: dict[str, Any] | None = None,
         env_config: dict[str, str] | None = None,
         secrets: list[str] | None = None,
+        provided_secrets: dict[str, str] | None = None,
         credentials: Credentials | None = None,
         git_identity: str,
     ) -> SubmitRunResult:
@@ -314,8 +315,11 @@ class OsmosisClient:
             data["advanced_config"] = advanced_config
         if env_config:
             data["env_config"] = env_config
-        if secrets:
-            data["secrets"] = {"required": secrets}
+        if secrets or provided_secrets:
+            secrets_payload: dict[str, Any] = {"required": secrets or []}
+            if provided_secrets:
+                secrets_payload["provided"] = provided_secrets
+            data["secrets"] = secrets_payload
         result = platform_request(
             "/api/cli/training-runs",
             method="POST",
@@ -618,6 +622,7 @@ class OsmosisClient:
         advanced_config: dict[str, Any] | None = None,
         env_config: dict[str, str] | None = None,
         secrets: list[str] | None = None,
+        provided_secrets: dict[str, str] | None = None,
         credentials: Credentials | None = None,
         git_identity: str,
     ) -> SubmitRunResult:
@@ -631,8 +636,11 @@ class OsmosisClient:
             data["advanced_config"] = advanced_config
         if env_config:
             data["env_config"] = env_config
-        if secrets:
-            data["secrets"] = {"required": secrets}
+        if secrets or provided_secrets:
+            secrets_payload: dict[str, Any] = {"required": secrets or []}
+            if provided_secrets:
+                secrets_payload["provided"] = provided_secrets
+            data["secrets"] = secrets_payload
         result = platform_request(
             "/api/cli/eval-runs",
             method="POST",
@@ -650,6 +658,7 @@ class OsmosisClient:
         tasks_config: dict[str, Any] | None = None,
         execution_config: dict[str, Any] | None = None,
         env_config: dict[str, str] | None = None,
+        secrets: dict[str, Any] | None = None,
         credentials: Credentials | None = None,
         git_identity: str,
     ) -> SubmitBenchmarkRunResult:
@@ -664,6 +673,8 @@ class OsmosisClient:
             data["execution_config"] = execution_config
         if env_config:
             data["env_config"] = env_config
+        if secrets:
+            data["secrets"] = secrets
         result = platform_request(
             "/api/cli/benchmark-runs",
             method="POST",

@@ -182,7 +182,6 @@ def test_info_exposes_selection_metadata_and_full_task_list(
                     },
                 ],
                 unavailable_tasks=None,
-                required_secret_names=["HF_TOKEN"],
             )
 
         list_benchmark_runs = staticmethod(_empty_runs_page)
@@ -206,10 +205,8 @@ def test_info_exposes_selection_metadata_and_full_task_list(
         {"name": "math", "task_count": 1},
         {"name": "science", "task_count": 1},
     ]
-    assert result.data["benchmark"]["required_secret_names"] == ["HF_TOKEN"]
     fields = {field.label: field.value for field in result.fields}
     assert fields["Key"] == "hle"
-    assert fields["Required Secrets"] == "HF_TOKEN"
     assert 'task_set = "parity"' in result.display_hints[0]
     assert result.sections[0].plain_lines == [
         "",
@@ -229,30 +226,6 @@ def test_info_exposes_selection_metadata_and_full_task_list(
             "git_identity": GIT_IDENTITY,
         }
     ]
-
-
-def test_catalog_detail_defaults_required_secret_names() -> None:
-    detail = BenchmarkCatalogDetail(
-        id="benchmark-1",
-        name="Example",
-        description=None,
-        source_type="harbor_registry",
-        source_ref="example@1",
-        task_count=1,
-        category_count=0,
-        task_sets=[],
-        runner_family="harbor",
-        supports_harness=True,
-        requires_harness=True,
-        requires_judge_model=False,
-        judge_model_default=None,
-        pass_threshold=1,
-        categories=[],
-        tasks=[{"name": "task-1", "category": None, "difficulty": None}],
-        unavailable_tasks=None,
-    )
-
-    assert detail.required_secret_names == []
 
 
 def _syncing_entry(**overrides: Any) -> BenchmarkCatalogEntry:
@@ -731,3 +704,62 @@ def test_benchmark_runs_section_render_status_progress_and_date() -> None:
         "Best Pass@1",
         "Submitted",
     ]
+
+
+@pytest.mark.parametrize(
+    ("requires_judge_model", "requires_judge_api_key", "default", "expected"),
+    [
+        (False, False, None, "–"),
+        (True, False, "openai/gpt-5", "Required (default: openai/gpt-5)"),
+        (False, True, None, "API key only (pinned grader)"),
+    ],
+)
+def test_benchmark_info_judge_row_covers_every_grader_shape(
+    monkeypatch: pytest.MonkeyPatch,
+    requires_judge_model: bool,
+    requires_judge_api_key: bool,
+    default: str | None,
+    expected: str,
+) -> None:
+    """A benchmark can pin its own grader, needing the key but no model."""
+
+    class FakeClient:
+        def get_benchmark(self, *_: Any, **__: Any) -> BenchmarkCatalogDetail:
+            return BenchmarkCatalogDetail(
+                id="benchmark-judge",
+                name="BrowseComp",
+                description=None,
+                source_type="osmosis_managed",
+                source_ref="browsecomp",
+                task_count=10,
+                category_count=0,
+                task_sets=[],
+                runner_family="harbor",
+                supports_harness=True,
+                requires_harness=False,
+                requires_judge_model=requires_judge_model,
+                requires_judge_api_key=requires_judge_api_key,
+                judge_model_default=default,
+                pass_threshold=1,
+                categories=[],
+                tasks=[],
+                unavailable_tasks=None,
+            )
+
+        list_benchmark_runs = staticmethod(_empty_runs_page)
+
+    monkeypatch.setattr(
+        benchmark_module,
+        "require_git_workspace_directory_context",
+        _context,
+    )
+    monkeypatch.setattr(benchmark_module, "OsmosisClient", FakeClient)
+
+    result = benchmark_module.benchmark_info(
+        "browsecomp", limit=DEFAULT_PAGE_SIZE, all_=False
+    )
+
+    fields = {field.label: field.value for field in result.fields}
+    assert fields["LLM Judge"] == expected
+    # Agents read the JSON, not the rendered row.
+    assert result.data["benchmark"]["requires_judge_api_key"] is requires_judge_api_key

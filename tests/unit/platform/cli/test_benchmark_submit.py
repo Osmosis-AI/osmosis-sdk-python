@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+from dataclasses import asdict
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -292,3 +294,64 @@ def test_submit_warns_before_hle_missing_secret_failure(
             "code": "HLE_PARITY_RECOMMENDED",
         }
     ]
+
+
+def test_submit_sends_resolved_run_secrets_and_never_prints_a_value(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    workspace = _make_workspace(tmp_path / "workspace")
+    config_path = workspace / "configs" / "benchmark" / "secrets.toml"
+    config_path.write_text(
+        """
+[experiment]
+benchmark = "acme/custom@1.0"
+
+[[agents]]
+harness = "codex"
+
+[agents.model]
+type = "provider"
+model = "openai/gpt-5"
+api_key_secret = "OPENAI_API_KEY"
+
+[secrets]
+required = ["WEATHER_API_KEY"]
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+    context = _context(workspace)
+    captured: dict[str, Any] = {}
+
+    class FakeClient:
+        def submit_benchmark_run(self, **kwargs: Any) -> SubmitBenchmarkRunResult:
+            captured.update(kwargs)
+            return SubmitBenchmarkRunResult(
+                id="benchmark-run-2",
+                name="brave-otter",
+                status="pending",
+                workflow_id="benchmark-run/benchmark-run-2",
+                task_count=3,
+                created_at="2026-08-06T00:00:00Z",
+                platform_url=None,
+            )
+
+    monkeypatch.setenv("WEATHER_API_KEY", "super-secret")
+    monkeypatch.setattr(
+        benchmark_module, "require_git_workspace_directory_context", lambda: context
+    )
+    monkeypatch.setattr(benchmark_module, "OsmosisClient", FakeClient)
+    monkeypatch.setattr(
+        benchmark_module,
+        "_fetch_secret_scopes",
+        lambda *args, **kwargs: ({"OPENAI_API_KEY"}, set()),
+    )
+
+    result = benchmark_module.submit(config_path, yes=True)
+
+    assert captured["secrets"] == {
+        "required": ["WEATHER_API_KEY"],
+        "provided": {"WEATHER_API_KEY": "super-secret"},
+    }
+    assert "super-secret" not in json.dumps(asdict(result), default=str)

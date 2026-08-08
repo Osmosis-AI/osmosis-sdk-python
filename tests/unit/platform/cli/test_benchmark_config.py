@@ -441,7 +441,6 @@ judge_api_key_secret = 42
 @pytest.mark.parametrize(
     "secret_name",
     [
-        "HF_TOKEN",
         "DAYTONA_API_KEY",
         "DAYTONA_API_URL",
         "SKYPILOT_SERVICE_ACCOUNT_TOKEN",
@@ -486,11 +485,11 @@ api_key_secret = "{secret_name}"
 @pytest.mark.parametrize(
     "env_section",
     [
-        '[env]\nHF_TOKEN = "literal-token"',
-        '[agents.env]\nHF_TOKEN = "literal-token"',
+        '[env]\nHF_TOKEN = "agent-token"',
+        '[agents.env]\nHF_TOKEN = "agent-token"',
     ],
 )
-def test_load_benchmark_submit_config_rejects_literal_hf_token_for_every_benchmark(
+def test_load_benchmark_submit_config_accepts_an_agents_own_hf_token(
     tmp_path: Path,
     benchmark: str,
     env_section: str,
@@ -513,8 +512,9 @@ lora_model_name = "benchmark-agent"
 """,
     )
 
-    with pytest.raises(CLIError, match=r"reserved by the benchmark runner"):
-        load_benchmark_submit_config(path)
+    config = load_benchmark_submit_config(path)
+
+    assert {**config.env, **config.agents[0].env}["HF_TOKEN"] == "agent-token"
 
 
 def test_load_benchmark_submit_config_validates_harness_secret_name(
@@ -726,4 +726,83 @@ lora_model_name = "deep-swe-agent"
     )
 
     with pytest.raises(CLIError, match=r"Invalid secret name ''"):
+        load_benchmark_submit_config(path)
+
+
+_VERIFIER_BASE = """
+[experiment]
+benchmark = "acme/custom@1.0"
+
+[[agents]]
+harness = "terminus"
+
+[agents.model]
+type = "provider"
+model = "openai/gpt-5"
+api_key_secret = "OPENAI_API_KEY"
+"""
+
+
+def test_verifier_required_becomes_execution_verifier_secrets(tmp_path: Path) -> None:
+    path = _write_config(
+        tmp_path / "benchmark.toml",
+        _VERIFIER_BASE
+        + """
+[verifier]
+required = ["VLM_API_KEY"]
+""",
+    )
+
+    config = load_benchmark_submit_config(path)
+
+    assert config.execution_config["verifier_secrets"] == ["VLM_API_KEY"]
+    assert "VLM_API_KEY" in config.required_secrets
+
+
+def test_config_without_verifier_secrets_omits_the_key(tmp_path: Path) -> None:
+    path = _write_config(tmp_path / "benchmark.toml", _VERIFIER_BASE)
+
+    config = load_benchmark_submit_config(path)
+
+    assert "verifier_secrets" not in config.execution_config
+
+
+def test_verifier_secret_colliding_with_agent_env_is_rejected(tmp_path: Path) -> None:
+    path = _write_config(
+        tmp_path / "benchmark.toml",
+        """
+[experiment]
+benchmark = "acme/custom@1.0"
+
+[[agents]]
+harness = "terminus"
+
+[agents.model]
+type = "provider"
+model = "openai/gpt-5"
+api_key_secret = "OPENAI_API_KEY"
+
+[agents.env]
+VLM_API_KEY = "literal-value"
+
+[verifier]
+required = ["VLM_API_KEY"]
+""",
+    )
+
+    with pytest.raises(CLIError, match=r"'VLM_API_KEY' appears in \[agents\.env\]"):
+        load_benchmark_submit_config(path)
+
+
+def test_verifier_required_rejects_an_invalid_secret_name(tmp_path: Path) -> None:
+    path = _write_config(
+        tmp_path / "benchmark.toml",
+        _VERIFIER_BASE
+        + """
+[verifier]
+required = ["not-a-secret"]
+""",
+    )
+
+    with pytest.raises(CLIError, match=r"Invalid secret name 'not-a-secret'"):
         load_benchmark_submit_config(path)

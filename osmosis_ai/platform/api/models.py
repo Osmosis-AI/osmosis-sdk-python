@@ -533,7 +533,7 @@ class BenchmarkCatalogDetail:
     categories: list[BenchmarkCategory]
     tasks: list[BenchmarkCatalogTask]
     unavailable_tasks: dict[str, Any] | None
-    required_secret_names: list[str] = field(default_factory=list)
+    requires_judge_api_key: bool = False
     default_harness: str | None = None
     source_url: str | None = None
     sync_status: str = "ready"
@@ -569,6 +569,7 @@ class BenchmarkCatalogDetail:
             supports_harness=benchmark["supports_harness"],
             requires_harness=benchmark["requires_harness"],
             requires_judge_model=benchmark["requires_judge_model"],
+            requires_judge_api_key=benchmark.get("requires_judge_api_key", False),
             judge_model_default=benchmark.get("judge_model_default"),
             pass_threshold=float(benchmark["pass_threshold"]),
             categories=[
@@ -582,7 +583,6 @@ class BenchmarkCatalogDetail:
             unavailable_tasks=_parse_unavailable_benchmark_tasks(
                 benchmark.get("unavailable_tasks")
             ),
-            required_secret_names=list(benchmark.get("required_secret_names", [])),
             default_harness=benchmark.get("default_harness"),
             sync_status=benchmark.get("sync_status", "ready"),
             synced_task_count=int(benchmark.get("synced_task_count") or 0),

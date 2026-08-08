@@ -24,7 +24,6 @@ _HARNESS_API_KEY_ENV = {
 }
 _RESERVED_MODEL_API_KEY_SECRET_NAMES = frozenset(
     {
-        "HF_TOKEN",
         "DAYTONA_API_KEY",
         "DAYTONA_API_URL",
         "SKYPILOT_SERVICE_ACCOUNT_TOKEN",
@@ -109,6 +108,18 @@ class BenchmarkExecutionSection(_StrictSection):
     judge_api_key_secret: str | None = None
 
 
+class BenchmarkSecretsSection(_StrictSection):
+    # Names resolved at submit from --secrets-file, the process environment, a
+    # prompt, or the secret store, in that order. Values never live in the file.
+    required: list[str] = Field(default_factory=list, max_length=16)
+
+
+class BenchmarkVerifierSection(_StrictSection):
+    # Secret record names the dataset's verifier reads; the record name is the
+    # variable name. Submit rejects the section for managed benchmarks.
+    required: list[str] = Field(default_factory=list, max_length=16)
+
+
 class BenchmarkSubmitConfig(_StrictSection):
     """Parsed benchmark run TOML configuration."""
 
@@ -118,6 +129,8 @@ class BenchmarkSubmitConfig(_StrictSection):
     execution: BenchmarkExecutionSection = Field(
         default_factory=BenchmarkExecutionSection
     )
+    verifier: BenchmarkVerifierSection = Field(default_factory=BenchmarkVerifierSection)
+    secrets: BenchmarkSecretsSection = Field(default_factory=BenchmarkSecretsSection)
     env: dict[str, str] = Field(default_factory=dict)
 
     @property
@@ -134,7 +147,10 @@ class BenchmarkSubmitConfig(_StrictSection):
 
     @property
     def execution_config(self) -> dict[str, Any]:
-        return self.execution.model_dump(exclude_none=True)
+        config = self.execution.model_dump(exclude_none=True)
+        if self.verifier.required:
+            config["verifier_secrets"] = list(self.verifier.required)
+        return config
 
     @property
     def required_secrets(self) -> list[str]:
@@ -151,6 +167,8 @@ class BenchmarkSubmitConfig(_StrictSection):
         judge_secret = self.execution.judge_api_key_secret
         if isinstance(judge_secret, str):
             names.append(judge_secret)
+        names.extend(self.verifier.required)
+        names.extend(self.secrets.required)
         return list(dict.fromkeys(names))
 
 
@@ -164,15 +182,15 @@ def _validate_secret_references(config: BenchmarkSubmitConfig, path: Path) -> No
     """Validate secret record names and per-agent env collisions.
 
     The platform injects an agent model's ``api_key_secret`` value (and any
-    judge secret) as an env var of the same name into that agent's runtime env,
-    so a literal env var with that name would be silently overwritten.
+    judge secret, and any verifier secret) as an env var of the same name into
+    that agent's runtime env, so a literal env var with that name would be
+    silently overwritten.
     Collisions are scoped per agent: one agent's secret name may still be
     another agent's literal env var. Model secrets also cannot use names the
     runner removes before model-key aliasing. Harness credentials travel
     through a separate reserved channel; a credentialed harness must reference
     a secret record named exactly for the variable it reads, and cannot also
-    set that name as a literal env var. ``HF_TOKEN`` is always runner-reserved
-    as a literal env.
+    set that name as a literal env var.
     """
     for name in config.required_secrets:
         if not SECRET_NAME_RE.match(name):
@@ -213,15 +231,14 @@ def _validate_secret_references(config: BenchmarkSubmitConfig, path: Path) -> No
                 "judge secret value under that name; remove the env var or "
                 "rename it."
             )
-        if "HF_TOKEN" in effective_env:
-            source = _env_source_label("HF_TOKEN", index, agent.env)
-            raise CLIError(
-                f"'HF_TOKEN' appears in {source} but is reserved by the "
-                f"benchmark runner in {path}. The runner removes this literal "
-                "env var before starting the agent; remove it from the config. "
-                "For HLE, store the dataset credential in the HF_TOKEN Platform "
-                "secret record instead."
-            )
+        for secret in config.verifier.required:
+            if secret in effective_env:
+                source = _env_source_label(secret, index, agent.env)
+                raise CLIError(
+                    f"'{secret}' appears in {source} and in [verifier].required "
+                    f"of {path}. The platform injects the secret value under "
+                    "that name; remove the env var or rename it."
+                )
         harness_env_name = _HARNESS_API_KEY_ENV.get(agent.harness or "")
         if harness_env_name and harness_env_name in effective_env:
             source = _env_source_label(harness_env_name, index, agent.env)

@@ -116,6 +116,7 @@ def _submit_training(
     config: TrainSubmitConfig,
     credentials: Any,
     git_identity: str,
+    provided_secrets: dict[str, str],
 ) -> SubmitRunResult:
     return client.submit_training_run(
         experiment_config=config.experiment_config,
@@ -125,6 +126,7 @@ def _submit_training(
         advanced_config=config.advanced_config or None,
         env_config=config.env or None,
         secrets=config.secrets or None,
+        provided_secrets=provided_secrets or None,
         credentials=credentials,
         git_identity=git_identity,
     )
@@ -168,9 +170,13 @@ _TRAIN_SUBMIT_SPEC: CloudSubmitSpec[TrainSubmitConfig] = CloudSubmitSpec(
 )
 
 
-def submit(config_path: Path, *, yes: bool) -> OperationResult:
+def submit(
+    config_path: Path, *, yes: bool, secrets_file: str | None = None
+) -> OperationResult:
     """Submit a new training run."""
-    return run_cloud_submit(config_path, yes=yes, spec=_TRAIN_SUBMIT_SPEC)
+    return run_cloud_submit(
+        config_path, yes=yes, spec=_TRAIN_SUBMIT_SPEC, secrets_file=secrets_file
+    )
 
 
 def list_training_runs(*, limit: int, all_: bool) -> ListResult:
