@@ -18,5 +18,5 @@ CACHE_TTL_SECONDS = 300
 
 VALID_EXTENSIONS = {"csv", "jsonl", "parquet"}
 MAX_FILE_SIZE = 5 * 1024 * 1024 * 1024  # 5 GB
-REQUIRED_COLUMNS = {"system_prompt", "user_prompt"}
+REQUIRED_COLUMNS = {"user_prompt", "ground_truth"}
 MIN_ROW_COUNT = 4
