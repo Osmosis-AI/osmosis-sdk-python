@@ -5,12 +5,22 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from osmosis_ai._imports import raise_optional_dependency_error
 from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.cli.output import OperationResult, OutputFormat, get_output_context
 from osmosis_ai.cli.paths import parse_cli_path
 
 from .dataset import RubricRecord, load_rubric_dataset
-from .engine import evaluate_rubric
+
+try:
+    from .engine import evaluate_rubric
+except ModuleNotFoundError as _exc:
+    raise_optional_dependency_error(
+        _exc,
+        extra="rubric",
+        feature="Rubric evaluation",
+    )
+
 from .report import (
     ConsoleReportRenderer,
     JsonReportWriter,

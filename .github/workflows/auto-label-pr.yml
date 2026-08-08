@@ -2,65 +2,165 @@ name: Auto Label PR
 
 on:
   pull_request_target:
-    types: [opened, edited, reopened]
+    types: [opened, edited, reopened, ready_for_review, converted_to_draft]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
 
 jobs:
   label:
-    if: ${{ !endsWith(github.actor, '[bot]') && (github.event.action != 'edited' || github.event.changes.title) }}
+    if: ${{ !endsWith(github.event.pull_request.user.login, '[bot]') }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
+      # Covers the current PR read, timeline read, and label writes.
       pull-requests: write
     steps:
-      - name: Apply labels based on PR title
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          PR_TITLE: ${{ github.event.pull_request.title }}
-        run: |
-          labels=()
+      - name: Reconcile labels from PR title and draft state
+        uses: actions/github-script@v9
+        with:
+          script: |
+            // Grammar and stack validation mirror check-pr-title.yml. Keep the
+            // two in sync.
+            const TITLE_PATTERN =
+              /^(\[\d+\/\d+\])?(\[BREAKING\])?((?:\[(?:rollout|server|cli|auth|eval|misc|ci|doc)\]){1,3}) (feat|fix|refactor|chore|test|doc): .+$/;
 
-          # Breaking change
-          if [[ "$PR_TITLE" =~ ^\[BREAKING\] ]]; then
-            labels+=("breaking")
-          fi
+            // [misc] deliberately maps to no label.
+            const MODULE_LABELS = {
+              auth: 'auth',
+              ci: 'ci',
+              cli: 'cli',
+              doc: 'documentation',
+              eval: 'eval',
+              rollout: 'rollout',
+              server: 'server',
+            };
+            // Maps to the categories in .github/release.yml.
+            const TYPE_LABELS = {
+              chore: 'chore',
+              doc: 'documentation',
+              feat: 'enhancement',
+              fix: 'bug',
+              refactor: 'refactor',
+              test: 'chore',
+            };
 
-          # Type-based labels (maps to release.yml categories)
-          if [[ "$PR_TITLE" =~ \]\ feat: ]]; then
-            labels+=("enhancement")
-          elif [[ "$PR_TITLE" =~ \]\ fix: ]]; then
-            labels+=("bug")
-          elif [[ "$PR_TITLE" =~ \]\ doc: ]]; then
-            labels+=("documentation")
-          elif [[ "$PR_TITLE" =~ \]\ chore: ]]; then
-            labels+=("chore")
-          elif [[ "$PR_TITLE" =~ \]\ refactor: ]]; then
-            labels+=("refactor")
-          elif [[ "$PR_TITLE" =~ \]\ test: ]]; then
-            labels+=("chore")
-          fi
+            // Labels this job is allowed to remove. github-actions[bot] is a
+            // shared identity, so bot attribution on its own would let this job
+            // delete labels some future workflow owns. A label must be both in
+            // this set and bot-applied before it is removed.
+            const MANAGED = new Set([
+              ...Object.values(MODULE_LABELS),
+              ...Object.values(TYPE_LABELS),
+              'breaking',
+              'stacked-pr',
+              'wip',
+            ]);
+            const BOT = 'github-actions[bot]';
 
-          # Module labels from [module] tags in title (supports multi-module like [rollout][auth])
-          remaining="$PR_TITLE"
-          while [[ "$remaining" =~ \[([a-z]+)\] ]]; do
-            module="${BASH_REMATCH[1]}"
-            remaining="${remaining#*]}"
-            if [[ "$module" == "doc" ]]; then
-              labels+=("documentation")
-            elif [[ "$module" != "misc" ]]; then
-              labels+=("$module")
-            fi
-          done
+            const pullNumber = context.payload.pull_request.number;
+            // Event payloads are snapshots. Read the current PR so an older
+            // queued event converges on the latest title, draft state, and
+            // labels instead of restoring stale state.
+            const { data: pr } = await github.rest.pulls.get({
+              ...context.repo,
+              pull_number: pullNumber,
+            });
+            const match = TITLE_PATTERN.exec(pr.title);
+            if (!match) {
+              core.setFailed(
+                'PR title does not match the required format, so labels were ' +
+                  'left untouched. Fix the title (see the check-title job) and ' +
+                  'labels reconcile on the next edit.\n' +
+                  `Got: ${pr.title}`,
+              );
+              return;
+            }
 
-          if [ ${#labels[@]} -eq 0 ]; then
-            echo "No labels to apply"
-            exit 0
-          fi
+            const [, stack, breaking, modules, type] = match;
+            if (stack) {
+              const [positionText, totalText] = stack.slice(1, -1).split('/');
+              const position = BigInt(positionText);
+              const total = BigInt(totalText);
+              if (
+                positionText.startsWith('0') ||
+                totalText.startsWith('0') ||
+                total < 2n ||
+                position > total
+              ) {
+                core.setFailed(
+                  `Invalid stacked PR position ${stack}. Expected 1 <= N <= M ` +
+                    'and M >= 2, without leading zeroes. Labels were left untouched.',
+                );
+                return;
+              }
+            }
 
-          # Deduplicate
-          labels=($(printf '%s\n' "${labels[@]}" | sort -u))
+            const desired = new Set([TYPE_LABELS[type]]);
+            if (stack) desired.add('stacked-pr');
+            if (breaking) desired.add('breaking');
+            if (pr.draft) desired.add('wip');
+            for (const [, module] of modules.matchAll(/\[([a-z]+)\]/g)) {
+              if (MODULE_LABELS[module]) desired.add(MODULE_LABELS[module]);
+            }
 
-          echo "Applying labels: ${labels[*]}"
-          gh pr edit "$PR_NUMBER" \
-            --repo "${{ github.repository }}" \
-            --add-label "$(IFS=,; echo "${labels[*]}")"
+            // Who applied each label currently on the PR. A label a human added
+            // stays even once the title stops implying it. An unknown applier
+            // (no timeline entry yet) is treated as human, so the conservative
+            // outcome of a race is to keep the label rather than drop it.
+            const timeline = await github.paginate(
+              github.rest.issues.listEventsForTimeline,
+              { ...context.repo, issue_number: pullNumber, per_page: 100 },
+            );
+            const appliedBy = new Map();
+            for (const event of timeline) {
+              if (event.event === 'labeled') {
+                appliedBy.set(event.label.name, event.actor?.login);
+              } else if (event.event === 'unlabeled') {
+                appliedBy.delete(event.label.name);
+              }
+            }
+
+            const current = new Set(pr.labels.map((label) => label.name));
+            const added = [...desired].filter((name) => !current.has(name)).sort();
+            const removed = [...current]
+              .filter(
+                (name) =>
+                  MANAGED.has(name) &&
+                  !desired.has(name) &&
+                  appliedBy.get(name) === BOT,
+              )
+              .sort();
+            if (added.length === 0 && removed.length === 0) {
+              core.info(`Labels already up to date: ${[...current].sort().join(', ') || '(none)'}`);
+              return;
+            }
+            if (added.length > 0) core.info(`Adding: ${added.join(', ')}`);
+            if (removed.length > 0) core.info(`Removing stale bot labels: ${removed.join(', ')}`);
+            // Mutate only the labels this workflow owns. setLabels replaces the
+            // complete set and can erase a human label added after the PR read.
+            if (added.length > 0) {
+              await github.rest.issues.addLabels({
+                ...context.repo,
+                issue_number: pullNumber,
+                labels: added,
+              });
+            }
+            for (const name of removed) {
+              try {
+                await github.rest.issues.removeLabel({
+                  ...context.repo,
+                  issue_number: pullNumber,
+                  name,
+                });
+              } catch (error) {
+                // Another actor may remove the same stale label between our
+                // read and write. That already achieved the desired state.
+                if (error.status === 404) {
+                  core.info(`Already removed: ${name}`);
+                } else {
+                  throw error;
+                }
+              }
+            }

@@ -1,6 +1,6 @@
 """Convert ``RolloutSample.trajectory_messages`` (OpenAI chat shape) into ATIF
-trajectories, using Harbor's reference models for spec validation. Anything
-that does not fit the spec losslessly is preserved under ``extra``.
+trajectories. Anything that does not fit the spec losslessly is preserved
+under ``extra``.
 """
 
 import json
@@ -9,7 +9,10 @@ from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Any, Literal
 
-from harbor.models.trajectories import (
+from pydantic import ValidationError
+
+from osmosis_ai.consts import PACKAGE_VERSION
+from osmosis_ai.rollout.trajectory.atif import (
     Agent,
     FinalMetrics,
     Metrics,
@@ -19,9 +22,6 @@ from harbor.models.trajectories import (
     ToolCall,
     Trajectory,
 )
-from pydantic import ValidationError
-
-from osmosis_ai.consts import PACKAGE_VERSION
 from osmosis_ai.rollout.trajectory.report import LlmCallMetrics, SampleReport
 from osmosis_ai.rollout.types import RolloutSample
 
@@ -245,7 +245,17 @@ def _apply_report(
     if len(agent_steps) != len(report.llm_call_metrics):
         return [e.model_dump(exclude_none=True) for e in report.llm_call_metrics]
     for step, entry in zip(agent_steps, report.llm_call_metrics, strict=True):
-        step.metrics = _metrics_from_report_entry(entry) or step.metrics
+        reported = _metrics_from_report_entry(entry)
+        if reported is not None:
+            # Merge field by field: the count-only report must not erase
+            # native token ids and logprobs.
+            step.metrics = (
+                reported
+                if step.metrics is None
+                else step.metrics.model_copy(
+                    update=reported.model_dump(exclude_none=True)
+                )
+            )
         step.model_name = entry.model_name or step.model_name
         step.llm_call_count = 1
     return None

@@ -87,7 +87,7 @@ from osmosis_ai.platform.api.upload import BACKOFF_BASE, BACKOFF_CAP, MAX_RETRIE
 
 PARQUET_VALIDATION_SKIPPED_WARNING = (
     "pyarrow not installed; parquet content validation skipped. "
-    "Install with: pip install 'osmosis-ai[platform]'"
+    "Install with: pip install 'osmosis-ai[parquet]'"
 )
 
 

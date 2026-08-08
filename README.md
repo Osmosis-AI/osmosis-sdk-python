@@ -26,12 +26,18 @@ Python SDK and CLI for [Osmosis AI](https://platform.osmosis.ai), a platform for
 Requires **Python 3.12+**.
 
 ```bash
-pip install osmosis-ai            # Core SDK
-pip install osmosis-ai[server]    # + FastAPI rollout server
+pip install osmosis-ai                     # CLI + framework-neutral rollout core
+pip install "osmosis-ai[server]"            # + generic FastAPI rollout server
+pip install "osmosis-ai[strands]"           # + Strands integration
+pip install "osmosis-ai[openai-agents]"     # + OpenAI Agents integration
+pip install "osmosis-ai[harbor]"            # + Harbor backend (uses an externally provided SkyPilot runtime)
+pip install "osmosis-ai[rubric]"            # + LLM-as-judge rubric evaluation
+pip install "osmosis-ai[parquet]"           # + Parquet dataset support
+pip install "osmosis-ai[full]"              # every optional feature
 # or with uv:  uv add osmosis-ai
 ```
 
-See [Installation](https://docs.osmosis.ai/cli/installation) for the full extras matrix and [CONTRIBUTING.md](CONTRIBUTING.md) for development setup.
+There is one distribution, `osmosis-ai`. The `harbor` extra installs plain Harbor only: Daytona is retired, and Harbor's `skypilot` extra must not be installed because the rollout runtime provides SkyPilot. See [Installation](https://docs.osmosis.ai/cli/installation) for product setup and [CONTRIBUTING.md](CONTRIBUTING.md) for development setup.
 
 ## Documentation
 

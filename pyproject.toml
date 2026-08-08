@@ -22,77 +22,114 @@ classifiers = [
 ]
 requires-python = ">=3.12"
 dependencies = [
-    # Security floors (CVE remediation): patched in python-dotenv 1.2.2 and
-    # requests 2.33.0. Lower bounds only, so they can still float up.
+    # CLI and rollout core. Security floors are kept with the feature that
+    # owns the dependency; lower bounds still allow patched releases to float.
     "python-dotenv>=1.2.2,<2.0.0",
     "requests>=2.33.0,<3.0.0",
-    # 1.91.1 is the tested compatibility floor and includes the proxy
-    # auth-bypass / SSTI / SQLi / RCE fixes from the earlier 1.84.0 floor.
-    "litellm>=1.91.1,<2.0.0",
-    # LiteLLM's tool-call path imports orjson at runtime, but only declares it
-    # through its larger proxy extra.
-    "orjson>=3.11.6,<4.0",
-    "tqdm>=4.0.0,<5.0.0",
-    # Remote rollout SDK dependencies
     "httpx>=0.25.0,<1.0.0",
     "pydantic>=2.0.0,<3.0.0",
-    "strands-agents[litellm]>=1.29.0",
-    # >=0.18.1 supports OpenAI Python 2.45's cache_write_tokens usage field.
-    "openai-agents[litellm]>=0.18.1,<0.19",
     # Secure credential storage (system keychain)
     "keyring>=25.0.0",
+    # Loaded via keyring's SecretService backend on Linux. >=48.0.1 is the
+    # security floor for the credential-storage feature.
+    "cryptography>=48.0.1",
     # Interactive CLI prompts
     "questionary>=2.1.0,<3.0.0",
+    # The CLI customizes prompt-toolkit directly rather than only through
+    # questionary, so keep it as an explicit dependency.
+    "prompt-toolkit>=3.0.0,<4.0.0",
     # Requirement parsing for the submit preflight. Transitive via setuptools and
-    # litellm, but declared because the CLI imports it directly.
+    # other optional features, but declared because the CLI imports it directly.
     "packaging>=24.0",
     # CLI framework. <0.28 keeps cli/_click_compat.py's private imports stable.
     "typer>=0.27,<0.28",
     # Do not directly constrain typer-slim: versions <0.22 shared typer/* with
     # typer, and upgrading that legacy distribution can delete Typer's files.
     "rich>=14.2.0",
-    # Pinned so the CLI preflight and the rollout server resolve the same harbor;
-    # a harbor release cannot change what a rollout runs without an SDK release.
-    # EnvironmentType.SKYPILOT needs >=0.20.0. Never the [skypilot] extra: its
-    # skypilot-nightly claims the `sky` namespace the rollout runtime provides.
-    "harbor[daytona]>=0.20.0,<0.21",
-    # Security floors for load-bearing transitive deps (CVE remediation):
-    # aiohttp is exercised via litellm's async transport, and cryptography is
-    # loaded via keyring's SecretService backend on Linux. Lower bounds only,
-    # so they can still float up with their parents.
-    "aiohttp>=3.14.1",
-    "cryptography>=48.0.1",
-    # mcp arrives transitively via strands-agents and openai-agents. The SDK
-    # itself never imports it, but >=1.28.1 is the floor that clears the
-    # server-transport advisories (GHSA-hvrp-rf83-w775, GHSA-jpw9-pfvf-9f58,
-    # GHSA-vj7q-gjh5-988w) for consumers that do build MCP servers on top.
-    "mcp>=1.28.1",
-    # External click arrives via litellm/pyiceberg/uvicorn. >=8.3.3 drops the
-    # shell=True in click.edit()/pager (CVE-2026-7246). NOTE: this is purely a
-    # floor — CLI code must still never import click, since Typer vendors its
-    # own copy (see osmosis_ai/cli/_click_compat.py); the vendored copy was
-    # never affected.
-    "click>=8.3.3",
 ]
 
 [project.optional-dependencies]
-# Platform CLI (dataset upload/validate)
-platform = [
-    # Parquet file validation. >=23.0.1 is the CVE security floor.
+# Server dependencies for rollout serving
+server = [
+    "fastapi>=0.100.0,<1.0.0",
+    "uvicorn>=0.23.0,<1.0.0",
+    # Uvicorn installs external Click. >=8.3.3 removes shell=True from
+    # click.edit()/pager (CVE-2026-7246). The SDK CLI uses Typer's vendored
+    # Click and must continue to import it only through typer._click.
+    "click>=8.3.3",
+]
+
+# Strands Agents adapter. LiteLLM's tool-call path imports orjson at runtime,
+# although LiteLLM declares it only through its much larger proxy extra.
+strands = [
+    "strands-agents[litellm]>=1.29.0,<2.0.0",
+    "litellm>=1.91.1,<2.0.0",
+    "orjson>=3.11.6,<4.0",
+    "aiohttp>=3.14.1",
+    "mcp>=1.28.1,<2.0.0",
+    "click>=8.3.3",
+]
+
+# OpenAI Agents adapter. >=0.18.1 supports OpenAI Python 2.45's
+# cache_write_tokens usage field.
+openai-agents = [
+    "openai-agents[litellm]>=0.18.1,<0.19",
+    "litellm>=1.91.1,<2.0.0",
+    "orjson>=3.11.6,<4.0",
+    "aiohttp>=3.14.1",
+    "mcp>=1.28.1,<2.0.0",
+    "click>=8.3.3",
+]
+
+# Harbor execution backend. Keep Harbor on the reviewed 0.20 release line so
+# rollout behavior cannot cross a compatibility boundary without an SDK
+# release. Daytona is retired. SkyPilot is supplied by the rollout runtime;
+# never install Harbor's [skypilot] extra because its skypilot-nightly package
+# claims the same `sky` namespace as that runtime.
+harbor = [
+    "harbor>=0.20.0,<0.21",
+    # Harbor's SkyPilot environment parses Dockerfile WORKDIR itself, but the
+    # parser is otherwise declared only by Harbor's conflicting [skypilot]
+    # extra. Supply that narrow dependency without installing SkyPilot.
+    "dockerfile-parse>=2.0.1,<3.0.0",
+    # osmosis_ai.packaging builds the bundle wheel that Harbor installs in the
+    # task container: toml rewrites the rollout project's pyproject.toml and
+    # platformdirs locates the bundle cache. Nothing outside this backend
+    # imports that module, so both stay out of the base install. `uv` must also
+    # be on PATH to build the wheel.
+    "toml>=0.10.2,<1.0.0",
+    "platformdirs>=4.0",
+    # Harbor currently uses LiteLLM and PyIceberg, which own these runtime and
+    # security floors in this feature.
+    "litellm>=1.91.1,<2.0.0",
+    "orjson>=3.11.6,<4.0",
+    "aiohttp>=3.14.1",
+    "click>=8.3.3",
+]
+
+# LLM-as-judge rubric evaluation
+rubric = [
+    "litellm>=1.91.1,<2.0.0",
+    "orjson>=3.11.6,<4.0",
+    "tqdm>=4.0.0,<5.0.0",
+    "aiohttp>=3.14.1",
+    "click>=8.3.3",
+]
+
+# Parquet dataset validation. >=23.0.1 is the CVE security floor.
+parquet = [
     "pyarrow>=23.0.1",
 ]
 
-# Server dependencies for rollout serving
-server = [
-    "osmosis-ai[platform]",
-    "fastapi>=0.100.0,<1.0.0",
-    "uvicorn>=0.23.0,<1.0.0",
+# Full installation with all optional features
+full = [
+    "osmosis-ai[server,strands,openai-agents,harbor,rubric,parquet]",
 ]
 
-# Development dependencies (testing, formatting, type checking, etc.)
-# Includes server extra so pyright can resolve server-related imports.
+[dependency-groups]
+# Local development environment. Runtime features remain project extras, so
+# sync this group together with --all-extras for full test/type-check coverage.
 dev = [
-    "osmosis-ai[server]",
     "pytest>=9.0.3,<10.0.0",
     "pytest-asyncio>=1.4.0,<2.0.0",
     "pytest-cov>=7.1.0",
@@ -100,11 +137,6 @@ dev = [
     "pre-commit>=4.6.0,<5.0.0",
     "pyright[nodejs]==1.1.411",
     "types-requests>=2.0",
-]
-
-# Full installation with all optional features
-full = [
-    "osmosis-ai[server]",
 ]
 
 [project.urls]
