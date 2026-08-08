@@ -4,6 +4,18 @@ This file records changes to `osmosis-ai`. For earlier versions, see [GitHub Rel
 
 ## Unreleased
 
+### Breaking Changes
+
+- The removed `osmosis_ai.eval.common` loader helpers and `osmosis_ai.rollout.validator` module have no public drop-in replacement: rollout entrypoints now construct their backend explicitly, submit preflight imports the entrypoint without namespace discovery, and backend constructors own validation. `save_trajectories()` is replaced by the single-sample `save_trajectory()` API. See [Migrating from 0.2.31 to 0.3](docs/migrating-to-0.3.md).
+
+### Fixed
+
+- Rollout bundle builds now use content-addressed cache entries, keep project versions separate, normalize all valid distribution-name separators, and alias generated imports so same-named workflow, grader, and config objects cannot shadow one another. The Harbor extra now installs its `uv` builder directly, and model-backed extras stay on the reviewed LiteLLM 1.91 release line instead of floating to an untested pre-2 build/runtime boundary.
+
+### Documentation
+
+- Clarified that a Harbor task's existing `tests/test.sh` takes precedence over an SDK `grader=`, and that Harbor `TrialQueue` attempt retries are not supported by the rollout lifecycle integration.
+
 ## 0.3.0rc3 - 2026-08-07
 
 ### Breaking Changes
@@ -52,3 +64,11 @@ This file records changes to `osmosis-ai`. For earlier versions, see [GitHub Rel
 - Harbor and local backends now exchange `sample.json` and write `reward.json` as `{"reward": <float>}` ([#235](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/235)).
 
 [Full changelog](https://github.com/Osmosis-AI/osmosis-sdk-python/compare/v0.2.30...v0.3.0rc1)
+
+## 0.2.31 - 2026-07-28
+
+### Changed
+
+- LiteLLM 1.91.1 is now the minimum supported version for the SDK's model integrations ([#268](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/268)).
+
+[Full changelog](https://github.com/Osmosis-AI/osmosis-sdk-python/compare/v0.2.30...v0.2.31)

@@ -11,6 +11,8 @@ from __future__ import annotations
 import hashlib
 import shutil
 import subprocess
+import sys
+import sysconfig
 import tempfile
 import tomllib
 import zipfile
@@ -80,10 +82,28 @@ def grader_script_name(package: str) -> str:
     return f"{package.replace('_', '-')}-grade"
 
 
+def _uv_executable() -> str:
+    """Find uv installed with this interpreter, then fall back to PATH."""
+    script_dirs = (Path(sysconfig.get_path("scripts")), Path(sys.executable).parent)
+    for script_dir in dict.fromkeys(script_dirs):
+        for name in ("uv", "uv.exe"):
+            candidate = script_dir / name
+            if candidate.is_file():
+                return str(candidate)
+    executable = shutil.which("uv")
+    if executable is None:
+        raise RuntimeError(
+            "uv is required to build rollout bundles; install osmosis-ai[harbor]"
+        )
+    return executable
+
+
 def content_hash(path: Path, *, extra: str = "") -> str:
     digest = hashlib.sha256(extra.encode())
     for file in sorted(
-        p for p in path.rglob("*") if p.is_file() and not (set(p.parts) & EXCLUDE_DIRS)
+        p
+        for p in path.rglob("*")
+        if p.is_file() and not (set(p.relative_to(path).parts) & EXCLUDE_DIRS)
     ):
         digest.update(str(file.relative_to(path)).encode())
         digest.update(file.read_bytes())
@@ -208,8 +228,9 @@ def build_bundle(
             references[label] = "None"
             continue
         module, attr = split_ref(ref, label)
-        imports.append(f"from {module} import {attr}")
-        references[label] = attr
+        alias = f"_osmosis_{label}"
+        imports.append(f"from {module} import {attr} as {alias}")
+        references[label] = alias
 
     shim = "\n".join(imports) + "\nfrom osmosis_ai.rollout.container import runner\n"
     scripts = {}
@@ -228,20 +249,44 @@ def build_bundle(
 
     project = tomllib.loads(pyproject_path.read_text()).get("project", {})
     name = project.get("name") or f"osmosis-harness-{package}"
-    bundle_key = content_hash(
-        code_dir, extra=pyproject_path.read_text() + shim + repr(deps or [])
+    wheel_distribution = canonicalize_name(name, validate=True).replace("-", "_")
+    build_descriptor = "\0".join(
+        (
+            pyproject_path.read_text(),
+            shim,
+            repr(deps or []),
+            package,
+            sys.implementation.cache_tag or "",
+            sysconfig.get_platform(),
+        )
     )
-    bundles_dir.mkdir(parents=True, exist_ok=True)
-    wheel_glob = f"{name.replace('-', '_')}-*.whl"
-    marker = bundles_dir / f"{name}-{bundle_key}.key"
-    cached = sorted(bundles_dir.glob(wheel_glob))
-    if cached and marker.exists():
-        return cached[0]
+    bundle_key = content_hash(
+        code_dir,
+        extra=build_descriptor,
+    )
+    wheel_glob = f"{wheel_distribution}-*.whl"
+    distribution_dir = bundles_dir / wheel_distribution
+    cache_dir = distribution_dir / bundle_key
+    distribution_dir.mkdir(parents=True, exist_ok=True)
 
-    for old in bundles_dir.glob(f"{name}-*.key"):
-        old.unlink()
-    with tempfile.TemporaryDirectory() as staging:
-        stage = Path(staging)
+    cached = sorted(path for path in cache_dir.glob(wheel_glob) if path.is_file())
+    if len(cached) == 1:
+        return cached[0]
+    if cache_dir.exists():
+        # Complete entries appear with one atomic directory rename below. Never
+        # delete here: another builder may have published between the glob and
+        # exists checks, and callers may already hold its returned wheel path.
+        cached = sorted(path for path in cache_dir.glob(wheel_glob) if path.is_file())
+        if len(cached) == 1:
+            return cached[0]
+        raise RuntimeError(f"invalid bundle cache entry: {cache_dir}")
+
+    with tempfile.TemporaryDirectory(
+        dir=distribution_dir, prefix=".build-"
+    ) as build_root:
+        root = Path(build_root)
+        stage = root / "source"
+        output = root / "wheel"
         shutil.copytree(
             code_dir,
             stage,
@@ -260,13 +305,34 @@ def build_bundle(
         staged_project["scripts"] = {**staged_project.get("scripts", {}), **scripts}
         (stage / "pyproject.toml").write_text(toml.dumps(staged))
         subprocess.run(
-            ["uv", "build", "--wheel", "--out-dir", str(bundles_dir), str(stage)],
+            [
+                _uv_executable(),
+                "build",
+                "--wheel",
+                "--out-dir",
+                str(output),
+                str(stage),
+            ],
             check=True,
             capture_output=True,
         )
+        wheels = sorted(path for path in output.glob(wheel_glob) if path.is_file())
+        if len(wheels) != 1:
+            raise RuntimeError(
+                f"uv build produced {len(wheels)} matching wheels in {output}; "
+                "expected exactly one"
+            )
+        wheel_name = wheels[0].name
+        try:
+            output.replace(cache_dir)
+        except OSError:
+            # Another process may have published the same content-addressed
+            # entry while this build was running. Its complete entry wins.
+            cached = sorted(
+                path for path in cache_dir.glob(wheel_glob) if path.is_file()
+            )
+            if len(cached) == 1:
+                return cached[0]
+            raise
 
-    marker.touch()
-    wheels = sorted(bundles_dir.glob(wheel_glob))
-    if not wheels:
-        raise RuntimeError(f"uv build produced no wheel in {bundles_dir}")
-    return wheels[0]
+    return cache_dir / wheel_name

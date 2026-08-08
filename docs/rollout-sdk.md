@@ -29,7 +29,7 @@ Optional features use these canonical modules:
 
 The `Messages` return type is available from `osmosis_ai.rollout.types`.
 
-The `harbor` extra installs plain Harbor for an externally provided SkyPilot runtime. Daytona is retired, and do not install Harbor's `skypilot` extra. It is a host-side extra: it also carries what [../osmosis_ai/packaging.py](../osmosis_ai/packaging.py) needs to build the bundle wheel (and `uv` must be on `PATH`). Inside the task container only the framework-neutral core runs, so a bundle never installs the `harbor` extra — which is why the in-container runner and ATIF persistence must work on a bare install.
+The `harbor` extra installs plain Harbor for an externally provided SkyPilot runtime. Daytona is retired, and do not install Harbor's `skypilot` extra. It is a host-side extra: it also carries `uv` and the other dependencies [../osmosis_ai/packaging.py](../osmosis_ai/packaging.py) needs to build the bundle wheel. Inside the task container only the framework-neutral core runs, so a bundle never installs the `harbor` extra — which is why the in-container runner and ATIF persistence must work on a bare install.
 
 ## AgentWorkflow
 
@@ -213,7 +213,7 @@ app = create_rollout_server(backend=backend)  # FastAPI: POST /rollout, GET /hea
 
 [../osmosis_ai/rollout/backend/harbor/](../osmosis_ai/rollout/backend/harbor/)
 
-`agent=` picks the track. A registered native agent name (`"terminus-2"`, `"mini-swe-agent"`, `"oracle"`) runs Harbor's own agent with the rollout endpoint injected; an `AgentWorkflow` class (or `"module:Class"` path) is packaged into a wheel and installed in the task container at trial start. `grader=None` makes the task's own `tests/` the reward source; a `Grader` class is delivered as the verifier instead.
+`agent=` picks the track. A registered native agent name (`"terminus-2"`, `"mini-swe-agent"`, `"oracle"`) runs Harbor's own agent with the rollout endpoint injected; an `AgentWorkflow` class (or `"module:Class"` path) is packaged into a wheel and installed in the task container at trial start. `grader=None` always uses the task's own `tests/` as the reward source. A `Grader` class is installed as the verifier only when the task does not already contain `tests/test.sh`; an existing task verifier remains authoritative.
 
 ```python
 from pathlib import Path
@@ -227,14 +227,16 @@ backend = HarborBackend(
     orchestrator=TrialQueue(n_concurrent=4),
     tasks_dir=Path("tasks"),
     agent=MyWorkflow,  # or a native agent name
-    grader=MyGrader,  # or None to score with the task's own tests/
+    grader=MyGrader,  # used when the task has no tests/test.sh
 )
 app = create_rollout_server(backend=backend, lifespan=backend.prewarm_lifespan())
 ```
 
 - Tasks come from `tasks_dir` (`task_mode="template"` or `"dataset"`), or per rollout via `metadata["harbor_task"]` — a local path, a registry package `"org/name[@ref]"`, or a git checkout (`metadata["git_url"]`, ideally with a pinned `metadata["git_commit_id"]`).
+- Reward precedence is deterministic: a task-provided `tests/test.sh` wins over `grader=`. To use the SDK grader, supply a task without that file; the backend never overwrites a benchmark's native verifier.
 - `prewarm()` builds every task image and runs agent setup before the server accepts traffic; `prewarm_lifespan()` wraps it as an ASGI lifespan.
 - `max_queue_depth` bounds admission (`has_capacity()`), and `cancel_rollouts()` cancels queued or running rollouts by id, prefix, or all.
+- Keep Harbor's `TrialQueue` at its default `RetryConfig(max_retries=0)`. The SDK treats Harbor's `END` event as the terminal rollout result, so queue-level attempt retries are not supported; resubmit with a new rollout id if controller-level retry is required.
 
 #### Migrating from the pre-v0.3 Harbor backend
 
@@ -247,7 +249,7 @@ Note that `HarborBackend` still resolves — with a different constructor. A cal
 | `task_dir=` (one task) | `tasks_dir=` plus `task_mode=` (`"template"` or `"dataset"`) |
 | `workflow=` | `agent=` — an `AgentWorkflow` **or** a native Harbor agent name |
 | `user_code_dir=` | `code_dir=` (defaults to the agent's project dir) or a prebuilt `bundle=` |
-| `grader=` or `custom_tests_dir=` (the two reward sources) | `grader=`, or `grader=None` to score with the task's own `tests/` — `custom_tests_dir=` is gone |
+| `grader=` or `custom_tests_dir=` (the two reward sources) | `grader=` for tasks without `tests/test.sh`; otherwise the task's native verifier wins. Use `grader=None` to always score with task tests; `custom_tests_dir=` is gone |
 | `prebuild_local_image=`, `symlink_environment=` | dropped — image reuse is Harbor's, and `prewarm()` warms it |
 | `HarborAgentWorkflowContext.environment` | gone: the workflow runs *inside* the container, so use ordinary process calls |
 

@@ -59,11 +59,13 @@ server = [
     "click>=8.3.3",
 ]
 
-# Strands Agents adapter. LiteLLM's tool-call path imports orjson at runtime,
-# although LiteLLM declares it only through its much larger proxy extra.
+# Strands Agents adapter. Keep LiteLLM on the reviewed 1.91 release line across
+# every owning extra; its pre-2 releases can change packaging and runtime
+# boundaries. LiteLLM's tool-call path imports orjson at runtime, although
+# LiteLLM declares it only through its much larger proxy extra.
 strands = [
     "strands-agents[litellm]>=1.29.0,<2.0.0",
-    "litellm>=1.91.1,<2.0.0",
+    "litellm>=1.91.1,<1.92.0",
     "orjson>=3.11.6,<4.0",
     "aiohttp>=3.14.1",
     "mcp>=1.28.1,<2.0.0",
@@ -74,7 +76,7 @@ strands = [
 # cache_write_tokens usage field.
 openai-agents = [
     "openai-agents[litellm]>=0.18.1,<0.19",
-    "litellm>=1.91.1,<2.0.0",
+    "litellm>=1.91.1,<1.92.0",
     "orjson>=3.11.6,<4.0",
     "aiohttp>=3.14.1",
     "mcp>=1.28.1,<2.0.0",
@@ -94,14 +96,15 @@ harbor = [
     "dockerfile-parse>=2.0.1,<3.0.0",
     # osmosis_ai.packaging builds the bundle wheel that Harbor installs in the
     # task container: toml rewrites the rollout project's pyproject.toml and
-    # platformdirs locates the bundle cache. Nothing outside this backend
-    # imports that module, so both stay out of the base install. `uv` must also
-    # be on PATH to build the wheel.
+    # platformdirs locates the bundle cache, and uv performs the isolated wheel
+    # build. Nothing outside this backend imports them, so they stay out of the
+    # base install.
     "toml>=0.10.2,<1.0.0",
     "platformdirs>=4.0",
+    "uv>=0.9.7,<0.10",
     # Harbor currently uses LiteLLM and PyIceberg, which own these runtime and
     # security floors in this feature.
-    "litellm>=1.91.1,<2.0.0",
+    "litellm>=1.91.1,<1.92.0",
     "orjson>=3.11.6,<4.0",
     "aiohttp>=3.14.1",
     "click>=8.3.3",
@@ -109,7 +112,7 @@ harbor = [
 
 # LLM-as-judge rubric evaluation
 rubric = [
-    "litellm>=1.91.1,<2.0.0",
+    "litellm>=1.91.1,<1.92.0",
     "orjson>=3.11.6,<4.0",
     "tqdm>=4.0.0,<5.0.0",
     "aiohttp>=3.14.1",

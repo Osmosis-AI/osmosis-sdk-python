@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import subprocess
 import sys
+import sysconfig
 import textwrap
 from pathlib import Path
 from types import ModuleType
@@ -206,7 +207,7 @@ def test_extra_modules_table_matches_pyproject_extras() -> None:
     environment, so this test requires syncing with ``--all-extras``.
     """
     import tomllib
-    from importlib.metadata import packages_distributions
+    from importlib.metadata import distribution, packages_distributions
 
     from packaging.requirements import Requirement
     from packaging.utils import canonicalize_name
@@ -224,6 +225,7 @@ def test_extra_modules_table_matches_pyproject_extras() -> None:
         for extra, requirements in declared_extras.items()
         if extra != "full"  # full only aggregates osmosis-ai[...] self-references
     }
+    executable_only = {"harbor": {"uv"}}
     assert set(EXTRA_MODULES) == set(checkable)
 
     for extra, requirements in checkable.items():
@@ -243,6 +245,17 @@ def test_extra_modules_table_matches_pyproject_extras() -> None:
             matching = providers & declared
             assert matching, f"{extra!r} does not declare a package providing {module}"
             covered |= matching
+        for name in executable_only.get(extra, set()):
+            distribution(name)
+            candidates = (
+                Path(sysconfig.get_path("scripts")) / name,
+                Path(sysconfig.get_path("scripts")) / f"{name}.exe",
+            )
+            assert any(candidate.is_file() for candidate in candidates), (
+                f"extra {extra!r} declares executable-only package {name!r}, "
+                f"but it does not install {name!r} beside the current interpreter"
+            )
+            covered.add(name)
         assert covered == declared, (
             f"extra {extra!r} declares {sorted(declared - covered)} but "
             "EXTRA_MODULES lists no import name for them; missing modules "
