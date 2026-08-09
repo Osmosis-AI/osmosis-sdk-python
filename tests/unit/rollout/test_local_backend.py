@@ -524,3 +524,144 @@ class TestLocalBackend:
         # Byte-for-byte identical: no content-block conversion, no copy-and-mutate.
         assert captured["prompt"] == original_prompt
         assert captured["prompt"][0]["content"] == "you are helpful"
+
+
+# ---------------------------------------------------------------------------
+# Deadlines (agent_timeout_sec / grader_timeout_sec)
+# ---------------------------------------------------------------------------
+
+
+class HangingWorkflow(AgentWorkflow):
+    """Runs far longer than any deadline the controller would send."""
+
+    cancelled = False
+
+    async def run(self, ctx: AgentWorkflowContext) -> Any:
+        import asyncio
+
+        try:
+            await asyncio.sleep(30)
+        except asyncio.CancelledError:
+            type(self).cancelled = True
+            raise
+
+
+class HangingGrader(Grader):
+    async def grade(self, ctx: GraderContext) -> Any:
+        import asyncio
+
+        await asyncio.sleep(30)
+
+
+class TestDeadlines:
+    async def test_workflow_deadline_returns_timeout_result(self):
+        HangingWorkflow.cancelled = False
+        backend = LocalBackend(
+            workflow=HangingWorkflow,
+            workflow_config=AgentWorkflowConfig(name="test"),
+        )
+        request = ExecutionRequest(
+            id="r1", prompt=[{"role": "user", "content": "hi"}], agent_timeout_sec=0.05
+        )
+
+        result = await backend.run_workflow(request)
+
+        assert result.status == RolloutStatus.FAILURE
+        assert result.err_category == RolloutErrorCategory.TIMEOUT
+        assert "0.05s deadline" in (result.err_message or "")
+        # A cooperatively-cancellable workflow actually stops. One that
+        # swallows CancelledError or blocks the loop still reports a timeout,
+        # but keeps running — that limitation is inherent to asyncio.timeout.
+        assert HangingWorkflow.cancelled
+
+    async def test_workflow_deadline_reports_through_the_callback(self):
+        backend = LocalBackend(
+            workflow=HangingWorkflow,
+            workflow_config=AgentWorkflowConfig(name="test"),
+        )
+        on_complete = AsyncMock()
+        request = ExecutionRequest(
+            id="r1", prompt=[{"role": "user", "content": "hi"}], agent_timeout_sec=0.05
+        )
+
+        await backend.execute(request, on_workflow_complete=on_complete)
+
+        # A deadline is a terminal result, not an exception the server has to
+        # rescue: the callback still fires and the slot is released.
+        on_complete.assert_awaited_once()
+        assert on_complete.await_args.args[0].err_category == (
+            RolloutErrorCategory.TIMEOUT
+        )
+        assert backend.limiter.snapshot()["running"] == 0
+
+    async def test_grader_deadline_is_independent_of_the_agent_deadline(self):
+        backend = LocalBackend(
+            workflow=StubWorkflow,
+            workflow_config=AgentWorkflowConfig(name="test"),
+            grader=HangingGrader,
+        )
+        request = ExecutionRequest(
+            id="r1",
+            prompt=[{"role": "user", "content": "hi"}],
+            label="x",
+            agent_timeout_sec=5.0,
+            grader_timeout_sec=0.05,
+        )
+
+        workflow_result = await backend.run_workflow(request)
+        graded = await backend.run_grader(request, workflow_result)
+
+        assert workflow_result.status == RolloutStatus.SUCCESS
+        assert graded.status == RolloutStatus.FAILURE
+        assert graded.err_category == RolloutErrorCategory.TIMEOUT
+        assert "0.05s deadline" in (graded.err_message or "")
+
+    async def test_no_deadline_runs_unbounded(self):
+        backend = LocalBackend(
+            workflow=StubWorkflow,
+            workflow_config=AgentWorkflowConfig(name="test"),
+        )
+        request = ExecutionRequest(id="r1", prompt=[{"role": "user", "content": "hi"}])
+
+        result = await backend.run_workflow(request)
+
+        assert result.status == RolloutStatus.SUCCESS
+
+    async def test_completion_just_inside_the_deadline_succeeds(self):
+        class BriefWorkflow(StubWorkflow):
+            async def run(self, ctx: AgentWorkflowContext) -> Any:
+                import asyncio
+
+                await asyncio.sleep(0.01)
+                await super().run(ctx)
+
+        backend = LocalBackend(
+            workflow=BriefWorkflow,
+            workflow_config=AgentWorkflowConfig(name="test"),
+        )
+        request = ExecutionRequest(
+            id="r1", prompt=[{"role": "user", "content": "hi"}], agent_timeout_sec=5.0
+        )
+
+        result = await backend.run_workflow(request)
+
+        assert result.status == RolloutStatus.SUCCESS
+
+    async def test_user_timeout_error_keeps_its_own_message(self):
+        class ImpatientWorkflow(AgentWorkflow):
+            async def run(self, ctx: AgentWorkflowContext) -> Any:
+                raise TimeoutError("upstream API gave up")
+
+        backend = LocalBackend(
+            workflow=ImpatientWorkflow,
+            workflow_config=AgentWorkflowConfig(name="test"),
+        )
+        request = ExecutionRequest(
+            id="r1", prompt=[{"role": "user", "content": "hi"}], agent_timeout_sec=30.0
+        )
+
+        result = await backend.run_workflow(request)
+
+        # Same wire category, but the deadline did not fire — do not claim it did.
+        assert result.err_category == RolloutErrorCategory.TIMEOUT
+        assert result.err_message == "upstream API gave up"

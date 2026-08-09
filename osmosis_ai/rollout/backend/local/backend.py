@@ -1,3 +1,4 @@
+import asyncio
 import copy
 import logging
 import traceback
@@ -32,6 +33,21 @@ from osmosis_ai.rollout.utils.imports import resolve_object
 from osmosis_ai.rollout.utils.rewards import validate_sample_has_reward
 
 logger: logging.Logger = logging.getLogger(__name__)
+
+
+def _failure_message(
+    exc: Exception, deadline: asyncio.Timeout, phase: str, limit: float | None
+) -> str:
+    """Name the deadline that fired, rather than ``str(TimeoutError())``.
+
+    User code may raise its own ``TimeoutError`` (an HTTP client giving up, for
+    instance), which carries a useful message and is not our deadline —
+    ``expired()`` is what distinguishes the two. The wire category is
+    ``TIMEOUT`` either way.
+    """
+    if deadline.expired():
+        return f"{phase} exceeded its {limit}s deadline"
+    return str(exc)
 
 
 class LocalBackend(ExecutionBackend):
@@ -114,26 +130,38 @@ class LocalBackend(ExecutionBackend):
             rollout_ctx = RolloutContext()
 
         workflow = self.workflow_cls(config)
+        # The controller expires its own session at this deadline; without it
+        # here the workflow keeps running — and keeps its concurrency slot —
+        # long after anyone is waiting for the answer. ``None`` means the
+        # controller sent no deadline, so run unbounded.
+        #
+        # This stops a cooperatively-cancellable workflow. One that swallows
+        # ``CancelledError``, or that blocks the event loop in sync code, still
+        # runs to completion; the rollout is reported as a timeout either way.
+        deadline = asyncio.timeout(request.agent_timeout_sec)
         try:
-            with rollout_ctx:
-                output = coerce_output(await workflow.run(ctx))
-                if output is None:
-                    sample = await rollout_ctx.get_sample()
-                else:
-                    sample = (
-                        RolloutSample(
-                            messages=output.messages,
-                            label=request.label,
-                            metrics=dict(output.metrics),
+            async with deadline:
+                with rollout_ctx:
+                    output = coerce_output(await workflow.run(ctx))
+                    if output is None:
+                        sample = await rollout_ctx.get_sample()
+                    else:
+                        sample = (
+                            RolloutSample(
+                                messages=output.messages,
+                                label=request.label,
+                                metrics=dict(output.metrics),
+                            )
+                            if output.messages is not None
+                            else None
                         )
-                        if output.messages is not None
-                        else None
-                    )
         except Exception as e:
             logger.error(traceback.format_exc())
             return ExecutionResult(
                 status=RolloutStatus.FAILURE,
-                err_message=str(e),
+                err_message=_failure_message(
+                    e, deadline, "workflow", request.agent_timeout_sec
+                ),
                 err_category=categorize_exception(e),
             )
 
@@ -156,10 +184,15 @@ class LocalBackend(ExecutionBackend):
                 self.artifact_root, request.id
             ),
         )
+        # Graded independently of the agent deadline: a workflow that finished
+        # just inside its budget still gets its full grading window, and a hung
+        # grader cannot hold the slot either.
+        deadline = asyncio.timeout(request.grader_timeout_sec)
         try:
-            grader = self.grader_cls(self.grader_config)
-            await grader.grade(grader_ctx)
-            validate_sample_has_reward(grader_ctx.sample)
+            async with deadline:
+                grader = self.grader_cls(self.grader_config)
+                await grader.grade(grader_ctx)
+                validate_sample_has_reward(grader_ctx.sample)
             return ExecutionResult(
                 status=RolloutStatus.SUCCESS,
                 sample=grader_ctx.sample,
@@ -169,6 +202,8 @@ class LocalBackend(ExecutionBackend):
             return ExecutionResult(
                 status=RolloutStatus.FAILURE,
                 sample=result.sample,
-                err_message=str(e),
+                err_message=_failure_message(
+                    e, deadline, "grader", request.grader_timeout_sec
+                ),
                 err_category=categorize_exception(e),
             )
