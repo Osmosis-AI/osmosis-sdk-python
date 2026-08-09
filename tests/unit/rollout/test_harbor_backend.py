@@ -27,6 +27,7 @@ from osmosis_ai.rollout.container.files import ContainerInput, ContainerResult
 from osmosis_ai.rollout.types import (
     ExecutionRequest,
     RolloutErrorCategory,
+    RolloutSample,
     RolloutStatus,
 )
 from osmosis_ai.rollout.types.output import AgentWorkflowOutput, coerce_output
@@ -1828,6 +1829,37 @@ class TestFailureCategorization:
         )
         outcome = backend.grader_outcome(event, "r1", PendingTrial(noop_callback, None))
 
+        assert outcome.err_category == RolloutErrorCategory.VALIDATION_ERROR
+        assert outcome.extra_fields["phase"] == "grading"
+
+    @pytest.mark.parametrize("reward", [float("nan"), float("inf"), "not-a-number"])
+    async def test_grader_outcome_rejects_unusable_verifier_reward(
+        self, template_task, tmp_path, reward
+    ):
+        # Assigning the reward validates, so it must not escape this method:
+        # harbor emits the END hook unguarded, and an exception here would
+        # skip archive_trial() and lose the trial's artifacts.
+        from types import SimpleNamespace
+
+        backend = HarborBackend(
+            orchestrator=TrialQueue(n_concurrent=1),
+            tasks_dir=template_task,
+            agent="terminus-2",
+            trials_dir=tmp_path / "trials",
+        )
+        backend.primary_sample = lambda *a, **k: RolloutSample(  # type: ignore[method-assign]
+            messages=[{"role": "assistant", "content": "hi"}]
+        )
+        event = SimpleNamespace(
+            config=SimpleNamespace(trial_name="trial-r1"),
+            result=trial_result(
+                verifier_result=SimpleNamespace(rewards={"reward": reward})
+            ),
+        )
+
+        outcome = backend.grader_outcome(event, "r1", PendingTrial(noop_callback, None))
+
+        assert outcome.status == RolloutStatus.FAILURE
         assert outcome.err_category == RolloutErrorCategory.VALIDATION_ERROR
         assert outcome.extra_fields["phase"] == "grading"
 

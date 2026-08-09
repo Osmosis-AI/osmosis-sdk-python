@@ -131,6 +131,11 @@ async def _handle_rollout(
     last_diagnostics: dict[str, Any] | None = None
     # Latest metrics from callback acks.
     report: TrajectoryReport | None = None
+    # A terminal callback is a promise the controller acts on: it closes out
+    # ``rollout_id``. Posting a second one contradicts the first, so track what
+    # has already been delivered and let the error path below skip it.
+    completion_posted = False
+    grader_posted = False
 
     def record_result_to_save(result: ExecutionResult) -> None:
         nonlocal result_to_save, last_diagnostics
@@ -140,7 +145,7 @@ async def _handle_rollout(
             result_to_save = result
 
     async def on_workflow_complete(result: ExecutionResult) -> None:
-        nonlocal report
+        nonlocal report, completion_posted
         record_result_to_save(result)
         resp = await post_json_with_retry(
             url=request.completion_callback_url,
@@ -152,10 +157,11 @@ async def _handle_rollout(
             ).model_dump(),
             headers=auth.as_bearer_headers(),
         )
+        completion_posted = True
         report = report_from_response(resp) or report
 
     async def on_grader_complete(result: ExecutionResult) -> None:
-        nonlocal report
+        nonlocal report, grader_posted
         record_result_to_save(result)
         if not request.grader_callback_url:
             logger.info(
@@ -177,12 +183,17 @@ async def _handle_rollout(
                 status=GraderStatus.SUCCESS
                 if result.status == RolloutStatus.SUCCESS
                 else GraderStatus.FAILURE,
-                sample=result.sample,
+                # Callers mutate ``metrics`` in place, past every validator;
+                # this is the last point before the payload has to be JSON.
+                sample=result.sample.drop_non_finite_values()
+                if result.sample is not None
+                else None,
                 err_message=result.err_message,
                 err_category=result.err_category,
             ).model_dump(exclude={"sample": {"trajectory_messages"}}),
             headers=auth.as_bearer_headers(),
         )
+        grader_posted = True
         report = report_from_response(resp) or report
         logger.info(
             "Grader callback for %s completed: status=%d",
@@ -209,20 +220,31 @@ async def _handle_rollout(
         logger.info("Rollout %s completed successfully", rollout_id)
     except Exception:
         logger.error("Rollout %s failed: %s", rollout_id, traceback.format_exc())
-        try:
-            resp = await post_json_with_retry(
-                url=request.completion_callback_url,
-                payload=RolloutCompleteRequest(
-                    status=RolloutStatus.FAILURE,
-                    rollout_id=rollout_id,
-                    err_message="Internal server error",
-                ).model_dump(),
-                headers=auth.as_bearer_headers(),
+        if completion_posted:
+            # The workflow already reported a terminal status; whatever failed
+            # afterwards (grading, callback encoding) belongs to the grader
+            # callback below, not to a second, contradicting completion.
+            logger.info(
+                "Rollout %s already reported completion; not posting a second one",
+                rollout_id,
             )
-            report = report_from_response(resp) or report
-        except Exception:
-            logger.error("Failed to post error callback: %s", traceback.format_exc())
-        if request.grader_callback_url:
+        else:
+            try:
+                resp = await post_json_with_retry(
+                    url=request.completion_callback_url,
+                    payload=RolloutCompleteRequest(
+                        status=RolloutStatus.FAILURE,
+                        rollout_id=rollout_id,
+                        err_message="Internal server error",
+                    ).model_dump(),
+                    headers=auth.as_bearer_headers(),
+                )
+                report = report_from_response(resp) or report
+            except Exception:
+                logger.error(
+                    "Failed to post error callback: %s", traceback.format_exc()
+                )
+        if request.grader_callback_url and not grader_posted:
             try:
                 await on_grader_complete(ExecutionResult(status=RolloutStatus.FAILURE))
             except Exception:

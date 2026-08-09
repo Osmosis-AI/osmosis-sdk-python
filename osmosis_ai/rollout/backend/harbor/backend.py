@@ -871,13 +871,17 @@ class HarborBackend(ExecutionBackend):
             # viewer, step gating all hardcode it); never guess another one.
             rewards = event.result.verifier_result.rewards or {}
             reward = rewards.get("reward")
-            if sample is not None and reward is not None:
-                sample.reward = float(reward)
             try:
+                # Both the conversion and the assignment reject a malformed
+                # verifier reward, so they belong with the check below: harbor
+                # emits this hook unguarded, and anything escaping here skips
+                # the archive_trial() call in the caller's else branch.
+                if sample is not None and reward is not None:
+                    sample.reward = float(reward)
                 validate_sample_has_reward(sample)
-            except ValueError as e:
+            except (TypeError, ValueError) as e:
                 logger.warning(
-                    "Verifier rewards for rollout %s missing 'reward': %s",
+                    "Unusable verifier reward for rollout %s: %s",
                     rollout_id,
                     e,
                 )
