@@ -74,3 +74,83 @@ def test_a_malformed_secrets_file_line_is_rejected(tmp_path: Path) -> None:
             stored_names=set(),
             is_tty=False,
         )
+
+
+SENTINEL = "sk-live-do-not-print-me"
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        # A value pasted without its NAME= prefix.
+        f"{SENTINEL}\n",
+        # The continuation of a multi-line value — a pasted PEM key being the
+        # realistic case. The opening line parses; the body that follows has
+        # no '=' and is what used to land in the error. (Spelled without a
+        # real PEM header so the pre-commit key scanner stays useful here.)
+        f'SIGNING_KEY="--BEGIN TEST KEY--\n{SENTINEL}\n',
+        # A name that is not a plain identifier: rejected, still not echoed.
+        f"not a name={SENTINEL}\n",
+    ],
+)
+def test_errors_never_quote_the_offending_line(tmp_path: Path, content: str) -> None:
+    path = tmp_path / ".env"
+    path.write_text(content, encoding="utf-8")
+
+    with pytest.raises(CLIError) as exc:
+        resolve_run_secrets(
+            names=["A_KEY"], secrets_file=str(path), stored_names=set(), is_tty=False
+        )
+
+    rendered = f"{exc.value} {exc.value.message} {exc.value.details}"
+    assert SENTINEL not in rendered
+    assert str(path) in exc.value.message
+
+
+def test_stdin_is_named_rather_than_shown(monkeypatch: pytest.MonkeyPatch) -> None:
+    import io
+
+    monkeypatch.setattr("sys.stdin", io.StringIO(f"{SENTINEL}\n"))
+
+    with pytest.raises(CLIError) as exc:
+        resolve_run_secrets(
+            names=["A_KEY"], secrets_file="-", stored_names=set(), is_tty=False
+        )
+
+    assert SENTINEL not in exc.value.message
+    assert "stdin" in exc.value.message
+
+
+def test_the_reported_line_number_locates_the_bad_line(tmp_path: Path) -> None:
+    path = tmp_path / ".env"
+    path.write_text(f"# note\n\nA_KEY=ok\n{SENTINEL}\n", encoding="utf-8")
+
+    with pytest.raises(CLIError, match="Invalid line 4"):
+        resolve_run_secrets(
+            names=["A_KEY"], secrets_file=str(path), stored_names=set(), is_tty=False
+        )
+
+
+@pytest.mark.parametrize(
+    "line,expected",
+    [
+        ('A_KEY="quoted"', "quoted"),
+        ("A_KEY='quoted'", "quoted"),
+        ("export A_KEY=exported", "exported"),
+        ('export A_KEY="both"', "both"),
+        ("A_KEY=", ""),
+        ('A_KEY=un"matched', 'un"matched'),
+        ("A_KEY=has=equals", "has=equals"),
+    ],
+)
+def test_common_dotenv_forms_resolve_to_the_intended_value(
+    tmp_path: Path, line: str, expected: str
+) -> None:
+    # These used to be accepted silently and submit the wrong secret: quotes
+    # travelled with the value, and `export A_KEY` became the name.
+    path = tmp_path / ".env"
+    path.write_text(line + "\n", encoding="utf-8")
+
+    assert resolve_run_secrets(
+        names=["A_KEY"], secrets_file=str(path), stored_names=set(), is_tty=False
+    ) == {"A_KEY": expected}

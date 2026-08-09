@@ -10,18 +10,41 @@ from pathlib import Path
 from osmosis_ai.cli.errors import CLIError
 
 
+def _unquote(value: str) -> str:
+    """Drop one matching pair of surrounding quotes, as dotenv files carry.
+
+    Without this the quotes travel with the value and the run submits a secret
+    that is wrong by two characters — which surfaces much later, as an opaque
+    authentication failure inside a job that is already running.
+    """
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+        return value[1:-1]
+    return value
+
+
 def _read_dotenv(source: str) -> dict[str, str]:
-    """Read `NAME=value` pairs. ``-`` reads stdin, for piping from a manager."""
+    """Read `NAME=value` pairs. ``-`` reads stdin, for piping from a manager.
+
+    Errors report the location and never the line: every line in this file is
+    a secret, and the CLI's JSON error envelope goes to stderr, which CI keeps.
+    A `NAME=value` line whose name is not a plain identifier is rejected rather
+    than stored under a name that could never be looked up.
+    """
     text = sys.stdin.read() if source == "-" else Path(source).read_text("utf-8")
+    label = "stdin" if source == "-" else source
     values: dict[str, str] = {}
-    for line in text.splitlines():
+    for lineno, line in enumerate(text.splitlines(), start=1):
         stripped = line.strip()
         if not stripped or stripped.startswith("#"):
             continue
         name, separator, value = stripped.partition("=")
-        if not separator:
-            raise CLIError(f"Invalid line in secrets file: {stripped!r}")
-        values[name.strip()] = value.strip()
+        name = name.strip().removeprefix("export ").strip()
+        if not separator or not name.isidentifier():
+            raise CLIError(
+                f"Invalid line {lineno} in {label}: expected NAME=value. "
+                "Values spanning multiple lines are not supported."
+            )
+        values[name] = _unquote(value.strip())
     return values
 
 
