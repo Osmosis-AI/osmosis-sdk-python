@@ -4,13 +4,22 @@ This file records changes to `osmosis-ai`. For earlier versions, see [GitHub Rel
 
 ## Unreleased
 
+### Added
+
+- Rollout bundles can be built from `src/` layout projects — the layout `uv init --lib` scaffolds. Package auto-detection, project-root discovery, and the generated runner shim all resolve `src/<package>/`; flat layouts are unaffected.
+
 ### Fixed
 
 - Rollout bundle builds now use content-addressed cache entries, keep project versions separate, normalize all valid distribution-name separators, and alias generated imports so same-named workflow, grader, and config objects cannot shadow one another. The Harbor extra now installs its `uv` builder directly, and model-backed extras stay below the incompatible LiteLLM 1.95 source-build boundary.
+- A `bundles_dir` inside the project no longer breaks the build: both the staging copy and the cache key exclude it, so it neither copies itself recursively nor invalidates its own cache entry on every call.
+- `LocalBackend` now enforces the controller's `agent_timeout_sec` and `grader_timeout_sec` as independent deadlines, cancelling the workflow or grader and releasing its concurrency slot instead of running on past a session the controller has already expired.
+- `RolloutSample.reward` rejects non-finite and non-numeric values at construction and at assignment, including through `GraderContext.set_reward()`. Non-finite values in `metrics`/`extra_fields` are dropped from the grader callback rather than costing the whole payload, so an unencodable telemetry value can no longer swallow a reward that was already earned.
+- A rollout server no longer posts a second, contradicting completion callback after a terminal status was already reported. A backend that dies before reporting anything still gets the fabricated failure completion, so the controller cannot be left waiting.
 
 ### Documentation
 
 - Clarified that a Harbor task's existing `tests/test.sh` takes precedence over an SDK `grader=`, and that Harbor `TrialQueue` attempt retries are not supported by the rollout lifecycle integration.
+- Corrected the rollout-timeout troubleshooting section, which stated that `LocalBackend` does not enforce per-rollout deadlines, and documented the reward domain and the callback sanitization policy in the rollout SDK reference.
 
 ## 0.3.0rc3 - 2026-08-07
 

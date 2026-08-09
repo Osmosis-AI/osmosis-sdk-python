@@ -62,6 +62,7 @@ class Grader(ABC):
 
 - `ctx.sample` is the single `RolloutSample` produced by the workflow; it is `None` when an explicit output contains no sample or when a `None` return has no registered ambient source.
 - Attach its scalar reward with `ctx.set_reward(reward)`; this raises `ValueError` when `ctx.sample` is `None` ([context.py](../osmosis_ai/rollout/context.py)).
+- The reward must be a finite number. `NaN`, infinity, and non-numeric values raise `pydantic.ValidationError`, because a reward that cannot be encoded as JSON reaches the controller as no reward at all. Leaving it unset (`None`) still means "not graded".
 - `ctx.label` carries the dataset row's label (the ground-truth string).
 - `ctx.metadata` is the read-only input-side dataset row metadata.
 
@@ -130,6 +131,8 @@ Layout per rollout, keyed by `rollout_id` (callers that need position semantics 
 ```
 
 Each document carries a normalized, controller-compatible transcript as ATIF steps (tool calls fold into agent-step observations) and namespaces platform context under `extra.osmosis`: `rollout_id`, `label`, `reward`, sample `metrics`/`extra_fields`, and the request's `metadata`/`extra_fields` (the natural channel for run identity such as an eval run id).
+
+Non-finite values in a sample's `metrics`/`extra_fields` are **dropped** from the grader callback rather than failing it: they cannot be encoded as JSON, and losing one telemetry value beats losing the reward with it. This is deliberately the opposite of `AgentWorkflowOutput.metrics` above, which *rejects* them — an output is authored by the workflow and can be fixed, whereas a callback payload is the last chance to deliver a reward that was already earned. `messages` content is not scanned; keep numeric telemetry in `metrics`.
 
 Built-in sample sources keep their framework-native `RolloutSample.messages` for graders and callbacks and prepare a separate `trajectory_messages` copy through the framework converter used for OpenAI-compatible `/chat/completions` traffic. `trajectory_messages` is SDK-internal: it crosses backend boundaries for persistence but is omitted from grader callbacks. This is not an exact wire replay because call-specific conversion arguments and separately supplied system instructions are not retained. Framework-native items omitted by the framework converter are outside the persisted transcript contract. Custom sample sources whose native history is already OpenAI chat-completions-shaped get the same behavior by default. A source with another native shape sets `RolloutSample.trajectory_messages` itself from `get_sample` (an explicit `None` marks conversion as unavailable and skips trajectory persistence for that sample). Like artifacts, conversion and saving are best-effort: failures are logged and never affect rewards, callbacks, or rollout status.
 
