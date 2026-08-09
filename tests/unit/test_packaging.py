@@ -379,6 +379,143 @@ def test_rejects_bad_refs_and_missing_pyproject(project, tmp_path):
         build_bundle(tmp_path / "nowhere", workflow="a:B", bundles_dir=tmp_path / "b")
 
 
+SRC_PYPROJECT = PYPROJECT.replace(
+    "[tool.setuptools.packages.find]\ninclude",
+    '[tool.setuptools.packages.find]\nwhere = ["src"]\ninclude',
+)
+
+
+@pytest.fixture
+def src_project(tmp_path):
+    """A ``src/`` layout project — what ``uv init --lib`` scaffolds."""
+    code_dir = tmp_path / "harness"
+    package = code_dir / "src" / "my_harness"
+    package.mkdir(parents=True)
+    (package / "__init__.py").touch()
+    (package / "solver.py").write_text("class MyWorkflow: pass\n")
+    (package / "grade.py").write_text("class MyGrader: pass\n")
+    (code_dir / "pyproject.toml").write_text(SRC_PYPROJECT)
+    return code_dir
+
+
+def test_bundles_dir_inside_project_does_not_recurse(project, tmp_path):
+    # The staging tree lives under bundles_dir; if that sits inside the project
+    # then copytree's destination is a descendant of its own source, and the
+    # published wheels feed back into the cache key.
+    bundles_dir = project / "bundles"
+    kwargs = dict(workflow="my_harness.solver:MyWorkflow", bundles_dir=bundles_dir)
+
+    first = build_bundle(project, **kwargs)
+
+    with zipfile.ZipFile(first) as archive:
+        names = archive.namelist()
+    # The staging tree is torn down before build_bundle returns, so the only
+    # durable evidence of a recursive copy is what landed in the wheel.
+    assert "my_harness/solver.py" in names
+    assert not [n for n in names if "bundles/" in n]
+    # The cache must still hit: excluding it from copytree alone is not enough,
+    # since content_hash() would otherwise digest the wheel it just published.
+    assert build_bundle(project, **kwargs) == first
+
+
+def test_bundles_dir_inside_project_still_tracks_source_changes(project, tmp_path):
+    bundles_dir = project / "bundles"
+    kwargs = dict(workflow="my_harness.solver:MyWorkflow", bundles_dir=bundles_dir)
+
+    first = build_bundle(project, **kwargs)
+    (project / "my_harness" / "solver.py").write_text(
+        "class MyWorkflow:\n    changed = True\n"
+    )
+
+    assert build_bundle(project, **kwargs) != first
+
+
+def test_src_layout_package_is_detected_and_shimmed(src_project, tmp_path):
+    wheel = build_bundle(
+        src_project,
+        workflow="my_harness.solver:MyWorkflow",
+        grader="my_harness.grade:MyGrader",
+        bundles_dir=tmp_path / "bundles",
+    )
+
+    with zipfile.ZipFile(wheel) as archive:
+        # The wheel is import-rooted, so the shim lands at my_harness/ even
+        # though it was written into src/my_harness/ in the staging tree.
+        shim = archive.read("my_harness/bundle_main.py").decode()
+    assert "from my_harness.solver import MyWorkflow as _osmosis_workflow" in shim
+    assert "from my_harness.grade import MyGrader as _osmosis_grader" in shim
+
+    info = inspect_bundle(wheel)
+    assert info.agent_script == "my-harness-agent"
+    assert info.grader_script == "my-harness-grade"
+
+
+def test_namespace_package_keeps_working_without_init(tmp_path):
+    # PEP 420 packages have no __init__.py; auto-detection has never found
+    # them, but an explicit package= used to work and must keep working.
+    from osmosis_ai.packaging import find_package_dir
+
+    (tmp_path / "ns_harness").mkdir()
+
+    assert find_package_dir(tmp_path, "ns_harness") == tmp_path / "ns_harness"
+
+
+def test_src_layout_accepts_explicit_package(src_project, tmp_path):
+    wheel = build_bundle(
+        src_project,
+        workflow="my_harness.solver:MyWorkflow",
+        package="my_harness",
+        bundles_dir=tmp_path / "bundles",
+    )
+
+    with zipfile.ZipFile(wheel) as archive:
+        assert "my_harness/bundle_main.py" in archive.namelist()
+
+
+def test_find_package_error_names_every_searched_root(tmp_path):
+    from osmosis_ai.packaging import find_package
+
+    code_dir = tmp_path / "empty"
+    (code_dir / "src").mkdir(parents=True)
+
+    with pytest.raises(ValueError, match="found none") as exc:
+        find_package(code_dir)
+    assert str(code_dir / "src") in str(exc.value)
+
+
+def test_find_package_dir_rejects_unknown_package(tmp_path):
+    from osmosis_ai.packaging import find_package_dir
+
+    (tmp_path / "src").mkdir()
+
+    with pytest.raises(ValueError, match="'nope' not found"):
+        find_package_dir(tmp_path, "nope")
+
+
+def test_project_dir_for_walks_out_of_src_layout(tmp_path, monkeypatch):
+    import sys
+
+    from osmosis_ai.packaging import project_dir_for
+
+    code_dir = tmp_path / "harness"
+    package = code_dir / "src" / "my_harness"
+    package.mkdir(parents=True)
+    (package / "__init__.py").touch()
+    (package / "solver.py").write_text("class MyWorkflow: pass\n")
+    (code_dir / "pyproject.toml").write_text(SRC_PYPROJECT)
+
+    monkeypatch.syspath_prepend(str(code_dir / "src"))
+    sys.modules.pop("my_harness", None)
+    sys.modules.pop("my_harness.solver", None)
+    try:
+        from my_harness.solver import MyWorkflow  # type: ignore[import-not-found]
+
+        assert project_dir_for(MyWorkflow) == code_dir
+    finally:
+        sys.modules.pop("my_harness", None)
+        sys.modules.pop("my_harness.solver", None)
+
+
 def test_project_dir_for_locates_bench_harness():
     import sys
     from pathlib import Path

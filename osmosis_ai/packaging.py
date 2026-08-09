@@ -17,6 +17,7 @@ import sysconfig
 import tempfile
 import tomllib
 import zipfile
+from collections.abc import Callable
 from dataclasses import dataclass
 from importlib.metadata import PathDistribution
 from pathlib import Path
@@ -66,6 +67,9 @@ EXCLUDE_DIRS = {
     ".ruff_cache",
 }
 
+# PyPA's ``src/`` layout, which ``uv init --lib`` also produces.
+SRC_LAYOUT_DIR = "src"
+
 
 @dataclass(frozen=True)
 class BundleInfo:
@@ -99,30 +103,83 @@ def _uv_executable() -> str:
     return executable
 
 
-def content_hash(path: Path, *, extra: str = "") -> str:
+def content_hash(path: Path, *, extra: str = "", exclude: Path | None = None) -> str:
     digest = hashlib.sha256(extra.encode())
     for file in sorted(
         p
         for p in path.rglob("*")
-        if p.is_file() and not (set(p.relative_to(path).parts) & EXCLUDE_DIRS)
+        if p.is_file()
+        and not (set(p.relative_to(path).parts) & EXCLUDE_DIRS)
+        and not (exclude is not None and p.is_relative_to(exclude))
     ):
         digest.update(str(file.relative_to(path)).encode())
         digest.update(file.read_bytes())
     return digest.hexdigest()[:32]
 
 
+def _stage_ignore(exclude: Path | None) -> Callable[[str, list[str]], set[str]]:
+    """``copytree`` filter: the usual noise, plus a cache dir inside the source.
+
+    ``ignore_patterns`` matches bare names, so it cannot distinguish the one
+    ``bundles/`` that is this build's own output directory from any other.
+    """
+    patterns = shutil.ignore_patterns(*EXCLUDE_DIRS, "*.pyc")
+
+    def ignore(src: str, names: list[str]) -> set[str]:
+        ignored = set(patterns(src, names))
+        if exclude is not None and exclude.parent == Path(src):
+            ignored.add(exclude.name)
+        return ignored
+
+    return ignore
+
+
+def package_roots(code_dir: Path) -> list[Path]:
+    """Directories that may hold the import package: flat layout, then ``src/``."""
+    roots = [code_dir]
+    src = code_dir / SRC_LAYOUT_DIR
+    if src.is_dir():
+        roots.append(src)
+    return roots
+
+
 def find_package(code_dir: Path) -> str:
     packages = sorted(
-        d.name
-        for d in code_dir.iterdir()
-        if d.is_dir() and (d / "__init__.py").exists() and d.name not in EXCLUDE_DIRS
+        {
+            d.name
+            for root in package_roots(code_dir)
+            for d in root.iterdir()
+            if d.is_dir()
+            and (d / "__init__.py").exists()
+            and d.name not in EXCLUDE_DIRS
+        }
     )
     if len(packages) != 1:
+        searched = " or ".join(str(root) for root in package_roots(code_dir))
         raise ValueError(
-            f"expected exactly one python package in {code_dir}, "
+            f"expected exactly one python package in {searched}, "
             f"found {packages or 'none'}; pass package= explicitly"
         )
     return packages[0]
+
+
+def find_package_dir(code_dir: Path, package: str) -> Path:
+    """Resolve *package* to its directory under a flat or ``src/`` layout.
+
+    The shim has to land in the directory the build backend will actually
+    package, which is ``src/<package>/`` for a src-layout project — writing it
+    to ``<project>/<package>/`` silently produces a wheel with no runner.
+    """
+    roots = package_roots(code_dir)
+    # ``__init__.py`` first, so a regular package always wins the flat-vs-src
+    # tie; then any directory, which is all a PEP 420 namespace package has.
+    for probe in (lambda d: (d / "__init__.py").is_file(), lambda d: d.is_dir()):
+        for root in roots:
+            candidate = root / package
+            if probe(candidate):
+                return candidate
+    searched = " or ".join(str(root / package) for root in roots)
+    raise ValueError(f"package {package!r} not found; looked in {searched}")
 
 
 def requirement_name(spec: str) -> str:
@@ -146,6 +203,12 @@ def project_dir_for(obj: object) -> Path:
     while (package_dir.parent / "__init__.py").exists():
         package_dir = package_dir.parent
     project_dir = package_dir.parent
+    # A src-layout package sits one level deeper than its project root.
+    if (
+        project_dir.name == SRC_LAYOUT_DIR
+        and not (project_dir / "pyproject.toml").is_file()
+    ):
+        project_dir = project_dir.parent
     if not (project_dir / "pyproject.toml").is_file():
         raise ValueError(
             f"no pyproject.toml next to package {package_dir.name!r} "
@@ -261,9 +324,19 @@ def build_bundle(
             sysconfig.get_platform(),
         )
     )
+    # A bundles_dir inside the project would otherwise feed its own output back
+    # into the build: the wheels change the cache key on every call, and the
+    # staging dir below becomes a descendant of the tree being copied into it.
+    # Compared resolved (code_dir is), but bundles_dir itself is left as the
+    # caller wrote it so the returned path keeps its shape.
+    resolved_bundles_dir = bundles_dir.resolve()
+    nested_cache = (
+        resolved_bundles_dir if resolved_bundles_dir.is_relative_to(code_dir) else None
+    )
     bundle_key = content_hash(
         code_dir,
         extra=build_descriptor,
+        exclude=nested_cache,
     )
     distribution_dir = bundles_dir / wheel_distribution
     cache_dir = distribution_dir / bundle_key
@@ -293,9 +366,9 @@ def build_bundle(
             code_dir,
             stage,
             dirs_exist_ok=True,
-            ignore=shutil.ignore_patterns(*EXCLUDE_DIRS, "*.pyc"),
+            ignore=_stage_ignore(nested_cache),
         )
-        (stage / package / "bundle_main.py").write_text(shim)
+        (find_package_dir(stage, package) / "bundle_main.py").write_text(shim)
         staged = tomllib.loads((stage / "pyproject.toml").read_text())
         staged_project = staged.setdefault("project", {})
         overridden = {requirement_name(d) for d in deps or []}
