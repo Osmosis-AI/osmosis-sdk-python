@@ -4,6 +4,7 @@ import zipfile
 from pathlib import Path
 
 import pytest
+from packaging.utils import InvalidName
 
 from osmosis_ai.packaging import build_bundle, inspect_bundle
 
@@ -149,6 +150,16 @@ def test_cache_keeps_project_versions_separate(project, tmp_path):
     assert build_bundle(project, **kwargs) == upgraded
 
 
+def test_invalid_cache_entry_has_recovery_instructions(project, tmp_path):
+    bundles_dir = tmp_path / "bundles"
+    kwargs = dict(workflow="my_harness.solver:MyWorkflow", bundles_dir=bundles_dir)
+    wheel = build_bundle(project, **kwargs)
+    wheel.unlink()
+
+    with pytest.raises(RuntimeError, match="delete this directory and retry"):
+        build_bundle(project, **kwargs)
+
+
 def test_concurrent_builds_publish_one_cache_entry(project, tmp_path, monkeypatch):
     import threading
     from concurrent.futures import ThreadPoolExecutor
@@ -248,6 +259,19 @@ def test_distribution_name_uses_wheel_normalization(project, tmp_path):
     assert wheel.name.startswith("acme_rollout-0.1.0-")
 
 
+def test_rejects_invalid_distribution_name(project, tmp_path):
+    (project / "pyproject.toml").write_text(
+        PYPROJECT.replace('name = "my-harness"', 'name = "not valid!"')
+    )
+
+    with pytest.raises(InvalidName):
+        build_bundle(
+            project,
+            workflow="my_harness.solver:MyWorkflow",
+            bundles_dir=tmp_path / "bundles",
+        )
+
+
 def test_uv_executable_uses_active_scripts_scheme(tmp_path, monkeypatch):
     import osmosis_ai.packaging as packaging
 
@@ -255,11 +279,67 @@ def test_uv_executable_uses_active_scripts_scheme(tmp_path, monkeypatch):
     scripts_dir.mkdir()
     uv = scripts_dir / "uv.exe"
     uv.touch()
-    monkeypatch.setattr(packaging.sysconfig, "get_path", lambda _name: str(scripts_dir))
+    uv.chmod(0o755)
+
+    def get_path(name):
+        assert name == "scripts"
+        return str(scripts_dir)
+
+    monkeypatch.setattr(packaging.sysconfig, "get_path", get_path)
     monkeypatch.setattr(packaging.sys, "executable", str(tmp_path / "python.exe"))
     monkeypatch.setattr(packaging.shutil, "which", lambda _name: None)
 
     assert packaging._uv_executable() == str(uv)
+
+
+def test_uv_executable_reports_missing_builder(tmp_path, monkeypatch):
+    import osmosis_ai.packaging as packaging
+
+    scripts_dir = tmp_path / "scripts"
+    scripts_dir.mkdir()
+    monkeypatch.setattr(packaging.sysconfig, "get_path", lambda name: str(scripts_dir))
+    monkeypatch.setattr(packaging.sys, "executable", str(tmp_path / "python"))
+    monkeypatch.setattr(packaging.shutil, "which", lambda _name: None)
+
+    with pytest.raises(RuntimeError, match=r"install osmosis-ai\[harbor\]"):
+        packaging._uv_executable()
+
+
+def test_uv_executable_skips_non_executable_candidate(tmp_path, monkeypatch):
+    import osmosis_ai.packaging as packaging
+
+    scripts_dir = tmp_path / "scripts"
+    scripts_dir.mkdir()
+    candidate = scripts_dir / "uv"
+    candidate.touch()
+    fallback = tmp_path / "path" / "uv"
+    monkeypatch.setattr(packaging.sysconfig, "get_path", lambda name: str(scripts_dir))
+    monkeypatch.setattr(packaging.sys, "executable", str(tmp_path / "python"))
+    monkeypatch.setattr(packaging.os, "access", lambda path, mode: path != candidate)
+    monkeypatch.setattr(packaging.shutil, "which", lambda _name: str(fallback))
+
+    assert packaging._uv_executable() == str(fallback)
+
+
+@pytest.mark.parametrize("wheel_names", [[], ["one.whl", "two.whl"]])
+def test_build_requires_exactly_one_wheel(project, tmp_path, monkeypatch, wheel_names):
+    import osmosis_ai.packaging as packaging
+
+    def fake_uv_build(args, **_kwargs):
+        output = Path(args[args.index("--out-dir") + 1])
+        output.mkdir(parents=True)
+        for name in wheel_names:
+            (output / name).touch()
+
+    monkeypatch.setattr(packaging, "_uv_executable", lambda: "uv")
+    monkeypatch.setattr(packaging.subprocess, "run", fake_uv_build)
+
+    with pytest.raises(RuntimeError, match=rf"produced {len(wheel_names)} wheels"):
+        build_bundle(
+            project,
+            workflow="my_harness.solver:MyWorkflow",
+            bundles_dir=tmp_path / "bundles",
+        )
 
 
 def test_generated_shim_aliases_same_named_references(project, tmp_path):

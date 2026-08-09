@@ -237,6 +237,7 @@ app = create_rollout_server(backend=backend, lifespan=backend.prewarm_lifespan()
 - `prewarm()` builds every task image and runs agent setup before the server accepts traffic; `prewarm_lifespan()` wraps it as an ASGI lifespan.
 - `max_queue_depth` bounds admission (`has_capacity()`), and `cancel_rollouts()` cancels queued or running rollouts by id, prefix, or all.
 - Keep Harbor's `TrialQueue` at its default `RetryConfig(max_retries=0)`. The SDK treats Harbor's `END` event as the terminal rollout result, so queue-level attempt retries are not supported; resubmit with a new rollout id if controller-level retry is required.
+- Bundle wheels are content-addressed and retained under `platformdirs.user_cache_path("osmosis") / "bundles"` (by default `~/Library/Caches/osmosis/bundles` on macOS and `~/.cache/osmosis/bundles` on Linux; Windows and environment overrides follow `platformdirs`). The SDK does not prune them automatically; stop rollout servers before deleting that directory to reclaim space.
 
 #### Migrating from the pre-v0.3 Harbor backend
 

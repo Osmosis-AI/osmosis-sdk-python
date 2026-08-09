@@ -4,13 +4,9 @@ This file records changes to `osmosis-ai`. For earlier versions, see [GitHub Rel
 
 ## Unreleased
 
-### Breaking Changes
-
-- The removed `osmosis_ai.eval.common` loader helpers and `osmosis_ai.rollout.validator` module have no public drop-in replacement: rollout entrypoints now construct their backend explicitly, submit preflight imports the entrypoint without namespace discovery, and backend constructors own validation. `save_trajectories()` is replaced by the single-sample `save_trajectory()` API. See [Migrating from 0.2.31 to 0.3](docs/migrating-to-0.3.md).
-
 ### Fixed
 
-- Rollout bundle builds now use content-addressed cache entries, keep project versions separate, normalize all valid distribution-name separators, and alias generated imports so same-named workflow, grader, and config objects cannot shadow one another. The Harbor extra now installs its `uv` builder directly, and model-backed extras stay on the reviewed LiteLLM 1.91 release line instead of floating to an untested pre-2 build/runtime boundary.
+- Rollout bundle builds now use content-addressed cache entries, keep project versions separate, normalize all valid distribution-name separators, and alias generated imports so same-named workflow, grader, and config objects cannot shadow one another. The Harbor extra now installs its `uv` builder directly, and model-backed extras stay below the incompatible LiteLLM 1.95 source-build boundary.
 
 ### Documentation
 
@@ -42,6 +38,7 @@ This file records changes to `osmosis-ai`. For earlier versions, see [GitHub Rel
 - Import server, Harbor, Strands, and OpenAI Agents features from their explicit submodules instead of `osmosis_ai.rollout`, and import `evaluate_rubric` explicitly from `osmosis_ai.eval.rubric` instead of relying on `from osmosis_ai import *` ([#270](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/270)).
 - `AgentWorkflow.run()` now returns `AgentWorkflowOutput | Messages | None` for one message history; replace the pre-v0.3 `samples` mapping with `messages`, return `None` for ambient sample fallback, and ensure output metrics are finite ([#270](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/270)).
 - The legacy `HarborBackend` is removed and its name now refers to the container-native implementation previously called `HarborBackendV2`; migrate constructor arguments and replace `HarborAgentWorkflowContext` with `AgentWorkflowContext` ([#291](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/291), [#292](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/292)).
+- The removed `osmosis_ai.eval.common` loader helpers and `osmosis_ai.rollout.validator` module have no public drop-in replacement: rollout entrypoints now construct their backend explicitly, submit preflight imports the entrypoint without namespace discovery, and backend constructors own validation. `save_trajectories()` is replaced by the single-sample `save_trajectory()` API. See [Migrating from 0.2.31 to 0.3](docs/migrating-to-0.3.md) ([#270](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/270), [#277](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/277)).
 
 ### Added
 

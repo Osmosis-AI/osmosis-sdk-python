@@ -3,9 +3,9 @@
 ``agent=`` selects the track: a registered native agent name ("terminus-2",
 "mini-swe-agent", "oracle") runs Harbor's own agent with the rollout endpoint
 injected; an AgentWorkflow class (or "module:Class" path) is packaged into a
-wheel and installed in the task container at trial start. ``grader=None``
-makes the task's own tests the reward source; a Grader class is delivered as
-the verifier instead.
+wheel and installed in the task container at trial start. ``grader=None`` uses
+the task's own tests; a Grader class is installed as the verifier only when the
+task does not already contain ``tests/test.sh``.
 
 Tasks come from ``tasks_dir`` (template or dataset mode), or per rollout via
 ``metadata["harbor_task"]``: a local path, a registry package "org/name[@ref]",

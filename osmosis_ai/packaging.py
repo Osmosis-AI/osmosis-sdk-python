@@ -9,6 +9,7 @@ anywhere with one ``pip install`` — a rollout container or a user's own box.
 from __future__ import annotations
 
 import hashlib
+import os
 import shutil
 import subprocess
 import sys
@@ -88,7 +89,7 @@ def _uv_executable() -> str:
     for script_dir in dict.fromkeys(script_dirs):
         for name in ("uv", "uv.exe"):
             candidate = script_dir / name
-            if candidate.is_file():
+            if candidate.is_file() and os.access(candidate, os.X_OK):
                 return str(candidate)
     executable = shutil.which("uv")
     if executable is None:
@@ -264,22 +265,23 @@ def build_bundle(
         code_dir,
         extra=build_descriptor,
     )
-    wheel_glob = f"{wheel_distribution}-*.whl"
     distribution_dir = bundles_dir / wheel_distribution
     cache_dir = distribution_dir / bundle_key
     distribution_dir.mkdir(parents=True, exist_ok=True)
 
-    cached = sorted(path for path in cache_dir.glob(wheel_glob) if path.is_file())
+    cached = sorted(path for path in cache_dir.glob("*.whl") if path.is_file())
     if len(cached) == 1:
         return cached[0]
     if cache_dir.exists():
         # Complete entries appear with one atomic directory rename below. Never
         # delete here: another builder may have published between the glob and
         # exists checks, and callers may already hold its returned wheel path.
-        cached = sorted(path for path in cache_dir.glob(wheel_glob) if path.is_file())
+        cached = sorted(path for path in cache_dir.glob("*.whl") if path.is_file())
         if len(cached) == 1:
             return cached[0]
-        raise RuntimeError(f"invalid bundle cache entry: {cache_dir}")
+        raise RuntimeError(
+            f"invalid bundle cache entry: {cache_dir}; delete this directory and retry"
+        )
 
     with tempfile.TemporaryDirectory(
         dir=distribution_dir, prefix=".build-"
@@ -316,10 +318,10 @@ def build_bundle(
             check=True,
             capture_output=True,
         )
-        wheels = sorted(path for path in output.glob(wheel_glob) if path.is_file())
+        wheels = sorted(path for path in output.glob("*.whl") if path.is_file())
         if len(wheels) != 1:
             raise RuntimeError(
-                f"uv build produced {len(wheels)} matching wheels in {output}; "
+                f"uv build produced {len(wheels)} wheels in {output}; "
                 "expected exactly one"
             )
         wheel_name = wheels[0].name
@@ -328,9 +330,7 @@ def build_bundle(
         except OSError:
             # Another process may have published the same content-addressed
             # entry while this build was running. Its complete entry wins.
-            cached = sorted(
-                path for path in cache_dir.glob(wheel_glob) if path.is_file()
-            )
+            cached = sorted(path for path in cache_dir.glob("*.whl") if path.is_file())
             if len(cached) == 1:
                 return cached[0]
             raise

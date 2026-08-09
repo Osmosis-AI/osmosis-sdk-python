@@ -59,13 +59,13 @@ server = [
     "click>=8.3.3",
 ]
 
-# Strands Agents adapter. Keep LiteLLM on the reviewed 1.91 release line across
-# every owning extra; its pre-2 releases can change packaging and runtime
-# boundaries. LiteLLM's tool-call path imports orjson at runtime, although
-# LiteLLM declares it only through its much larger proxy extra.
+# Strands Agents adapter. Keep LiteLLM below 1.95 across every owning extra:
+# its 1.95 macOS source build pulls Rust AWS crates that require rustc 1.94.1.
+# LiteLLM's tool-call path imports orjson at runtime, although LiteLLM declares
+# it only through its much larger proxy extra.
 strands = [
     "strands-agents[litellm]>=1.29.0,<2.0.0",
-    "litellm>=1.91.1,<1.92.0",
+    "litellm>=1.91.1,<1.95.0",
     "orjson>=3.11.6,<4.0",
     "aiohttp>=3.14.1",
     "mcp>=1.28.1,<2.0.0",
@@ -76,7 +76,7 @@ strands = [
 # cache_write_tokens usage field.
 openai-agents = [
     "openai-agents[litellm]>=0.18.1,<0.19",
-    "litellm>=1.91.1,<1.92.0",
+    "litellm>=1.91.1,<1.95.0",
     "orjson>=3.11.6,<4.0",
     "aiohttp>=3.14.1",
     "mcp>=1.28.1,<2.0.0",
@@ -101,10 +101,10 @@ harbor = [
     # base install.
     "toml>=0.10.2,<1.0.0",
     "platformdirs>=4.0",
-    "uv>=0.9.7,<0.10",
+    "uv>=0.9.7,<0.13",
     # Harbor currently uses LiteLLM and PyIceberg, which own these runtime and
     # security floors in this feature.
-    "litellm>=1.91.1,<1.92.0",
+    "litellm>=1.91.1,<1.95.0",
     "orjson>=3.11.6,<4.0",
     "aiohttp>=3.14.1",
     "click>=8.3.3",
@@ -112,7 +112,7 @@ harbor = [
 
 # LLM-as-judge rubric evaluation
 rubric = [
-    "litellm>=1.91.1,<1.92.0",
+    "litellm>=1.91.1,<1.95.0",
     "orjson>=3.11.6,<4.0",
     "tqdm>=4.0.0,<5.0.0",
     "aiohttp>=3.14.1",
