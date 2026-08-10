@@ -3,6 +3,9 @@
 from typing import Any
 from unittest.mock import AsyncMock
 
+import pytest
+from pydantic import ValidationError
+
 from osmosis_ai.rollout.agent_workflow import AgentWorkflow
 from osmosis_ai.rollout.backend.local.backend import LocalBackend
 from osmosis_ai.rollout.context import (
@@ -14,6 +17,7 @@ from osmosis_ai.rollout.grader import Grader
 from osmosis_ai.rollout.types import (
     AgentWorkflowConfig,
     AgentWorkflowOutput,
+    ConcurrencyConfig,
     ExecutionRequest,
     GraderConfig,
     RolloutErrorCategory,
@@ -665,3 +669,125 @@ class TestDeadlines:
         # Same wire category, but the deadline did not fire — do not claim it did.
         assert result.err_category == RolloutErrorCategory.TIMEOUT
         assert result.err_message == "upstream API gave up"
+
+    async def test_swallowed_cancellation_is_still_a_timeout(self):
+        class CancelSwallowingWorkflow(AgentWorkflow):
+            async def run(self, ctx: AgentWorkflowContext) -> Any:
+                import asyncio
+                import contextlib
+
+                # User code eats the deadline's cancellation and returns anyway.
+                with contextlib.suppress(asyncio.CancelledError):
+                    await asyncio.sleep(30)
+                return AgentWorkflowOutput(
+                    messages=[{"role": "assistant", "content": "late"}]
+                )
+
+        backend = LocalBackend(
+            workflow=CancelSwallowingWorkflow,
+            workflow_config=AgentWorkflowConfig(name="test"),
+        )
+        request = ExecutionRequest(
+            id="r1", prompt=[{"role": "user", "content": "hi"}], agent_timeout_sec=0.05
+        )
+
+        result = await backend.run_workflow(request)
+
+        # The controller stopped waiting at the deadline; success after it
+        # would report a rollout nobody received.
+        assert result.status == RolloutStatus.FAILURE
+        assert result.err_category == RolloutErrorCategory.TIMEOUT
+        assert "0.05s deadline" in (result.err_message or "")
+
+    async def test_sync_blocking_past_the_deadline_is_still_a_timeout(self):
+        class LoopBlockingWorkflow(AgentWorkflow):
+            async def run(self, ctx: AgentWorkflowContext) -> Any:
+                import time
+
+                # Blocks the event loop, so the timeout callback never runs.
+                time.sleep(0.15)
+                return AgentWorkflowOutput(
+                    messages=[{"role": "assistant", "content": "late"}]
+                )
+
+        backend = LocalBackend(
+            workflow=LoopBlockingWorkflow,
+            workflow_config=AgentWorkflowConfig(name="test"),
+        )
+        request = ExecutionRequest(
+            id="r1", prompt=[{"role": "user", "content": "hi"}], agent_timeout_sec=0.05
+        )
+
+        result = await backend.run_workflow(request)
+
+        assert result.status == RolloutStatus.FAILURE
+        assert result.err_category == RolloutErrorCategory.TIMEOUT
+
+    async def test_queue_time_consumes_the_workflow_budget(self):
+        import asyncio
+
+        backend = LocalBackend(
+            workflow=StubWorkflow,
+            workflow_config=AgentWorkflowConfig(
+                name="test", concurrency=ConcurrencyConfig(max_concurrent=1)
+            ),
+        )
+
+        async def hog_the_only_slot():
+            async with backend.limiter.acquire():
+                await asyncio.sleep(0.25)
+
+        hog = asyncio.create_task(hog_the_only_slot())
+        await asyncio.sleep(0.05)  # ensure the hog holds the slot first
+
+        on_complete = AsyncMock()
+        request = ExecutionRequest(
+            id="r1", prompt=[{"role": "user", "content": "hi"}], agent_timeout_sec=0.1
+        )
+        await backend.execute(request, on_workflow_complete=on_complete)
+        await hog
+
+        # The controller's clock covered the ~0.2s queue wait, which exceeded
+        # the whole 0.1s budget; reporting success after it would be a lie.
+        result = on_complete.await_args.args[0]
+        assert result.status == RolloutStatus.FAILURE
+        assert result.err_category == RolloutErrorCategory.TIMEOUT
+        assert "queued" in (result.err_message or "")
+
+    async def test_grader_swallowed_cancellation_is_still_a_timeout(self):
+        class CancelSwallowingGrader(Grader):
+            async def grade(self, ctx: GraderContext) -> Any:
+                import asyncio
+                import contextlib
+
+                ctx.set_reward(0.8)
+                with contextlib.suppress(asyncio.CancelledError):
+                    await asyncio.sleep(30)
+
+        backend = LocalBackend(
+            workflow=StubWorkflow,
+            workflow_config=AgentWorkflowConfig(name="test"),
+            grader=CancelSwallowingGrader,
+        )
+        request = ExecutionRequest(
+            id="r1",
+            prompt=[{"role": "user", "content": "hi"}],
+            label="x",
+            grader_timeout_sec=0.05,
+        )
+
+        workflow_result = await backend.run_workflow(request)
+        graded = await backend.run_grader(request, workflow_result)
+
+        assert graded.status == RolloutStatus.FAILURE
+        assert graded.err_category == RolloutErrorCategory.TIMEOUT
+
+    @pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+    def test_non_finite_timeouts_are_rejected_at_validation(self, value):
+        # NaN crashed the 3.13 event loop selector outright and +/-inf
+        # silently disables enforcement; neither may reach asyncio.timeout.
+        prompt = [{"role": "user", "content": "hi"}]
+        with pytest.raises(ValidationError):
+            ExecutionRequest(id="r1", prompt=prompt, agent_timeout_sec=value)
+        with pytest.raises(ValidationError):
+            ExecutionRequest(id="r1", prompt=prompt, grader_timeout_sec=value)
