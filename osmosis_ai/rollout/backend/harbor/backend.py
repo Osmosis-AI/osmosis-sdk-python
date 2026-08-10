@@ -3,9 +3,9 @@
 ``agent=`` selects the track: a registered native agent name ("terminus-2",
 "mini-swe-agent", "oracle") runs Harbor's own agent with the rollout endpoint
 injected; an AgentWorkflow class (or "module:Class" path) is packaged into a
-wheel and installed in the task container at trial start. ``grader=None``
-makes the task's own tests the reward source; a Grader class is delivered as
-the verifier instead.
+wheel and installed in the task container at trial start. ``grader=None`` uses
+the task's own tests; a Grader class is installed as the verifier only when the
+task does not already contain ``tests/test.sh``.
 
 Tasks come from ``tasks_dir`` (template or dataset mode), or per rollout via
 ``metadata["harbor_task"]``: a local path, a registry package "org/name[@ref]",
@@ -126,6 +126,15 @@ PRE_V03_KWARGS = frozenset(
         "_sdk_source_dir",
     }
 )
+
+
+class CredentialScrubError(RuntimeError):
+    """A retained trial tree may still hold the rollout credential.
+
+    Raised when scrubbing could not inspect or clean the whole tree and then
+    could not delete it. Nothing from such a tree may be merged, relocated, or
+    preserved.
+    """
 
 
 def trial_cancelled(err: Any) -> bool:
@@ -460,6 +469,14 @@ class HarborBackend(ExecutionBackend):
             self.pending.pop(request.id, None)
             category = categorize_exception(e)
             self.record_outcome(request.id, RolloutStatus.FAILURE, err_message=str(e))
+            # A setup failure keeps the trial directory for debugging; scrub the
+            # controller key out of it first. A scrub failure must not stop the
+            # terminal callbacks below — the scrub already deleted whatever it
+            # could, and there is no archive step here to hold back.
+            try:
+                self.scrub_trial_credentials(request.id, pending.api_key)
+            except CredentialScrubError:
+                logger.exception("Trial %s retains files after scrub", request.id)
             self.cleanup_rollout_residue(request.id, include_trial=False)
             logger.error("Failed trial %s: %s", request.id, traceback.format_exc())
             failure = ExecutionResult(
@@ -492,6 +509,79 @@ class HarborBackend(ExecutionBackend):
             else:
                 self.archive_trial(request.id, trial_result, pending)
 
+    def scrub_trial_credentials(self, rollout_id: str, api_key: str | None) -> None:
+        """Remove the rollout controller key from every retained trial file.
+
+        Native kwargs-wired agents (terminus-2) carry the key inside
+        ``agent.kwargs.llm_kwargs.api_key``, which harbor serializes verbatim
+        into ``config.json``/``result.json``. Harbor's own scrubbing only knows
+        secrets that arrived through env vars, so it never redacts this one —
+        and failed or preserved trials keep those files. Byte-replace the exact
+        credential across the trial tree, failing closed at every step: a file
+        that cannot be read (container-written root-owned files, say) cannot be
+        verified clean and is deleted, as is one whose rewrite fails. A
+        directory that cannot be traversed also makes the tree unverifiable.
+        In either case, if the affected entry cannot be removed, the whole
+        trial directory goes rather than retain the key on disk. Raises
+        ``CredentialScrubError`` when the tree cannot be verified or removed,
+        so callers never archive or preserve it.
+        """
+        if not api_key or len(api_key) < 8:
+            # ``dummy`` and other short placeholders are not real credentials.
+            return
+        trial_dir = self.trials_dir / f"{TRIAL_NAME_PREFIX}{rollout_id}"
+        if not trial_dir.is_dir():
+            return
+        needle = api_key.encode()
+        unremovable: list[Path] = []
+        walk_errors: list[OSError] = []
+        for root, _, filenames in trial_dir.walk(on_error=walk_errors.append):
+            for filename in filenames:
+                path = root / filename
+                try:
+                    if path.is_symlink() or not path.is_file():
+                        continue
+                    data = path.read_bytes()
+                except OSError:
+                    if not self._delete_unscrubbable(path):
+                        unremovable.append(path)
+                    continue
+                if needle not in data:
+                    continue
+                try:
+                    path.write_bytes(data.replace(needle, b"[REDACTED]"))
+                except OSError:
+                    if not self._delete_unscrubbable(path):
+                        unremovable.append(path)
+        if unremovable or walk_errors:
+            unverifiable = list(unremovable)
+            unverifiable.extend(
+                Path(error.filename) if isinstance(error.filename, str) else trial_dir
+                for error in walk_errors
+            )
+            # Losing the trial's debug value beats retaining the key.
+            shutil.rmtree(trial_dir, ignore_errors=True)
+            if trial_dir.exists():
+                raise CredentialScrubError(
+                    f"could not verify or delete {len(unverifiable)} path(s) "
+                    f"under {trial_dir}; the rollout credential may remain "
+                    "on disk: " + ", ".join(str(p) for p in unverifiable[:5])
+                )
+
+    @staticmethod
+    def _delete_unscrubbable(path: Path) -> bool:
+        """Delete a file that could not be verified or scrubbed clean."""
+        try:
+            path.unlink()
+        except OSError:
+            return False
+        logger.warning(
+            "Deleted trial file %s: could not verify or scrub the rollout "
+            "credential out of it",
+            path,
+        )
+        return True
+
     def archive_trial(
         self, rollout_id: str, trial_result: Any, pending: PendingTrial
     ) -> None:
@@ -501,6 +591,15 @@ class HarborBackend(ExecutionBackend):
         secrets before ``submit()`` returns, so any earlier relocation (e.g.
         from a trial hook) copies unredacted content into durable storage.
         """
+        # Scrub before anything is merged, relocated, or preserved, so no
+        # durable copy is made from an unredacted trial tree. A failed scrub
+        # aborts archiving entirely — but the staging dir, which always holds
+        # the key, is removed regardless.
+        try:
+            self.scrub_trial_credentials(rollout_id, pending.api_key)
+        except CredentialScrubError:
+            self.cleanup_rollout_residue(rollout_id, include_trial=False)
+            raise
         merge_grader_artifacts(self.trials_dir, rollout_id)
         delete_trial = bool(
             self.cleanup_successful_trials
@@ -871,13 +970,17 @@ class HarborBackend(ExecutionBackend):
             # viewer, step gating all hardcode it); never guess another one.
             rewards = event.result.verifier_result.rewards or {}
             reward = rewards.get("reward")
-            if sample is not None and reward is not None:
-                sample.reward = float(reward)
             try:
+                # Both the conversion and the assignment reject a malformed
+                # verifier reward, so they belong with the check below: harbor
+                # emits this hook unguarded, and anything escaping here skips
+                # the archive_trial() call in the caller's else branch.
+                if sample is not None and reward is not None:
+                    sample.reward = float(reward)
                 validate_sample_has_reward(sample)
-            except ValueError as e:
+            except (TypeError, ValueError) as e:
                 logger.warning(
-                    "Verifier rewards for rollout %s missing 'reward': %s",
+                    "Unusable verifier reward for rollout %s: %s",
                     rollout_id,
                     e,
                 )

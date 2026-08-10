@@ -1,3 +1,4 @@
+import math
 from enum import StrEnum
 from typing import Any
 
@@ -46,6 +47,16 @@ class RolloutInitRequest(BaseModel):
         if value is None:
             return None
         return ensure_single_path_segment(value, label="rollout_id")
+
+    @field_validator("agent_timeout_sec", "grader_timeout_sec")
+    @classmethod
+    def _validate_timeout(cls, value: float | None) -> float | None:
+        # Rejecting at admission turns a misconfigured deadline into a 422 the
+        # controller sees immediately, not an "Internal server error" callback
+        # minutes later. Mirrors ExecutionRequest's rule.
+        if value is not None and not math.isfinite(value):
+            raise ValueError("timeout must be finite; omit it to run unbounded")
+        return value
 
 
 class RolloutInitResponse(BaseModel): ...

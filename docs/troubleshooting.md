@@ -4,7 +4,11 @@
 
 ## Rollout timeouts
 
-The controller sends per-rollout `agent_timeout_sec` / `grader_timeout_sec` in the `RolloutInitRequest` ([../osmosis_ai/rollout/types/protocol.py](../osmosis_ai/rollout/types/protocol.py)). The Harbor backend enforces them per execution via `override_timeout_sec` ([../osmosis_ai/rollout/backend/harbor/backend.py](../osmosis_ai/rollout/backend/harbor/backend.py)); the in-process `LocalBackend` does **not** impose these per-rollout timeouts itself — it only maps a raised `TimeoutError` to `RolloutErrorCategory.TIMEOUT` ([../osmosis_ai/rollout/types/sample.py](../osmosis_ai/rollout/types/sample.py)).
+The controller sends per-rollout `agent_timeout_sec` / `grader_timeout_sec` in the `RolloutInitRequest` ([../osmosis_ai/rollout/types/protocol.py](../osmosis_ai/rollout/types/protocol.py)), and both backends enforce them. The Harbor backend applies them per execution via `override_timeout_sec` ([../osmosis_ai/rollout/backend/harbor/backend.py](../osmosis_ai/rollout/backend/harbor/backend.py)). `LocalBackend` wraps the two phases in independent `asyncio.timeout()` scopes — the agent deadline around `AgentWorkflow.run()`, the grader deadline around `Grader.grade()` — so a workflow that finishes just inside its budget still gets its full grading window ([../osmosis_ai/rollout/backend/local/backend.py](../osmosis_ai/rollout/backend/local/backend.py)).
+
+An expired deadline is a normal terminal result, not a crash: the rollout is reported with `err_category=timeout` and `err_message="workflow exceeded its <N>s deadline"`, and the concurrency slot is released. A `TimeoutError` your own code raises keeps its own message and is still categorized as `RolloutErrorCategory.TIMEOUT` ([../osmosis_ai/rollout/utils/errors.py](../osmosis_ai/rollout/utils/errors.py)). `None` means the controller sent no deadline, and that phase runs unbounded.
+
+The deadline cancels a *cooperatively cancellable* workflow. Code that swallows `CancelledError`, or that blocks the event loop in synchronous work, still runs to completion — the rollout is reported as a timeout either way, but the slot is not freed until that code returns.
 
 ### All rollouts time out / zero reward across the board
 
