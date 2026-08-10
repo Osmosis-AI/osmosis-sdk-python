@@ -277,6 +277,49 @@ class TestHarborTask:
         with pytest.raises(ValueError, match="unknown harbor task id"):
             HarborTask.from_dataset(root, "nope")
 
+    def test_materialize_rejects_file_symlinks(self, template_task, tmp_path):
+        # copytree dereferences links, so environment/leak -> /host/secret
+        # would land the host bytes inside the sandbox build context.
+        secret = tmp_path / "host-secret"
+        secret.write_text("HOST-ONLY-BYTES")
+        (template_task / "environment" / "leak").symlink_to(secret)
+
+        with pytest.raises(ValueError, match="symlink"):
+            HarborTask(template_task).materialize(
+                tmp_path / "r1",
+                ContainerInput(
+                    rollout_id="r1", prompt=[{"role": "user", "content": "x"}]
+                ),
+            )
+
+    def test_materialize_rejects_directory_and_broken_symlinks(
+        self, template_task, tmp_path
+    ):
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        (template_task / "environment" / "dir-link").symlink_to(
+            outside, target_is_directory=True
+        )
+        with pytest.raises(ValueError, match="symlink"):
+            HarborTask(template_task).materialize(
+                tmp_path / "r1",
+                ContainerInput(
+                    rollout_id="r1", prompt=[{"role": "user", "content": "x"}]
+                ),
+            )
+
+        (template_task / "environment" / "dir-link").unlink()
+        (template_task / "environment" / "dangling").symlink_to(
+            tmp_path / "does-not-exist"
+        )
+        with pytest.raises(ValueError, match="symlink"):
+            HarborTask(template_task).materialize(
+                tmp_path / "r2",
+                ContainerInput(
+                    rollout_id="r2", prompt=[{"role": "user", "content": "x"}]
+                ),
+            )
+
 
 class TestHarnessAgentLabelStrip:
     async def test_agent_phase_copy_has_no_label(self, tmp_path):
@@ -1366,6 +1409,81 @@ class TestArtifactLifecycle:
         # Artifacts still copied for inspection; source retained on failure.
         assert (tmp_path / "durable" / "r1" / "artifacts" / "log.txt").exists()
         assert (tmp_path / "trials" / "trial-r1").exists()
+
+    async def test_failed_trial_scrubs_controller_key_from_retained_files(
+        self, template_task, tmp_path
+    ):
+        # terminus-2 rides the controller key in agent.kwargs.llm_kwargs.api_key,
+        # which harbor writes verbatim into config.json/result.json and does not
+        # scrub (its scrubbing is env-based). A retained failed trial must not
+        # keep it in cleartext.
+        from types import SimpleNamespace
+
+        from osmosis_ai.rollout.context import RolloutContext
+
+        secret = "rk-controller-secret-abc123XYZ"
+
+        async def run(queue, config):
+            trial_dir = config.trials_dir / config.trial_name
+            trial_dir.mkdir(parents=True)
+            (trial_dir / "config.json").write_text(
+                json.dumps({"agent": {"kwargs": {"llm_kwargs": {"api_key": secret}}}})
+            )
+            (trial_dir / "result.json").write_text(
+                json.dumps({"agent_info": {"api_key": secret}})
+            )
+            result = trial_result(
+                exception_info=SimpleNamespace(
+                    exception_type="AgentTimeoutError",
+                    exception_message="too slow",
+                    exception_traceback="",
+                    occurred_at=None,
+                )
+            )
+            await queue.fire("end", SimpleNamespace(config=config, result=result))
+            return result
+
+        queue = FakeQueue(run)
+        backend = self.backend_for(template_task, tmp_path, queue)
+        request = ExecutionRequest(id="r1", prompt=[{"role": "user", "content": "go"}])
+        with RolloutContext(
+            chat_completions_url="http://t/v1", api_key=secret, rollout_id="r1"
+        ):
+            await backend.execute(request, noop_callback)
+
+        trial_dir = tmp_path / "trials" / "trial-r1"
+        assert trial_dir.exists(), "failed trial is kept for debugging"
+        for name in ("config.json", "result.json"):
+            text = (trial_dir / name).read_text()
+            assert secret not in text, f"{name} still leaks the key"
+            assert "[REDACTED]" in text
+
+    async def test_setup_failure_scrubs_controller_key_from_retained_trial(
+        self, template_task, tmp_path
+    ):
+        from osmosis_ai.rollout.context import RolloutContext
+
+        secret = "rk-controller-secret-abc123XYZ"
+
+        async def run(queue, config):
+            trial_dir = config.trials_dir / config.trial_name
+            trial_dir.mkdir(parents=True)
+            (trial_dir / "config.json").write_text(json.dumps({"api_key": secret}))
+            raise RuntimeError("infra exploded after writing config")
+
+        queue = FakeQueue(run)
+        backend = self.backend_for(template_task, tmp_path, queue)
+        request = ExecutionRequest(id="r1", prompt=[{"role": "user", "content": "go"}])
+        with RolloutContext(
+            chat_completions_url="http://t/v1", api_key=secret, rollout_id="r1"
+        ):
+            await backend.execute(request, noop_callback)
+
+        config_path = tmp_path / "trials" / "trial-r1" / "config.json"
+        if config_path.exists():
+            text = config_path.read_text()
+            assert secret not in text
+            assert "[REDACTED]" in text
 
 
 class TestPrewarmIdentity:

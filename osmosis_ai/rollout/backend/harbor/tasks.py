@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import shutil
 from enum import StrEnum
@@ -144,6 +145,23 @@ class HarborTask:
             raise ValueError(f"unknown harbor task id: {task_id!r}")
         return cls(path)
 
+    def _reject_symlinks(self) -> None:
+        """Task directories are external assets; refuse to copy through links.
+
+        The ``copytree`` below dereferences symlinks, so a task entry like
+        ``environment/leak -> /host/secret`` would become a regular file of
+        host bytes inside the sandbox build context. There is no legitimate
+        reason for a task to reach outside its own directory, so any symlink
+        — file, directory, or broken — is rejected outright.
+        """
+        for p in self.path.rglob("*"):
+            if p.is_symlink():
+                raise ValueError(
+                    f"harbor task {self.path.name!r} contains a symlink: "
+                    f"{p.relative_to(self.path)} -> {os.readlink(p)}; "
+                    "symlinks are not allowed in task directories"
+                )
+
     def materialize(
         self,
         out_dir: Path,
@@ -163,6 +181,7 @@ class HarborTask:
         ``write_input=False`` skips the top-level container input file — it
         carries the api_key in cleartext, so it is not staged without a consumer.
         """
+        self._reject_symlinks()
         task_dir = out_dir / self.path.name
         shutil.rmtree(task_dir, ignore_errors=True)
         shutil.copytree(self.path, task_dir)

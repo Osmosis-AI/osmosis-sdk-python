@@ -460,6 +460,9 @@ class HarborBackend(ExecutionBackend):
             self.pending.pop(request.id, None)
             category = categorize_exception(e)
             self.record_outcome(request.id, RolloutStatus.FAILURE, err_message=str(e))
+            # A setup failure keeps the trial directory for debugging; scrub the
+            # controller key out of it first.
+            self.scrub_trial_credentials(request.id, pending.api_key)
             self.cleanup_rollout_residue(request.id, include_trial=False)
             logger.error("Failed trial %s: %s", request.id, traceback.format_exc())
             failure = ExecutionResult(
@@ -492,6 +495,43 @@ class HarborBackend(ExecutionBackend):
             else:
                 self.archive_trial(request.id, trial_result, pending)
 
+    def scrub_trial_credentials(self, rollout_id: str, api_key: str | None) -> None:
+        """Remove the rollout controller key from every retained trial file.
+
+        Native kwargs-wired agents (terminus-2) carry the key inside
+        ``agent.kwargs.llm_kwargs.api_key``, which harbor serializes verbatim
+        into ``config.json``/``result.json``. Harbor's own scrubbing only knows
+        secrets that arrived through env vars, so it never redacts this one —
+        and failed or preserved trials keep those files. Byte-replace the exact
+        credential across the trial tree; a file that still holds it after a
+        write we could not complete is deleted rather than left in cleartext.
+        """
+        if not api_key or len(api_key) < 8:
+            # ``dummy`` and other short placeholders are not real credentials.
+            return
+        trial_dir = self.trials_dir / f"{TRIAL_NAME_PREFIX}{rollout_id}"
+        if not trial_dir.is_dir():
+            return
+        needle = api_key.encode()
+        for path in trial_dir.rglob("*"):
+            if not path.is_file() or path.is_symlink():
+                continue
+            try:
+                data = path.read_bytes()
+            except OSError:
+                continue
+            if needle not in data:
+                continue
+            try:
+                path.write_bytes(data.replace(needle, b"[REDACTED]"))
+            except OSError:
+                logger.error(
+                    "Could not scrub the rollout credential from %s; deleting "
+                    "it so the key is not retained in cleartext",
+                    path,
+                )
+                path.unlink(missing_ok=True)
+
     def archive_trial(
         self, rollout_id: str, trial_result: Any, pending: PendingTrial
     ) -> None:
@@ -501,6 +541,9 @@ class HarborBackend(ExecutionBackend):
         secrets before ``submit()`` returns, so any earlier relocation (e.g.
         from a trial hook) copies unredacted content into durable storage.
         """
+        # Scrub before anything is merged, relocated, or preserved, so no
+        # durable copy is made from an unredacted trial tree.
+        self.scrub_trial_credentials(rollout_id, pending.api_key)
         merge_grader_artifacts(self.trials_dir, rollout_id)
         delete_trial = bool(
             self.cleanup_successful_trials
