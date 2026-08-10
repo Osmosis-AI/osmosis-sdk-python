@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import os
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
@@ -1484,6 +1485,79 @@ class TestArtifactLifecycle:
             text = config_path.read_text()
             assert secret not in text
             assert "[REDACTED]" in text
+
+
+requires_unprivileged_posix = pytest.mark.skipif(
+    not hasattr(os, "geteuid") or os.geteuid() == 0,
+    reason="permission-based failure paths need an unprivileged POSIX user",
+)
+
+
+class TestCredentialScrubFailsClosed:
+    SECRET = "rk-controller-secret-abc123XYZ"
+
+    def scrubber(self, tmp_path):
+        backend = HarborBackend.__new__(HarborBackend)
+        backend.trials_dir = tmp_path / "trials"
+        trial = backend.trials_dir / "trial-r1"
+        trial.mkdir(parents=True)
+        return backend, trial
+
+    @requires_unprivileged_posix
+    def test_unreadable_file_is_deleted_not_retained(self, tmp_path):
+        # A file the scrubber cannot read (container-written root-owned files
+        # are the real-world case) cannot be verified clean. Skipping it would
+        # retain the key in cleartext — it must be deleted instead.
+        backend, trial = self.scrubber(tmp_path)
+        locked = trial / "config.json"
+        locked.write_text(json.dumps({"api_key": self.SECRET}))
+        locked.chmod(0o000)
+
+        try:
+            backend.scrub_trial_credentials("r1", self.SECRET)
+        finally:
+            if locked.exists():
+                locked.chmod(0o600)
+
+        assert not locked.exists()
+
+    @requires_unprivileged_posix
+    def test_undeletable_file_takes_the_trial_dir_with_it(self, tmp_path, caplog):
+        # If even deletion fails, retaining the tree would retain the key;
+        # the whole trial directory goes, and anything the platform still
+        # refuses to remove is loudly reported.
+        import logging
+
+        backend, trial = self.scrubber(tmp_path)
+        sub = trial / "agent"
+        sub.mkdir()
+        locked = sub / "log.txt"
+        locked.write_text(self.SECRET)
+        locked.chmod(0o000)
+        sub.chmod(0o500)  # unlink needs directory write permission
+
+        try:
+            with caplog.at_level(logging.ERROR):
+                backend.scrub_trial_credentials("r1", self.SECRET)
+        finally:
+            if sub.exists():
+                sub.chmod(0o700)
+            if locked.exists():
+                locked.chmod(0o600)
+
+        assert not trial.exists() or any(
+            "credential may remain" in record.message for record in caplog.records
+        )
+
+    def test_scrubbable_files_are_redacted_in_place(self, tmp_path):
+        backend, trial = self.scrubber(tmp_path)
+        (trial / "result.json").write_text(json.dumps({"api_key": self.SECRET}))
+
+        backend.scrub_trial_credentials("r1", self.SECRET)
+
+        text = (trial / "result.json").read_text()
+        assert self.SECRET not in text
+        assert "[REDACTED]" in text
 
 
 class TestPrewarmIdentity:

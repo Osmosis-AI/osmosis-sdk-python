@@ -503,8 +503,11 @@ class HarborBackend(ExecutionBackend):
         into ``config.json``/``result.json``. Harbor's own scrubbing only knows
         secrets that arrived through env vars, so it never redacts this one —
         and failed or preserved trials keep those files. Byte-replace the exact
-        credential across the trial tree; a file that still holds it after a
-        write we could not complete is deleted rather than left in cleartext.
+        credential across the trial tree, failing closed at every step: a file
+        that cannot be read (container-written root-owned files, say) cannot be
+        verified clean and is deleted, as is one whose rewrite fails; if even
+        deletion fails, the whole trial directory goes rather than retain the
+        key on disk.
         """
         if not api_key or len(api_key) < 8:
             # ``dummy`` and other short placeholders are not real credentials.
@@ -513,24 +516,48 @@ class HarborBackend(ExecutionBackend):
         if not trial_dir.is_dir():
             return
         needle = api_key.encode()
+        unremovable: list[Path] = []
         for path in trial_dir.rglob("*"):
             if not path.is_file() or path.is_symlink():
                 continue
             try:
                 data = path.read_bytes()
             except OSError:
+                if not self._delete_unscrubbable(path):
+                    unremovable.append(path)
                 continue
             if needle not in data:
                 continue
             try:
                 path.write_bytes(data.replace(needle, b"[REDACTED]"))
             except OSError:
+                if not self._delete_unscrubbable(path):
+                    unremovable.append(path)
+        if unremovable:
+            # Losing the trial's debug value beats retaining the key.
+            shutil.rmtree(trial_dir, ignore_errors=True)
+            if trial_dir.exists():
                 logger.error(
-                    "Could not scrub the rollout credential from %s; deleting "
-                    "it so the key is not retained in cleartext",
-                    path,
+                    "Could not scrub or delete %d file(s) under %s; the "
+                    "rollout credential may remain on disk: %s",
+                    len(unremovable),
+                    trial_dir,
+                    ", ".join(str(p) for p in unremovable[:5]),
                 )
-                path.unlink(missing_ok=True)
+
+    @staticmethod
+    def _delete_unscrubbable(path: Path) -> bool:
+        """Delete a file that could not be verified or scrubbed clean."""
+        try:
+            path.unlink()
+        except OSError:
+            return False
+        logger.warning(
+            "Deleted trial file %s: could not verify or scrub the rollout "
+            "credential out of it",
+            path,
+        )
+        return True
 
     def archive_trial(
         self, rollout_id: str, trial_result: Any, pending: PendingTrial
