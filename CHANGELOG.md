@@ -10,12 +10,14 @@ This file records changes to `osmosis-ai`. For earlier versions, see [GitHub Rel
 
 ### Fixed
 
-- Rollout bundle builds now use content-addressed cache entries, keep project versions separate, normalize all valid distribution-name separators, and alias generated imports so same-named workflow, grader, and config objects cannot shadow one another. The Harbor extra now installs its `uv` builder directly.
+- Rollout bundle builds now use content-addressed cache entries, isolated atomic build directories, normalized distribution names, and aliased generated imports, while rejecting directory or broken symlinks whose staged contents could disagree with the cache key. The Harbor extra now installs its `uv` builder directly.
 - Model-backed extras exclude only LiteLLM 1.95.0, the one release that shipped no macOS wheel, instead of capping below 1.95. LiteLLM 1.95.1 and 1.96.0 restored macOS wheels and are now installable.
-- A `bundles_dir` inside the project no longer breaks the build: both the staging copy and the cache key exclude it, so it neither copies itself recursively nor invalidates its own cache entry on every call.
-- `LocalBackend` now enforces the controller's `agent_timeout_sec` and `grader_timeout_sec` as independent deadlines, cancelling the workflow or grader and releasing its concurrency slot instead of running on past a session the controller has already expired.
-- `RolloutSample.reward` rejects non-finite and non-numeric values at construction and at assignment, including through `GraderContext.set_reward()`. Non-finite values in `metrics`/`extra_fields` are dropped from the grader callback rather than costing the whole payload, so an unencodable telemetry value can no longer swallow a reward that was already earned.
+- A `bundles_dir` strictly inside the project is excluded from both staging and the cache key, while using the project directory itself is rejected before it can recursively copy or exclude the entire source tree.
+- `LocalBackend` now treats limiter queue time as part of the controller's finite `agent_timeout_sec`, applies an independent `grader_timeout_sec`, and reports timeout even when user code swallows cancellation or blocks past its deadline instead of returning a late success.
+- `RolloutSample.reward` rejects non-finite and non-numeric values at construction and assignment. Grader callbacks normalize NumPy-like numeric scalars, drop telemetry with no JSON representation, preserve earned rewards when optional telemetry cannot encode, and clear wire rewards from failed or `remove_sample=True` results.
 - A rollout server no longer posts a second, contradicting completion callback after a terminal status was already reported. A backend that dies before reporting anything still gets the fabricated failure completion, so the controller cannot be left waiting.
+- Harbor reports malformed verifier rewards as validation failures instead of letting them escape its trial hook.
+- Harbor rejects symlinks in task sources before materialization and scrubs the rollout controller credential from retained trial files before merge, relocation, or preservation. An unverifiable tree is deleted when possible and otherwise aborts archiving instead of copying a possible credential into durable storage; setup failures still deliver both terminal callbacks.
 - A malformed `--secrets-file` line is reported by source and line number instead of by quoting the line, so secret material can no longer reach CI logs through the CLI error envelope. `NAME="quoted"` values and `export NAME=value` now resolve to the intended value rather than silently submitting the quotes or a name of `export NAME`, and a name that is not a plain identifier is rejected outright.
 
 ### Documentation
