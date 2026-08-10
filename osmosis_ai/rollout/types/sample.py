@@ -1,6 +1,7 @@
 import copy
 import logging
 import math
+import numbers
 from collections.abc import Mapping, Sequence
 from enum import StrEnum
 from typing import Any, ClassVar, Self
@@ -14,32 +15,81 @@ logger: logging.Logger = logging.getLogger(__name__)
 MessageDict = dict[str, Any]
 SampleMessage = Mapping[str, Any]
 
+# Sentinel for values with no JSON representation at all.
+_DROP = object()
 
-def _is_json_safe(value: Any) -> bool:
-    """NaN and infinity have no JSON representation.
 
+def _json_ready_scalar(value: Any) -> bool:
+    """A scalar ``json.dumps`` encodes as-is, no normalization needed.
+
+    Exact builtin types only: NumPy's ``float64`` is a ``float`` subclass, so
+    an ``isinstance`` check would pass it through untouched and leave a foreign
+    scalar in the ``Any`` telemetry map. Non-finite floats are excluded too —
     ``json.dumps`` emits the non-standard ``NaN``/``Infinity`` literals and
-    HTTPX's encoder raises outright, so one non-finite telemetry value is
-    enough to cost a callback its whole payload.
+    HTTPX's encoder raises outright, so one is enough to cost a callback its
+    whole payload.
     """
-    return not isinstance(value, float) or math.isfinite(value)
+    if value is None or isinstance(value, (bool, str)):
+        return True
+    if type(value) is int:
+        return True
+    return type(value) is float and math.isfinite(value)
 
 
-def _has_non_finite(value: Any) -> bool:
+def _needs_json_fit(value: Any) -> bool:
     if isinstance(value, dict):
-        return any(not _is_json_safe(v) or _has_non_finite(v) for v in value.values())
-    # Tuples encode as JSON arrays too, so they carry the same hazard.
+        return any(
+            not isinstance(k, str) or _needs_json_fit(v) for k, v in value.items()
+        )
+    # Tuples encode as JSON arrays too, so they carry the same hazards.
     if isinstance(value, (list, tuple)):
-        return any(not _is_json_safe(v) or _has_non_finite(v) for v in value)
-    return False
+        return any(_needs_json_fit(v) for v in value)
+    return not _json_ready_scalar(value)
 
 
-def _drop_non_finite(value: Any) -> Any:
+def _json_fit(value: Any, dropped: list[str]) -> Any:
+    """Return *value* as something ``json.dumps`` encodes, or ``_DROP``.
+
+    Numeric scalars outside the builtins — NumPy's, most commonly — normalize
+    to built-in int/float through the ``numbers`` ABCs, which numpy registers
+    its scalar types with; the SDK never has to import numpy itself. Non-finite
+    numbers and everything else JSON cannot represent drop, recorded in
+    *dropped* for one summary warning.
+    """
+    if _json_ready_scalar(value):
+        return value
+    if isinstance(value, numbers.Integral):
+        return int(value)
+    if isinstance(value, numbers.Real):
+        as_float = float(value)
+        if math.isfinite(as_float):
+            return as_float
+        dropped.append(f"non-finite {type(value).__name__}")
+        return _DROP
     if isinstance(value, dict):
-        return {k: _drop_non_finite(v) for k, v in value.items() if _is_json_safe(v)}
+        fitted: dict[str, Any] = {}
+        for k, v in value.items():
+            if isinstance(k, str):
+                key = k
+            elif isinstance(k, bool) or not isinstance(k, numbers.Real):
+                dropped.append(f"unencodable key {type(k).__name__}")
+                continue
+            else:
+                # JSON keys are strings; stringify numeric keys the same way
+                # json.dumps would have.
+                num = _json_fit(k, dropped)
+                if num is _DROP:
+                    continue
+                key = str(num)
+            val = _json_fit(v, dropped)
+            if val is _DROP:
+                continue
+            fitted[key] = val
+        return fitted
     if isinstance(value, (list, tuple)):
-        return [_drop_non_finite(v) for v in value if _is_json_safe(v)]
-    return value
+        return [f for v in value if (f := _json_fit(v, dropped)) is not _DROP]
+    dropped.append(type(value).__name__)
+    return _DROP
 
 
 class RolloutSample(BaseModel):
@@ -86,27 +136,34 @@ class RolloutSample(BaseModel):
                 self.trajectory_messages = None
         return self
 
-    def drop_non_finite_values(self) -> Self:
-        """Return a copy whose ``metrics``/``extra_fields`` are JSON-encodable.
+    def json_safe_copy(self) -> Self:
+        """Return a copy whose ``metrics``/``extra_fields`` survive JSON encoding.
 
         ``allow_inf_nan`` only guards typed float fields, and these two are
         ``Any`` maps that callers routinely mutate in place — which no pydantic
-        validator can intercept. Sanitize at the wire boundary instead, and
-        drop rather than fail: non-finite telemetry should not cost a rollout
-        its reward (same trade-off as ``container/runner.py``).
+        validator can intercept — and routinely fill with NumPy scalars, which
+        ``json.dumps`` rejects outright. Sanitize at the wire boundary instead:
+        normalize foreign numeric scalars to built-in int/float, and drop
+        non-finite values and unencodable objects rather than fail — telemetry
+        should not cost a rollout its reward (same trade-off as
+        ``container/runner.py``).
         """
-        if not (_has_non_finite(self.metrics) or _has_non_finite(self.extra_fields)):
+        if not (_needs_json_fit(self.metrics) or _needs_json_fit(self.extra_fields)):
             return self
-        logger.warning(
-            "Dropped non-finite values from sample metrics/extra_fields; "
-            "they have no JSON representation"
-        )
-        return self.model_copy(
+        dropped: list[str] = []
+        fitted = self.model_copy(
             update={
-                "metrics": _drop_non_finite(self.metrics),
-                "extra_fields": _drop_non_finite(self.extra_fields),
+                "metrics": _json_fit(self.metrics, dropped),
+                "extra_fields": _json_fit(self.extra_fields, dropped),
             }
         )
+        if dropped:
+            logger.warning(
+                "Dropped values with no JSON representation from sample "
+                "metrics/extra_fields: %s",
+                ", ".join(sorted(set(dropped))),
+            )
+        return fitted
 
 
 class RolloutStatus(StrEnum):
@@ -142,6 +199,17 @@ class ExecutionRequest(BaseModel):
     def _validate_id(cls, value: str) -> str:
         # ``id`` is joined onto host paths by every backend.
         return ensure_single_path_segment(value, label="rollout_id")
+
+    @field_validator("agent_timeout_sec", "grader_timeout_sec")
+    @classmethod
+    def _validate_timeout(cls, value: float | None) -> float | None:
+        # NaN reaches the event loop's selector and crashes it (observed on
+        # 3.13), and +/-inf silently disables enforcement — neither is a
+        # deadline. "No deadline" is spelled None. Zero and negative values
+        # stay allowed and mean an immediately-expired deadline.
+        if value is not None and not math.isfinite(value):
+            raise ValueError("timeout must be finite; omit it to run unbounded")
+        return value
 
 
 class ExecutionResult(BaseModel):

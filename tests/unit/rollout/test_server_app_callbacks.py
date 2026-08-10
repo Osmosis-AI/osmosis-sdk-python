@@ -209,3 +209,121 @@ async def test_non_finite_metrics_do_not_break_the_grader_payload(
     payload = graders(posted)[0]
     assert payload["sample"]["metrics"] == {"ok": 1.5}
     assert payload["sample"]["reward"] == 0.7
+
+
+async def test_numpy_like_metrics_normalize_instead_of_killing_the_callback(
+    tmp_path: Path, monkeypatch
+) -> None:
+    # ML graders routinely leave np.float32/np.int64 in metrics. Those pass an
+    # isinstance(float) gate and then the JSON encoder raises — turning an
+    # earned reward into a fabricated grader failure. They must normalize.
+    from tests.unit.rollout.test_sample_validation import fake_float32, fake_int64
+
+    posted = patch_callbacks(monkeypatch)
+    patch_artifact_root(monkeypatch, tmp_path)
+    sample = make_sample(reward=0.8)
+    sample.metrics["f32"] = fake_float32(0.5)
+    sample.metrics["steps"] = fake_int64(12)
+    backend = ScriptedBackend(
+        workflow_result=ExecutionResult(status=RolloutStatus.SUCCESS, sample=sample),
+        grader_result=ExecutionResult(status=RolloutStatus.SUCCESS, sample=sample),
+    )
+
+    await _handle_rollout(backend, make_request())
+
+    payload = graders(posted)[0]
+    assert payload["status"] == "success"
+    assert payload["sample"]["reward"] == 0.8
+    assert payload["sample"]["metrics"] == {"f32": 0.5, "steps": 12}
+
+
+async def test_unencodable_payload_still_delivers_the_reward(
+    tmp_path: Path, monkeypatch
+) -> None:
+    # Defense in depth: if some object still leaks past sanitization and the
+    # encoder raises, the retry must deliver the reward without telemetry —
+    # never a fabricated grader failure that erases it.
+    posted: list[tuple[str, dict[str, Any]]] = []
+
+    async def poisoned_post(
+        *, url: str, payload: dict[str, Any], headers: Any = None
+    ) -> Any:
+        if url == GRADER_URL and "poison" in (payload.get("sample") or {}).get(
+            "metrics", {}
+        ):
+            raise TypeError("Object of type Widget is not JSON serializable")
+        posted.append((url, payload))
+        return SimpleNamespace(status_code=200, json=lambda: {"ok": True})
+
+    monkeypatch.setattr(
+        "osmosis_ai.rollout.server.app.post_json_with_retry", poisoned_post
+    )
+    patch_artifact_root(monkeypatch, tmp_path)
+    sample = make_sample(reward=0.8)
+    sample.metrics["poison"] = "stands in for an object the sanitizer missed"
+    backend = ScriptedBackend(
+        workflow_result=ExecutionResult(status=RolloutStatus.SUCCESS, sample=sample),
+        grader_result=ExecutionResult(status=RolloutStatus.SUCCESS, sample=sample),
+    )
+
+    await _handle_rollout(backend, make_request())
+
+    payload = graders(posted)[0]
+    assert payload["status"] == "success"
+    assert payload["sample"]["reward"] == 0.8
+    assert payload["sample"]["metrics"] == {}
+    # Exactly one grader callback made it to the controller.
+    assert len(graders(posted)) == 1
+
+
+async def test_failure_grader_callback_does_not_carry_a_reward(
+    tmp_path: Path, monkeypatch
+) -> None:
+    # A grader that scores the sample and then raises leaves the reward on the
+    # shared sample object. Consumers attach any numeric reward they see to
+    # eval metrics and training data, so the failure callback must not
+    # transport one.
+    posted = patch_callbacks(monkeypatch)
+    patch_artifact_root(monkeypatch, tmp_path)
+    backend = ScriptedBackend(
+        workflow_result=ExecutionResult(
+            status=RolloutStatus.SUCCESS, sample=make_sample()
+        ),
+        grader_result=ExecutionResult(
+            status=RolloutStatus.FAILURE,
+            sample=make_sample(reward=0.8),
+            err_message="grader blew up after scoring",
+        ),
+    )
+
+    await _handle_rollout(backend, make_request())
+
+    payload = graders(posted)[0]
+    assert payload["status"] == "failure"
+    assert payload["sample"] is not None, "diagnostics keep the sample itself"
+    assert payload["sample"]["reward"] is None
+
+
+async def test_removed_sample_does_not_carry_a_reward_on_the_wire(
+    tmp_path: Path, monkeypatch
+) -> None:
+    # remove_sample=True means "do not train/eval on this". Consumers ignore
+    # the flag and attach any reward they see, so the wire must not present one.
+    posted = patch_callbacks(monkeypatch)
+    patch_artifact_root(monkeypatch, tmp_path)
+    sample = RolloutSample(
+        messages=[{"role": "assistant", "content": "hello"}],
+        reward=0.8,
+        remove_sample=True,
+    )
+    backend = ScriptedBackend(
+        workflow_result=ExecutionResult(status=RolloutStatus.SUCCESS, sample=sample),
+        grader_result=ExecutionResult(status=RolloutStatus.SUCCESS, sample=sample),
+    )
+
+    await _handle_rollout(backend, make_request())
+
+    payload = graders(posted)[0]
+    assert payload["status"] == "success"
+    assert payload["sample"]["remove_sample"] is True
+    assert payload["sample"]["reward"] is None

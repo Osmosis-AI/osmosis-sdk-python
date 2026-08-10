@@ -23,6 +23,7 @@ from osmosis_ai.rollout.types import (
     RolloutCompleteRequest,
     RolloutInitRequest,
     RolloutInitResponse,
+    RolloutSample,
     RolloutStatus,
     RolloutStatusResponse,
 )
@@ -176,23 +177,68 @@ async def _handle_rollout(
             result.status,
             result.sample is not None,
         )
-        resp = await post_json_with_retry(
-            url=request.grader_callback_url,
-            payload=GraderCompleteRequest(
+        status = (
+            GraderStatus.SUCCESS
+            if result.status == RolloutStatus.SUCCESS
+            else GraderStatus.FAILURE
+        )
+        wire_sample = result.sample
+        if wire_sample is not None:
+            # Callers mutate ``metrics`` in place, past every validator;
+            # this is the last point before the payload has to be JSON.
+            wire_sample = wire_sample.json_safe_copy()
+            # Consumers attach any numeric reward they see to eval metrics and
+            # training trajectories, checking neither status nor remove_sample.
+            # So the wire reward has to stand for exactly one thing: a kept,
+            # successfully-graded sample. A failed grade or a sample the grader
+            # marked for removal must not carry one. The archived trajectory
+            # keeps the original sample, reward included.
+            reward_is_trainable = (
+                status is GraderStatus.SUCCESS and not wire_sample.remove_sample
+            )
+            if not reward_is_trainable and wire_sample.reward is not None:
+                wire_sample = wire_sample.model_copy(update={"reward": None})
+
+        def grader_payload(sample: RolloutSample | None) -> dict[str, Any]:
+            return GraderCompleteRequest(
                 rollout_id=rollout_id,
-                status=GraderStatus.SUCCESS
-                if result.status == RolloutStatus.SUCCESS
-                else GraderStatus.FAILURE,
-                # Callers mutate ``metrics`` in place, past every validator;
-                # this is the last point before the payload has to be JSON.
-                sample=result.sample.drop_non_finite_values()
-                if result.sample is not None
-                else None,
+                status=status,
+                sample=sample,
                 err_message=result.err_message,
                 err_category=result.err_category,
-            ).model_dump(exclude={"sample": {"trajectory_messages"}}),
-            headers=auth.as_bearer_headers(),
-        )
+            ).model_dump(exclude={"sample": {"trajectory_messages"}})
+
+        try:
+            resp = await post_json_with_retry(
+                url=request.grader_callback_url,
+                payload=grader_payload(wire_sample),
+                headers=auth.as_bearer_headers(),
+            )
+        except (TypeError, ValueError):
+            # Encoding failed despite sanitization. Telemetry is optional;
+            # the reward is not — retry with a minimal sample so an earned
+            # reward still arrives instead of a fabricated grader failure.
+            logger.exception(
+                "Grader callback payload for %s is not JSON-encodable; "
+                "retrying without telemetry",
+                rollout_id,
+            )
+            minimal = (
+                RolloutSample(
+                    messages=[],
+                    trajectory_messages=None,
+                    label=wire_sample.label,
+                    reward=wire_sample.reward,
+                    remove_sample=wire_sample.remove_sample,
+                )
+                if wire_sample is not None
+                else None
+            )
+            resp = await post_json_with_retry(
+                url=request.grader_callback_url,
+                payload=grader_payload(minimal),
+                headers=auth.as_bearer_headers(),
+            )
         grader_posted = True
         report = report_from_response(resp) or report
         logger.info(
