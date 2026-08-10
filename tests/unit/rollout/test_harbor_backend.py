@@ -14,6 +14,7 @@ from pydantic import ValidationError
 from osmosis_ai.packaging import build_bundle, inspect_bundle
 from osmosis_ai.rollout.backend.harbor.backend import (
     MIGRATION_DOCS_URL,
+    CredentialScrubError,
     HarborBackend,
 )
 from osmosis_ai.rollout.backend.harbor.tasks import (
@@ -1522,12 +1523,12 @@ class TestCredentialScrubFailsClosed:
         assert not locked.exists()
 
     @requires_unprivileged_posix
-    def test_undeletable_file_takes_the_trial_dir_with_it(self, tmp_path, caplog):
-        # If even deletion fails, retaining the tree would retain the key;
-        # the whole trial directory goes, and anything the platform still
-        # refuses to remove is loudly reported.
-        import logging
-
+    def test_undeletable_file_raises_instead_of_returning(self, tmp_path):
+        # If even deletion fails, retaining the tree would retain the key: the
+        # trial directory is removed outright, and when the platform blocks
+        # that too the scrub must raise so no caller archives or preserves the
+        # tree. A logged error with a normal return is not an acceptable
+        # outcome — that is exactly the fail-open this guards against.
         backend, trial = self.scrubber(tmp_path)
         sub = trial / "agent"
         sub.mkdir()
@@ -1537,7 +1538,7 @@ class TestCredentialScrubFailsClosed:
         sub.chmod(0o500)  # unlink needs directory write permission
 
         try:
-            with caplog.at_level(logging.ERROR):
+            with pytest.raises(CredentialScrubError, match="credential may remain"):
                 backend.scrub_trial_credentials("r1", self.SECRET)
         finally:
             if sub.exists():
@@ -1545,9 +1546,25 @@ class TestCredentialScrubFailsClosed:
             if locked.exists():
                 locked.chmod(0o600)
 
-        assert not trial.exists() or any(
-            "credential may remain" in record.message for record in caplog.records
-        )
+    @requires_unprivileged_posix
+    def test_untraversable_directory_raises_instead_of_being_skipped(self, tmp_path):
+        # pathlib's recursive glob silently skips an unreadable directory. A
+        # scrubber using it can therefore return normally without ever seeing a
+        # secret below that directory. Traversal errors must trigger the same
+        # delete-or-raise fallback as unreadable files.
+        backend, trial = self.scrubber(tmp_path)
+        locked_dir = trial / "agent"
+        locked_dir.mkdir()
+        locked = locked_dir / "log.txt"
+        locked.write_text(self.SECRET)
+        locked_dir.chmod(0o000)
+
+        try:
+            with pytest.raises(CredentialScrubError, match="credential may remain"):
+                backend.scrub_trial_credentials("r1", self.SECRET)
+        finally:
+            if locked_dir.exists():
+                locked_dir.chmod(0o700)
 
     def test_scrubbable_files_are_redacted_in_place(self, tmp_path):
         backend, trial = self.scrubber(tmp_path)
@@ -1558,6 +1575,124 @@ class TestCredentialScrubFailsClosed:
         text = (trial / "result.json").read_text()
         assert self.SECRET not in text
         assert "[REDACTED]" in text
+
+    @requires_unprivileged_posix
+    async def test_unscrubbable_trial_aborts_archiving(self, template_task, tmp_path):
+        # archive_trial must not merge, relocate, or preserve anything from a
+        # tree that still holds the key — and the staging dir, which always
+        # holds it, goes regardless.
+        from osmosis_ai.rollout.context import RolloutContext
+
+        secret = self.SECRET
+
+        async def run(queue, config):
+            trial_dir = config.trials_dir / config.trial_name
+            artifacts = trial_dir / "artifacts"
+            artifacts.mkdir(parents=True)
+            (artifacts / "out.txt").write_text("evidence")
+            locked_dir = trial_dir / "agent"
+            locked_dir.mkdir()
+            locked = locked_dir / "log.txt"
+            locked.write_text(secret)
+            locked.chmod(0o000)
+            locked_dir.chmod(0o500)
+            result = trial_result(
+                verifier_result=SimpleNamespace(rewards={"reward": 1.0})
+            )
+            await queue.fire("end", SimpleNamespace(config=config, result=result))
+            return result
+
+        queue = FakeQueue(run)
+        backend = HarborBackend(
+            orchestrator=queue,
+            tasks_dir=template_task,
+            agent="terminus-2",
+            trials_dir=tmp_path / "trials",
+        )
+        backend.rollouts_dir = tmp_path / "rollouts"
+        backend.rollouts_dir.mkdir(parents=True, exist_ok=True)
+        backend.artifact_root = tmp_path / "durable"
+        request = ExecutionRequest(id="r1", prompt=[{"role": "user", "content": "go"}])
+        locked_dir = tmp_path / "trials" / "trial-r1" / "agent"
+
+        try:
+            with pytest.raises(CredentialScrubError):
+                with RolloutContext(
+                    chat_completions_url="http://t/v1",
+                    api_key=secret,
+                    rollout_id="r1",
+                ):
+                    await backend.execute(request, noop_callback, noop_callback)
+        finally:
+            if locked_dir.exists():
+                locked_dir.chmod(0o700)
+                locked = locked_dir / "log.txt"
+                if locked.exists():
+                    locked.chmod(0o600)
+
+        # Nothing from the unscrubbed tree reached durable storage, and the
+        # credential-bearing staging dir is gone.
+        assert not (tmp_path / "durable" / "r1").exists()
+        assert not (tmp_path / "rollouts" / "r1").exists()
+
+    @requires_unprivileged_posix
+    async def test_setup_failure_with_unscrubbable_trial_still_reports(
+        self, template_task, tmp_path
+    ):
+        # On the setup-failure path there is no archive to hold back; a scrub
+        # failure must not eat the terminal callbacks the controller waits on.
+        from osmosis_ai.rollout.context import RolloutContext
+
+        secret = self.SECRET
+
+        async def run(queue, config):
+            trial_dir = config.trials_dir / config.trial_name
+            locked_dir = trial_dir / "agent"
+            locked_dir.mkdir(parents=True)
+            locked = locked_dir / "log.txt"
+            locked.write_text(secret)
+            locked.chmod(0o000)
+            locked_dir.chmod(0o500)
+            raise RuntimeError("infra exploded after writing the trial dir")
+
+        queue = FakeQueue(run)
+        backend = HarborBackend(
+            orchestrator=queue,
+            tasks_dir=template_task,
+            agent="terminus-2",
+            trials_dir=tmp_path / "trials",
+        )
+        backend.rollouts_dir = tmp_path / "rollouts"
+        backend.rollouts_dir.mkdir(parents=True, exist_ok=True)
+        backend.artifact_root = tmp_path / "durable"
+        request = ExecutionRequest(id="r1", prompt=[{"role": "user", "content": "go"}])
+        locked_dir = tmp_path / "trials" / "trial-r1" / "agent"
+        workflow_delivered = []
+        grader_delivered = []
+
+        async def on_workflow_complete(result):
+            workflow_delivered.append(result)
+
+        async def on_grader_complete(result):
+            grader_delivered.append(result)
+
+        try:
+            with RolloutContext(
+                chat_completions_url="http://t/v1", api_key=secret, rollout_id="r1"
+            ):
+                await backend.execute(request, on_workflow_complete, on_grader_complete)
+        finally:
+            if locked_dir.exists():
+                locked_dir.chmod(0o700)
+                locked = locked_dir / "log.txt"
+                if locked.exists():
+                    locked.chmod(0o600)
+
+        assert len(workflow_delivered) == 1
+        assert workflow_delivered[0].status == RolloutStatus.FAILURE
+        assert len(grader_delivered) == 1
+        assert grader_delivered[0].status == RolloutStatus.FAILURE
+        assert not (tmp_path / "rollouts" / "r1").exists()
 
 
 class TestPrewarmIdentity:
