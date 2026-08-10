@@ -617,3 +617,13 @@ def test_symlinks_inside_excluded_dirs_are_ignored(project, tmp_path):
         bundles_dir=tmp_path / "bundles",
     )
     assert wheel.is_file()
+
+
+def test_bundles_dir_equal_to_project_dir_is_rejected(project):
+    # Equal paths defeat the nested-cache carve-out: every source file would
+    # be excluded from the cache key and staging would copy the tree into
+    # itself until copytree fails.
+    with pytest.raises(ValueError, match="project directory itself"):
+        build_bundle(
+            project, workflow="my_harness.solver:MyWorkflow", bundles_dir=project
+        )

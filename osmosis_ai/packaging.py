@@ -354,6 +354,14 @@ def build_bundle(
     # Compared resolved (code_dir is), but bundles_dir itself is left as the
     # caller wrote it so the returned path keeps its shape.
     resolved_bundles_dir = bundles_dir.resolve()
+    if resolved_bundles_dir == code_dir:
+        # The exclusion below only knows how to carve out a strict
+        # subdirectory. Equal paths would exclude every source file from the
+        # cache key and stage the tree into itself until copytree fails.
+        raise ValueError(
+            f"bundles_dir must not be the project directory itself ({code_dir}); "
+            "use a subdirectory such as code_dir / 'bundles'"
+        )
     nested_cache = (
         resolved_bundles_dir if resolved_bundles_dir.is_relative_to(code_dir) else None
     )
