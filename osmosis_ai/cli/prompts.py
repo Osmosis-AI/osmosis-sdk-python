@@ -14,7 +14,7 @@ Usage:
 from __future__ import annotations
 
 import sys
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing import Any
 
 import questionary
@@ -306,13 +306,13 @@ def text_input(
     message: str,
     *,
     default: str = "",
-    validate: Any = None,
+    validate: Callable[[str], bool | str] | None = None,
     instruction: str | None = None,
 ) -> str | None:
     """Interactive free-text prompt with an optional pre-filled, editable default.
 
-    The validate callable receives the input string and should return True
-    if valid, or an error message string if invalid.
+    ``validate`` returns True when the input is valid, or the error message to
+    show when it is not.
 
     Returns the entered text, or None if the user cancels (Ctrl+C / ESC).
     """

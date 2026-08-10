@@ -56,6 +56,7 @@ _BENCHMARKS_DOCS_URL = f"{_DOCS_URL}/platform/benchmarks"
 _BENCHMARK_SKILL = "submit-benchmarks"
 
 _REPO_POLL_SECONDS = 5.0
+_REPO_WAIT_TIMEOUT_SECONDS = 900.0
 _WAITING_FOR_REPO = (
     "waiting for repository... (Ctrl+C to exit; re-run 'osmosis quickstart' to resume)"
 )
@@ -88,9 +89,9 @@ _TASK_PROMPTS = {
     ),
 }
 _BENCHMARK_PROMPT = (
-    "I want to benchmark agents on managed suites in this Osmosis workspace. Use "
-    f"the {_BENCHMARK_SKILL} skill: help me pick a suite and configuration, submit "
-    "the run, and interpret the results."
+    "I want to benchmark agents on managed benchmarks in this Osmosis workspace. "
+    f"Use the {_BENCHMARK_SKILL} skill: help me pick a benchmark and configuration, "
+    "submit the run, and interpret the results."
 )
 
 
@@ -208,18 +209,52 @@ def _resolve_workspace(
     return next(workspace for workspace in workspaces if workspace.id == choice), None
 
 
+def _fetch_status(
+    client: OsmosisClient, workspace: WorkspaceSummary, credentials: Credentials
+) -> tuple[QuickstartStatus, Credentials]:
+    """Read setup state, re-authenticating once if the saved session is stale."""
+    output = get_output_context()
+    try:
+        with output.status("Checking workspace setup..."):
+            status = client.get_quickstart_status(workspace.id, credentials=credentials)
+    except AuthenticationExpiredError:
+        _step("saved session is no longer valid")
+        credentials = _login()
+        with output.status("Checking workspace setup..."):
+            status = client.get_quickstart_status(workspace.id, credentials=credentials)
+    return status, credentials
+
+
 def _wait_for_repository(
     client: OsmosisClient, workspace: WorkspaceSummary, credentials: Credentials
-) -> QuickstartStatus:
+) -> tuple[QuickstartStatus, Credentials]:
+    """Poll until an admin connects the workspace repository.
+
+    The wait outlives a session, so an expiry mid-poll re-authenticates and
+    resumes against the original deadline.
+    """
+    deadline = time.monotonic() + _REPO_WAIT_TIMEOUT_SECONDS
     output = get_output_context()
-    with output.status(_WAITING_FOR_REPO):
-        while True:
-            time.sleep(_REPO_POLL_SECONDS)
-            status = client.get_quickstart_status(workspace.id, credentials=credentials)
-            if status.repo_connected:
-                break
-    _step(f"detected {status.repo_full_name}")
-    return status
+    while True:
+        try:
+            with output.status(_WAITING_FOR_REPO):
+                while True:
+                    if time.monotonic() >= deadline:
+                        raise CLIError(
+                            "Timed out waiting for the workspace repository. Re-run "
+                            "'osmosis quickstart' once an admin has connected it at "
+                            f"{_platform_url(workspace.name, 'integrations/git')}."
+                        )
+                    time.sleep(_REPO_POLL_SECONDS)
+                    status = client.get_quickstart_status(
+                        workspace.id, credentials=credentials
+                    )
+                    if status.repo_connected:
+                        _step(f"detected {status.repo_full_name}")
+                        return status, credentials
+        except AuthenticationExpiredError:
+            _step("saved session is no longer valid")
+            credentials = _login()
 
 
 def _clone_url(full_name: str, transport: str) -> str:
@@ -309,7 +344,7 @@ def _ensure_repository(
     status: QuickstartStatus,
     local_clone: Path | None,
     start: Path,
-) -> tuple[Path, QuickstartStatus]:
+) -> tuple[Path, QuickstartStatus, Credentials]:
     if status.repo_connected:
         cloned = " (cloned here)" if local_clone is not None else ""
         _check("Workspace repo", f"{status.repo_full_name}{cloned}")
@@ -321,10 +356,10 @@ def _ensure_repository(
             "  ", _platform_url(workspace.name, "integrations/git"), style="yellow"
         )
         console.print()
-        status = _wait_for_repository(client, workspace, credentials)
+        status, credentials = _wait_for_repository(client, workspace, credentials)
 
     if local_clone is not None:
-        return local_clone, status
+        return local_clone, status, credentials
 
     full_name = status.repo_full_name
     if full_name is None:
@@ -334,7 +369,7 @@ def _ensure_repository(
             "'osmosis quickstart'.",
             code="PLATFORM_ERROR",
         )
-    return _clone_workspace_repo(full_name, start=start), status
+    return _clone_workspace_repo(full_name, start=start), status, credentials
 
 
 def _report_billing(status: QuickstartStatus, workspace: WorkspaceSummary) -> None:
@@ -429,8 +464,8 @@ def _print_handoff(
     console.print()
     if intent == "benchmark":
         console.print_url(
-            "  Or start a run in the platform: ",
-            _platform_url(workspace.name, "benchmarks/new"),
+            "  Or browse benchmarks in the platform: ",
+            _platform_url(workspace.name, "benchmarks"),
         )
         console.print_url("  Benchmarks guide: ", _BENCHMARKS_DOCS_URL)
     console.separator()
@@ -447,11 +482,9 @@ def run_quickstart(*, cwd: Path | None = None) -> OperationResult:
     workspaces, credentials = _fetch_workspaces(client, credentials)
     workspace, local_clone = _resolve_workspace(workspaces, start)
 
-    output = get_output_context()
-    with output.status("Checking workspace setup..."):
-        status = client.get_quickstart_status(workspace.id, credentials=credentials)
+    status, credentials = _fetch_status(client, workspace, credentials)
 
-    clone_dir, status = _ensure_repository(
+    clone_dir, status, credentials = _ensure_repository(
         client, workspace, credentials, status, local_clone, start
     )
     _report_billing(status, workspace)

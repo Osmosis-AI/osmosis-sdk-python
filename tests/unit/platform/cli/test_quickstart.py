@@ -73,8 +73,8 @@ EVAL_PROMPT = (
     "before submitting an evaluation run."
 )
 BENCHMARK_PROMPT = (
-    "I want to benchmark agents on managed suites in this Osmosis workspace. "
-    "Use the submit-benchmarks skill: help me pick a suite and configuration, "
+    "I want to benchmark agents on managed benchmarks in this Osmosis workspace. "
+    "Use the submit-benchmarks skill: help me pick a benchmark and configuration, "
     "submit the run, and interpret the results."
 )
 
@@ -102,12 +102,15 @@ class FakeClient:
         statuses: list[QuickstartStatus],
         complete_error: Exception | None,
         list_errors: list[Exception],
+        status_errors: list[Exception | None],
     ) -> None:
         self._workspaces = workspaces
         self._statuses = statuses
         self._complete_error = complete_error
         self._list_errors = list_errors
+        self._status_errors = status_errors
         self.status_calls: list[str] = []
+        self.status_credentials: list[Any] = []
         self.completions: list[tuple[str, str]] = []
         self.credentials: list[Any] = []
 
@@ -121,6 +124,11 @@ class FakeClient:
         self, organization_id: str, *, credentials: Any = None
     ) -> QuickstartStatus:
         self.status_calls.append(organization_id)
+        self.status_credentials.append(credentials)
+        if self._status_errors:
+            error = self._status_errors.pop(0)
+            if error is not None:
+                raise error
         if len(self._statuses) > 1:
             return self._statuses.pop(0)
         return self._statuses[0]
@@ -245,12 +253,14 @@ def _install_client(
     statuses: list[QuickstartStatus] | None = None,
     complete_error: Exception | None = None,
     list_errors: list[Exception] | None = None,
+    status_errors: list[Exception | None] | None = None,
 ) -> FakeClient:
     client = FakeClient(
         workspaces if workspaces is not None else [WORKSPACE],
         statuses if statuses is not None else [_status()],
         complete_error,
         list_errors if list_errors is not None else [],
+        status_errors if status_errors is not None else [],
     )
     wizard.monkeypatch.setattr(quickstart_module, "OsmosisClient", lambda: client)
     return client
@@ -614,7 +624,7 @@ def test_benchmark_intent_skips_the_task_question(wizard: Any, tmp_path: Path) -
     assert result.resource["agent_prompt"] == BENCHMARK_PROMPT
     output = _out(wizard)
     assert BENCHMARK_PROMPT in output
-    assert f"{PLATFORM_URL}/acme/benchmarks/new" in output
+    assert f"{PLATFORM_URL}/acme/benchmarks" in output
     assert "https://docs.osmosis.ai/platform/benchmarks" in output
 
 
@@ -747,6 +757,59 @@ def test_an_expired_session_relogs_in_and_retries_the_workspace_list(
     output = _out(wizard)
     assert "saved session is no longer valid" in output
     assert "authenticated as new@osmosis.ai" in output
+
+
+def test_a_session_expiring_mid_wait_relogs_in_and_keeps_polling(
+    wizard: Any, tmp_path: Path
+) -> None:
+    client = _install_client(
+        wizard,
+        statuses=[_status(connected=False), _status()],
+        status_errors=[None, AuthenticationExpiredError("session has expired")],
+    )
+    wizard.prompts.texts[CLONE_QUESTION] = ["./acme-workspace"]
+    wizard.prompts.selects[TRANSPORT_QUESTION] = ["https"]
+    _train_answers(wizard)
+    new_credentials = SimpleNamespace(
+        user=SimpleNamespace(email="new@osmosis.ai"),
+        is_expired=lambda: False,
+    )
+    logins: list[str] = []
+
+    def _device_login() -> Any:
+        logins.append("device")
+        return (
+            SimpleNamespace(user=SimpleNamespace(email="new@osmosis.ai")),
+            new_credentials,
+        )
+
+    wizard.monkeypatch.setattr(quickstart_module, "device_login", _device_login)
+    wizard.monkeypatch.setattr(quickstart_module, "save_credentials", lambda _c: None)
+
+    result = quickstart_module.run_quickstart(cwd=tmp_path)
+
+    assert logins == ["device"]
+    assert client.status_credentials == [CREDENTIALS, CREDENTIALS, new_credentials]
+    assert client.completions == [(WORKSPACE.id, "train")]
+    assert result.resource is not None
+
+    output = _out(wizard)
+    assert "saved session is no longer valid" in output
+    assert f"detected {FULL_NAME}" in output
+
+
+def test_waiting_for_the_repository_gives_up_eventually(
+    wizard: Any, tmp_path: Path
+) -> None:
+    _install_client(wizard, statuses=[_status(connected=False)])
+    clock = iter([0.0, 600.0, 1200.0, 1800.0])
+    wizard.monkeypatch.setattr("time.monotonic", lambda: next(clock))
+
+    with pytest.raises(CLIError) as excinfo:
+        quickstart_module.run_quickstart(cwd=tmp_path)
+
+    assert "Timed out waiting for the workspace repository" in str(excinfo.value)
+    assert f"{PLATFORM_URL}/acme/integrations/git" in str(excinfo.value)
 
 
 def test_an_account_without_workspaces_points_at_the_platform(
