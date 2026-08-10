@@ -1,6 +1,6 @@
 # Troubleshooting (engineering)
 
-> Engineering-level failure modes when building rollouts and running evals. Install, login, and workspace-setup basics live at [docs.osmosis.ai](https://docs.osmosis.ai). One entry fact: the SDK requires **Python 3.12+** and the server extra (`pip install osmosis-ai[server]`) to run a rollout server (scaffold one with `osmosis rollout init`, then `python main.py`).
+> Engineering-level failure modes when building rollouts and running evals. Install, login, and workspace-setup basics live at [docs.osmosis.ai](https://docs.osmosis.ai). One entry fact: the SDK requires **Python 3.12+** and the server extra (`pip install "osmosis-ai[server]"`) to run a rollout server (scaffold one with `osmosis rollout init <name>`, then run `python rollouts/<name>/main.py`).
 
 ## Rollout timeouts
 
@@ -35,6 +35,7 @@ agent_workflow_timeout_s = 900   # 15 minutes instead of the default 7.5
 
   ```python
   import asyncio
+
   tools = await asyncio.get_running_loop().run_in_executor(None, mcp.list_tools_sync)
   ```
 
@@ -46,23 +47,13 @@ agent_workflow_timeout_s = 900   # 15 minutes instead of the default 7.5
 
   A backend may also advertise a ceiling via `ExecutionBackend.max_concurrency`.
 
-## Backend validation (submit preflight)
+## Backend validation
 
-Cloud `osmosis eval submit` / `osmosis train submit` run a backend preflight (`validate_rollout_backend` → `validate_backend`, [../osmosis_ai/rollout/validator.py](../osmosis_ai/rollout/validator.py)) before uploading. Frequent failures and their codes:
-
-| Code | Meaning |
-|------|---------|
-| `INVALID_WORKFLOW_CLASS` / `INVALID_GRADER_CLASS` | Not a concrete subclass of `AgentWorkflow` / `Grader` |
-| `WORKFLOW_RUN_NOT_ASYNC` / `GRADER_GRADE_NOT_ASYNC` | `run` / `grade` is not `async def` |
-| `WORKFLOW_INIT_FAILED` / `GRADER_INIT_FAILED` | Constructor raised when called as `cls(config)` |
-| `INVALID_AGENT_NAME` | Resolved name not 1–256 chars |
-| `MISSING_GRADER` | `grader_cls` is required for local validation |
-
-All applicable errors are aggregated into one `ValidationResult` — fix them together.
+Cloud `osmosis eval submit` / `osmosis train submit` validate rollout paths and dependencies, then import the entrypoint once. The CLI does not infer backend requirements by scanning for workflow or grader classes, and there is no separate validation step: errors raised while the module constructs its backend (bad import strings, rejected configs) surface through submit preflight, and anything beyond that surfaces on the first rollout. Run an eval first — it exercises the workflow, grader, and server end to end and is the intended smoke test before training.
 
 ## Dataset validation
 
-Local validation requires the columns `system_prompt` and `user_prompt` (exact, case-sensitive), at least 4 rows, and a `.csv` / `.jsonl` / `.parquet` extension. `ground_truth` is optional. See [datasets.md](./datasets.md) for the full contract; a "missing required columns" error means the header/keys don't match exactly.
+Local validation requires at least 4 rows and a `.csv` / `.jsonl` / `.parquet` extension. Without a `metadata` column, the dataset must contain `user_prompt` and `ground_truth` (`label` is accepted as an alias); with a `metadata` column, every row must contain a valid, non-empty JSON object. `system_prompt` is always optional, and JSONL rows must use identical top-level fields. See [datasets.md](./datasets.md) for the full contract.
 
 ## Rubric (`osmosis eval rubric` / `evaluate_rubric`)
 

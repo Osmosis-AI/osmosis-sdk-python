@@ -1,4 +1,4 @@
-"""Manifest-to-disk download engine for evaluation runs."""
+"""Shared manifest-to-disk download engine for remote runs."""
 
 from __future__ import annotations
 
@@ -35,13 +35,18 @@ DOWNLOAD_MAX_ATTEMPTS = 3
 DOWNLOAD_RETRY_BASE_SECONDS = 0.5
 
 EVAL_DOWNLOAD_TYPES = ("metrics", "trajectories", "artifacts", "logs")
+BENCHMARK_DOWNLOAD_TYPES = ("summary", "results", "artifacts", "logs")
 
 ManifestLoader = Callable[[Sequence[str]], RunDownloadManifest]
 URLLoader = Callable[[Sequence[RunDownloadFile]], RunDownloadURLBatch]
+OutputResolver = Callable[..., Path]
+PathCategory = Callable[[str], str | None]
 
 _ROWS_RE = re.compile(r"\d+(?:-\d+)?(?:,\d+(?:-\d+)?)*")
 _URL_RE = re.compile(r"https?://\S+", re.IGNORECASE)
-_RESERVED_ARTIFACT_MANIFEST_RE = re.compile(r"artifacts/row_\d+_run_\d+/manifest\.json")
+_EVAL_RESERVED_ARTIFACT_MANIFEST_RE = re.compile(
+    r"artifacts/row_\d+_run_\d+/manifest\.json"
+)
 
 
 @dataclass(frozen=True)
@@ -99,6 +104,9 @@ def validate_rows(value: str | None) -> str | None:
 
 
 def _path_category(path: str) -> str | None:
+    if _EVAL_RESERVED_ARTIFACT_MANIFEST_RE.fullmatch(path) is not None:
+        # The per-run artifact manifest is a server-side index, not an output.
+        return None
     if path == "metrics.json":
         return "metrics"
     if path == "logs.txt":
@@ -110,19 +118,32 @@ def _path_category(path: str) -> str | None:
     return None
 
 
+def benchmark_path_category(path: str) -> str | None:
+    """Map a fixed benchmark download path to its public selector."""
+    if path == "summary.csv":
+        return "summary"
+    if path == "results.csv":
+        return "results"
+    if path == "logs.txt":
+        return "logs"
+    parts = path.split("/")
+    if len(parts) >= 3 and parts[0] == "artifacts":
+        return "artifacts"
+    return None
+
+
 def _safe_relative_path(
     path: str,
     *,
     selected_types: set[str],
+    path_category: PathCategory = _path_category,
 ) -> tuple[Path, str] | None:
     if not path or path.startswith("/") or "\\" in path:
         return None
     parts = path.split("/")
     if any(part in {"", ".", ".."} for part in parts):
         return None
-    if _RESERVED_ARTIFACT_MANIFEST_RE.fullmatch(path) is not None:
-        return None
-    category = _path_category(path)
+    category = path_category(path)
     if category is None or category not in selected_types:
         return None
     return Path(*parts), category
@@ -133,6 +154,7 @@ def _prepare_files(
     *,
     output_dir: Path,
     selected_types: Sequence[str],
+    path_category: PathCategory = _path_category,
 ) -> tuple[list[_PreparedFile], list[dict[str, str]]]:
     prepared: list[_PreparedFile] = []
     rejected: list[dict[str, str]] = []
@@ -140,7 +162,11 @@ def _prepare_files(
     selected = set(selected_types)
     resolved_root = output_dir.resolve(strict=False)
     for item in manifest.files:
-        safe = _safe_relative_path(item.path, selected_types=selected)
+        safe = _safe_relative_path(
+            item.path,
+            selected_types=selected,
+            path_category=path_category,
+        )
         if safe is None:
             rejected.append(
                 {
@@ -312,9 +338,13 @@ def run_download(
     manifest_loader: ManifestLoader,
     url_loader: URLLoader,
     selection: dict[str, Any] | None = None,
+    output_resolver: OutputResolver = resolve_eval_output_dir,
+    path_category: PathCategory = _path_category,
+    operation: str = "eval.download",
+    resource_key: str = "eval_run",
 ) -> OperationResult:
-    """Plan, confirm, and execute one eval download using the route contract."""
-    output_dir = resolve_eval_output_dir(
+    """Plan, confirm, and execute a run download using the manifest contract."""
+    output_dir = output_resolver(
         run_name,
         run_id,
         workspace_directory=workspace_directory,
@@ -329,6 +359,7 @@ def run_download(
         manifest,
         output_dir=output_dir,
         selected_types=selected_types,
+        path_category=path_category,
     )
     if not prepared:
         if rejected:
@@ -376,7 +407,7 @@ def run_download(
             notes=[f"Selected types: {', '.join(selected_types)}"],
         )
 
-    resolve_eval_output_dir(
+    output_resolver(
         run_name,
         run_id,
         workspace_directory=workspace_directory,
@@ -468,7 +499,7 @@ def run_download(
         message += f" ({len(failures):,} failed; re-run to retry)"
 
     resource: dict[str, Any] = {
-        "eval_run": {"id": run_id, "name": run_name},
+        resource_key: {"id": run_id, "name": run_name},
         "status": run_status,
         "selected_types": list(selected_types),
         "files_downloaded": downloaded,
@@ -486,7 +517,7 @@ def run_download(
         resource.update(selection)
 
     return OperationResult(
-        operation="eval.download",
+        operation=operation,
         status="partial" if partial else "success",
         resource=resource,
         message=message,

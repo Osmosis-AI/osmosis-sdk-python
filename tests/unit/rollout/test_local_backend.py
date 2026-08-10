@@ -4,10 +4,7 @@ from typing import Any
 from unittest.mock import AsyncMock
 
 from osmosis_ai.rollout.agent_workflow import AgentWorkflow
-from osmosis_ai.rollout.backend.local.backend import (
-    LocalBackend,
-    _categorize_exception,
-)
+from osmosis_ai.rollout.backend.local.backend import LocalBackend
 from osmosis_ai.rollout.context import (
     AgentWorkflowContext,
     GraderContext,
@@ -16,12 +13,14 @@ from osmosis_ai.rollout.context import (
 from osmosis_ai.rollout.grader import Grader
 from osmosis_ai.rollout.types import (
     AgentWorkflowConfig,
+    AgentWorkflowOutput,
     ExecutionRequest,
     GraderConfig,
     RolloutErrorCategory,
     RolloutSample,
     RolloutStatus,
 )
+from osmosis_ai.rollout.utils.errors import categorize_exception
 
 # ---------------------------------------------------------------------------
 # Stub implementations
@@ -63,35 +62,35 @@ class FailingGrader(Grader):
 
 
 # ---------------------------------------------------------------------------
-# _categorize_exception
+# categorize_exception
 # ---------------------------------------------------------------------------
 
 
 class TestCategorizeException:
     def test_timeout(self):
-        assert _categorize_exception(TimeoutError()) == RolloutErrorCategory.TIMEOUT
+        assert categorize_exception(TimeoutError()) == RolloutErrorCategory.TIMEOUT
 
     def test_value_error(self):
         assert (
-            _categorize_exception(ValueError("bad"))
+            categorize_exception(ValueError("bad"))
             == RolloutErrorCategory.VALIDATION_ERROR
         )
 
     def test_type_error(self):
         assert (
-            _categorize_exception(TypeError("bad"))
+            categorize_exception(TypeError("bad"))
             == RolloutErrorCategory.VALIDATION_ERROR
         )
 
     def test_assertion_error(self):
         assert (
-            _categorize_exception(AssertionError())
+            categorize_exception(AssertionError())
             == RolloutErrorCategory.VALIDATION_ERROR
         )
 
     def test_generic(self):
         assert (
-            _categorize_exception(RuntimeError("boom"))
+            categorize_exception(RuntimeError("boom"))
             == RolloutErrorCategory.AGENT_ERROR
         )
 
@@ -197,6 +196,85 @@ class TestLocalBackend:
         result = on_complete.call_args[0][0]
         assert result.status == RolloutStatus.SUCCESS
 
+    async def test_explicit_output_is_primary_sample_source(self):
+        class ReturningWorkflow(AgentWorkflow):
+            async def run(self, ctx: AgentWorkflowContext) -> AgentWorkflowOutput:
+                from osmosis_ai.rollout.context import get_rollout_context
+
+                rollout_ctx = get_rollout_context()
+                assert rollout_ctx is not None
+                rollout_ctx.set_sample_source(
+                    StaticSampleSource([{"role": "assistant", "content": "ambient"}]),
+                )
+                return AgentWorkflowOutput(
+                    messages=[{"role": "assistant", "content": "returned"}],
+                    metrics={"quality": 0.75},
+                )
+
+        backend = LocalBackend(
+            workflow=ReturningWorkflow,
+            workflow_config=AgentWorkflowConfig(name="test"),
+        )
+
+        result = await backend.run_workflow(
+            ExecutionRequest(
+                id="r1",
+                prompt=[{"role": "user", "content": "hi"}],
+                label="expected",
+            )
+        )
+
+        assert result.status == RolloutStatus.SUCCESS
+        assert result.sample is not None
+        assert result.sample.messages == [{"role": "assistant", "content": "returned"}]
+        assert result.sample.label == "expected"
+        assert result.sample.metrics == {"quality": 0.75}
+
+    async def test_bare_messages_return_is_accepted(self):
+        class ReturningWorkflow(AgentWorkflow):
+            async def run(self, ctx: AgentWorkflowContext) -> list[dict[str, Any]]:
+                return [{"role": "assistant", "content": "returned"}]
+
+        backend = LocalBackend(
+            workflow=ReturningWorkflow,
+            workflow_config=AgentWorkflowConfig(name="test"),
+        )
+
+        result = await backend.run_workflow(
+            ExecutionRequest(
+                id="r1",
+                prompt=[{"role": "user", "content": "hi"}],
+            )
+        )
+
+        assert result.status == RolloutStatus.SUCCESS
+        assert result.sample is not None
+        assert result.sample.messages == [{"role": "assistant", "content": "returned"}]
+
+    async def test_mutated_non_finite_metrics_fail_validation(self):
+        class ReturningWorkflow(AgentWorkflow):
+            async def run(self, ctx: AgentWorkflowContext) -> AgentWorkflowOutput:
+                output = AgentWorkflowOutput(metrics={"score": 1.0})
+                output.metrics["score"] = float("nan")
+                return output
+
+        backend = LocalBackend(
+            workflow=ReturningWorkflow,
+            workflow_config=AgentWorkflowConfig(name="test"),
+        )
+
+        result = await backend.run_workflow(
+            ExecutionRequest(
+                id="r1",
+                prompt=[{"role": "user", "content": "hi"}],
+            )
+        )
+
+        assert result.status == RolloutStatus.FAILURE
+        assert result.err_category == RolloutErrorCategory.VALIDATION_ERROR
+        assert result.err_message is not None
+        assert "finite" in result.err_message
+
     async def test_execute_failure_calls_callback_with_error(self):
         backend = LocalBackend(
             workflow=FailingWorkflow,
@@ -214,10 +292,29 @@ class TestLocalBackend:
         assert result.err_category == RolloutErrorCategory.VALIDATION_ERROR
 
     async def test_execute_with_grader(self):
+        captured: dict[str, Any] = {}
+
+        class ReturningWorkflow(AgentWorkflow):
+            async def run(self, ctx: AgentWorkflowContext) -> AgentWorkflowOutput:
+                return AgentWorkflowOutput(
+                    messages=[{"role": "assistant", "content": "returned"}],
+                    metrics={"quality": 0.75},
+                    info={"workflow_only": True},
+                )
+
+        class CapturingGrader(Grader):
+            async def grade(self, ctx: GraderContext) -> Any:
+                assert ctx.sample is not None
+                captured["messages"] = ctx.sample.messages
+                captured["metrics"] = ctx.sample.metrics
+                captured["extra_fields"] = ctx.sample.extra_fields
+                captured["metadata"] = ctx.metadata
+                ctx.set_reward(1.0)
+
         backend = LocalBackend(
-            workflow=StubWorkflow,
+            workflow=ReturningWorkflow,
             workflow_config=AgentWorkflowConfig(name="test"),
-            grader=StubGrader,
+            grader=CapturingGrader,
             grader_config=GraderConfig(name="test-grader"),
         )
         on_complete = AsyncMock()
@@ -227,6 +324,7 @@ class TestLocalBackend:
             id="r1",
             prompt=[{"role": "user", "content": "hi"}],
             label="test-label",
+            metadata={"input_only": True},
         )
         await backend.execute(
             request,
@@ -238,9 +336,14 @@ class TestLocalBackend:
         on_grader.assert_awaited_once()
         grader_result = on_grader.call_args[0][0]
         assert grader_result.status == RolloutStatus.SUCCESS
-        # Grader should have assigned reward=1.0
         assert grader_result.sample is not None
         assert grader_result.sample.reward == 1.0
+        assert captured == {
+            "messages": [{"role": "assistant", "content": "returned"}],
+            "metrics": {"quality": 0.75},
+            "extra_fields": {},
+            "metadata": {"input_only": True},
+        }
 
     async def test_grader_callback_reports_failure_without_label(self):
         backend = LocalBackend(

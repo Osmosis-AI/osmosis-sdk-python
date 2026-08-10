@@ -53,3 +53,10 @@ def to_import_path(obj: Any) -> str:
         f"Cannot resolve import path for {obj!r}. "
         "Ensure it is a class or a module-level variable."
     )
+
+
+def ensure_import_path(ref: Any) -> str:
+    """Convert a Python object or string to an import path string."""
+    if isinstance(ref, str):
+        return ref
+    return to_import_path(ref)

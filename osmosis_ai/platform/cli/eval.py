@@ -310,6 +310,7 @@ def _submit_eval(
     config: EvalSubmitConfig,
     credentials: Any,
     git_identity: str,
+    provided_secrets: dict[str, str],
 ) -> SubmitRunResult:
     return client.submit_evaluation_run(
         experiment_config=config.experiment_config,
@@ -317,6 +318,7 @@ def _submit_eval(
         advanced_config=config.advanced_config or None,
         env_config=config.env or None,
         secrets=config.secrets or None,
+        provided_secrets=provided_secrets or None,
         credentials=credentials,
         git_identity=git_identity,
     )
@@ -360,9 +362,13 @@ _EVAL_SUBMIT_SPEC: CloudSubmitSpec[EvalSubmitConfig] = CloudSubmitSpec(
 )
 
 
-def submit(config_path: Path, *, yes: bool) -> OperationResult:
+def submit(
+    config_path: Path, *, yes: bool, secrets_file: str | None = None
+) -> OperationResult:
     """Submit an evaluation run."""
-    return run_cloud_submit(config_path, yes=yes, spec=_EVAL_SUBMIT_SPEC)
+    return run_cloud_submit(
+        config_path, yes=yes, spec=_EVAL_SUBMIT_SPEC, secrets_file=secrets_file
+    )
 
 
 def list_eval_runs(*, limit: int, all_: bool) -> ListResult:
@@ -424,7 +430,7 @@ def list_eval_runs(*, limit: int, all_: bool) -> ListResult:
     )
 
 
-def logs(name_or_id: str, *, limit: int, cursor: str | None = None) -> ListResult:
+def logs(name: str, *, limit: int, cursor: str | None = None) -> ListResult:
     """Show the most recent logs for an evaluation run, oldest-first."""
     context = require_git_workspace_directory_context()
     credentials = context.credentials
@@ -433,7 +439,7 @@ def logs(name_or_id: str, *, limit: int, cursor: str | None = None) -> ListResul
     output = get_output_context()
     with output.status("Fetching logs..."):
         page = client.get_eval_run_logs(
-            name_or_id,
+            name,
             limit=limit,
             cursor=cursor,
             credentials=credentials,
@@ -441,14 +447,14 @@ def logs(name_or_id: str, *, limit: int, cursor: str | None = None) -> ListResul
         )
 
     return build_logs_result(
-        title=f"Evaluation Run Logs: {name_or_id}",
+        title=f"Evaluation Run Logs: {name}",
         page=page,
         context=context,
-        next_step_hint=f"Use osmosis eval info {name_or_id} for run details.",
+        next_step_hint=f"Use osmosis eval info {name} for run details.",
     )
 
 
-def info(name_or_id: str, *, output: str | None) -> DetailResult:
+def info(name: str, *, output: str | None) -> DetailResult:
     """Show evaluation run details, results, and metrics."""
     context = require_git_workspace_directory_context()
     credentials = context.credentials
@@ -457,7 +463,7 @@ def info(name_or_id: str, *, output: str | None) -> DetailResult:
     output_ctx = get_output_context()
     with output_ctx.status("Fetching evaluation run..."):
         detail = client.get_eval_run(
-            name_or_id,
+            name,
             credentials=credentials,
             git_identity=context.git_identity,
         )
@@ -575,14 +581,10 @@ def info(name_or_id: str, *, output: str | None) -> DetailResult:
         display_hints.append(f"View: {detail.platform_url}")
 
     if detail.status in EVAL_RUN_STATUSES_ERROR:
-        display_hints.append(
-            f"See logs with: osmosis eval logs {detail.name or name_or_id}"
-        )
+        display_hints.append(f"See logs with: osmosis eval logs {detail.name or name}")
 
     if detail.status not in EVAL_RUN_STATUSES_TERMINAL:
-        display_hints.append(
-            f"Stop with: osmosis eval stop {detail.name or name_or_id}"
-        )
+        display_hints.append(f"Stop with: osmosis eval stop {detail.name or name}")
 
     export: dict[str, Any] | None = None
     output_path: str | None = None
@@ -659,7 +661,7 @@ def info(name_or_id: str, *, output: str | None) -> DetailResult:
 
 
 def download(
-    name_or_id: str,
+    name: str,
     *,
     output: str | None,
     types: str = "metrics,trajectories",
@@ -686,7 +688,7 @@ def download(
     output_ctx = get_output_context()
     with output_ctx.status("Fetching evaluation run..."):
         detail = client.get_eval_run(
-            name_or_id,
+            name,
             credentials=credentials,
             git_identity=git_identity,
         )
@@ -731,23 +733,23 @@ def download(
         raise
 
 
-def stop(name_or_id: str, *, yes: bool) -> OperationResult:
+def stop(name: str, *, yes: bool) -> OperationResult:
     """Stop an evaluation run."""
     context = require_git_workspace_directory_context()
     credentials = context.credentials
 
     require_confirmation(
-        f'Stop evaluation run "{name_or_id}"?',
+        f'Stop evaluation run "{name}"?',
         yes=yes,
         default=False,
-        summary=[("Name", name_or_id)],
+        summary=[("Name", name)],
     )
 
     client = OsmosisClient()
     output = get_output_context()
     with output.status("Stopping evaluation run..."):
         client.stop_eval_run(
-            name_or_id,
+            name,
             credentials=credentials,
             git_identity=context.git_identity,
         )
@@ -755,6 +757,6 @@ def stop(name_or_id: str, *, yes: bool) -> OperationResult:
     return OperationResult(
         operation="eval.stop",
         status="success",
-        resource={"name": name_or_id, **git_result_context(context)},
-        message=f'Evaluation run "{name_or_id}" stopped.',
+        resource={"name": name, **git_result_context(context)},
+        message=f'Evaluation run "{name}" stopped.',
     )

@@ -187,6 +187,7 @@ def _register_commands() -> None:
     get_completion_inspect_parameters()
     # -- Command groups --
     from osmosis_ai.cli.commands.auth import app as auth_app
+    from osmosis_ai.cli.commands.benchmark import app as benchmark_app
     from osmosis_ai.cli.commands.dataset import app as dataset_app
     from osmosis_ai.cli.commands.eval import app as eval_app
     from osmosis_ai.cli.commands.model import app as model_app
@@ -209,6 +210,7 @@ def _register_commands() -> None:
     app.add_typer(train_app, name="train", rich_help_panel=_WORKFLOW)
     app.add_typer(model_app, name="model", rich_help_panel=_WORKFLOW)
     app.add_typer(eval_app, name="eval", rich_help_panel=_WORKFLOW)
+    app.add_typer(benchmark_app, name="benchmark", rich_help_panel=_WORKFLOW)
     app.add_typer(rollout_app, name="rollout", rich_help_panel=_WORKFLOW)
     app.add_typer(template_app, name="template", rich_help_panel=_WORKFLOW)
 

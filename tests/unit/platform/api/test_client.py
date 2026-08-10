@@ -557,6 +557,53 @@ class TestSubmitTrainingRun:
         assert "secret_refs_config" not in payload
 
     @patch("osmosis_ai.platform.api.client.platform_request")
+    def test_provided_secrets_included_in_secrets_payload(
+        self, mock_request: MagicMock
+    ) -> None:
+        """Inline provided secrets are nested under secrets.provided."""
+        mock_request.return_value = self._response()
+        client = OsmosisClient()
+        client.submit_training_run(
+            experiment_config={
+                "model_path": "m1",
+                "dataset": "ds1",
+                "rollout": "rollout1",
+                "entrypoint": "rollouts/main.py",
+            },
+            secrets=["OPENAI_API_KEY"],
+            provided_secrets={"GITHUB_TOKEN": "ghp_test"},
+            git_identity="git_test",
+        )
+        payload = mock_request.call_args.kwargs["data"]
+        assert payload["secrets"] == {
+            "required": ["OPENAI_API_KEY"],
+            "provided": {"GITHUB_TOKEN": "ghp_test"},
+        }
+
+    @patch("osmosis_ai.platform.api.client.platform_request")
+    def test_provided_secrets_alone_sends_empty_required(
+        self, mock_request: MagicMock
+    ) -> None:
+        """provided_secrets without required secrets still emits a secrets block."""
+        mock_request.return_value = self._response()
+        client = OsmosisClient()
+        client.submit_training_run(
+            experiment_config={
+                "model_path": "m1",
+                "dataset": "ds1",
+                "rollout": "rollout1",
+                "entrypoint": "rollouts/main.py",
+            },
+            provided_secrets={"GITHUB_TOKEN": "ghp_test"},
+            git_identity="git_test",
+        )
+        payload = mock_request.call_args.kwargs["data"]
+        assert payload["secrets"] == {
+            "required": [],
+            "provided": {"GITHUB_TOKEN": "ghp_test"},
+        }
+
+    @patch("osmosis_ai.platform.api.client.platform_request")
     def test_empty_env_and_secrets_are_omitted(self, mock_request: MagicMock) -> None:
         """Empty containers are treated as 'not provided' and stripped."""
         mock_request.return_value = self._response()
@@ -678,6 +725,43 @@ class TestEvaluationRuns:
             "advanced_config": {"max_concurrent_rollouts": 8},
             "env_config": {"FOO": "bar"},
             "secrets": {"required": ["OPENAI_API_KEY"]},
+        }
+
+    @patch("osmosis_ai.platform.api.client.platform_request")
+    def test_submit_evaluation_run_includes_provided_secrets(
+        self, mock_request: MagicMock
+    ) -> None:
+        mock_request.return_value = self._submit_response()
+
+        OsmosisClient().submit_evaluation_run(
+            experiment_config={"model_path": "openai/gpt-oss"},
+            secrets=["OPENAI_API_KEY"],
+            provided_secrets={"GITHUB_TOKEN": "ghp_test"},
+            git_identity="git_test",
+        )
+
+        payload = mock_request.call_args.kwargs["data"]
+        assert payload["secrets"] == {
+            "required": ["OPENAI_API_KEY"],
+            "provided": {"GITHUB_TOKEN": "ghp_test"},
+        }
+
+    @patch("osmosis_ai.platform.api.client.platform_request")
+    def test_submit_evaluation_run_provided_secrets_alone(
+        self, mock_request: MagicMock
+    ) -> None:
+        mock_request.return_value = self._submit_response()
+
+        OsmosisClient().submit_evaluation_run(
+            experiment_config={"model_path": "openai/gpt-oss"},
+            provided_secrets={"OPENAI_API_KEY": "sk-test"},
+            git_identity="git_test",
+        )
+
+        payload = mock_request.call_args.kwargs["data"]
+        assert payload["secrets"] == {
+            "required": [],
+            "provided": {"OPENAI_API_KEY": "sk-test"},
         }
 
     @patch("osmosis_ai.platform.api.client.platform_request")

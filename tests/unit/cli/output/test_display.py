@@ -1,15 +1,19 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import pytest
 
 from osmosis_ai.cli.output.display import (
     format_duration_ms,
+    format_elapsed,
     format_local_date,
     format_local_datetime,
+    format_relative_time,
 )
+
+NOW = datetime(2026, 8, 4, 12, 0, tzinfo=UTC)
 
 
 def test_format_local_date_uses_explicit_timezone() -> None:
@@ -120,3 +124,33 @@ def test_format_local_date_uses_compact_fallback_for_offsetless_input() -> None:
 )
 def test_format_duration_ms(duration_ms: float, expected: str) -> None:
     assert format_duration_ms(duration_ms) == expected
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("2026-08-04T11:59:30Z", "just now"),
+        ("2026-08-04T11:35:00Z", "25m ago"),
+        ("2026-08-04T07:00:00Z", "5h ago"),
+        ("2026-08-02T12:00:00Z", "2d ago"),
+        ("2026-07-14T12:00:00Z", "3w ago"),
+        ("2026-05-04T12:00:00Z", "3mo ago"),
+        ("2024-08-04T12:00:00Z", "2y ago"),
+    ],
+)
+def test_format_relative_time(value: str, expected: str) -> None:
+    assert format_relative_time(value, now=NOW) == expected
+
+
+def test_format_relative_time_falls_back_for_invalid_input() -> None:
+    assert format_relative_time("not-a-date", now=NOW) == "not-a-date"
+    assert format_relative_time(None, now=NOW) == ""
+
+
+def test_format_elapsed_measures_to_completion_or_now() -> None:
+    assert (
+        format_elapsed("2026-08-04T09:15:00Z", "2026-08-04T11:00:00Z", now=NOW)
+        == "1h 45m"
+    )
+    assert format_elapsed("2026-08-04T11:00:00Z", None, now=NOW) == "1h"
+    assert format_elapsed(None, "2026-08-04T11:00:00Z", now=NOW) is None

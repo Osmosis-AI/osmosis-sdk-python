@@ -1,14 +1,10 @@
 """Tests for osmosis_ai.rollout.context."""
 
-from pathlib import Path
-from unittest.mock import MagicMock
-
 import pytest
 
 from osmosis_ai.rollout.context import (
     AgentWorkflowContext,
     GraderContext,
-    HarborAgentWorkflowContext,
     RolloutContext,
     SampleSource,
     get_rollout_context,
@@ -133,7 +129,7 @@ class TestGraderContext:
 
 
 # ---------------------------------------------------------------------------
-# AgentWorkflowContext / HarborAgentWorkflowContext
+# AgentWorkflowContext
 # ---------------------------------------------------------------------------
 
 
@@ -161,52 +157,3 @@ class TestAgentWorkflowContext:
             prompt=[{"role": "user", "content": "hi"}], metadata=metadata
         )
         assert ctx.metadata == metadata
-
-
-class TestHarborAgentWorkflowContext:
-    def test_with_environment(self):
-        env = MagicMock()
-        cfg = AgentWorkflowConfig(name="harbor-test")
-        ctx = HarborAgentWorkflowContext(
-            prompt=[{"role": "user", "content": "hi"}],
-            config=cfg,
-            environment=env,
-        )
-        assert ctx.environment is env
-        assert ctx.config is cfg
-
-    def test_positional_call_pattern_still_works(self):
-        """Existing positional call sites (prompt, config, environment) keep working."""
-        env = MagicMock()
-        cfg = AgentWorkflowConfig(name="harbor-test")
-        ctx = HarborAgentWorkflowContext(
-            [{"role": "user", "content": "hi"}],
-            cfg,
-            env,
-        )
-        assert ctx.environment is env
-        assert ctx.config is cfg
-        assert ctx.metadata is None
-
-    def test_metadata_threaded_through_super_init(self):
-        env = MagicMock()
-        cfg = AgentWorkflowConfig(name="harbor-test")
-        metadata = {"tools": ["search"], "difficulty": 3}
-        ctx = HarborAgentWorkflowContext(
-            prompt=[{"role": "user", "content": "hi"}],
-            config=cfg,
-            environment=env,
-            metadata=metadata,
-        )
-        assert ctx.metadata == metadata
-        assert ctx.environment is env
-
-    def test_artifacts_dir_threaded_through_super_init(self, tmp_path: Path):
-        cfg = AgentWorkflowConfig(name="harbor-test")
-        ctx = HarborAgentWorkflowContext(
-            prompt=[{"role": "user", "content": "hi"}],
-            config=cfg,
-            environment=MagicMock(),
-            artifacts_dir=tmp_path,
-        )
-        assert ctx.artifacts_dir == tmp_path

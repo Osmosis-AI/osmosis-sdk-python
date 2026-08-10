@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 import tomllib
 from pathlib import Path
-from typing import Any, ClassVar, Self
+from typing import TYPE_CHECKING, Any, ClassVar, Self
 
 from pydantic import (
     BaseModel,
@@ -15,9 +15,11 @@ from pydantic import (
     field_validator,
     model_validator,
 )
-from pydantic_core import ErrorDetails
 
 from osmosis_ai.cli.errors import CLIError
+
+if TYPE_CHECKING:
+    from pydantic_core import ErrorDetails
 
 ENV_VAR_NAME_RE = re.compile(r"^[A-Z_][A-Z0-9_]*$")
 SECRET_NAME_RE = re.compile(r"^[A-Z][A-Z0-9_]*$")
@@ -193,7 +195,11 @@ def validation_issue_to_config_issue(
     loc = tuple(error.get("loc") or ())
     field_path = format_field_path(loc)
     error_type = str(error.get("type"))
-    issue_key = f"{section_name}.{field_path}" if field_path else section_name
+    issue_key = (
+        f"{section_name}.{field_path}"
+        if section_name and field_path
+        else field_path or section_name
+    )
 
     if error_type == "extra_forbidden":
         return {"key": issue_key, "message": "Unrecognized key"}
@@ -297,17 +303,18 @@ def validate_env_var_keys(
     *,
     env: dict[str, str],
     path: Path,
+    source_label: str = "[env]",
 ) -> None:
-    """Reject invalid or reserved [env] var names."""
+    """Reject invalid or reserved environment variable names."""
     for key in env:
         if not ENV_VAR_NAME_RE.match(key):
             raise CLIError(
-                f"Invalid env var name '{key}' in [env] of {path}: "
+                f"Invalid env var name '{key}' in {source_label} of {path}: "
                 "must match ^[A-Z_][A-Z0-9_]*$"
             )
         if key.startswith(RESERVED_ENV_PREFIX):
             raise CLIError(
-                f"'{key}' in [env] of {path}: env var names starting "
+                f"'{key}' in {source_label} of {path}: env var names starting "
                 f"with {RESERVED_ENV_PREFIX} are reserved by the platform; "
                 "choose a different name."
             )

@@ -20,18 +20,21 @@ The package (`osmosis_ai/`) is organized into top-level domains. See [architectu
 | CLI framework + commands | [../osmosis_ai/cli/](../osmosis_ai/cli/) | Typer entry point, command shells, output/JSON envelopes | `from osmosis_ai.cli.errors import CLIError` |
 | Platform integration | [../osmosis_ai/platform/](../osmosis_ai/platform/) | Auth, platform API client, CLI business logic | `from osmosis_ai.platform.auth import load_credentials` |
 | Remote rollout SDK | [../osmosis_ai/rollout/](../osmosis_ai/rollout/) | `AgentWorkflow` + `Grader`, contexts, server, backends | `from osmosis_ai.rollout import AgentWorkflow, Grader` |
-| Eval helpers | [../osmosis_ai/eval/](../osmosis_ai/eval/) | Rubric (LLM-as-judge) + workflow/grader loader | `from osmosis_ai.eval.rubric import evaluate_rubric` |
+| Eval helpers | [../osmosis_ai/eval/](../osmosis_ai/eval/) | Rubric (LLM-as-judge) | `from osmosis_ai.eval.rubric import evaluate_rubric` |
 | Workspace templates | [../osmosis_ai/templates/](../osmosis_ai/templates/) | `osmosis template` recipe catalog + source resolution | (internal) |
+
+The single `osmosis-ai` distribution always includes the CLI and framework-neutral rollout core. Install extras only for the feature you use: `server`, `strands`, `openai-agents`, `harbor`, `rubric`, `parquet`, or `full`. The Harbor extra installs plain Harbor for an externally provided SkyPilot runtime; Daytona is retired, and Harbor's `skypilot` extra is intentionally unsupported.
 
 ## Pages
 
 - [architecture.md](./architecture.md) — package layout, domain boundaries, import paths, lazy-loading rules, and the remote rollout protocol (controller <-> rollout server). Start here.
-- [rollout-sdk.md](./rollout-sdk.md) — the library API you implement against: `AgentWorkflow`, `Grader`, contexts, configs, `create_rollout_server`, execution backends, and framework integrations.
+- [rollout-sdk.md](./rollout-sdk.md) — the library API you implement against: `AgentWorkflow`, `Grader`, contexts, configs, server/backends, and framework integrations.
 - [eval.md](./eval.md) — the `osmosis eval submit` config contract (SDK-vs-backend validation, submit flow), plus a brief note on the `evaluate_rubric` / `osmosis eval rubric` LLM-as-judge API.
+- [benchmark.md](./benchmark.md) — the `osmosis benchmark submit` config contract: sections, the agent model union, secret-reference and env-collision rules, and the submit flow.
 - [datasets.md](./datasets.md) — the dataset row contract enforced by the SDK validator.
 - [troubleshooting.md](./troubleshooting.md) — engineering issues (rollout timeouts, event-loop blocking, concurrency tuning).
 - [cli.md](./cli.md) — CLI internals for contributors (command shells, lazy imports, JSON envelopes).
-- [run-downloads.md](./run-downloads.md) — eval download command, platform route contract, fixed local layout, resume, confirmation, and retry behavior.
+- [run-downloads.md](./run-downloads.md) — eval and benchmark download commands, platform route contracts, fixed local layouts, resume, confirmation, and retry behavior.
 
 ## See also
 

@@ -124,7 +124,11 @@ def test_rollout_init_main_py_is_a_runnable_rollout_server(
     assert "from osmosis_ai.rollout.backend.local import LocalBackend" in main_py
     assert "from osmosis_ai.rollout.server import create_rollout_server" in main_py
     assert "osmosis_ai.rollout.integrations.agents.openai_agents" in main_py
-    assert "osmosis_ai.rollout.integrations.agents.openai " not in main_py
+    assert "osmosis_ai.rollout.integrations.openai_agents" not in main_py
+    pyproject_toml = (
+        workspace_directory / "rollouts" / "my-agent" / "pyproject.toml"
+    ).read_text(encoding="utf-8")
+    assert '"osmosis-ai[server]>=0.3.0rc1,<0.4"' in pyproject_toml
     assert "osmosis rollout serve" not in main_py
     assert "def main()" in main_py
     assert 'if __name__ == "__main__":' in main_py

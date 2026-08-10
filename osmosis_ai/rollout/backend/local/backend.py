@@ -18,10 +18,12 @@ from osmosis_ai.rollout.types import (
     ExecutionRequest,
     ExecutionResult,
     GraderConfig,
-    RolloutErrorCategory,
+    RolloutSample,
     RolloutStatus,
 )
+from osmosis_ai.rollout.types.output import coerce_output
 from osmosis_ai.rollout.utils.concurrency import ConcurrencyLimiter
+from osmosis_ai.rollout.utils.errors import categorize_exception
 from osmosis_ai.rollout.utils.file_artifacts import (
     create_rollout_artifacts_dir,
     default_artifact_root,
@@ -114,18 +116,30 @@ class LocalBackend(ExecutionBackend):
         workflow = self.workflow_cls(config)
         try:
             with rollout_ctx:
-                await workflow.run(ctx)
+                output = coerce_output(await workflow.run(ctx))
+                if output is None:
+                    sample = await rollout_ctx.get_sample()
+                else:
+                    sample = (
+                        RolloutSample(
+                            messages=output.messages,
+                            label=request.label,
+                            metrics=dict(output.metrics),
+                        )
+                        if output.messages is not None
+                        else None
+                    )
         except Exception as e:
             logger.error(traceback.format_exc())
             return ExecutionResult(
                 status=RolloutStatus.FAILURE,
                 err_message=str(e),
-                err_category=_categorize_exception(e),
+                err_category=categorize_exception(e),
             )
 
         return ExecutionResult(
             status=RolloutStatus.SUCCESS,
-            sample=await rollout_ctx.get_sample(),
+            sample=sample,
         )
 
     async def run_grader(
@@ -156,13 +170,5 @@ class LocalBackend(ExecutionBackend):
                 status=RolloutStatus.FAILURE,
                 sample=result.sample,
                 err_message=str(e),
-                err_category=_categorize_exception(e),
+                err_category=categorize_exception(e),
             )
-
-
-def _categorize_exception(exc: Exception) -> RolloutErrorCategory:
-    if isinstance(exc, TimeoutError):
-        return RolloutErrorCategory.TIMEOUT
-    if isinstance(exc, (ValueError, TypeError, AssertionError)):
-        return RolloutErrorCategory.VALIDATION_ERROR
-    return RolloutErrorCategory.AGENT_ERROR

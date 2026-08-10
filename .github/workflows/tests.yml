@@ -24,9 +24,9 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: astral-sh/ruff-action@v4.0.0
+      - uses: astral-sh/ruff-action@v4.1.0
 
-      - uses: astral-sh/ruff-action@v4.0.0
+      - uses: astral-sh/ruff-action@v4.1.0
         with:
           args: "format --check"
 
@@ -40,7 +40,7 @@ jobs:
           python-version: "3.12"
           enable-cache: true
       - name: Install dependencies
-        run: uv sync --locked --extra dev
+        run: uv sync --locked --all-extras --group dev
       - name: Run pyright
         run: uv run pyright osmosis_ai/
       - name: Verify public API types
@@ -48,15 +48,14 @@ jobs:
           output=$(uv run --no-editable pyright --verifytypes osmosis_ai --ignoreexternal 2>&1) || true
           echo "$output"
           # Known --verifytypes baselines we intentionally skip:
-          #   * agent_adapter: inherits from harbor's BaseInstalledAgent which
-          #     has no type stubs ("base class unknown").
-          #   * convert_sample_to_trajectory: returns harbor's Trajectory which
-          #     has no type stubs ("return type is unknown").
+          #   * harbor.harness_agent: inherits harbor's BaseInstalledAgent which
+          #     has no type stubs ("base class / metaclass unknown"). Anchored to
+          #     that module so errors elsewhere (e.g. a harness_agent_config
+          #     member) are still reported.
           unexpected=$(echo "$output" | awk '
             /^osmosis_ai\./ { sym = $0 }
             /error:/ {
-              if (sym ~ /agent_adapter/) next
-              if (sym ~ /convert_sample_to_trajectory/) next
+              if (sym ~ /harbor\.harness_agent\./) next
               print $0
             }
           ')
@@ -82,7 +81,7 @@ jobs:
           enable-cache: true
 
       - name: Install dependencies
-        run: uv sync --locked --extra dev
+        run: uv sync --locked --all-extras --group dev
 
       - name: Run tests with coverage
         if: matrix.python-version == '3.12'
@@ -150,22 +149,73 @@ jobs:
               sys.exit(1)
           PY
 
-      - name: Smoke-test the built wheel
-        run: |
-          uv venv --python 3.12 /tmp/osmosis-wheel-smoke
-          uv pip install --python /tmp/osmosis-wheel-smoke/bin/python dist/*.whl
-          /tmp/osmosis-wheel-smoke/bin/python - <<'PY'
-          import osmosis_ai
-          from agents.usage import Usage
-          from osmosis_ai.rollout.integrations.agents.openai_agents import OsmosisLitellmModel
-
-          assert Usage().input_tokens_details.cached_tokens == 0
-          print(osmosis_ai.__version__, OsmosisLitellmModel.__name__)
-          PY
-          /tmp/osmosis-wheel-smoke/bin/osmosis --version
-
       - name: Upload dist artifact
         uses: actions/upload-artifact@v7
         with:
           name: dist
           path: dist/
+
+  wheel-smoke:
+    name: Wheel smoke (${{ matrix.scenario }})
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - scenario: bare
+            extra: ""
+          - scenario: server
+            extra: "[server]"
+          - scenario: strands
+            extra: "[strands]"
+          - scenario: openai-agents
+            extra: "[openai-agents]"
+          - scenario: harbor
+            extra: "[harbor]"
+          - scenario: rubric
+            extra: "[rubric]"
+          - scenario: parquet
+            extra: "[parquet]"
+          - scenario: full
+            extra: "[full]"
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.12"
+          enable-cache: true
+
+      - name: Download built wheel
+        uses: actions/download-artifact@v8
+        with:
+          name: dist
+          path: dist/
+
+      - name: Install and verify wheel
+        env:
+          INSTALL_EXTRA: ${{ matrix.extra }}
+          SMOKE_SCENARIO: ${{ matrix.scenario }}
+        run: |
+          mapfile -t wheels < <(find "$GITHUB_WORKSPACE/dist" -maxdepth 1 -type f -name '*.whl' -print | sort)
+          if [ "${#wheels[@]}" -ne 1 ]; then
+            echo "::error::Expected exactly one wheel, found ${#wheels[@]}"
+            exit 1
+          fi
+
+          smoke_root=$(mktemp -d)
+          python="$smoke_root/venv/bin/python"
+          install_spec="${wheels[0]}${INSTALL_EXTRA}"
+
+          uv venv --python 3.12 "$smoke_root/venv"
+          (
+            cd "$smoke_root"
+            env -u PYTHONPATH uv pip install --python "$python" "$install_spec"
+            env -u PYTHONPATH uv pip check --python "$python"
+            env -u PYTHONPATH "$python" -I \
+              "$GITHUB_WORKSPACE/.github/scripts/verify-wheel-install.py" \
+              --scenario "$SMOKE_SCENARIO" \
+              --source-root "$GITHUB_WORKSPACE"
+          )

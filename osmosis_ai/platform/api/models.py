@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
-from typing import Any, Literal
+from dataclasses import dataclass, field
+from typing import Any, Literal, TypedDict
 
 # ── Dataset status constants ─────────────────────────────────────
 # Single source of truth for status classification.
@@ -178,6 +178,19 @@ EVAL_RUN_STATUSES_TERMINAL: frozenset[str] = (
     EVAL_RUN_STATUSES_SUCCESS | EVAL_RUN_STATUSES_ERROR | EVAL_RUN_STATUSES_STOPPED
 )
 
+# ── Benchmark run status constants ───────────────────────────────
+
+BENCHMARK_RUN_STATUSES_SUCCESS: frozenset[str] = frozenset({"finished"})
+BENCHMARK_RUN_STATUSES_PENDING: frozenset[str] = frozenset({"pending", "queued"})
+BENCHMARK_RUN_STATUSES_IN_PROGRESS: frozenset[str] = frozenset({"running"})
+BENCHMARK_RUN_STATUSES_ERROR: frozenset[str] = frozenset({"failed"})
+BENCHMARK_RUN_STATUSES_STOPPED: frozenset[str] = frozenset({"stopped"})
+BENCHMARK_RUN_STATUSES_TERMINAL: frozenset[str] = (
+    BENCHMARK_RUN_STATUSES_SUCCESS
+    | BENCHMARK_RUN_STATUSES_ERROR
+    | BENCHMARK_RUN_STATUSES_STOPPED
+)
+
 
 def _number_or_none(value: Any) -> int | float | None:
     if isinstance(value, bool):
@@ -349,6 +362,420 @@ class SubmitRunResult:
             status=data["status"],
             created_at=data["created_at"],
             platform_url=data.get("platform_url"),
+        )
+
+
+@dataclass
+class BenchmarkTaskSet:
+    """A named task set exposed by a benchmark."""
+
+    name: str
+    task_count: int
+    recommended: bool
+    description: str | None
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> BenchmarkTaskSet:
+        return cls(
+            name=data["name"],
+            task_count=data["task_count"],
+            recommended=data.get("recommended", False),
+            description=data.get("description"),
+        )
+
+
+@dataclass
+class BenchmarkCategory:
+    """Task count for one benchmark category."""
+
+    name: str
+    task_count: int
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> BenchmarkCategory:
+        return cls(name=data["name"], task_count=data["task_count"])
+
+
+BenchmarkTaskDifficulty = Literal["easy", "medium", "hard"]
+
+
+class BenchmarkCatalogTask(TypedDict):
+    """One task exposed by the benchmark catalog."""
+
+    name: str
+    category: str | None
+    difficulty: BenchmarkTaskDifficulty | None
+
+
+def _parse_benchmark_catalog_task(data: dict[str, Any]) -> BenchmarkCatalogTask:
+    difficulty = data.get("difficulty")
+    if difficulty not in ("easy", "medium", "hard"):
+        difficulty = None
+    return {
+        "name": data["name"],
+        "category": data.get("category"),
+        "difficulty": difficulty,
+    }
+
+
+def _parse_unavailable_benchmark_tasks(data: Any) -> dict[str, Any] | None:
+    if not isinstance(data, dict):
+        return None
+    raw_tasks = data.get("tasks", [])
+    tasks = (
+        [
+            _parse_benchmark_catalog_task(task)
+            for task in raw_tasks
+            if isinstance(task, dict)
+        ]
+        if isinstance(raw_tasks, list)
+        else []
+    )
+    return {**data, "tasks": tasks}
+
+
+@dataclass
+class BenchmarkCatalogEntry:
+    """Benchmark available in the current workspace catalog."""
+
+    id: str
+    name: str
+    description: str | None
+    source_type: str
+    source_ref: str
+    task_count: int
+    category_count: int
+    task_sets: list[BenchmarkTaskSet]
+    source_url: str | None = None
+    sync_status: str = "ready"
+    synced_task_count: int = 0
+    sync_error: str | None = None
+    platform_url: str | None = None
+    run_count: int = 0
+    running_count: int = 0
+    last_run_at: str | None = None
+    last_run_status: str | None = None
+    last_run_name: str | None = None
+    creator_name: str | None = None
+
+    @property
+    def is_ready(self) -> bool:
+        """Whether the task list has finished paging in from the registry."""
+        return self.sync_status == "ready"
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> BenchmarkCatalogEntry:
+        return cls(
+            id=data["id"],
+            name=data["name"],
+            description=data.get("description"),
+            source_type=data["source_type"],
+            source_ref=data["source_ref"],
+            source_url=data.get("source_url"),
+            task_count=data["task_count"],
+            category_count=data["category_count"],
+            task_sets=[
+                BenchmarkTaskSet.from_dict(item) for item in data.get("task_sets", [])
+            ],
+            sync_status=data.get("sync_status", "ready"),
+            synced_task_count=int(data.get("synced_task_count") or 0),
+            sync_error=data.get("sync_error"),
+            platform_url=data.get("platform_url"),
+            run_count=int(data.get("run_count") or 0),
+            running_count=int(data.get("running_count") or 0),
+            last_run_at=data.get("last_run_at"),
+            last_run_status=data.get("last_run_status"),
+            last_run_name=data.get("last_run_name"),
+            creator_name=data.get("creator_name"),
+        )
+
+
+@dataclass
+class PaginatedBenchmarks:
+    """Paginated workspace benchmark catalog."""
+
+    benchmarks: list[BenchmarkCatalogEntry]
+    total_count: int
+    has_more: bool
+    next_offset: int | None
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> PaginatedBenchmarks:
+        return cls(
+            benchmarks=[
+                BenchmarkCatalogEntry.from_dict(item)
+                for item in data.get("benchmarks", [])
+            ],
+            total_count=data.get("total_count", 0),
+            has_more=data.get("has_more", False),
+            next_offset=data.get("next_offset"),
+        )
+
+
+@dataclass
+class BenchmarkCatalogDetail:
+    """Detailed benchmark metadata and task-selection options."""
+
+    id: str
+    name: str
+    description: str | None
+    source_type: str
+    source_ref: str
+    task_count: int
+    category_count: int
+    task_sets: list[BenchmarkTaskSet]
+    runner_family: str
+    supports_harness: bool
+    requires_harness: bool
+    requires_judge_model: bool
+    judge_model_default: str | None
+    pass_threshold: float
+    categories: list[BenchmarkCategory]
+    tasks: list[BenchmarkCatalogTask]
+    unavailable_tasks: dict[str, Any] | None
+    requires_judge_api_key: bool = False
+    default_harness: str | None = None
+    source_url: str | None = None
+    sync_status: str = "ready"
+    synced_task_count: int = 0
+    sync_error: str | None = None
+    platform_url: str | None = None
+    # Server-computed standings; metric shapes travel verbatim like
+    # BenchmarkRunDetail.agent_metrics, so the estimator stays server-side.
+    leaderboard: list[dict[str, Any]] = field(default_factory=list)
+
+    @property
+    def is_ready(self) -> bool:
+        """Whether the task list has finished paging in from the registry."""
+        return self.sync_status == "ready"
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> BenchmarkCatalogDetail:
+        benchmark = data["benchmark"]
+        return cls(
+            id=benchmark["id"],
+            name=benchmark["name"],
+            description=benchmark.get("description"),
+            source_type=benchmark["source_type"],
+            source_ref=benchmark["source_ref"],
+            source_url=benchmark.get("source_url"),
+            task_count=benchmark["task_count"],
+            category_count=benchmark["category_count"],
+            task_sets=[
+                BenchmarkTaskSet.from_dict(item)
+                for item in benchmark.get("task_sets", [])
+            ],
+            runner_family=benchmark["runner_family"],
+            supports_harness=benchmark["supports_harness"],
+            requires_harness=benchmark["requires_harness"],
+            requires_judge_model=benchmark["requires_judge_model"],
+            requires_judge_api_key=benchmark.get("requires_judge_api_key", False),
+            judge_model_default=benchmark.get("judge_model_default"),
+            pass_threshold=float(benchmark["pass_threshold"]),
+            categories=[
+                BenchmarkCategory.from_dict(item)
+                for item in benchmark.get("categories", [])
+            ],
+            tasks=[
+                _parse_benchmark_catalog_task(item)
+                for item in benchmark.get("tasks", [])
+            ],
+            unavailable_tasks=_parse_unavailable_benchmark_tasks(
+                benchmark.get("unavailable_tasks")
+            ),
+            default_harness=benchmark.get("default_harness"),
+            sync_status=benchmark.get("sync_status", "ready"),
+            synced_task_count=int(benchmark.get("synced_task_count") or 0),
+            sync_error=benchmark.get("sync_error"),
+            platform_url=benchmark.get("platform_url"),
+            leaderboard=[
+                item for item in data.get("leaderboard", []) if isinstance(item, dict)
+            ],
+        )
+
+
+@dataclass
+class SubmitBenchmarkRunResult:
+    """Result of submitting a benchmark run."""
+
+    id: str
+    name: str
+    status: str
+    created_at: str
+    workflow_id: str
+    task_count: int
+    platform_url: str | None = None
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> SubmitBenchmarkRunResult:
+        return cls(
+            id=data["id"],
+            name=data["name"],
+            status=data["status"],
+            created_at=data["created_at"],
+            workflow_id=data["workflow_id"],
+            task_count=data["task_count"],
+            platform_url=data.get("platform_url"),
+        )
+
+
+@dataclass
+class BenchmarkRun:
+    """A benchmark run in the current workspace."""
+
+    id: str
+    name: str
+    status: str
+    benchmark_name: str
+    created_at: str
+    benchmark_id: str | None = None
+    started_at: str | None = None
+    completed_at: str | None = None
+    creator_name: str | None = None
+    creator_email: str | None = None
+    platform_url: str | None = None
+    agent_count: int = 0
+    best_pass_at_1: float | None = None
+    ingested_results: int = 0
+    expected_results: int = 0
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> BenchmarkRun:
+        benchmark = data.get("benchmark")
+        if not isinstance(benchmark, dict):
+            benchmark = {}
+        best_pass_at_1 = _number_or_none(data.get("best_pass_at_1"))
+        return cls(
+            id=data["id"],
+            name=data.get("name") or data.get("benchmark_run_name", ""),
+            status=data.get("status", ""),
+            benchmark_name=data.get("benchmark_name") or benchmark.get("name", ""),
+            benchmark_id=data.get("benchmark_id") or benchmark.get("id"),
+            created_at=data.get("created_at", ""),
+            started_at=data.get("started_at"),
+            completed_at=data.get("completed_at"),
+            creator_name=data.get("creator_name"),
+            creator_email=data.get("creator_email"),
+            platform_url=data.get("platform_url"),
+            agent_count=int(data.get("agent_count") or 0),
+            best_pass_at_1=(
+                float(best_pass_at_1) if best_pass_at_1 is not None else None
+            ),
+            ingested_results=int(data.get("ingested_results") or 0),
+            expected_results=int(data.get("expected_results") or 0),
+        )
+
+
+@dataclass
+class BenchmarkRunDetail(BenchmarkRun):
+    """Detailed benchmark run with configuration, agents, and result totals."""
+
+    configuration: dict[str, Any] | None = None
+    agents: list[dict[str, Any]] | None = None
+    progress: dict[str, Any] | None = None
+    totals: dict[str, Any] | None = None
+    agent_metrics: list[dict[str, Any]] | None = None
+    is_internal_user: bool = False
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> BenchmarkRunDetail:
+        run = data["benchmark_run"]
+        configuration = data.get("configuration")
+        if not isinstance(configuration, dict):
+            configuration = None
+        progress = data.get("progress")
+        if not isinstance(progress, dict):
+            progress = None
+        totals = data.get("totals")
+        if not isinstance(totals, dict):
+            totals = None
+        raw_agents = data.get("agents")
+        agents = (
+            [item for item in raw_agents if isinstance(item, dict)]
+            if isinstance(raw_agents, list)
+            else []
+        )
+        raw_agent_metrics = data.get("agent_metrics")
+        agent_metrics = (
+            [item for item in raw_agent_metrics if isinstance(item, dict)]
+            if isinstance(raw_agent_metrics, list)
+            else []
+        )
+        benchmark_name = run.get("benchmark_name")
+        if not isinstance(benchmark_name, str):
+            benchmark_name = (
+                configuration.get("benchmark_name", "") if configuration else ""
+            )
+        benchmark_id = run.get("benchmark_id")
+        if not isinstance(benchmark_id, str):
+            configured_id = configuration.get("benchmark_id") if configuration else None
+            benchmark_id = configured_id if isinstance(configured_id, str) else None
+        merged_run = {
+            **run,
+            "benchmark_id": benchmark_id,
+            "benchmark_name": benchmark_name,
+        }
+        base = BenchmarkRun.from_dict(merged_run)
+        ingested_results = base.ingested_results
+        expected_results = base.expected_results
+        if progress is not None:
+            ingested_results = int(progress.get("ingested") or 0)
+            expected_results = int(progress.get("expected") or 0)
+        pass_at_1_values = []
+        for metrics in agent_metrics:
+            interval = metrics.get("pass_at_1")
+            if not isinstance(interval, dict):
+                continue
+            value = _number_or_none(interval.get("value"))
+            if value is not None:
+                pass_at_1_values.append(float(value))
+        return cls(
+            id=base.id,
+            name=base.name,
+            status=base.status,
+            benchmark_name=base.benchmark_name,
+            benchmark_id=base.benchmark_id,
+            created_at=base.created_at,
+            started_at=base.started_at,
+            completed_at=base.completed_at,
+            creator_name=base.creator_name,
+            creator_email=base.creator_email,
+            platform_url=base.platform_url,
+            agent_count=base.agent_count or len(agents),
+            best_pass_at_1=(
+                base.best_pass_at_1
+                if base.best_pass_at_1 is not None
+                else max(pass_at_1_values, default=None)
+            ),
+            ingested_results=ingested_results,
+            expected_results=expected_results,
+            configuration=configuration,
+            agents=agents,
+            progress=progress,
+            totals=totals,
+            agent_metrics=agent_metrics,
+            is_internal_user=data.get("is_internal_user", False),
+        )
+
+
+@dataclass
+class PaginatedBenchmarkRuns:
+    """Paginated benchmark runs for a workspace."""
+
+    benchmark_runs: list[BenchmarkRun]
+    total_count: int
+    has_more: bool
+    next_offset: int | None = None
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> PaginatedBenchmarkRuns:
+        return cls(
+            benchmark_runs=[
+                BenchmarkRun.from_dict(item) for item in data.get("benchmark_runs", [])
+            ],
+            total_count=data.get("total_count", 0),
+            has_more=data.get("has_more", False),
+            next_offset=data.get("next_offset"),
         )
 
 

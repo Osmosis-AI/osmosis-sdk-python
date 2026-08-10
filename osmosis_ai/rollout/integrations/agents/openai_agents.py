@@ -1,15 +1,41 @@
+"""OpenAI Agents SDK adapter for Osmosis rollouts.
+
+Install ``osmosis-ai[openai-agents]`` before importing this module.
+"""
+
 import logging
 import uuid
 from collections.abc import AsyncIterator, Mapping, Sequence
 from typing import Any, cast
 
-from agents import Agent
-from agents.extensions.models.litellm_model import LitellmModel
-from agents.items import ModelResponse, TResponseInputItem, TResponseStreamEvent
-from agents.memory.session import SessionABC
-from agents.model_settings import ModelSettings
-from agents.models.chatcmpl_converter import Converter
-from agents.usage import Usage
+from osmosis_ai._imports import raise_optional_dependency_error
+
+try:
+    from agents import Agent
+    from agents.extensions.models.litellm_model import LitellmModel
+    from agents.items import ModelResponse, TResponseInputItem, TResponseStreamEvent
+    from agents.memory.session import SessionABC
+    from agents.model_settings import ModelSettings
+    from agents.models.chatcmpl_converter import Converter
+    from agents.usage import Usage
+except ModuleNotFoundError as _exc:
+    raise_optional_dependency_error(
+        _exc,
+        extra="openai-agents",
+        feature="The OpenAI Agents integration",
+    )
+except ImportError as _exc:
+    # openai-agents converts a missing LiteLLM extra into ImportError. Recover
+    # the original ModuleNotFoundError so users get the Osmosis installation
+    # command without masking unrelated import incompatibilities.
+    _cause = _exc.__cause__
+    if not isinstance(_cause, ModuleNotFoundError) or _cause.name != "litellm":
+        raise
+    raise_optional_dependency_error(
+        _cause,
+        extra="openai-agents",
+        feature="The OpenAI Agents integration",
+    )
 
 from osmosis_ai.rollout.context import SampleSource, get_rollout_context
 from osmosis_ai.rollout.types import RolloutSample

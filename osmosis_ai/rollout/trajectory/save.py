@@ -1,16 +1,17 @@
 """Best-effort saving of finished rollouts as ATIF trajectory documents.
 
 Documents land at ``<artifact_root>/<rollout_id>/trajectory.json``, next to
-the rollout's file artifacts. Failures are logged and swallowed.
+the rollout's file artifacts; backend diagnostics land alongside as
+``diagnostics.json``. Failures are logged and swallowed.
 """
 
 import asyncio
+import json
 import logging
 from pathlib import Path
 from typing import Any
 
-from harbor.utils.trajectory_utils import format_trajectory_json
-
+from osmosis_ai.rollout.trajectory.atif import format_trajectory_json
 from osmosis_ai.rollout.trajectory.converter import convert_sample_to_trajectory
 from osmosis_ai.rollout.trajectory.report import SampleReport, TrajectoryReport
 from osmosis_ai.rollout.types import ExecutionResult
@@ -40,7 +41,7 @@ def _resolve_sample_report(
     return None, dict(report.samples)
 
 
-async def save_trajectories(
+async def save_trajectory(
     *,
     rollout_id: str,
     result: ExecutionResult,
@@ -49,8 +50,12 @@ async def save_trajectories(
     request_extra_fields: dict[str, Any] | None = None,
     report: TrajectoryReport | None = None,
     artifact_root: Path | None = None,
+    diagnostics: dict[str, Any] | None = None,
 ) -> None:
-    """Save the rollout's sample as an ATIF document. Never raises."""
+    """Save the rollout's sample as an ATIF document. Never raises.
+
+    ``diagnostics`` overrides ``result.extra_fields`` for the sidecar.
+    """
     try:
         await _save(
             rollout_id=rollout_id,
@@ -60,10 +65,11 @@ async def save_trajectories(
             request_extra_fields=request_extra_fields,
             report=report,
             artifact_root=artifact_root or default_artifact_root(),
+            diagnostics=diagnostics,
         )
     except Exception:
         logger.warning(
-            "Failed to save trajectories for rollout %s (best-effort)",
+            "Failed to save the trajectory for rollout %s (best-effort)",
             rollout_id,
             exc_info=True,
         )
@@ -78,7 +84,20 @@ async def _save(
     request_extra_fields: dict[str, Any] | None,
     report: TrajectoryReport | None,
     artifact_root: Path,
+    diagnostics: dict[str, Any] | None = None,
 ) -> None:
+    # Written before the sample-None early return so failures leave a record.
+    payload = diagnostics if diagnostics is not None else result.extra_fields
+    if payload is not None:
+        diagnostics_dest = artifact_root / rollout_id / "diagnostics.json"
+        diagnostics_data = json.dumps(
+            payload, ensure_ascii=False, indent=2, sort_keys=True, default=str
+        ).encode()
+        await asyncio.to_thread(_write_document, diagnostics_dest, diagnostics_data)
+        logger.info(
+            "Saved rollout diagnostics for %s -> %s", rollout_id, diagnostics_dest
+        )
+
     sample = result.sample
     if sample is None:
         return
@@ -112,7 +131,7 @@ async def _save(
         unmatched_sample_reports=unmatched_reports or None,
     )
     dest = artifact_root / rollout_id / "trajectory.json"
-    # Harbor's formatter keeps numeric arrays on one line.
+    # Keep large token-id/logprob arrays compact inside the pretty document.
     data = format_trajectory_json(trajectory.to_json_dict()).encode()
     await asyncio.to_thread(_write_document, dest, data)
     logger.info("Saved trajectory document for rollout %s -> %s", rollout_id, dest)

@@ -130,33 +130,3 @@ class AgentWorkflowContext[TConfig: AgentWorkflowConfig]:
         self.config = config
         self.metadata = metadata
         self.artifacts_dir = artifacts_dir
-
-
-@dataclass
-class HarborAgentWorkflowContext[TConfig: AgentWorkflowConfig](
-    AgentWorkflowContext[TConfig]
-):
-    """Context for agent workflow execution under HarborBackend.
-
-    Extends AgentWorkflowContext with the Harbor ``BaseEnvironment``,
-    allowing the workflow to interact with the container via
-    ``environment.exec()``, ``environment.upload_file()``, etc.
-    """
-
-    environment: Any = None
-
-    def __init__(
-        self,
-        prompt: list[dict[str, Any]],
-        config: TConfig,
-        environment: Any = None,
-        metadata: dict[str, Any] | None = None,
-        artifacts_dir: Path | None = None,
-    ):
-        super().__init__(
-            prompt=prompt,
-            config=config,
-            metadata=metadata,
-            artifacts_dir=artifacts_dir,
-        )
-        self.environment = environment
