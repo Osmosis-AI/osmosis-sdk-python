@@ -117,6 +117,30 @@ def content_hash(path: Path, *, extra: str = "", exclude: Path | None = None) ->
     return digest.hexdigest()[:32]
 
 
+def _reject_directory_symlinks(path: Path, *, exclude: Path | None) -> None:
+    """Refuse to build through directory (or broken) symlinks.
+
+    ``content_hash`` cannot see through them — ``rglob`` does not recurse into
+    symlinked directories — while the ``copytree`` staging below dereferences
+    them into the build, so the cache key would not describe what actually
+    ships and a mutated link target would keep serving the stale cached wheel.
+    A link resolving into the build output tree would even recurse. File
+    symlinks stay allowed: hashing and staging both read the target's bytes,
+    so the two agree. Walks the same exclusion rules as ``content_hash``.
+    """
+    for p in path.rglob("*"):
+        if set(p.relative_to(path).parts) & EXCLUDE_DIRS:
+            continue
+        if exclude is not None and p.is_relative_to(exclude):
+            continue
+        if p.is_symlink() and not p.is_file():
+            raise ValueError(
+                f"bundle source contains a directory or broken symlink: "
+                f"{p} -> {os.readlink(p)}; replace it with a real directory "
+                "or file so the bundle cache can hash what it ships"
+            )
+
+
 def _stage_ignore(exclude: Path | None) -> Callable[[str, list[str]], set[str]]:
     """``copytree`` filter: the usual noise, plus a cache dir inside the source.
 
@@ -333,6 +357,7 @@ def build_bundle(
     nested_cache = (
         resolved_bundles_dir if resolved_bundles_dir.is_relative_to(code_dir) else None
     )
+    _reject_directory_symlinks(code_dir, exclude=nested_cache)
     bundle_key = content_hash(
         code_dir,
         extra=build_descriptor,

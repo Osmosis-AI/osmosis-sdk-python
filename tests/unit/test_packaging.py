@@ -535,3 +535,85 @@ def test_project_dir_for_locates_bench_harness():
         assert project_dir_for(BenchWorkflow) == harness_dir
     finally:
         sys.path.remove(str(harness_dir))
+
+
+# ---------------------------------------------------------------------------
+# Directory symlinks: the hash cannot see through them, staging dereferences
+# them — so they are rejected before either runs.
+# ---------------------------------------------------------------------------
+
+
+def test_directory_symlink_is_rejected(project, tmp_path):
+    external = tmp_path / "external"
+    external.mkdir()
+    (external / "value.py").write_text('VALUE = "v1"\n')
+    (project / "my_harness" / "linked").symlink_to(external, target_is_directory=True)
+
+    with pytest.raises(ValueError, match="symlink"):
+        build_bundle(
+            project,
+            workflow="my_harness.solver:MyWorkflow",
+            bundles_dir=tmp_path / "bundles",
+        )
+
+
+def test_broken_symlink_is_rejected(project, tmp_path):
+    (project / "my_harness" / "gone").symlink_to(tmp_path / "does-not-exist")
+
+    with pytest.raises(ValueError, match="symlink"):
+        build_bundle(
+            project,
+            workflow="my_harness.solver:MyWorkflow",
+            bundles_dir=tmp_path / "bundles",
+        )
+
+
+def test_symlink_back_into_the_project_is_rejected(project, tmp_path):
+    # The recursion family: staging a link that resolves to the tree being
+    # copied (project root, or the bundle output inside it) never terminates.
+    (project / "my_harness" / "loop").symlink_to(project)
+
+    with pytest.raises(ValueError, match="symlink"):
+        build_bundle(
+            project,
+            workflow="my_harness.solver:MyWorkflow",
+            bundles_dir=project / "bundles",
+        )
+
+
+def test_file_symlink_builds_and_tracks_target_content(project, tmp_path):
+    # File symlinks are the case hash and staging agree on: both read the
+    # target's bytes, so a mutated target must produce a different wheel.
+    real = tmp_path / "shared.py"
+    real.write_text('VALUE = "v1"\n')
+    (project / "my_harness" / "shared.py").symlink_to(real)
+
+    first = build_bundle(
+        project,
+        workflow="my_harness.solver:MyWorkflow",
+        bundles_dir=tmp_path / "bundles",
+    )
+    real.write_text('VALUE = "v2"\n')
+    second = build_bundle(
+        project,
+        workflow="my_harness.solver:MyWorkflow",
+        bundles_dir=tmp_path / "bundles",
+    )
+
+    assert first != second
+    with zipfile.ZipFile(second) as archive:
+        assert 'VALUE = "v2"' in archive.read("my_harness/shared.py").decode()
+
+
+def test_symlinks_inside_excluded_dirs_are_ignored(project, tmp_path):
+    # Virtualenvs are full of symlinks and are never part of the bundle.
+    venv_bin = project / ".venv" / "bin"
+    venv_bin.mkdir(parents=True)
+    (venv_bin / "python").symlink_to(tmp_path)
+
+    wheel = build_bundle(
+        project,
+        workflow="my_harness.solver:MyWorkflow",
+        bundles_dir=tmp_path / "bundles",
+    )
+    assert wheel.is_file()
