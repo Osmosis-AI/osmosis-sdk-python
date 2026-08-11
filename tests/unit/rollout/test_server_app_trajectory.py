@@ -44,7 +44,7 @@ class StubBackend(ExecutionBackend):
 
     def __init__(
         self,
-        workflow_result: ExecutionResult,
+        workflow_result: ExecutionResult | None = None,
         grader_result: ExecutionResult | None = None,
         raises: Exception | None = None,
     ) -> None:
@@ -60,7 +60,10 @@ class StubBackend(ExecutionBackend):
         on_grader_complete: ResultCallback | None = None,
     ) -> None:
         self.received_grader_callback = on_grader_complete is not None
-        await on_workflow_complete(self.workflow_result)
+        # ``workflow_result=None`` models a backend that dies before reporting
+        # anything at all — the case the server's error path exists for.
+        if self.workflow_result is not None:
+            await on_workflow_complete(self.workflow_result)
         if on_grader_complete and self.grader_result is not None:
             await on_grader_complete(self.grader_result)
         if self.raises is not None:
@@ -174,8 +177,10 @@ async def test_records_even_when_backend_raises(tmp_path: Path, monkeypatch) -> 
 async def test_failure_completion_ack_report_lands_in_document(
     tmp_path: Path, monkeypatch
 ) -> None:
-    # The backend dies after the workflow completed; only the ack of the
-    # resulting failure completion callback carries the controller's metrics.
+    # The workflow reports failure but still carries a sample; the ack of that
+    # failure completion callback is what brings the controller's metrics. (A
+    # backend that dies *after* reporting success no longer posts a second,
+    # contradicting completion — see test_server_app_callbacks.py.)
     report_body = {
         "trajectory": {
             "model_name": "openai/gpt-5-mini",
@@ -193,9 +198,8 @@ async def test_failure_completion_ack_report_lands_in_document(
     patch_artifact_root(monkeypatch, tmp_path)
     backend = StubBackend(
         workflow_result=ExecutionResult(
-            status=RolloutStatus.SUCCESS, sample=make_sample()
+            status=RolloutStatus.FAILURE, sample=make_sample()
         ),
-        raises=RuntimeError("boom"),
     )
 
     await _handle_rollout(backend, make_request(grader_callback_url=None))
@@ -303,15 +307,11 @@ async def test_failure_with_no_sample_at_all_still_writes_diagnostics(
 async def test_fabricated_failure_callback_sent_when_execute_raises(
     tmp_path: Path, monkeypatch
 ) -> None:
+    # execute() dies before reporting anything, so the server has to fabricate
+    # a terminal completion or the controller waits forever.
     posted = patch_callbacks(monkeypatch)
     patch_artifact_root(monkeypatch, tmp_path)
-    backend = StubBackend(
-        workflow_result=ExecutionResult(
-            status=RolloutStatus.FAILURE,
-            extra_fields={"phase": "agent_setup"},
-        ),
-        raises=RuntimeError("boom"),
-    )
+    backend = StubBackend(raises=RuntimeError("boom"))
 
     await _handle_rollout(backend, make_request(grader_callback_url=None))
 

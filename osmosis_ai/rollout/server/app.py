@@ -23,6 +23,7 @@ from osmosis_ai.rollout.types import (
     RolloutCompleteRequest,
     RolloutInitRequest,
     RolloutInitResponse,
+    RolloutSample,
     RolloutStatus,
     RolloutStatusResponse,
 )
@@ -131,6 +132,11 @@ async def _handle_rollout(
     last_diagnostics: dict[str, Any] | None = None
     # Latest metrics from callback acks.
     report: TrajectoryReport | None = None
+    # A terminal callback is a promise the controller acts on: it closes out
+    # ``rollout_id``. Posting a second one contradicts the first, so track what
+    # has already been delivered and let the error path below skip it.
+    completion_posted = False
+    grader_posted = False
 
     def record_result_to_save(result: ExecutionResult) -> None:
         nonlocal result_to_save, last_diagnostics
@@ -140,7 +146,7 @@ async def _handle_rollout(
             result_to_save = result
 
     async def on_workflow_complete(result: ExecutionResult) -> None:
-        nonlocal report
+        nonlocal report, completion_posted
         record_result_to_save(result)
         resp = await post_json_with_retry(
             url=request.completion_callback_url,
@@ -152,10 +158,11 @@ async def _handle_rollout(
             ).model_dump(),
             headers=auth.as_bearer_headers(),
         )
+        completion_posted = True
         report = report_from_response(resp) or report
 
     async def on_grader_complete(result: ExecutionResult) -> None:
-        nonlocal report
+        nonlocal report, grader_posted
         record_result_to_save(result)
         if not request.grader_callback_url:
             logger.info(
@@ -170,19 +177,69 @@ async def _handle_rollout(
             result.status,
             result.sample is not None,
         )
-        resp = await post_json_with_retry(
-            url=request.grader_callback_url,
-            payload=GraderCompleteRequest(
+        status = (
+            GraderStatus.SUCCESS
+            if result.status == RolloutStatus.SUCCESS
+            else GraderStatus.FAILURE
+        )
+        wire_sample = result.sample
+        if wire_sample is not None:
+            # Callers mutate ``metrics`` in place, past every validator;
+            # this is the last point before the payload has to be JSON.
+            wire_sample = wire_sample.json_safe_copy()
+            # Consumers attach any numeric reward they see to eval metrics and
+            # training trajectories, checking neither status nor remove_sample.
+            # So the wire reward has to stand for exactly one thing: a kept,
+            # successfully-graded sample. A failed grade or a sample the grader
+            # marked for removal must not carry one. The archived trajectory
+            # keeps the original sample, reward included.
+            reward_is_trainable = (
+                status is GraderStatus.SUCCESS and not wire_sample.remove_sample
+            )
+            if not reward_is_trainable and wire_sample.reward is not None:
+                wire_sample = wire_sample.model_copy(update={"reward": None})
+
+        def grader_payload(sample: RolloutSample | None) -> dict[str, Any]:
+            return GraderCompleteRequest(
                 rollout_id=rollout_id,
-                status=GraderStatus.SUCCESS
-                if result.status == RolloutStatus.SUCCESS
-                else GraderStatus.FAILURE,
-                sample=result.sample,
+                status=status,
+                sample=sample,
                 err_message=result.err_message,
                 err_category=result.err_category,
-            ).model_dump(exclude={"sample": {"trajectory_messages"}}),
-            headers=auth.as_bearer_headers(),
-        )
+            ).model_dump(exclude={"sample": {"trajectory_messages"}})
+
+        try:
+            resp = await post_json_with_retry(
+                url=request.grader_callback_url,
+                payload=grader_payload(wire_sample),
+                headers=auth.as_bearer_headers(),
+            )
+        except (TypeError, ValueError):
+            # Encoding failed despite sanitization. Telemetry is optional;
+            # the reward is not — retry with a minimal sample so an earned
+            # reward still arrives instead of a fabricated grader failure.
+            logger.exception(
+                "Grader callback payload for %s is not JSON-encodable; "
+                "retrying without telemetry",
+                rollout_id,
+            )
+            minimal = (
+                RolloutSample(
+                    messages=[],
+                    trajectory_messages=None,
+                    label=wire_sample.label,
+                    reward=wire_sample.reward,
+                    remove_sample=wire_sample.remove_sample,
+                )
+                if wire_sample is not None
+                else None
+            )
+            resp = await post_json_with_retry(
+                url=request.grader_callback_url,
+                payload=grader_payload(minimal),
+                headers=auth.as_bearer_headers(),
+            )
+        grader_posted = True
         report = report_from_response(resp) or report
         logger.info(
             "Grader callback for %s completed: status=%d",
@@ -209,20 +266,31 @@ async def _handle_rollout(
         logger.info("Rollout %s completed successfully", rollout_id)
     except Exception:
         logger.error("Rollout %s failed: %s", rollout_id, traceback.format_exc())
-        try:
-            resp = await post_json_with_retry(
-                url=request.completion_callback_url,
-                payload=RolloutCompleteRequest(
-                    status=RolloutStatus.FAILURE,
-                    rollout_id=rollout_id,
-                    err_message="Internal server error",
-                ).model_dump(),
-                headers=auth.as_bearer_headers(),
+        if completion_posted:
+            # The workflow already reported a terminal status; whatever failed
+            # afterwards (grading, callback encoding) belongs to the grader
+            # callback below, not to a second, contradicting completion.
+            logger.info(
+                "Rollout %s already reported completion; not posting a second one",
+                rollout_id,
             )
-            report = report_from_response(resp) or report
-        except Exception:
-            logger.error("Failed to post error callback: %s", traceback.format_exc())
-        if request.grader_callback_url:
+        else:
+            try:
+                resp = await post_json_with_retry(
+                    url=request.completion_callback_url,
+                    payload=RolloutCompleteRequest(
+                        status=RolloutStatus.FAILURE,
+                        rollout_id=rollout_id,
+                        err_message="Internal server error",
+                    ).model_dump(),
+                    headers=auth.as_bearer_headers(),
+                )
+                report = report_from_response(resp) or report
+            except Exception:
+                logger.error(
+                    "Failed to post error callback: %s", traceback.format_exc()
+                )
+        if request.grader_callback_url and not grader_posted:
             try:
                 await on_grader_complete(ExecutionResult(status=RolloutStatus.FAILURE))
             except Exception:

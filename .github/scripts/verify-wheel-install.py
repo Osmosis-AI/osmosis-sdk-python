@@ -16,6 +16,7 @@ import os
 import re
 import subprocess
 import sys
+import sysconfig
 from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import Any
@@ -64,6 +65,7 @@ EXTRA_REQUIREMENTS: dict[str, set[str]] = {
         "orjson",
         "platformdirs",
         "toml",
+        "uv",
     },
     "rubric": {"aiohttp", "click", "litellm", "orjson", "tqdm"},
     "parquet": {"pyarrow"},
@@ -294,6 +296,11 @@ def _smoke_harbor() -> None:
     packaging = importlib.import_module("osmosis_ai.packaging")
     assert callable(packaging.build_bundle)
     importlib.import_module("toml")
+    uv_executable = Path(sysconfig.get_path("scripts")) / (
+        "uv.exe" if os.name == "nt" else "uv"
+    )
+    assert uv_executable.is_file(), f"Missing uv executable: {uv_executable}"
+    assert packaging._uv_executable() == str(uv_executable)
 
 
 def _smoke_rubric() -> None:
@@ -330,7 +337,7 @@ SCENARIO_PRESENT: dict[str, set[str]] = {
     "server": {"fastapi", "uvicorn"},
     "strands": {"litellm", "strands-agents"},
     "openai-agents": {"litellm", "openai-agents"},
-    "harbor": {"dockerfile-parse", "harbor", "platformdirs", "toml"},
+    "harbor": {"dockerfile-parse", "harbor", "platformdirs", "toml", "uv"},
     "rubric": {"litellm", "orjson", "tqdm"},
     "parquet": {"pyarrow"},
     "full": {
@@ -345,6 +352,7 @@ SCENARIO_PRESENT: dict[str, set[str]] = {
         "strands-agents",
         "toml",
         "tqdm",
+        "uv",
         "uvicorn",
     },
 }
@@ -365,6 +373,7 @@ SCENARIO_ABSENT: dict[str, set[str]] = {
         "strands-agents",
         "toml",
         "tqdm",
+        "uv",
         "uvicorn",
     },
     "server": {
@@ -378,6 +387,7 @@ SCENARIO_ABSENT: dict[str, set[str]] = {
         "strands-agents",
         "toml",
         "tqdm",
+        "uv",
     },
     "strands": {
         "dockerfile-parse",
@@ -386,6 +396,7 @@ SCENARIO_ABSENT: dict[str, set[str]] = {
         "platformdirs",
         "pyarrow",
         "toml",
+        "uv",
     },
     "openai-agents": {
         "dockerfile-parse",
@@ -394,6 +405,7 @@ SCENARIO_ABSENT: dict[str, set[str]] = {
         "pyarrow",
         "strands-agents",
         "toml",
+        "uv",
     },
     "harbor": {"openai-agents", "pyarrow", "strands-agents"},
     "rubric": {
@@ -405,6 +417,7 @@ SCENARIO_ABSENT: dict[str, set[str]] = {
         "pyarrow",
         "strands-agents",
         "toml",
+        "uv",
         "uvicorn",
     },
     "parquet": {
@@ -418,6 +431,7 @@ SCENARIO_ABSENT: dict[str, set[str]] = {
         "strands-agents",
         "toml",
         "tqdm",
+        "uv",
         "uvicorn",
     },
     "full": set(),

@@ -9,11 +9,15 @@ anywhere with one ``pip install`` — a rollout container or a user's own box.
 from __future__ import annotations
 
 import hashlib
+import os
 import shutil
 import subprocess
+import sys
+import sysconfig
 import tempfile
 import tomllib
 import zipfile
+from collections.abc import Callable
 from dataclasses import dataclass
 from importlib.metadata import PathDistribution
 from pathlib import Path
@@ -63,6 +67,9 @@ EXCLUDE_DIRS = {
     ".ruff_cache",
 }
 
+# PyPA's ``src/`` layout, which ``uv init --lib`` also produces.
+SRC_LAYOUT_DIR = "src"
+
 
 @dataclass(frozen=True)
 class BundleInfo:
@@ -80,28 +87,123 @@ def grader_script_name(package: str) -> str:
     return f"{package.replace('_', '-')}-grade"
 
 
-def content_hash(path: Path, *, extra: str = "") -> str:
+def _uv_executable() -> str:
+    """Find uv installed with this interpreter, then fall back to PATH."""
+    script_dirs = (Path(sysconfig.get_path("scripts")), Path(sys.executable).parent)
+    for script_dir in dict.fromkeys(script_dirs):
+        for name in ("uv", "uv.exe"):
+            candidate = script_dir / name
+            if candidate.is_file() and os.access(candidate, os.X_OK):
+                return str(candidate)
+    executable = shutil.which("uv")
+    if executable is None:
+        raise RuntimeError(
+            "uv is required to build rollout bundles; install osmosis-ai[harbor]"
+        )
+    return executable
+
+
+def content_hash(path: Path, *, extra: str = "", exclude: Path | None = None) -> str:
     digest = hashlib.sha256(extra.encode())
     for file in sorted(
-        p for p in path.rglob("*") if p.is_file() and not (set(p.parts) & EXCLUDE_DIRS)
+        p
+        for p in path.rglob("*")
+        if p.is_file()
+        and not (set(p.relative_to(path).parts) & EXCLUDE_DIRS)
+        and not (exclude is not None and p.is_relative_to(exclude))
     ):
         digest.update(str(file.relative_to(path)).encode())
         digest.update(file.read_bytes())
     return digest.hexdigest()[:32]
 
 
+def _reject_directory_symlinks(path: Path, *, exclude: Path | None) -> None:
+    """Refuse to build through directory (or broken) symlinks.
+
+    ``content_hash`` cannot see through them — ``rglob`` does not recurse into
+    symlinked directories — while the ``copytree`` staging below dereferences
+    them into the build, so the cache key would not describe what actually
+    ships and a mutated link target would keep serving the stale cached wheel.
+    A link resolving into the build output tree would even recurse. File
+    symlinks stay allowed: hashing and staging both read the target's bytes,
+    so the two agree. Walks the same exclusion rules as ``content_hash``.
+    """
+    for p in path.rglob("*"):
+        if set(p.relative_to(path).parts) & EXCLUDE_DIRS:
+            continue
+        if exclude is not None and p.is_relative_to(exclude):
+            continue
+        if p.is_symlink() and not p.is_file():
+            raise ValueError(
+                f"bundle source contains a directory or broken symlink: "
+                f"{p} -> {os.readlink(p)}; replace it with a real directory "
+                "or file so the bundle cache can hash what it ships"
+            )
+
+
+def _stage_ignore(exclude: Path | None) -> Callable[[str, list[str]], set[str]]:
+    """``copytree`` filter: the usual noise, plus a cache dir inside the source.
+
+    ``ignore_patterns`` matches bare names, so it cannot distinguish the one
+    ``bundles/`` that is this build's own output directory from any other.
+    """
+    patterns = shutil.ignore_patterns(*EXCLUDE_DIRS, "*.pyc")
+
+    def ignore(src: str, names: list[str]) -> set[str]:
+        ignored = set(patterns(src, names))
+        if exclude is not None and exclude.parent == Path(src):
+            ignored.add(exclude.name)
+        return ignored
+
+    return ignore
+
+
+def package_roots(code_dir: Path) -> list[Path]:
+    """Directories that may hold the import package: flat layout, then ``src/``."""
+    roots = [code_dir]
+    src = code_dir / SRC_LAYOUT_DIR
+    if src.is_dir():
+        roots.append(src)
+    return roots
+
+
 def find_package(code_dir: Path) -> str:
     packages = sorted(
-        d.name
-        for d in code_dir.iterdir()
-        if d.is_dir() and (d / "__init__.py").exists() and d.name not in EXCLUDE_DIRS
+        {
+            d.name
+            for root in package_roots(code_dir)
+            for d in root.iterdir()
+            if d.is_dir()
+            and (d / "__init__.py").exists()
+            and d.name not in EXCLUDE_DIRS
+        }
     )
     if len(packages) != 1:
+        searched = " or ".join(str(root) for root in package_roots(code_dir))
         raise ValueError(
-            f"expected exactly one python package in {code_dir}, "
+            f"expected exactly one python package in {searched}, "
             f"found {packages or 'none'}; pass package= explicitly"
         )
     return packages[0]
+
+
+def find_package_dir(code_dir: Path, package: str) -> Path:
+    """Resolve *package* to its directory under a flat or ``src/`` layout.
+
+    The shim has to land in the directory the build backend will actually
+    package, which is ``src/<package>/`` for a src-layout project — writing it
+    to ``<project>/<package>/`` silently produces a wheel with no runner.
+    """
+    roots = package_roots(code_dir)
+    # ``__init__.py`` first, so a regular package always wins the flat-vs-src
+    # tie; then any directory, which is all a PEP 420 namespace package has.
+    for probe in (lambda d: (d / "__init__.py").is_file(), lambda d: d.is_dir()):
+        for root in roots:
+            candidate = root / package
+            if probe(candidate):
+                return candidate
+    searched = " or ".join(str(root / package) for root in roots)
+    raise ValueError(f"package {package!r} not found; looked in {searched}")
 
 
 def requirement_name(spec: str) -> str:
@@ -125,6 +227,12 @@ def project_dir_for(obj: object) -> Path:
     while (package_dir.parent / "__init__.py").exists():
         package_dir = package_dir.parent
     project_dir = package_dir.parent
+    # A src-layout package sits one level deeper than its project root.
+    if (
+        project_dir.name == SRC_LAYOUT_DIR
+        and not (project_dir / "pyproject.toml").is_file()
+    ):
+        project_dir = project_dir.parent
     if not (project_dir / "pyproject.toml").is_file():
         raise ValueError(
             f"no pyproject.toml next to package {package_dir.name!r} "
@@ -208,8 +316,9 @@ def build_bundle(
             references[label] = "None"
             continue
         module, attr = split_ref(ref, label)
-        imports.append(f"from {module} import {attr}")
-        references[label] = attr
+        alias = f"_osmosis_{label}"
+        imports.append(f"from {module} import {attr} as {alias}")
+        references[label] = alias
 
     shim = "\n".join(imports) + "\nfrom osmosis_ai.rollout.container import runner\n"
     scripts = {}
@@ -228,27 +337,71 @@ def build_bundle(
 
     project = tomllib.loads(pyproject_path.read_text()).get("project", {})
     name = project.get("name") or f"osmosis-harness-{package}"
-    bundle_key = content_hash(
-        code_dir, extra=pyproject_path.read_text() + shim + repr(deps or [])
+    wheel_distribution = canonicalize_name(name, validate=True).replace("-", "_")
+    build_descriptor = "\0".join(
+        (
+            pyproject_path.read_text(),
+            shim,
+            repr(deps or []),
+            package,
+            sys.implementation.cache_tag or "",
+            sysconfig.get_platform(),
+        )
     )
-    bundles_dir.mkdir(parents=True, exist_ok=True)
-    wheel_glob = f"{name.replace('-', '_')}-*.whl"
-    marker = bundles_dir / f"{name}-{bundle_key}.key"
-    cached = sorted(bundles_dir.glob(wheel_glob))
-    if cached and marker.exists():
-        return cached[0]
+    # A bundles_dir inside the project would otherwise feed its own output back
+    # into the build: the wheels change the cache key on every call, and the
+    # staging dir below becomes a descendant of the tree being copied into it.
+    # Compared resolved (code_dir is), but bundles_dir itself is left as the
+    # caller wrote it so the returned path keeps its shape.
+    resolved_bundles_dir = bundles_dir.resolve()
+    if resolved_bundles_dir == code_dir:
+        # The exclusion below only knows how to carve out a strict
+        # subdirectory. Equal paths would exclude every source file from the
+        # cache key and stage the tree into itself until copytree fails.
+        raise ValueError(
+            f"bundles_dir must not be the project directory itself ({code_dir}); "
+            "use a subdirectory such as code_dir / 'bundles'"
+        )
+    nested_cache = (
+        resolved_bundles_dir if resolved_bundles_dir.is_relative_to(code_dir) else None
+    )
+    _reject_directory_symlinks(code_dir, exclude=nested_cache)
+    bundle_key = content_hash(
+        code_dir,
+        extra=build_descriptor,
+        exclude=nested_cache,
+    )
+    distribution_dir = bundles_dir / wheel_distribution
+    cache_dir = distribution_dir / bundle_key
+    distribution_dir.mkdir(parents=True, exist_ok=True)
 
-    for old in bundles_dir.glob(f"{name}-*.key"):
-        old.unlink()
-    with tempfile.TemporaryDirectory() as staging:
-        stage = Path(staging)
+    cached = sorted(path for path in cache_dir.glob("*.whl") if path.is_file())
+    if len(cached) == 1:
+        return cached[0]
+    if cache_dir.exists():
+        # Complete entries appear with one atomic directory rename below. Never
+        # delete here: another builder may have published between the glob and
+        # exists checks, and callers may already hold its returned wheel path.
+        cached = sorted(path for path in cache_dir.glob("*.whl") if path.is_file())
+        if len(cached) == 1:
+            return cached[0]
+        raise RuntimeError(
+            f"invalid bundle cache entry: {cache_dir}; delete this directory and retry"
+        )
+
+    with tempfile.TemporaryDirectory(
+        dir=distribution_dir, prefix=".build-"
+    ) as build_root:
+        root = Path(build_root)
+        stage = root / "source"
+        output = root / "wheel"
         shutil.copytree(
             code_dir,
             stage,
             dirs_exist_ok=True,
-            ignore=shutil.ignore_patterns(*EXCLUDE_DIRS, "*.pyc"),
+            ignore=_stage_ignore(nested_cache),
         )
-        (stage / package / "bundle_main.py").write_text(shim)
+        (find_package_dir(stage, package) / "bundle_main.py").write_text(shim)
         staged = tomllib.loads((stage / "pyproject.toml").read_text())
         staged_project = staged.setdefault("project", {})
         overridden = {requirement_name(d) for d in deps or []}
@@ -260,13 +413,32 @@ def build_bundle(
         staged_project["scripts"] = {**staged_project.get("scripts", {}), **scripts}
         (stage / "pyproject.toml").write_text(toml.dumps(staged))
         subprocess.run(
-            ["uv", "build", "--wheel", "--out-dir", str(bundles_dir), str(stage)],
+            [
+                _uv_executable(),
+                "build",
+                "--wheel",
+                "--out-dir",
+                str(output),
+                str(stage),
+            ],
             check=True,
             capture_output=True,
         )
+        wheels = sorted(path for path in output.glob("*.whl") if path.is_file())
+        if len(wheels) != 1:
+            raise RuntimeError(
+                f"uv build produced {len(wheels)} wheels in {output}; "
+                "expected exactly one"
+            )
+        wheel_name = wheels[0].name
+        try:
+            output.replace(cache_dir)
+        except OSError:
+            # Another process may have published the same content-addressed
+            # entry while this build was running. Its complete entry wins.
+            cached = sorted(path for path in cache_dir.glob("*.whl") if path.is_file())
+            if len(cached) == 1:
+                return cached[0]
+            raise
 
-    marker.touch()
-    wheels = sorted(bundles_dir.glob(wheel_glob))
-    if not wheels:
-        raise RuntimeError(f"uv build produced no wheel in {bundles_dir}")
-    return wheels[0]
+    return cache_dir / wheel_name
