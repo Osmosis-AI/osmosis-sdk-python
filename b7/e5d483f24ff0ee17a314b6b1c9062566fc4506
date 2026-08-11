@@ -1,0 +1,21 @@
+osmosis_ai/consts.py
+  s_52fc51b5f5c65f::t_16f73ded8a1226 3
+CHANGELOG.md
+  s_52fc51b5f5c65f::t_16f73ded8a1226 7-8,11-13,17-21,23
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "b7e5d483f24ff0ee17a314b6b1c9062566fc4506",
+  "prompts": {},
+  "sessions": {
+    "s_52fc51b5f5c65f": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019ff260-c42e-7c93-927d-33b7e81b05d5",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}
