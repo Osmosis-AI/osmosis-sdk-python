@@ -133,6 +133,31 @@ def test_local_session_uses_the_local_tool(
     assert stdout.getvalue() == ""
 
 
+def test_windows_session_uses_clip(
+    runs: list[dict[str, Any]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("osmosis_ai.cli.clipboard.platform.system", lambda: "Windows")
+    _installed(monkeypatch, "clip")
+
+    assert copy_to_clipboard(TEXT) is True
+
+    assert [call["command"] for call in runs] == [["clip"]]
+
+
+def test_unknown_platform_skips_local_tool(
+    runs: list[dict[str, Any]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    stdout = _stdout(monkeypatch)
+    monkeypatch.setattr("osmosis_ai.cli.clipboard.platform.system", lambda: "FreeBSD")
+    # Even if a familiar binary exists, an unknown OS has no candidate list.
+    _installed(monkeypatch, "xclip", "pbcopy", "clip")
+
+    assert copy_to_clipboard(TEXT) is True
+
+    assert runs == []
+    assert stdout.getvalue() == f"{ESC}]52;c;{PAYLOAD}{BEL}"
+
+
 def test_wayland_session_uses_wl_copy(
     runs: list[dict[str, Any]], monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -197,5 +222,25 @@ def test_reports_failure_when_nothing_can_copy(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _stdout(monkeypatch, tty=False)
+
+    assert copy_to_clipboard(TEXT) is False
+
+
+def test_osc52_fails_when_isatty_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _BrokenTty(StringIO):
+        def isatty(self) -> bool:
+            raise OSError("broken pipe")
+
+    monkeypatch.setattr("osmosis_ai.cli.clipboard.sys.stdout", _BrokenTty())
+
+    assert copy_to_clipboard(TEXT) is False
+
+
+def test_osc52_fails_when_write_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _WriteFails(_Tty):
+        def write(self, s: str) -> int:  # type: ignore[override]
+            raise OSError("broken pipe")
+
+    monkeypatch.setattr("osmosis_ai.cli.clipboard.sys.stdout", _WriteFails(tty=True))
 
     assert copy_to_clipboard(TEXT) is False
