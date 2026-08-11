@@ -29,6 +29,10 @@ from osmosis_ai.platform.auth.platform_client import (
     AuthenticationExpiredError,
     PlatformAPIError,
 )
+from osmosis_ai.platform.cli.workspace_directories import (
+    recall_workspace_directory,
+    remember_workspace_directory,
+)
 from tests.unit.platform.cli.conftest import strip_ansi
 
 # Captured at import so the spinner-rendering test can restore what the fixtures
@@ -38,6 +42,7 @@ _REAL_RUN_GIT_CLONE = quickstart_module._run_git_clone
 
 PLATFORM_URL = "https://platform.osmosis.ai"
 FULL_NAME = "acme/acme-workspace"
+BILLING_PAUSE = "Press Enter to continue..."
 WORKSPACE = WorkspaceSummary(
     id="ws-1",
     name="acme",
@@ -73,9 +78,10 @@ EVAL_PROMPT = (
     "before submitting an evaluation run."
 )
 BENCHMARK_PROMPT = (
-    "I want to benchmark agents on managed benchmarks in this Osmosis workspace. "
-    "Use the submit-benchmarks skill: help me pick a benchmark and configuration, "
-    "submit the run, and interpret the results."
+    "I want to run a benchmark in this Osmosis workspace. Start with the "
+    "submit-benchmarks skill: read the workspace instructions, help me settle "
+    "which benchmark, which tasks, and which agents to compare, and confirm the "
+    "run size with me before submitting a benchmark run."
 )
 
 
@@ -147,16 +153,35 @@ class Prompts:
     def __init__(self) -> None:
         self.selects: dict[str, list[Any]] = {}
         self.texts: dict[str, list[str | None]] = {}
+        self.confirms: dict[str, list[bool | None]] = {}
+        self.pauses: list[bool] = []
+        self.pause_calls: list[str] = []
         self.select_calls: list[tuple[str, list[Any]]] = []
+        self.select_defaults: dict[str, Any] = {}
         self.text_calls: list[tuple[str, str, str | None]] = []
+        self.confirm_calls: list[tuple[str, bool]] = []
         self.rejections: list[tuple[str, str, Any]] = []
 
-    def select_list(self, message: str, items: Any, **_kwargs: Any) -> Any:
+    def select_list(self, message: str, items: Any, **kwargs: Any) -> Any:
         titles = [getattr(item, "title", item) for item in items]
         self.select_calls.append((message, titles))
+        self.select_defaults[message] = kwargs.get("default")
         answers = self.selects.get(message)
         if not answers:
             pytest.fail(f"unexpected select prompt: {message}")
+        return answers.pop(0)
+
+    def pause(self, message: str) -> bool:
+        self.pause_calls.append(message)
+        if not self.pauses:
+            pytest.fail(f"unexpected pause prompt: {message}")
+        return self.pauses.pop(0)
+
+    def confirm(self, message: str, *, default: bool = True) -> bool | None:
+        self.confirm_calls.append((message, default))
+        answers = self.confirms.get(message)
+        if not answers:
+            pytest.fail(f"unexpected confirm prompt: {message}")
         return answers.pop(0)
 
     def text_input(
@@ -198,7 +223,11 @@ def status_messages(monkeypatch: pytest.MonkeyPatch) -> Any:
 
 
 @pytest.fixture
-def wizard(monkeypatch: pytest.MonkeyPatch) -> Any:
+def wizard(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Any:
+    monkeypatch.setattr(
+        "osmosis_ai.platform.cli.workspace_directories.WORKSPACE_DIRECTORIES_FILE",
+        tmp_path / "config" / "workspace-directories.json",
+    )
     buffer = StringIO()
     # Console binds its warning stream to sys.stderr at construction time.
     stderr = StringIO()
@@ -207,10 +236,18 @@ def wizard(monkeypatch: pytest.MonkeyPatch) -> Any:
     prompts = Prompts()
     clone_calls: list[tuple[str, Path]] = []
     remotes: dict[Path, str] = {}
+    worktrees: dict[Path, Path] = {}
 
     monkeypatch.setattr(quickstart_module, "console", console)
     monkeypatch.setattr(quickstart_module, "select_list", prompts.select_list)
     monkeypatch.setattr(quickstart_module, "text_input", prompts.text_input)
+    monkeypatch.setattr(quickstart_module, "confirm", prompts.confirm)
+    monkeypatch.setattr(quickstart_module, "pause", prompts.pause)
+    monkeypatch.setattr(
+        quickstart_module,
+        "git_worktree_top_level",
+        lambda path: worktrees.get(Path(path)),
+    )
     monkeypatch.setattr(quickstart_module, "copy_to_clipboard", lambda _text: False)
     monkeypatch.setattr(quickstart_module, "get_platform_url", lambda: PLATFORM_URL)
     monkeypatch.setattr(
@@ -242,6 +279,7 @@ def wizard(monkeypatch: pytest.MonkeyPatch) -> Any:
         prompts=prompts,
         clone_calls=clone_calls,
         remotes=remotes,
+        worktrees=worktrees,
         monkeypatch=monkeypatch,
     )
 
@@ -289,6 +327,18 @@ def _intent_labels() -> list[str]:
         "Run a benchmark",
         "Just exploring for now",
     ]
+
+
+def _billing_wizard(
+    wizard: Any, tmp_path: Path, *, statuses: list[QuickstartStatus]
+) -> FakeClient:
+    """A wizard with nothing left to set up except billing."""
+    clone = tmp_path / "acme-workspace"
+    _adopt_clone(wizard, clone)
+    wizard.monkeypatch.setattr(
+        quickstart_module, "find_workspace_directory", lambda _start: clone.resolve()
+    )
+    return _install_client(wizard, statuses=statuses)
 
 
 def _cloned_wizard(wizard: Any, tmp_path: Path) -> None:
@@ -375,6 +425,18 @@ def test_single_workspace_is_selected_without_a_prompt(
     ]
 
 
+def test_a_folder_outside_a_workspace_says_so(wizard: Any, tmp_path: Path) -> None:
+    _install_client(wizard, workspaces=[WORKSPACE, OTHER_WORKSPACE])
+    wizard.prompts.selects[WORKSPACE_QUESTION] = ["ws-1"]
+    wizard.prompts.texts[CLONE_QUESTION] = ["./acme-workspace"]
+    wizard.prompts.selects[TRANSPORT_QUESTION] = ["https"]
+    _train_answers(wizard)
+
+    quickstart_module.run_quickstart(cwd=tmp_path)
+
+    assert "not in a workspace directory" in _out(wizard)
+
+
 def test_several_workspaces_prompt_for_one(wizard: Any, tmp_path: Path) -> None:
     client = _install_client(wizard, workspaces=[WORKSPACE, OTHER_WORKSPACE])
     wizard.prompts.selects[WORKSPACE_QUESTION] = ["ws-2"]
@@ -438,7 +500,7 @@ def test_clone_prompt_echoes_the_resolved_path_and_hint(
     assert wizard.prompts.text_calls[0] == (
         CLONE_QUESTION,
         "./acme-workspace",
-        "(this folder will be created and become the repo root)",
+        "(this folder will be created and become your workspace directory)",
     )
     assert f"cloning {FULL_NAME} into {target}" in _out(wizard)
     assert wizard.clone_calls == [(f"git@github.com:{FULL_NAME}.git", target)]
@@ -533,9 +595,168 @@ def test_clone_spinner_survives_a_bracketed_destination(
     assert result.resource["workspace_directory"] == str(target)
 
 
-def test_workspace_is_inferred_from_the_surrounding_clone(
+def _nesting_question(target: Path) -> str:
+    return f"Clone into {target} anyway?"
+
+
+def test_a_nested_clone_target_is_questioned_and_can_be_declined(
     wizard: Any, tmp_path: Path
 ) -> None:
+    wizard.worktrees[tmp_path] = tmp_path
+    outside = tmp_path.parent / "outside-any-repo"
+    _install_client(wizard)
+    wizard.prompts.texts[CLONE_QUESTION] = ["./acme-workspace", str(outside)]
+    wizard.prompts.confirms[
+        _nesting_question((tmp_path / "acme-workspace").resolve())
+    ] = [False]
+    wizard.prompts.selects[TRANSPORT_QUESTION] = ["https"]
+    _train_answers(wizard)
+
+    quickstart_module.run_quickstart(cwd=tmp_path)
+
+    assert wizard.prompts.confirm_calls == [
+        (_nesting_question((tmp_path / "acme-workspace").resolve()), False)
+    ]
+    assert wizard.clone_calls == [
+        (f"https://github.com/{FULL_NAME}.git", outside.resolve())
+    ]
+    warning = strip_ansi(wizard.stderr.getvalue())
+    assert f"is inside the git repository at {tmp_path}" in warning
+
+
+def test_a_nested_clone_target_is_used_when_confirmed(
+    wizard: Any, tmp_path: Path
+) -> None:
+    wizard.worktrees[tmp_path] = tmp_path
+    nested = (tmp_path / "acme-workspace").resolve()
+    _install_client(wizard)
+    wizard.prompts.texts[CLONE_QUESTION] = ["./acme-workspace"]
+    wizard.prompts.confirms[_nesting_question(nested)] = [True]
+    wizard.prompts.selects[TRANSPORT_QUESTION] = ["https"]
+    _train_answers(wizard)
+
+    quickstart_module.run_quickstart(cwd=tmp_path)
+
+    assert wizard.clone_calls == [(f"https://github.com/{FULL_NAME}.git", nested)]
+
+
+def test_cancelling_the_nesting_question_exits_130(wizard: Any, tmp_path: Path) -> None:
+    wizard.worktrees[tmp_path] = tmp_path
+    _install_client(wizard)
+    wizard.prompts.texts[CLONE_QUESTION] = ["./acme-workspace"]
+    wizard.prompts.confirms[
+        _nesting_question((tmp_path / "acme-workspace").resolve())
+    ] = [None]
+
+    with pytest.raises(typer.Exit) as excinfo:
+        quickstart_module.run_quickstart(cwd=tmp_path)
+
+    assert excinfo.value.exit_code == 130
+
+
+def test_a_clone_target_outside_a_repo_is_not_questioned(
+    wizard: Any, tmp_path: Path
+) -> None:
+    _install_client(wizard)
+    wizard.prompts.texts[CLONE_QUESTION] = ["./acme-workspace"]
+    wizard.prompts.selects[TRANSPORT_QUESTION] = ["https"]
+    _train_answers(wizard)
+
+    quickstart_module.run_quickstart(cwd=tmp_path)
+
+    assert wizard.prompts.confirm_calls == []
+
+
+def test_adopting_a_clone_inside_a_repo_is_not_questioned(
+    wizard: Any, tmp_path: Path
+) -> None:
+    """An existing clone is a resume, not a new nested checkout."""
+    wizard.worktrees[tmp_path] = tmp_path
+    existing = tmp_path / "acme-workspace"
+    _adopt_clone(wizard, existing)
+    _install_client(wizard)
+    wizard.prompts.texts[CLONE_QUESTION] = ["./acme-workspace"]
+    _train_answers(wizard)
+
+    result = quickstart_module.run_quickstart(cwd=tmp_path)
+
+    assert wizard.prompts.confirm_calls == []
+    assert wizard.clone_calls == []
+    assert result.resource is not None
+    assert result.resource["workspace_directory"] == str(existing.resolve())
+
+
+def test_a_remembered_clone_is_reused_from_anywhere(
+    wizard: Any, tmp_path: Path
+) -> None:
+    remembered = tmp_path / "elsewhere" / "acme-workspace"
+    _adopt_clone(wizard, remembered)
+    remember_workspace_directory("ws-1", remembered)
+    _install_client(wizard)
+    _train_answers(wizard)
+
+    result = quickstart_module.run_quickstart(cwd=tmp_path)
+
+    assert wizard.clone_calls == []
+    assert [message for message, _default, _hint in wizard.prompts.text_calls] == [
+        TASK_QUESTION
+    ]
+    assert result.resource is not None
+    assert result.resource["workspace_directory"] == str(remembered.resolve())
+    assert f"continuing from {remembered.resolve()}" in _out(wizard)
+
+
+def test_a_stale_remembered_clone_falls_back_to_cloning(
+    wizard: Any, tmp_path: Path
+) -> None:
+    """A clone the user has since deleted must not be offered as usable."""
+    remember_workspace_directory("ws-1", tmp_path / "deleted-clone")
+    _install_client(wizard)
+    wizard.prompts.texts[CLONE_QUESTION] = ["./acme-workspace"]
+    wizard.prompts.selects[TRANSPORT_QUESTION] = ["https"]
+    _train_answers(wizard)
+
+    quickstart_module.run_quickstart(cwd=tmp_path)
+
+    fresh = (tmp_path / "acme-workspace").resolve()
+    assert wizard.clone_calls == [(f"https://github.com/{FULL_NAME}.git", fresh)]
+    assert recall_workspace_directory("ws-1") == fresh
+
+
+def test_the_surrounding_clone_wins_over_a_remembered_one(
+    wizard: Any, tmp_path: Path
+) -> None:
+    stale = tmp_path / "older-clone"
+    _adopt_clone(wizard, stale)
+    remember_workspace_directory("ws-1", stale)
+    here = tmp_path / "acme-workspace"
+    _adopt_clone(wizard, here)
+    wizard.monkeypatch.setattr(
+        quickstart_module, "find_workspace_directory", lambda _start: here.resolve()
+    )
+    _install_client(wizard)
+    _train_answers(wizard)
+
+    result = quickstart_module.run_quickstart(cwd=here)
+
+    assert result.resource is not None
+    assert result.resource["workspace_directory"] == str(here.resolve())
+    assert recall_workspace_directory("ws-1") == here.resolve()
+
+
+def test_a_fresh_clone_is_remembered(wizard: Any, tmp_path: Path) -> None:
+    _install_client(wizard)
+    wizard.prompts.texts[CLONE_QUESTION] = ["./acme-workspace"]
+    wizard.prompts.selects[TRANSPORT_QUESTION] = ["https"]
+    _train_answers(wizard)
+
+    quickstart_module.run_quickstart(cwd=tmp_path)
+
+    assert recall_workspace_directory("ws-1") == (tmp_path / "acme-workspace").resolve()
+
+
+def _inside_clone(wizard: Any, tmp_path: Path) -> Path:
+    """Run the wizard from inside a clone of the first workspace's repo."""
     clone = tmp_path / "acme-workspace"
     _adopt_clone(wizard, clone)
     wizard.monkeypatch.setattr(
@@ -543,27 +764,99 @@ def test_workspace_is_inferred_from_the_surrounding_clone(
         "find_workspace_directory",
         lambda _start: clone.resolve(),
     )
+    return clone
+
+
+def test_the_surrounding_clone_is_used_without_a_picker(
+    wizard: Any, tmp_path: Path
+) -> None:
+    """Standing in a workspace clone answers the question, so don't ask it."""
+    clone = _inside_clone(wizard, tmp_path)
     client = _install_client(wizard, workspaces=[WORKSPACE, OTHER_WORKSPACE])
     _train_answers(wizard)
 
     result = quickstart_module.run_quickstart(cwd=clone / "configs")
 
     assert wizard.prompts.select_calls == [(INTENT_QUESTION, _intent_labels())]
+    assert wizard.clone_calls == []
     assert client.status_calls == ["ws-1"]
     assert result.resource is not None
     assert result.resource["workspace"] == {"id": "ws-1", "name": "acme"}
+    assert result.resource["workspace_directory"] == str(clone.resolve())
+    output = _out(wizard)
+    assert "Workspace" in output
+    assert f"continuing from {clone.resolve()}" in output
+    assert "this clone" not in output
 
 
-# ── Billing ──────────────────────────────────────────────────────
+def test_the_workspace_flag_overrides_the_surrounding_clone(
+    wizard: Any, tmp_path: Path
+) -> None:
+    """Naming another workspace abandons the clone the wizard was run from."""
+    _inside_clone(wizard, tmp_path)
+    client = _install_client(wizard, workspaces=[WORKSPACE, OTHER_WORKSPACE])
+    wizard.prompts.texts[CLONE_QUESTION] = ["./globex-workspace"]
+    wizard.prompts.selects[TRANSPORT_QUESTION] = ["https"]
+    _train_answers(wizard)
+
+    result = quickstart_module.run_quickstart(cwd=tmp_path, workspace_name="globex")
+
+    assert WORKSPACE_QUESTION not in dict(wizard.prompts.select_calls)
+    assert client.status_calls == ["ws-2"]
+    assert wizard.clone_calls == [
+        (
+            f"https://github.com/{FULL_NAME}.git",
+            (tmp_path / "globex-workspace").resolve(),
+        )
+    ]
+    assert result.resource is not None
+    assert result.resource["workspace"] == {"id": "ws-2", "name": "globex"}
 
 
-def test_billing_warning_is_informational(wizard: Any, tmp_path: Path) -> None:
-    clone = tmp_path / "acme-workspace"
-    _adopt_clone(wizard, clone)
-    wizard.monkeypatch.setattr(
-        quickstart_module, "find_workspace_directory", lambda _start: clone.resolve()
-    )
-    _install_client(wizard, statuses=[_status(billing_ready=False)])
+def test_the_workspace_flag_can_name_the_surrounding_clone(
+    wizard: Any, tmp_path: Path
+) -> None:
+    clone = _inside_clone(wizard, tmp_path)
+    _install_client(wizard, workspaces=[WORKSPACE, OTHER_WORKSPACE])
+    _train_answers(wizard)
+
+    result = quickstart_module.run_quickstart(cwd=tmp_path, workspace_name="acme")
+
+    assert wizard.clone_calls == []
+    assert result.resource is not None
+    assert result.resource["workspace_directory"] == str(clone.resolve())
+
+
+def test_the_workspace_flag_replaces_the_picker(wizard: Any, tmp_path: Path) -> None:
+    client = _install_client(wizard, workspaces=[WORKSPACE, OTHER_WORKSPACE])
+    wizard.prompts.texts[CLONE_QUESTION] = ["./globex-workspace"]
+    wizard.prompts.selects[TRANSPORT_QUESTION] = ["https"]
+    _train_answers(wizard)
+
+    quickstart_module.run_quickstart(cwd=tmp_path, workspace_name="GLOBEX")
+
+    assert WORKSPACE_QUESTION not in dict(wizard.prompts.select_calls)
+    assert client.status_calls == ["ws-2"]
+
+
+def test_an_unknown_workspace_name_lists_the_real_ones(
+    wizard: Any, tmp_path: Path
+) -> None:
+    _install_client(wizard, workspaces=[WORKSPACE, OTHER_WORKSPACE])
+
+    with pytest.raises(CLIError) as excinfo:
+        quickstart_module.run_quickstart(cwd=tmp_path, workspace_name="nope")
+
+    assert excinfo.value.code == "NOT_FOUND"
+    assert "acme" in str(excinfo.value)
+    assert "globex" in str(excinfo.value)
+
+
+def test_billing_pauses_with_a_link_and_can_be_skipped(
+    wizard: Any, tmp_path: Path
+) -> None:
+    _billing_wizard(wizard, tmp_path, statuses=[_status(billing_ready=False)])
+    wizard.prompts.pauses = [True]
     _train_answers(wizard)
 
     result = quickstart_module.run_quickstart(cwd=tmp_path)
@@ -573,9 +866,48 @@ def test_billing_warning_is_informational(wizard: Any, tmp_path: Path) -> None:
         "Paid features (training, evaluations, benchmarks, deployments, ...) "
         f"need billing set up: {PLATFORM_URL}/acme/billing" in output
     )
+    assert wizard.prompts.pause_calls == [BILLING_PAUSE]
+    assert "continuing without billing" in output
     assert TRAIN_PROMPT in output
     assert result.resource is not None
     assert result.resource["billing_ready"] is False
+
+
+def test_billing_is_rechecked_after_the_pause(wizard: Any, tmp_path: Path) -> None:
+    client = _billing_wizard(
+        wizard, tmp_path, statuses=[_status(billing_ready=False), _status()]
+    )
+    wizard.prompts.pauses = [True]
+    _train_answers(wizard)
+
+    result = quickstart_module.run_quickstart(cwd=tmp_path)
+
+    assert client.status_calls == ["ws-1", "ws-1"]
+    output = _out(wizard)
+    assert "Billing" in output
+    assert "continuing without billing" not in output
+    assert result.resource is not None
+    assert result.resource["billing_ready"] is True
+
+
+def test_a_ready_billing_account_is_not_paused(wizard: Any, tmp_path: Path) -> None:
+    _billing_wizard(wizard, tmp_path, statuses=[_status()])
+    _train_answers(wizard)
+
+    quickstart_module.run_quickstart(cwd=tmp_path)
+
+    assert wizard.prompts.pause_calls == []
+
+
+def test_cancelling_the_billing_pause_exits_130(wizard: Any, tmp_path: Path) -> None:
+    _billing_wizard(wizard, tmp_path, statuses=[_status(billing_ready=False)])
+    wizard.prompts.pauses = [False]
+
+    with pytest.raises(typer.Exit) as excinfo:
+        quickstart_module.run_quickstart(cwd=tmp_path)
+
+    assert excinfo.value.exit_code == 130
+    assert "Cancelled." in _out(wizard)
 
 
 # ── Intent, task, and the agent prompts ──────────────────────────
@@ -638,9 +970,32 @@ def test_explore_intent_prints_docs_links_only(wizard: Any, tmp_path: Path) -> N
     assert result.resource is not None
     assert result.resource["agent_prompt"] is None
     output = _out(wizard)
+    clone = tmp_path / "acme-workspace"
+    assert f"Your workspace directory is at {clone.resolve()}" in output
     assert "https://docs.osmosis.ai/platform/quickstart" in output
-    assert "https://docs.osmosis.ai/cli/rollout/overview" in output
+    assert "https://docs.osmosis.ai/sdk/overview" in output
     assert "paste the prompt below" not in output
+    assert "workspace clone" not in output
+
+
+def test_handoff_points_the_shell_at_the_clone(wizard: Any, tmp_path: Path) -> None:
+    _cloned_wizard(wizard, tmp_path)
+    _train_answers(wizard)
+
+    quickstart_module.run_quickstart(cwd=tmp_path)
+
+    assert "cd acme-workspace" in _out(wizard)
+
+
+def test_handoff_omits_the_cd_from_inside_the_clone(
+    wizard: Any, tmp_path: Path
+) -> None:
+    _cloned_wizard(wizard, tmp_path)
+    _train_answers(wizard)
+
+    quickstart_module.run_quickstart(cwd=tmp_path / "acme-workspace")
+
+    assert "cd acme-workspace" not in _out(wizard)
 
 
 def test_a_blank_task_is_rejected_until_described(wizard: Any, tmp_path: Path) -> None:

@@ -15,7 +15,8 @@ from osmosis_ai.cli.output import OperationResult
 ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;]*m")
 
 HELP_TEXT = (
-    "Interactive setup: sign in, clone your workspace, and get your first agent prompt."
+    "Interactive setup: sign in, clone your workspace repository, and get your first "
+    "agent prompt."
 )
 MANUAL_SETUP_URL = "https://docs.osmosis.ai/platform/onboarding#manual-setup"
 
@@ -53,9 +54,7 @@ def test_quickstart_help_exits_zero(capfd) -> None:
     assert HELP_TEXT in out
 
 
-def test_quickstart_delegates_to_the_wizard_handler(
-    monkeypatch: pytest.MonkeyPatch, capsys
-) -> None:
+def _stub_wizard(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, object]]:
     calls: list[dict[str, object]] = []
 
     def fake_run_quickstart(**kwargs: object) -> OperationResult:
@@ -69,16 +68,36 @@ def test_quickstart_delegates_to_the_wizard_handler(
     monkeypatch.setattr(
         "osmosis_ai.platform.cli.quickstart.run_quickstart", fake_run_quickstart
     )
+    return calls
+
+
+def test_quickstart_delegates_to_the_wizard_handler(
+    monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    calls = _stub_wizard(monkeypatch)
 
     exit_code = cli.main(["--json", "quickstart"])
 
     captured = capsys.readouterr()
     assert exit_code == 0
-    assert calls == [{}]
+    assert calls == [{"workspace_name": None}]
     payload = json.loads(captured.out)
     assert payload["operation"] == "quickstart"
     assert payload["status"] == "success"
     assert payload["resource"]["intent"] == "train"
+
+
+@pytest.mark.parametrize("flag", ["--workspace", "-w"])
+def test_quickstart_forwards_the_requested_workspace(
+    monkeypatch: pytest.MonkeyPatch, capsys, flag: str
+) -> None:
+    calls = _stub_wizard(monkeypatch)
+
+    exit_code = cli.main(["--json", "quickstart", flag, "globex"])
+
+    capsys.readouterr()
+    assert exit_code == 0
+    assert calls == [{"workspace_name": "globex"}]
 
 
 def test_quickstart_requires_an_interactive_terminal(capsys) -> None:

@@ -11,6 +11,7 @@ prompt for it.
 
 from __future__ import annotations
 
+import shlex
 import shutil
 import subprocess
 import time
@@ -20,10 +21,11 @@ from urllib.parse import quote
 
 import typer
 
+from osmosis_ai.cli.clipboard import copy_to_clipboard
 from osmosis_ai.cli.console import console
 from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.cli.output import OperationResult, OutputFormat, get_output_context
-from osmosis_ai.cli.prompts import Choice, select_list, text_input
+from osmosis_ai.cli.prompts import Choice, confirm, pause, select_list, text_input
 from osmosis_ai.platform.api.client import OsmosisClient
 from osmosis_ai.platform.api.models import QuickstartStatus, WorkspaceSummary
 from osmosis_ai.platform.auth import (
@@ -33,12 +35,18 @@ from osmosis_ai.platform.auth import (
     save_credentials,
 )
 from osmosis_ai.platform.auth.config import get_platform_url
-from osmosis_ai.platform.auth.flow import copy_to_clipboard, device_login
+from osmosis_ai.platform.auth.flow import device_login
+from osmosis_ai.platform.cli.workspace_directories import (
+    forget_workspace_directory,
+    recall_workspace_directory,
+    remember_workspace_directory,
+)
 from osmosis_ai.platform.cli.workspace_directory_contract import (
     find_workspace_directory,
 )
 from osmosis_ai.platform.cli.workspace_repo import (
     get_local_git_remote_url,
+    git_worktree_top_level,
     normalize_git_identity,
 )
 
@@ -48,7 +56,7 @@ if TYPE_CHECKING:
 _DOCS_URL = "https://docs.osmosis.ai"
 _MANUAL_SETUP_URL = f"{_DOCS_URL}/platform/onboarding#manual-setup"
 _PLATFORM_QUICKSTART_DOCS_URL = f"{_DOCS_URL}/platform/quickstart"
-_ROLLOUT_DOCS_URL = f"{_DOCS_URL}/cli/rollout/overview"
+_SDK_OVERVIEW_DOCS_URL = f"{_DOCS_URL}/sdk/overview"
 _BENCHMARKS_DOCS_URL = f"{_DOCS_URL}/platform/benchmarks"
 
 # The agent is told to use this skill by name, so it must match the skill as
@@ -60,11 +68,12 @@ _REPO_WAIT_TIMEOUT_SECONDS = 900.0
 _WAITING_FOR_REPO = (
     "waiting for repository... (Ctrl+C to exit; re-run 'osmosis quickstart' to resume)"
 )
-_CLONE_PATH_HINT = "(this folder will be created and become the repo root)"
+_CLONE_PATH_HINT = "(this folder will be created and become your workspace directory)"
 _BILLING_WARNING = (
     "Paid features (training, evaluations, benchmarks, deployments, ...) "
     "need billing set up: "
 )
+_BILLING_PAUSE = "Press Enter to continue..."
 _CHECK_WIDTH = 20
 
 _INTENTS: tuple[tuple[str, str], ...] = (
@@ -89,9 +98,10 @@ _TASK_PROMPTS = {
     ),
 }
 _BENCHMARK_PROMPT = (
-    "I want to benchmark agents on managed benchmarks in this Osmosis workspace. "
-    f"Use the {_BENCHMARK_SKILL} skill: help me pick a benchmark and configuration, "
-    "submit the run, and interpret the results."
+    "I want to run a benchmark in this Osmosis workspace. Start with the "
+    f"{_BENCHMARK_SKILL} skill: read the workspace instructions, help me settle "
+    "which benchmark, which tasks, and which agents to compare, and confirm the "
+    "run size with me before submitting a benchmark run."
 )
 
 
@@ -180,24 +190,52 @@ def _clone_identity(path: Path) -> str | None:
         return None
 
 
+def _workspace_by_name(
+    workspaces: list[WorkspaceSummary], requested: str
+) -> WorkspaceSummary:
+    wanted = requested.strip().lower()
+    for workspace in workspaces:
+        if workspace.name.lower() == wanted:
+            return workspace
+    available = ", ".join(sorted(workspace.name for workspace in workspaces))
+    raise CLIError(
+        f"This account has no workspace named '{requested}'. Available: {available}.",
+        code="NOT_FOUND",
+    )
+
+
 def _resolve_workspace(
-    workspaces: list[WorkspaceSummary], start: Path
+    workspaces: list[WorkspaceSummary],
+    start: Path,
+    requested: str | None,
 ) -> tuple[WorkspaceSummary, Path | None]:
     """Pick the workspace, preferring the clone the wizard was run from."""
     local_clone = find_workspace_directory(start)
     identity = _clone_identity(local_clone) if local_clone is not None else None
+    detected: WorkspaceSummary | None = None
     if identity is not None:
         for workspace in workspaces:
             connected = (workspace.connected_repo_full_name or "").lower()
             if connected and connected == identity:
-                _check("Workspace", f"{workspace.name} (this clone)")
-                return workspace, local_clone
+                detected = workspace
+                break
+
+    if requested is not None:
+        chosen = _workspace_by_name(workspaces, requested)
+        _check("Workspace", chosen.name)
+        if detected is not None and detected.id == chosen.id:
+            return chosen, local_clone
+        return chosen, None
+
+    if detected is not None:
+        _check("Workspace", detected.name)
+        return detected, local_clone
 
     if len(workspaces) == 1:
         _check("Workspace", workspaces[0].name)
         return workspaces[0], None
 
-    _check("Workspace", "cwd is not a workspace clone")
+    _check("Workspace", "not in a workspace directory")
     choice = select_list(
         "Which workspace?",
         items=[
@@ -295,6 +333,32 @@ def _is_empty_directory(path: Path) -> bool:
     return path.is_dir() and not any(path.iterdir())
 
 
+def _enclosing_repository(target: Path) -> Path | None:
+    """Nearest worktree that would contain ``target`` (may not exist yet).
+
+    git only answers for existing paths, so walk up to the nearest ancestor.
+    """
+    existing = target
+    while not existing.exists():
+        parent = existing.parent
+        if parent == existing:
+            return None
+        existing = parent
+    return git_worktree_top_level(existing)
+
+
+def _nesting_accepted(target: Path) -> bool | None:
+    """Confirm a destination inside another repository. None means cancelled."""
+    enclosing = _enclosing_repository(target)
+    if enclosing is None:
+        return True
+    console.print_warning(
+        f"{target} is inside the git repository at {enclosing}. "
+        "Cloning there puts a repository inside a repository."
+    )
+    return confirm(f"Clone into {target} anyway?", default=False)
+
+
 def _clone_workspace_repo(full_name: str, *, start: Path) -> Path:
     """Prompt for a destination and leave a usable clone of ``full_name`` there."""
     default_path = f"./{full_name.split('/')[-1]}"
@@ -322,6 +386,12 @@ def _clone_workspace_repo(full_name: str, *, start: Path) -> Path:
                 )
                 continue
 
+        accepted = _nesting_accepted(target)
+        if accepted is None:
+            _cancel()
+        if not accepted:
+            continue
+
         transport = select_list(
             "Clone over HTTPS or SSH?",
             items=[
@@ -337,6 +407,17 @@ def _clone_workspace_repo(full_name: str, *, start: Path) -> Path:
         return target
 
 
+def _remembered_clone(workspace_id: str, full_name: str) -> Path | None:
+    """Return the clone recorded for this workspace, if it is still one."""
+    path = recall_workspace_directory(workspace_id)
+    if path is None:
+        return None
+    if _clone_identity(path) == full_name.lower():
+        return path
+    forget_workspace_directory(workspace_id)
+    return None
+
+
 def _ensure_repository(
     client: OsmosisClient,
     workspace: WorkspaceSummary,
@@ -346,8 +427,7 @@ def _ensure_repository(
     start: Path,
 ) -> tuple[Path, QuickstartStatus, Credentials]:
     if status.repo_connected:
-        cloned = " (cloned here)" if local_clone is not None else ""
-        _check("Workspace repo", f"{status.repo_full_name}{cloned}")
+        _check("Workspace repo", f"{status.repo_full_name}")
     else:
         _check("Workspace repo", "none connected yet")
         console.print()
@@ -359,6 +439,8 @@ def _ensure_repository(
         status, credentials = _wait_for_repository(client, workspace, credentials)
 
     if local_clone is not None:
+        _step(f"continuing from {local_clone}")
+        remember_workspace_directory(workspace.id, local_clone)
         return local_clone, status, credentials
 
     full_name = status.repo_full_name
@@ -369,20 +451,43 @@ def _ensure_repository(
             "'osmosis quickstart'.",
             code="PLATFORM_ERROR",
         )
-    return _clone_workspace_repo(full_name, start=start), status, credentials
+
+    remembered = _remembered_clone(workspace.id, full_name)
+    if remembered is not None:
+        _step(f"continuing from {remembered}")
+        return remembered, status, credentials
+
+    clone_dir = _clone_workspace_repo(full_name, start=start)
+    remember_workspace_directory(workspace.id, clone_dir)
+    return clone_dir, status, credentials
 
 
-def _report_billing(status: QuickstartStatus, workspace: WorkspaceSummary) -> None:
+def _report_billing(
+    client: OsmosisClient,
+    workspace: WorkspaceSummary,
+    credentials: Credentials,
+    status: QuickstartStatus,
+) -> tuple[QuickstartStatus, Credentials]:
+    """Report billing, re-reading it once so a card added at the pause counts."""
     if status.billing_ready:
         _check("Billing", "ok")
-        return
+        return status, credentials
+
     _check("Billing", "no payment method on file")
     console.print_url(
         f"  ! {_BILLING_WARNING}",
         _platform_url(workspace.name, "billing"),
         style="yellow",
     )
-    console.print("    (not blocking setup)", style="dim")
+    if not pause(_BILLING_PAUSE):
+        _cancel()
+
+    status, credentials = _fetch_status(client, workspace, credentials)
+    if status.billing_ready:
+        _check("Billing", "ok")
+    else:
+        _step("continuing without billing")
+    return status, credentials
 
 
 def _ask_intent() -> str:
@@ -434,22 +539,38 @@ def _record_completion(
     return True
 
 
+def _print_cd_hint(clone_dir: Path, start: Path) -> None:
+    if start == clone_dir or clone_dir in start.parents:
+        return
+    try:
+        target = clone_dir.relative_to(start)
+    except ValueError:
+        target = clone_dir
+    console.print("  Run this next:")
+    console.print(
+        f"    cd {console.escape(shlex.quote(str(target)))}", style="bold cyan"
+    )
+    console.print()
+
+
 def _print_handoff(
     *,
     intent: str,
     prompt: str | None,
     clone_dir: Path,
     workspace: WorkspaceSummary,
+    start: Path,
 ) -> None:
     console.print()
     console.separator()
     location = console.escape(str(clone_dir))
 
     if prompt is None:
-        console.print(f"  Setup complete. Your workspace clone is at {location}.")
+        console.print(f"  Setup complete. Your workspace directory is at {location}.")
         console.print()
+        _print_cd_hint(clone_dir, start)
         console.print_url("  Quickstart guide: ", _PLATFORM_QUICKSTART_DOCS_URL)
-        console.print_url("  Building rollouts: ", _ROLLOUT_DOCS_URL)
+        console.print_url("  Building rollouts: ", _SDK_OVERVIEW_DOCS_URL)
         console.separator()
         return
 
@@ -460,6 +581,7 @@ def _print_handoff(
         soft_wrap=True,
     )
     console.print()
+    _print_cd_hint(clone_dir, start)
     console.print(f"  {prompt}", style="cyan", markup=False, soft_wrap=True)
     console.print()
     if intent == "benchmark":
@@ -471,7 +593,9 @@ def _print_handoff(
     console.separator()
 
 
-def run_quickstart(*, cwd: Path | None = None) -> OperationResult:
+def run_quickstart(
+    *, cwd: Path | None = None, workspace_name: str | None = None
+) -> OperationResult:
     """Verify local setup, then hand the user an agent prompt for their goal."""
     _require_interactive_session()
     start = (cwd or Path.cwd()).resolve()
@@ -480,21 +604,25 @@ def run_quickstart(*, cwd: Path | None = None) -> OperationResult:
     client = OsmosisClient()
     credentials = _resolve_credentials()
     workspaces, credentials = _fetch_workspaces(client, credentials)
-    workspace, local_clone = _resolve_workspace(workspaces, start)
+    workspace, local_clone = _resolve_workspace(workspaces, start, workspace_name)
 
     status, credentials = _fetch_status(client, workspace, credentials)
 
     clone_dir, status, credentials = _ensure_repository(
         client, workspace, credentials, status, local_clone, start
     )
-    _report_billing(status, workspace)
+    status, credentials = _report_billing(client, workspace, credentials, status)
 
     intent = _ask_intent()
     task = _ask_task(intent)
     prompt = _agent_prompt(intent, task)
     recorded = _record_completion(client, workspace, credentials, intent)
     _print_handoff(
-        intent=intent, prompt=prompt, clone_dir=clone_dir, workspace=workspace
+        intent=intent,
+        prompt=prompt,
+        clone_dir=clone_dir,
+        workspace=workspace,
+        start=start,
     )
 
     return OperationResult(

@@ -24,9 +24,8 @@ from typing import TYPE_CHECKING, Any
 
 import keyring
 from keyring.backends.fail import Keyring as FailKeyring
-from keyring.errors import PasswordDeleteError
+from keyring.errors import NoKeyringError, PasswordDeleteError
 
-from ._fileutil import atomic_write_json
 from .config import (
     CREDENTIALS_FILE,
     CREDENTIALS_VERSION,
@@ -34,6 +33,7 @@ from .config import (
     get_platform_url,
     normalize_platform_url,
 )
+from .fileutil import atomic_write_json
 
 if TYPE_CHECKING:
     from .flow import VerifyResult
@@ -153,6 +153,12 @@ def _entry_for_platform(
     return None
 
 
+def _entry_used_keyring(entry: dict[str, Any] | None) -> bool:
+    if not entry:
+        return False
+    return entry.get("token_store", TOKEN_STORE_FILE) == TOKEN_STORE_KEYRING
+
+
 def _keyring_accounts_for_entry(
     entry: dict[str, Any] | None,
     platform_url: str,
@@ -161,7 +167,7 @@ def _keyring_accounts_for_entry(
     if _is_default_platform_url(platform_url):
         accounts.append(KEYRING_ACCOUNT)
 
-    if entry and entry.get("token_store", TOKEN_STORE_FILE) == TOKEN_STORE_KEYRING:
+    if entry is not None and _entry_used_keyring(entry):
         account = entry.get("keyring_account")
         if isinstance(account, str):
             accounts.append(account)
@@ -183,7 +189,9 @@ def _cleanup_platform_keyring_entries(
     cleaned = True
     for account in _keyring_accounts_for_entry(entry, platform_url):
         cleaned = _keyring_delete(account) and cleaned
-    return cleaned
+    # File-stored tokens still get a platform-account sweep as legacy hygiene;
+    # only a token believed to be in the keyring is worth reporting as left behind.
+    return cleaned if _entry_used_keyring(entry) else True
 
 
 def _resolve_entry_token(
@@ -222,18 +230,15 @@ def _keyring_get(account: str) -> str | None:
 
 
 def _keyring_delete(account: str) -> bool:
-    """Delete a token from the system keyring. Returns ``True`` on success."""
+    """Delete a keyring token. Missing entry or absent backend is success."""
     try:
+        if isinstance(keyring.get_keyring(), FailKeyring):
+            return True
         keyring.delete_password(KEYRING_SERVICE, account)
         return True
-    except PasswordDeleteError:
-        # Entry does not exist — nothing to clean up.
+    except (PasswordDeleteError, NoKeyringError):
         return True
     except Exception:
-        _warn(
-            f"Could not remove token from keyring for {account}.",
-            code="KEYRING_DELETE_FAILED",
-        )
         return False
 
 

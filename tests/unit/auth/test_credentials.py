@@ -612,6 +612,103 @@ def test_delete_file_only(tmp_path, monkeypatch) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Headless machines: an absent keyring is not a cleanup failure
+# ---------------------------------------------------------------------------
+
+
+def test_keyring_delete_is_a_silent_noop_without_a_backend() -> None:
+    from keyring.backends.fail import Keyring as FailKeyring
+
+    from osmosis_ai.platform.auth.credentials import _keyring_delete
+
+    with (
+        patch("keyring.get_keyring", return_value=FailKeyring()),
+        patch("osmosis_ai.cli.console.console.print_warning") as mock_warn,
+    ):
+        assert _keyring_delete("platform:abc") is True
+
+    mock_warn.assert_not_called()
+
+
+def test_keyring_delete_is_a_silent_noop_when_the_backend_reports_no_keyring() -> None:
+    """The host has a backend object, but keyring still resolves none."""
+    from keyring.errors import NoKeyringError
+
+    from osmosis_ai.platform.auth.credentials import _keyring_delete
+
+    with (
+        patch("keyring.get_keyring", return_value=object()),
+        patch("keyring.delete_password", side_effect=NoKeyringError("no backend")),
+        patch("osmosis_ai.cli.console.console.print_warning") as mock_warn,
+    ):
+        assert _keyring_delete("platform:abc") is True
+
+    mock_warn.assert_not_called()
+
+
+def test_keyring_delete_reports_a_real_failure_without_warning_itself() -> None:
+    from osmosis_ai.platform.auth.credentials import _keyring_delete
+
+    with (
+        patch("keyring.get_keyring", return_value=object()),
+        patch("keyring.delete_password", side_effect=RuntimeError("keychain locked")),
+        patch("osmosis_ai.cli.console.console.print_warning") as mock_warn,
+    ):
+        assert _keyring_delete("platform:abc") is False
+
+    mock_warn.assert_not_called()
+
+
+def test_delete_does_not_warn_when_the_token_lived_in_the_file(
+    tmp_path, monkeypatch
+) -> None:
+    creds_file = tmp_path / "creds.json"
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.credentials.CREDENTIALS_FILE", creds_file
+    )
+
+    data = _make_credentials().to_dict()
+    data["token_store"] = TOKEN_STORE_FILE
+    creds_file.write_text(json.dumps(data))
+
+    with (
+        patch(
+            "osmosis_ai.platform.auth.credentials._keyring_delete", return_value=False
+        ),
+        patch("osmosis_ai.cli.console.console.print_warning") as mock_warn,
+    ):
+        from osmosis_ai.platform.auth.credentials import delete_credentials
+
+        assert delete_credentials() is True
+
+    assert not creds_file.exists()
+    mock_warn.assert_not_called()
+
+
+def test_save_does_not_warn_about_keyring_cleanup_without_a_backend(
+    tmp_path, monkeypatch
+) -> None:
+    """A headless login reports plaintext storage and nothing else."""
+    from keyring.backends.fail import Keyring as FailKeyring
+
+    creds_file = tmp_path / "creds.json"
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.credentials.CREDENTIALS_FILE", creds_file
+    )
+
+    with (
+        patch("keyring.get_keyring", return_value=FailKeyring()),
+        patch("osmosis_ai.cli.console.console.print_warning") as mock_warn,
+    ):
+        from osmosis_ai.platform.auth.credentials import save_credentials
+
+        assert save_credentials(_make_credentials()) == TOKEN_STORE_FILE
+
+    codes = [call.kwargs.get("code") for call in mock_warn.call_args_list]
+    assert codes == ["KEYRING_UNAVAILABLE"]
+
+
+# ---------------------------------------------------------------------------
 # P1 regression: keyring→file fallback must clean up old keyring token
 # ---------------------------------------------------------------------------
 
