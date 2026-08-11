@@ -199,6 +199,13 @@ def _register_commands() -> None:
     _WORKFLOW = "Workflow Commands"
     _PLATFORM = "Platform Commands"
 
+    from osmosis_ai.cli.commands.quickstart import HELP as QUICKSTART_HELP
+    from osmosis_ai.cli.commands.quickstart import quickstart
+
+    app.command("quickstart", help=QUICKSTART_HELP, rich_help_panel=_WORKFLOW)(
+        quickstart
+    )
+
     app.add_typer(dataset_app, name="dataset", rich_help_panel=_WORKFLOW)
     app.add_typer(train_app, name="train", rich_help_panel=_WORKFLOW)
     app.add_typer(model_app, name="model", rich_help_panel=_WORKFLOW)

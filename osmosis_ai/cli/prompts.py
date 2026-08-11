@@ -14,7 +14,7 @@ Usage:
 from __future__ import annotations
 
 import sys
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing import Any
 
 import questionary
@@ -45,6 +45,11 @@ OSMOSIS_STYLE = Style(
 )
 
 
+# prompt_toolkit's 1.0s default + 0.5s input flush makes bare ESC feel dead;
+# chords arrive in one read so they never wait this out.
+_ESCAPE_TIMEOUT = 0.1
+
+
 def _add_extra_keys(
     question: questionary.Question,
     extra: KeyBindings,
@@ -68,13 +73,19 @@ def _add_extra_keys(
 
 
 def _add_escape_binding(question: questionary.Question) -> questionary.Question:
-    """Add ESC key binding to cancel/go back (same as Ctrl+C)."""
+    """Cancel on bare ESC (like Ctrl+C); option/alt chords arrive as ESC+key.
+
+    Escape+Any keeps ESC a prefix so prompt_toolkit waits ``timeoutlen`` before
+    cancelling and hands complete chords to their own bindings.
+    """
     extra = KeyBindings()
-    extra.add(Keys.Escape, eager=True)(
+    extra.add(Keys.Escape, Keys.Any)(lambda event: None)
+    extra.add(Keys.Escape)(
         lambda event: event.app.exit(
             exception=KeyboardInterrupt, style="class:aborting"
         )
     )
+    question.application.timeoutlen = _ESCAPE_TIMEOUT
     return _add_extra_keys(question, extra)
 
 
@@ -302,6 +313,48 @@ def confirm(
     ).ask()
 
 
+def text_input(
+    message: str,
+    *,
+    default: str = "",
+    validate: Callable[[str], bool | str] | None = None,
+    instruction: str | None = None,
+) -> str | None:
+    """Interactive free-text prompt with an optional pre-filled, editable default.
+
+    ``validate`` returns True when the input is valid, or the error message to
+    show when it is not.
+
+    Returns the entered text, or None if the user cancels (Ctrl+C / ESC).
+    """
+    return _add_escape_binding(
+        questionary.text(
+            message,
+            default=default,
+            validate=validate,
+            style=OSMOSIS_STYLE,
+            qmark="?",
+            instruction=instruction,
+        )
+    ).ask()
+
+
+def pause(message: str) -> bool:
+    """Wait for Enter; False on Ctrl+C/ESC.
+
+    Uses the text prompt because questionary's press-any-key prompt swallows ESC.
+    """
+    answer = _add_escape_binding(
+        questionary.text(
+            message,
+            default="",
+            style=OSMOSIS_STYLE,
+            qmark="?",
+        )
+    ).ask()
+    return answer is not None
+
+
 def password(
     message: str,
     *,
@@ -416,6 +469,8 @@ __all__ = [
     "Separator",
     "confirm",
     "password",
+    "pause",
     "require_confirmation",
     "select_list",
+    "text_input",
 ]

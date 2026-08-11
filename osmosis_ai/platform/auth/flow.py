@@ -8,9 +8,7 @@ from __future__ import annotations
 
 import contextlib
 import json
-import platform
 import socket
-import subprocess
 import sys
 import time
 from collections.abc import Callable
@@ -20,6 +18,7 @@ from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
+from osmosis_ai.cli.clipboard import copy_to_clipboard
 from osmosis_ai.cli.console import console
 
 from .config import get_platform_url
@@ -139,24 +138,6 @@ def _get_device_name() -> str:
         return socket.gethostname()
     except Exception:
         return "Unknown"
-
-
-def _copy_to_clipboard(text: str) -> bool:
-    """Try to copy text to system clipboard. Returns True on success."""
-    system = platform.system()
-    try:
-        if system == "Darwin":
-            cmd = ["pbcopy"]
-        elif system == "Linux":
-            cmd = ["xclip", "-selection", "clipboard"]
-        elif system == "Windows":
-            cmd = ["clip"]
-        else:
-            return False
-        subprocess.run(cmd, input=text.encode(), check=True, timeout=3)
-        return True
-    except Exception:
-        return False
 
 
 def _read_error_body(e: HTTPError) -> dict[str, Any]:
@@ -421,7 +402,7 @@ def device_login(timeout: float = 900.0) -> tuple[LoginResult, Credentials]:
         device_code_resp = request_device_code()
 
     console.print()
-    copied = _copy_to_clipboard(device_code_resp.user_code)
+    copied = copy_to_clipboard(device_code_resp.user_code)
     if copied:
         console.print("Your one-time code (copied to clipboard):", style="dim")
     else:

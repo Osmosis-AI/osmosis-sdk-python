@@ -1,4 +1,4 @@
-"""Internal utilities for atomic file operations."""
+"""Utilities for atomic file operations."""
 
 from __future__ import annotations
 
