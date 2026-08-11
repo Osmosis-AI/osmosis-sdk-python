@@ -4,26 +4,23 @@ This file records changes to `osmosis-ai`. For earlier versions, see [GitHub Rel
 
 ## Unreleased
 
+## 0.3.0rc4 - 2026-08-11
+
 ### Added
 
-- Rollout bundles can be built from `src/` layout projects — the layout `uv init --lib` scaffolds. Package auto-detection, project-root discovery, and the generated runner shim all resolve `src/<package>/`; flat layouts are unaffected.
+- `osmosis quickstart` now guides interactive users through authentication, workspace and repository setup, billing checks, and a ready-to-paste agent prompt, with resumable clone discovery and clipboard support over local terminals, SSH, and tmux ([#299](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/299)).
+- `OsmosisClient` now exposes `list_workspaces()`, `get_quickstart_status()`, and `complete_quickstart()` for workspace-scoped onboarding integrations ([#299](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/299)).
+- Rollout bundles can now be built from `src/` layout and PEP 420 namespace-package projects, including the layout scaffolded by `uv init --lib` ([#298](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/298)).
 
 ### Fixed
 
-- Rollout bundle builds now use content-addressed cache entries, isolated atomic build directories, normalized distribution names, and aliased generated imports, while rejecting directory or broken symlinks whose staged contents could disagree with the cache key. The Harbor extra now installs its `uv` builder directly.
-- Model-backed extras exclude only LiteLLM 1.95.0, the one release that shipped no macOS wheel, instead of capping below 1.95. LiteLLM 1.95.1 and 1.96.0 restored macOS wheels and are now installable.
-- A `bundles_dir` strictly inside the project is excluded from both staging and the cache key, while using the project directory itself is rejected before it can recursively copy or exclude the entire source tree.
-- `LocalBackend` now treats limiter queue time as part of the controller's finite `agent_timeout_sec`, applies an independent `grader_timeout_sec`, and reports timeout even when user code swallows cancellation or blocks past its deadline instead of returning a late success.
-- `RolloutSample.reward` rejects non-finite and non-numeric values at construction and assignment. Grader callbacks normalize NumPy-like numeric scalars, drop telemetry with no JSON representation, preserve earned rewards when optional telemetry cannot encode, and clear wire rewards from failed or `remove_sample=True` results.
-- A rollout server no longer posts a second, contradicting completion callback after a terminal status was already reported. A backend that dies before reporting anything still gets the fabricated failure completion, so the controller cannot be left waiting.
-- Harbor reports malformed verifier rewards as validation failures instead of letting them escape its trial hook.
-- Harbor rejects symlinks in task sources before materialization and scrubs the rollout controller credential from retained trial files before merge, relocation, or preservation. An unverifiable tree is deleted when possible and otherwise aborts archiving instead of copying a possible credential into durable storage; setup failures still deliver both terminal callbacks.
-- A malformed `--secrets-file` line is reported by source and line number instead of by quoting the line, so secret material can no longer reach CI logs through the CLI error envelope. `NAME="quoted"` values and `export NAME=value` now resolve to the intended value rather than silently submitting the quotes or a name of `export NAME`, and a name that is not a plain identifier is rejected outright.
+- Rollout bundle builds now use content-addressed atomic cache entries, reject unsafe cache and symlink layouts, install a compatible `uv` through the Harbor extra, and permit current LiteLLM releases except 1.95.0 ([#298](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/298)).
+- `LocalBackend` now counts limiter queue time against `agent_timeout_sec`, applies an independent `grader_timeout_sec`, and reports overruns as timeouts even when user code swallows cancellation or blocks the event loop ([#298](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/298)).
+- Reward validation and callbacks now normalize numeric scalars, reject invalid reward values, preserve earned rewards when optional telemetry cannot encode, clear rewards from failed or removed samples, and avoid contradictory duplicate completions ([#298](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/298)).
+- Harbor now reports malformed verifier rewards as validation failures, rejects task-source symlinks, and prevents rollout controller credentials from entering archived trial data ([#298](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/298)).
+- `--secrets-file` errors no longer echo secret-bearing input, while `export NAME=value` and quoted values parse correctly and invalid names are rejected ([#298](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/298)).
 
-### Documentation
-
-- Clarified that a Harbor task's existing `tests/test.sh` takes precedence over an SDK `grader=`, and that Harbor `TrialQueue` attempt retries are not supported by the rollout lifecycle integration.
-- Corrected the rollout-timeout troubleshooting section, which stated that `LocalBackend` does not enforce per-rollout deadlines, and documented the reward domain and the callback sanitization policy in the rollout SDK reference.
+[Full changelog](https://github.com/Osmosis-AI/osmosis-sdk-python/compare/v0.3.0rc3...v0.3.0rc4)
 
 ## 0.3.0rc3 - 2026-08-07
 
