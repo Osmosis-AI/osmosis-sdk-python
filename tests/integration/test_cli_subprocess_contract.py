@@ -10,6 +10,16 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 
 
+def _write_workspace_template(root: Path) -> Path:
+    (root / "configs").mkdir(parents=True)
+    (root / "AGENTS.md").write_text("template agents\n", encoding="utf-8")
+    (root / "CLAUDE.md").write_text("template claude\n", encoding="utf-8")
+    (root / "configs" / "AGENTS.md").write_text(
+        "template config agents\n", encoding="utf-8"
+    )
+    return root
+
+
 def test_project_doctor_fix_in_git_repo_creates_runtime_free_scaffold(
     tmp_path: Path,
 ) -> None:
@@ -22,6 +32,9 @@ def test_project_doctor_fix_in_git_repo_creates_runtime_free_scaffold(
     env = {**os.environ}
     env["PYTHONPATH"] = os.pathsep.join(
         [str(ROOT), *(path for path in [env.get("PYTHONPATH")] if path)]
+    )
+    env["OSMOSIS_WORKSPACE_TEMPLATE_PATH"] = str(
+        _write_workspace_template(tmp_path / "workspace-template")
     )
 
     proc = subprocess.run(
