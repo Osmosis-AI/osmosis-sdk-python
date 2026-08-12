@@ -81,10 +81,10 @@ def test_upgrade_json_failed_subprocess_is_parseable_nonzero(
 
     captured = capsys.readouterr()
     assert exit_code == 1
-    assert captured.err == ""
-    payload = json.loads(captured.out)
-    assert payload["status"] == "failed"
-    assert payload["resource"]["stderr"] == "failed\n"
+    assert captured.out == ""
+    payload = json.loads(captured.err)
+    assert payload["error"]["code"] == "PLATFORM_ERROR"
+    assert payload["error"]["details"]["stderr"] == "failed\n"
 
 
 def test_upgrade_json_tries_next_fallback_after_failed_command(

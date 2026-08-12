@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-import io
 from datetime import UTC, datetime, timedelta
 
 import pytest
 
-import osmosis_ai.cli.commands.auth as auth_module
-from osmosis_ai.cli.console import Console
+import osmosis_ai.platform.cli.auth as auth_module
 from osmosis_ai.cli.errors import CLIError
+from osmosis_ai.cli.output import OutputFormat
+from osmosis_ai.cli.output.context import override_output_context
 from osmosis_ai.platform.auth.credentials import Credentials, UserInfo
 from osmosis_ai.platform.auth.flow import LoginResult, VerifyResult
 
@@ -32,6 +32,13 @@ def _make_login_result(email: str = "a@example.com") -> LoginResult:
         user=UserInfo(id="user_1", email=email, name="User"),
         expires_at=datetime.now(UTC) + timedelta(days=30),
     )
+
+
+@pytest.fixture(autouse=True)
+def _interactive_rich() -> None:
+    """Device-login unit tests call the handler outside Typer."""
+    with override_output_context(format=OutputFormat.rich, interactive=True):
+        yield
 
 
 @pytest.fixture(autouse=True)
@@ -254,7 +261,7 @@ def test_first_login_does_not_clear_workspace(monkeypatch) -> None:
 
 
 def test_login_success_prompts_clone_and_doctor_not_workspace_link(
-    monkeypatch, capsys
+    monkeypatch,
 ) -> None:
     """Login should point users at Platform clones and the doctor command."""
     new_creds = _make_credentials(user_id="user_1")
@@ -269,24 +276,23 @@ def test_login_success_prompts_clone_and_doctor_not_workspace_link(
         "osmosis_ai.platform.auth.device_login",
         lambda **kw: (result, new_creds),
     )
-    monkeypatch.setattr(
-        "osmosis_ai.cli.console.console",
-        Console(force_terminal=False, no_color=True, width=100),
+
+    login_result = auth_module.login(force=False, token=None)
+
+    assert login_result.message == "Logged in as a@example.com."
+    assert (
+        "Create or open a workspace in the Osmosis Platform"
+        in (login_result.display_next_steps[0])
     )
-
-    auth_module.login(force=False, token=None)
-
-    rendered = capsys.readouterr().out
-    assert "Login Successful" in rendered
-    assert "Create or open a workspace in the Osmosis Platform" in rendered
-    assert "osmosis doctor" in rendered
-    assert "workspace link" not in rendered
-    assert "workspace.validate" not in rendered
-    assert "workspace.link" not in rendered
-    assert "workspace switch" not in rendered
+    assert any("osmosis doctor" in step for step in login_result.display_next_steps)
+    serialized = " ".join(login_result.display_next_steps)
+    assert "workspace link" not in serialized
+    assert "workspace.validate" not in serialized
+    assert "workspace.link" not in serialized
+    assert "workspace switch" not in serialized
 
 
-def test_login_next_steps_omit_workspace_specific_guidance(monkeypatch, capsys) -> None:
+def test_login_next_steps_omit_workspace_specific_guidance(monkeypatch) -> None:
     """Login guidance should be generic account bootstrap guidance."""
     new_creds = _make_credentials(user_id="user_1")
     result = _make_login_result()
@@ -300,28 +306,36 @@ def test_login_next_steps_omit_workspace_specific_guidance(monkeypatch, capsys) 
         "osmosis_ai.platform.auth.device_login",
         lambda **kw: (result, new_creds),
     )
+
+    login_result = auth_module.login(force=False, token=None)
+
+    assert login_result.message == "Logged in as a@example.com."
+    serialized = " ".join(login_result.display_next_steps)
+    assert "Create or open a workspace in the Osmosis Platform" in serialized
+    assert "clone the repository created there" in serialized
+    assert "osmosis doctor" in serialized
+    assert "Git Sync" not in serialized
+    assert "workspace create" not in serialized
+    assert "workspace list" not in serialized
+    assert "workspace link" not in serialized
+
+
+def test_login_keyboardinterrupt_propagates(monkeypatch) -> None:
+    """Ctrl+C during device login must not be swallowed as a generic failure."""
+    monkeypatch.delenv("OSMOSIS_TOKEN", raising=False)
+    monkeypatch.setattr("osmosis_ai.platform.auth.load_credentials", lambda: None)
     monkeypatch.setattr(
-        "osmosis_ai.cli.console.console",
-        Console(force_terminal=False, no_color=True, width=100),
+        "osmosis_ai.platform.auth.device_login",
+        lambda **kw: (_ for _ in ()).throw(KeyboardInterrupt),
     )
 
-    auth_module.login(force=False, token=None)
-
-    rendered = capsys.readouterr().out
-    assert "Login Successful" in rendered
-    assert "Create or open a workspace in the Osmosis Platform" in rendered
-    assert "clone the repository created there" in rendered
-    assert "osmosis doctor" in rendered
-    assert "Git Sync" not in rendered
-    assert "workspace create" not in rendered
-    assert "workspace list" not in rendered
-    assert "workspace link" not in rendered
+    with pytest.raises(KeyboardInterrupt):
+        auth_module.login(force=False, token=None)
 
 
 def test_whoami_prints_local_identity_outside_workspace_directory(monkeypatch) -> None:
     """whoami should not require workspace directory setup outside repositories."""
     creds = _make_credentials(user_id="user_1")
-    output = io.StringIO()
 
     monkeypatch.setattr("osmosis_ai.platform.auth.load_credentials", lambda: creds)
     monkeypatch.setattr(
@@ -336,15 +350,13 @@ def test_whoami_prints_local_identity_outside_workspace_directory(monkeypatch) -
         "osmosis_ai.platform.cli.workspace_directory_contract.resolve_workspace_directory_from_cwd",
         lambda: (_ for _ in ()).throw(CLIError("not in workspace directory")),
     )
-    monkeypatch.setattr(
-        "osmosis_ai.cli.console.console",
-        Console(file=output, force_terminal=False, no_color=True, width=80),
+
+    result = auth_module.whoami()
+
+    assert result.data["email"] == "a@example.com"
+    assert result.data["name"] == "User"
+    assert creds.expires_at.strftime("%Y-%m-%d") in str(
+        [field.value for field in result.fields]
     )
-
-    auth_module.whoami()
-
-    rendered = output.getvalue()
-    assert "a@example.com" in rendered
-    assert "User" in rendered
-    assert creds.expires_at.strftime("%Y-%m-%d") in rendered
-    assert "Workspace" not in rendered
+    assert result.data["workspace"] is None
+    assert all(field.label != "Workspace" for field in result.fields)

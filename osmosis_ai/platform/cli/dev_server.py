@@ -186,6 +186,7 @@ def logs(server_id: str, *, follow: bool | None, tail: int) -> None:
         except KeyboardInterrupt:
             if fmt is OutputFormat.rich:
                 console.print(f"\nDetached from {server_id}.", style="dim")
+            raise
     else:
         page = client.get_dev_rollout_server_logs(
             server_id,

@@ -241,10 +241,9 @@ class TestPerformUpload:
             )
 
     def test_abort_on_keyboard_interrupt(self, monkeypatch, tmp_path):
-        """_perform_upload aborts and raises CLIError on KeyboardInterrupt."""
+        """_perform_upload aborts and re-raises KeyboardInterrupt."""
         import osmosis_ai.platform.api.client as api_client_module
         import osmosis_ai.platform.api.upload as upload_module
-        from osmosis_ai.cli.errors import CLIError
 
         file_path = tmp_path / "data.jsonl"
         file_path.write_text("{}")
@@ -280,7 +279,7 @@ class TestPerformUpload:
 
         from osmosis_ai.platform.cli.dataset import _perform_upload
 
-        with pytest.raises(CLIError, match="cancelled"):
+        with pytest.raises(KeyboardInterrupt):
             _perform_upload(
                 file_path=file_path,
                 ext="jsonl",

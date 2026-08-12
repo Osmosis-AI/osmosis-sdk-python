@@ -51,6 +51,8 @@ Serializers that turn API models into these shapes live in [../osmosis_ai/cli/ou
 
 The output context, format enum, and selector resolution live in [../osmosis_ai/cli/output/context.py](../osmosis_ai/cli/output/context.py); the full output surface is re-exported from [../osmosis_ai/cli/output/__init__.py](../osmosis_ai/cli/output/__init__.py). Serializer names are lazy (PEP 562) so importing the package does not load platform API models.
 
+Hidden `osmosis dev server logs` is a streaming exception to the envelope contract: `--json` writes NDJSON lines (`{"timestamp", "message"}`) to stdout and exits via `typer.Exit(0)` rather than a `schema_version: 1` list envelope. `--follow` off is still that stream, not a final list envelope.
+
 ## Errors
 
 Raise `CLIError` ([../osmosis_ai/cli/errors.py](../osmosis_ai/cli/errors.py)) — the single error type shared by every domain. `main()` funnels all exceptions through `_handle_cli_error`:

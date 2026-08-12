@@ -71,30 +71,38 @@ def doctor_workspace_directory(path: Any | None = None, *, fix: bool = False) ->
         missing = _missing_scaffold_paths(workspace_directory)
 
     valid = not missing
+    resource = {
+        "workspace_directory": str(workspace_directory),
+        "git": git,
+        "workspace": workspace,
+        "required_paths": _required_workspace_paths(),
+        "missing": missing,
+        "valid": valid,
+        "fixed": fix,
+    }
+    display_lines = _doctor_display_lines(
+        workspace_directory=workspace_directory,
+        workspace=workspace,
+        missing=missing,
+        fixed=fix,
+    )
+    if not valid:
+        raise CLIError(
+            "\n".join(
+                [
+                    "Workspace doctor found missing scaffold paths.",
+                    *display_lines,
+                ]
+            ),
+            code="VALIDATION",
+            details=resource,
+        )
     return OperationResult(
         operation="doctor",
-        status="success" if valid else "failed",
-        resource={
-            "workspace_directory": str(workspace_directory),
-            "git": git,
-            "workspace": workspace,
-            "required_paths": _required_workspace_paths(),
-            "missing": missing,
-            "valid": valid,
-            "fixed": fix,
-        },
-        message=(
-            "Workspace doctor completed."
-            if valid
-            else "Workspace doctor found missing scaffold paths."
-        ),
-        display_next_steps=_doctor_display_lines(
-            workspace_directory=workspace_directory,
-            workspace=workspace,
-            missing=missing,
-            fixed=fix,
-        ),
-        exit_code=0 if valid else 1,
+        status="success",
+        resource=resource,
+        message="Workspace doctor completed.",
+        display_next_steps=display_lines,
     )
 
 

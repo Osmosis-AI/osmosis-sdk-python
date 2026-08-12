@@ -80,10 +80,11 @@ def test_project_doctor_json_reports_missing_paths_with_failure_exit(
 
     captured = capsys.readouterr()
     assert exit_code == 1
-    payload = json.loads(captured.out)
-    assert payload["status"] == "failed"
-    assert payload["resource"]["valid"] is False
-    assert payload["resource"]["missing"] == [
+    assert captured.out == ""
+    error = json.loads(captured.err)["error"]
+    assert error["code"] == "VALIDATION"
+    assert error["details"]["valid"] is False
+    assert error["details"]["missing"] == [
         "rollouts/",
         "configs/training/",
         "configs/eval/",

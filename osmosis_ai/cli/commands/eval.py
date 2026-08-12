@@ -7,6 +7,7 @@ from typing import Any
 
 import typer
 
+from osmosis_ai.cli.output import CommandResult
 from osmosis_ai.platform.constants import (
     DEFAULT_PAGE_SIZE,
     MAX_LOG_PAGE_SIZE,
@@ -50,12 +51,11 @@ def eval_rubric(
     ),
     score_min: float = typer.Option(0.0, "--score-min", help="Minimum score."),
     score_max: float = typer.Option(1.0, "--score-max", help="Maximum score."),
-) -> Any:
+) -> CommandResult:
     """Evaluate conversations against a rubric using LLM-as-judge."""
-    from osmosis_ai.cli.output import CommandResult
     from osmosis_ai.eval.rubric.cli import RubricCommand
 
-    result = RubricCommand().run(
+    return RubricCommand().run(
         data=data,
         rubric=rubric,
         model=model,
@@ -66,11 +66,6 @@ def eval_rubric(
         score_min=score_min,
         score_max=score_max,
     )
-    if isinstance(result, CommandResult):
-        return result
-    if result:
-        raise typer.Exit(result)
-    return None
 
 
 @app.command("submit")

@@ -7,10 +7,10 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-import osmosis_ai.cli.commands.auth as auth_module
 from osmosis_ai.cli import main as cli
 from osmosis_ai.platform.auth.credentials import Credentials, UserInfo
 from osmosis_ai.platform.auth.flow import LoginError, VerifyResult
+from osmosis_ai.platform.cli import auth as auth_module
 
 
 @pytest.fixture
@@ -415,7 +415,7 @@ def test_login_json_force_restores_old_credentials_when_new_save_fails(
     )
 
     with pytest.raises(OSError, match="disk full"):
-        auth_module._machine_login_with_token(token="new-token", force=True)
+        auth_module._login_with_token(token="new-token", force=True)
 
     assert calls == ["clear_all_local_data", "save_new", "restore_old"]
 
@@ -529,7 +529,8 @@ def test_login_rich_with_env_token_is_verify_only(
 
     captured = capsys.readouterr()
     assert exit_code == 0
-    assert "Verified OSMOSIS_TOKEN for brian@example.com." in captured.out
+    assert captured.out.count("Verified OSMOSIS_TOKEN for brian@example.com.") == 1
+    assert "Login Successful" not in captured.out
     assert "OSMOSIS_TOKEN was not saved to local credentials." in captured.out
     assert verify_calls == ["env-token"]
     assert save_calls == []
@@ -544,22 +545,16 @@ def test_login_rich_with_invalid_env_token_mentions_unset(
     monkeypatch, capsys, error_code: str
 ) -> None:
     monkeypatch.setenv("OSMOSIS_TOKEN", "bad-env-token")
-    errors = []
     monkeypatch.setattr(
         "osmosis_ai.platform.auth.verify_token",
         lambda token, git_identity=None: (_ for _ in ()).throw(
             LoginError("Token is invalid.", code=error_code)
         ),
     )
-    monkeypatch.setattr(
-        "osmosis_ai.cli.console.console.print_error",
-        lambda message: errors.append(message),
-    )
 
     exit_code = cli.main(["auth", "login"])
 
-    capsys.readouterr()
-    message = errors[0]
+    message = capsys.readouterr().err
     assert exit_code == 1
     assert "OSMOSIS_TOKEN environment variable is invalid or expired" in message
     assert "unset OSMOSIS_TOKEN" in message

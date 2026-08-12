@@ -315,7 +315,7 @@ def _perform_upload(
                 credentials=credentials,
                 git_identity=git_identity,
             )
-            raise CLIError("Upload cancelled by user.") from None
+            raise
         except Exception as e:
             _abort_upload(
                 client,
@@ -346,7 +346,7 @@ def _perform_upload(
                 credentials=credentials,
                 git_identity=git_identity,
             )
-            raise CLIError("Upload cancelled by user.") from None
+            raise
         except Exception as e:
             _abort_upload(
                 client,

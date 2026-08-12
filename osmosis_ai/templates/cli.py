@@ -9,16 +9,8 @@ from __future__ import annotations
 import shutil
 from pathlib import Path
 
-from osmosis_ai.cli.console import console
 from osmosis_ai.cli.errors import CLIError
-from osmosis_ai.cli.output import (
-    CommandResult,
-    ListColumn,
-    ListResult,
-    OperationResult,
-    OutputFormat,
-    get_output_context,
-)
+from osmosis_ai.cli.output import ListColumn, ListResult, OperationResult
 from osmosis_ai.templates.catalog import shared_template_files
 from osmosis_ai.templates.registry import (
     TemplateNotFoundError,
@@ -54,22 +46,9 @@ def _format_unknown_template(name: str) -> CLIError:
 # ── osmosis template list ────────────────────────────────────────
 
 
-def list_command() -> CommandResult | None:
+def list_command() -> ListResult:
     """List templates."""
     names = list_templates()
-
-    output = get_output_context()
-    if output.format is OutputFormat.rich:
-        if not names:
-            console.print(
-                "No templates are currently available.",
-                style="dim",
-            )
-            return None
-        for name in names:
-            console.print(name)
-        return None
-
     return ListResult(
         title="Templates",
         items=[{"name": name} for name in names],
@@ -233,33 +212,12 @@ def _copy_template(
     return top_level, written
 
 
-def apply_command(name: str, *, force: bool = False) -> CommandResult | None:
+def apply_command(name: str, *, force: bool = False) -> OperationResult:
     """Apply a template into the active workspace directory layout."""
     workspace_directory = _require_workspace_directory()
     destinations, written = _copy_template(name, workspace_directory, force=force)
 
-    rel_destinations = [
-        dest.relative_to(workspace_directory).as_posix() + "/" for dest in destinations
-    ]
-
-    output = get_output_context()
     next_steps = _next_steps(name)
-    if output.format is OutputFormat.rich:
-        console.print(f"Applied template '{name}'.", style="green")
-        if rel_destinations:
-            console.print("Destinations:", style="dim")
-            for path in rel_destinations:
-                console.print(f"  ./{path}", style="dim")
-        if written:
-            console.print(f"Wrote {len(written)} file(s):", style="dim")
-            for path in written:
-                console.print(f"  {path}", style="dim")
-        console.print()
-        console.print("Next:", style="dim")
-        for command in next_steps:
-            console.print(f"  {command}", style="dim")
-        return None
-
     return OperationResult(
         operation="template.apply",
         status="success",

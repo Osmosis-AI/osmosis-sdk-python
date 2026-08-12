@@ -14,14 +14,8 @@ from importlib.resources import files
 from importlib.resources.abc import Traversable
 from pathlib import Path
 
-from osmosis_ai.cli.console import console
 from osmosis_ai.cli.errors import CLIError
-from osmosis_ai.cli.output import (
-    CommandResult,
-    OperationResult,
-    OutputFormat,
-    get_output_context,
-)
+from osmosis_ai.cli.output import OperationResult
 
 _NAME_PATTERN = re.compile(r"^[a-z][a-z0-9-]*$")
 _RESERVED_NAMES = frozenset({"default"})
@@ -154,7 +148,7 @@ def _check_force_config_targets(
     )
 
 
-def init_command(name: str, *, force: bool = False) -> CommandResult | None:
+def init_command(name: str, *, force: bool = False) -> OperationResult:
     """Scaffold ``rollouts/<name>/`` and matching evaluation/training configs."""
     from osmosis_ai.platform.cli.workspace_directory_contract import (
         resolve_workspace_directory_from_cwd,
@@ -194,18 +188,6 @@ def init_command(name: str, *, force: bool = False) -> CommandResult | None:
     rollout_dir_rel = rollout_dir.relative_to(workspace_directory).as_posix()
     eval_config_rel = eval_config.relative_to(workspace_directory).as_posix()
     training_config_rel = training_config.relative_to(workspace_directory).as_posix()
-
-    output = get_output_context()
-    if output.format is OutputFormat.rich:
-        console.print(f"Initialized rollout '{name}'.", style="green")
-        console.print(f"Wrote {len(written)} file(s):", style="dim")
-        for path in written:
-            console.print(f"  {path}", style="dim")
-        console.print()
-        console.print("Next:", style="dim")
-        for command in next_steps:
-            console.print(f"  {command}", style="dim")
-        return None
 
     return OperationResult(
         operation="rollout.init",

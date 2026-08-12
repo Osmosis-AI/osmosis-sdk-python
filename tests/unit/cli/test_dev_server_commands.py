@@ -722,13 +722,10 @@ class TestDevServerLogs:
         assert calls == [("stream", 100)]
 
     def test_follow_keyboardinterrupt_detaches_cleanly(self, monkeypatch) -> None:
-        import typer
-
         from osmosis_ai.cli.output.context import OutputFormat, override_output_context
 
         self._install(monkeypatch, self._stream_client(["a1"], raise_ki=True))
 
         with override_output_context(format=OutputFormat.plain):
-            with pytest.raises(typer.Exit) as exc:
+            with pytest.raises(KeyboardInterrupt):
                 dev_server_module.logs("srv-1", follow=True, tail=100)
-            assert exc.value.exit_code == 0

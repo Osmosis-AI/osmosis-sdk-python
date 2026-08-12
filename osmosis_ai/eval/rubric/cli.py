@@ -46,7 +46,7 @@ class RubricCommand:
         timeout: float | None = None,
         score_min: float = 0.0,
         score_max: float = 1.0,
-    ) -> int | OperationResult:
+    ) -> OperationResult:
         if number < 1:
             raise CLIError("--number must be at least 1.")
 
@@ -99,19 +99,23 @@ class RubricCommand:
                 console.print(f"Wrote results to {console.escape(str(written))}")
 
         has_errors = any(r.errors for r in results)
-        if output.format is not OutputFormat.rich:
-            return OperationResult(
-                operation="eval.rubric",
-                status="failed" if has_errors else "success",
-                resource=self._report_resource(report, written),
-                message=(
-                    "Rubric evaluation completed with errors."
-                    if has_errors
-                    else "Rubric evaluation completed."
-                ),
-                exit_code=1 if has_errors else 0,
+        resource = self._report_resource(report, written)
+        if has_errors:
+            raise CLIError(
+                "Rubric evaluation completed with errors.",
+                code="PLATFORM_ERROR",
+                details=resource,
             )
-        return 1 if has_errors else 0
+        return OperationResult(
+            operation="eval.rubric",
+            status="success",
+            resource=resource,
+            message=(
+                None
+                if output.format is OutputFormat.rich
+                else "Rubric evaluation completed."
+            ),
+        )
 
     @staticmethod
     def _report_resource(
