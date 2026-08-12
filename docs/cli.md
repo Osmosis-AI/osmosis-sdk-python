@@ -55,10 +55,16 @@ Hidden `osmosis dev server logs` is a streaming exception to the envelope contra
 
 ## Errors
 
-Raise `CLIError` ([../osmosis_ai/cli/errors.py](../osmosis_ai/cli/errors.py)) — the single error type shared by every domain. `main()` funnels all exceptions through `_handle_cli_error`:
+Raise `CLIError` ([../osmosis_ai/cli/errors.py](../osmosis_ai/cli/errors.py)) — the single error type shared by every domain. `CLIError.code` is a `CLIErrorCode` `StrEnum`. `main()` funnels all exceptions through `_handle_cli_error`:
 
 - in JSON mode, `classify_error()` + `emit_structured_error_to_stderr()` write a structured error envelope (with a CLI error `code`, command path, and SDK version) to **stderr** ([../osmosis_ai/cli/output/error.py](../osmosis_ai/cli/output/error.py));
 - otherwise a plain `Error: …` line is printed.
+
+Command path prefers Click's `command_path` when the context is already inside a subcommand; otherwise argv is parsed against the same name catalog `_register_commands` uses ([../osmosis_ai/cli/command_registry.py](../osmosis_ai/cli/command_registry.py)), including three-token prefixes such as `dev server up` and `benchmark runs download`.
+
+Not-logged-in failures use `AUTH_REQUIRED`. `SubscriptionRequiredError` maps to `SUBSCRIPTION_REQUIRED` or `BILLING_REQUIRED` from the platform `error_code`; a generic HTTP 403 stays `PLATFORM_ERROR`. The error object has `code`, `message`, and `details` only — `request_id` is omitted because the platform client does not expose one.
+
+JSON success and error envelopes are encoded with `allow_nan=False`. Non-finite metric values are sanitized to `null` in train/eval metrics exports (including the file written by `train info --output`); any remaining non-finite float fails the command rather than emitting invalid JSON.
 
 Unknown exceptions become `INTERNAL` with a generic message. Set `OSMOSIS_DEBUG=1` to append the original exception and traceback to stderr (the JSON envelope is unchanged).
 

@@ -489,6 +489,80 @@ def test_dataset_upload_json_stdout_is_one_envelope(
     assert "Uploading" not in captured.out
 
 
+def test_dataset_upload_json_surfaces_parquet_skip_warning(
+    monkeypatch,
+    tmp_path: Path,
+    capsys,
+) -> None:
+    fake_credentials = _stub_git_context(monkeypatch)
+    real_import = builtins.__import__
+
+    def _block_pyarrow(name: str, *args, **kwargs):
+        if name == "pyarrow.parquet" or name == "pyarrow":
+            raise ImportError("mocked missing pyarrow")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", _block_pyarrow)
+    file_path = tmp_path / "train.parquet"
+    file_path.write_bytes(b"fake parquet data")
+    monkeypatch.setattr(
+        upload_module,
+        "make_progress_bar",
+        lambda _size, **_kwargs: (nullcontext(), lambda _done, _total: None),
+    )
+    monkeypatch.setattr(
+        upload_module,
+        "upload_file_simple",
+        lambda _file_path, _upload_info, progress_callback=None: None,
+    )
+
+    class FakeClient:
+        def create_dataset(
+            self, file_name, file_size, extension, *, git_identity, credentials=None
+        ):
+            assert credentials is fake_credentials
+            assert git_identity == GIT_IDENTITY
+            return DatasetFile(
+                id="ds_1",
+                file_name=file_name,
+                file_size=file_size,
+                status="created",
+                upload=UploadInfo(
+                    method="simple",
+                    s3_key="uploads/train",
+                    presigned_url="https://example.com/upload",
+                ),
+            )
+
+        def complete_upload(
+            self,
+            file_id,
+            parts=None,
+            *,
+            file_extension=None,
+            git_identity,
+            credentials=None,
+        ):
+            assert file_id == "ds_1"
+            assert credentials is fake_credentials
+            assert git_identity == GIT_IDENTITY
+            return _dataset(id=file_id)
+
+    monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+
+    exit_code = cli.main(["--json", "dataset", "upload", str(file_path), "--yes"])
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    payload = json.loads(captured.out)
+    assert payload["operation"] == "dataset.upload"
+    assert payload["warnings"]
+    assert "pyarrow not installed" in payload["warnings"][0]
+    warning = json.loads(captured.err.splitlines()[0])
+    assert warning["warning"]["code"] == "PARQUET_VALIDATION_SKIPPED"
+    assert "pyarrow not installed" in warning["warning"]["message"]
+
+
 @pytest.mark.parametrize("yes_flag", ["--yes", "-y"])
 def test_dataset_upload_yes_option_is_forwarded(
     yes_flag: str, monkeypatch, tmp_path: Path

@@ -143,10 +143,11 @@ def test_platform_context_requires_credentials(
     _scaffold(tmp_path)
     monkeypatch.setattr(workspace_directory_context, "load_credentials", lambda: None)
 
-    with pytest.raises(CLIError, match="Not logged in"):
+    with pytest.raises(CLIError, match="Not logged in") as exc_info:
         workspace_directory_context.resolve_git_workspace_directory_context(
             cwd=tmp_path
         )
+    assert exc_info.value.code == "AUTH_REQUIRED"
 
 
 def test_platform_context_rejects_expired_credentials(

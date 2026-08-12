@@ -24,6 +24,7 @@ from osmosis_ai.cli.output.error import (
 from osmosis_ai.platform.auth.platform_client import (
     AuthenticationExpiredError,
     PlatformAPIError,
+    SubscriptionRequiredError,
 )
 
 GOLDEN = Path(__file__).resolve().parents[3] / "golden" / "cli_output"
@@ -45,7 +46,8 @@ def test_envelope_keys_match_golden() -> None:
     assert envelope["cli_version"]
     assert envelope["error"]["code"] == "VALIDATION"
     assert envelope["error"]["details"] == {}
-    assert envelope["error"]["request_id"] is None
+    assert sorted(envelope["error"].keys()) == sorted(expected["error_keys"])
+    assert "request_id" not in envelope["error"]
 
 
 def test_envelope_includes_platform_details() -> None:
@@ -78,6 +80,27 @@ def test_envelope_includes_platform_details() -> None:
 def test_platform_error_status_mapping(status: int, expected_code: str) -> None:
     cli_err = classify_error(PlatformAPIError("x", status_code=status))
     assert cli_err.code == expected_code
+
+
+def test_subscription_required_maps_to_dedicated_code() -> None:
+    cli_err = classify_error(
+        SubscriptionRequiredError("need sub", error_code="SUBSCRIPTION_REQUIRED")
+    )
+    assert cli_err.code == "SUBSCRIPTION_REQUIRED"
+    assert cli_err.details["platform_code"] == "SUBSCRIPTION_REQUIRED"
+    assert cli_err.details["status_code"] == 403
+
+
+def test_billing_required_maps_to_billing_code() -> None:
+    cli_err = classify_error(
+        SubscriptionRequiredError("need billing", error_code="BILLING_REQUIRED")
+    )
+    assert cli_err.code == "BILLING_REQUIRED"
+
+
+def test_generic_403_stays_platform_error() -> None:
+    cli_err = classify_error(PlatformAPIError("forbidden", status_code=403))
+    assert cli_err.code == "PLATFORM_ERROR"
 
 
 def test_authentication_expired_error_maps_to_auth_required() -> None:
@@ -188,6 +211,38 @@ def test_benchmark_command_path_falls_back_to_full_command(
 def test_command_path_fallback_excludes_top_level_argument(monkeypatch) -> None:
     monkeypatch.setattr("sys.argv", ["osmosis", "--json", "deploy", "ckpt-name"])
     assert command_path_for_error(None) == "deploy"
+
+
+def test_command_path_prefers_click_context_over_argv() -> None:
+    parent = Context(typer.core.TyperCommand(name="osmosis"))
+    parent.info_name = "osmosis"
+    middle = Context(typer.core.TyperCommand(name="dataset"), parent=parent)
+    middle.info_name = "dataset"
+    nested = Context(typer.core.TyperCommand(name="list"), parent=middle)
+    nested.info_name = "list"
+    assert command_path_for_error(nested, argv=["train", "list"]) == "dataset list"
+
+
+def test_dev_server_up_command_path_from_argv(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("sys.argv", ["osmosis", "--json", "dev", "server", "up"])
+    assert command_path_for_error(None) == "dev server up"
+
+
+def test_eval_cache_is_not_a_three_token_command(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("sys.argv", ["osmosis", "--json", "eval", "cache", "clear"])
+    assert command_path_for_error(None) == "eval cache"
+
+
+def test_command_registry_matches_registered_app() -> None:
+    from osmosis_ai.cli.command_registry import COMMAND_GROUPS, STANDALONE_COMMANDS
+
+    cli_main._register_commands()
+    group_names = {info.name for info in cli_main.app.registered_groups}
+    command_names = {info.name for info in cli_main.app.registered_commands}
+    assert group_names == COMMAND_GROUPS
+    assert command_names == STANDALONE_COMMANDS
 
 
 def test_command_path_uses_click_context_when_available() -> None:

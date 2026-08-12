@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import json
 import re
 import sys
 from typing import Any
 
 from .context import OutputContext, OutputFormat
+from .jsonutil import dump_cli_json
 from .result import (
     CommandResult,
     DetailResult,
@@ -133,7 +133,7 @@ def _build_json_envelope(
 
 def _render_json(result: CommandResult, output: OutputContext) -> None:
     envelope = _build_json_envelope(result, schema_version=output.schema_version)
-    sys.stdout.write(json.dumps(envelope, ensure_ascii=False))
+    sys.stdout.write(dump_cli_json(envelope))
     sys.stdout.write("\n")
     sys.stdout.flush()
 

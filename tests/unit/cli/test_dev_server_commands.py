@@ -300,8 +300,9 @@ class TestDevServerUp:
         )
         monkeypatch.setattr(Path, "cwd", classmethod(lambda cls: rollout_dir))
 
-        with pytest.raises(CLIError, match=r"main\.py"):
+        with pytest.raises(CLIError, match=r"main\.py") as exc_info:
             dev_server_module.up(ttl_hours=24, yes=False)
+        assert exc_info.value.code == "VALIDATION"
 
     def test_up_missing_main_py_takes_priority_over_dirty(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
@@ -332,8 +333,9 @@ class TestDevServerUp:
 
         monkeypatch.setattr(dev_server_module, "require_confirmation", _fail_if_called)
 
-        with pytest.raises(CLIError, match=r"main\.py"):
+        with pytest.raises(CLIError, match=r"main\.py") as exc_info:
             dev_server_module.up(ttl_hours=24, yes=False)
+        assert exc_info.value.code == "VALIDATION"
 
 
 class TestDevServerDown:

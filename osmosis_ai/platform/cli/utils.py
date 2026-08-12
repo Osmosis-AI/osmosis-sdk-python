@@ -111,7 +111,7 @@ def require_credentials() -> Credentials:
 
     credentials = load_credentials()
     if credentials is None:
-        raise CLIError(MSG_NOT_LOGGED_IN)
+        raise CLIError(MSG_NOT_LOGGED_IN, code="AUTH_REQUIRED")
     if credentials.is_expired():
         raise AuthenticationExpiredError()
     return credentials

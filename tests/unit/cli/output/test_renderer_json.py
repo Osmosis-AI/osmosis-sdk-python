@@ -8,6 +8,9 @@ from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from typing import Any
 
+import pytest
+
+from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.cli.output.context import OutputFormat, override_output_context
 from osmosis_ai.cli.output.renderer import render
 from osmosis_ai.cli.output.result import (
@@ -270,3 +273,11 @@ def test_render_marks_output_emitted() -> None:
         with redirect_stdout(out):
             render(result, ctx)
         assert ctx.output_emitted is True
+
+
+def test_json_envelope_rejects_nonfinite_floats() -> None:
+    result = DetailResult(title="Metrics", data={"value": float("nan")})
+    with override_output_context(format=OutputFormat.json) as ctx:
+        with pytest.raises(CLIError) as exc_info:
+            render(result, ctx)
+    assert exc_info.value.code == "INTERNAL"

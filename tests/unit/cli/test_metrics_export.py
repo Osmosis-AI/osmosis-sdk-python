@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from osmosis_ai.cli.errors import CLIError
@@ -325,6 +327,20 @@ class TestBuildExportDict:
         assert tr["latest_step"] == 120
         assert tr["total_steps"] == 200
 
+    def test_nonfinite_metric_values_are_sanitized_to_none(self) -> None:
+        metrics = self._make_metrics(
+            steps=[
+                (0, float("nan"), 1711800000000),
+                (10, float("inf"), 1711800060000),
+            ]
+        )
+        metrics.overview.metric_summaries[0].latest = float("nan")
+        result = build_export_dict(self._make_run_detail(), metrics)
+        values = [point["value"] for point in result["metrics"][0]["data"]]
+        assert values == [None, None]
+        assert result["summary"]["training_reward"]["latest"] is None
+        json.dumps(result, allow_nan=False)
+
 
 class TestBuildEvalExportDict:
     """Tests for build_eval_export_dict — the eval API-to-JSON transformer."""
@@ -480,3 +496,18 @@ class TestBuildEvalExportDict:
             {"k": 1, "value": 0.6},
             {"k": 4, "value": 0.85},
         ]
+
+    def test_nonfinite_summary_values_are_sanitized_to_none(self) -> None:
+        metrics = self._make_metrics(
+            reward_stats=EvalRewardStats(
+                mean=float("nan"), median=0.75, std=None, min=None, max=float("inf")
+            ),
+            pass_at_k=[EvalPassAtKPoint(k=1, value=float("nan"))],
+        )
+        metrics.overview.pass_rate = float("nan")
+        result = build_eval_export_dict(self._make_detail(), metrics)
+        assert result["summary"]["pass_rate"] is None
+        assert result["summary"]["reward_stats"]["mean"] is None
+        assert result["summary"]["reward_stats"]["max"] is None
+        assert result["summary"]["pass_at_k"][0]["value"] is None
+        json.dumps(result, allow_nan=False)

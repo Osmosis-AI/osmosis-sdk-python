@@ -30,7 +30,7 @@ def up(*, ttl_hours: int | None, yes: bool = False) -> OperationResult:
     cwd = Path.cwd()
     if not (cwd / "main.py").is_file():
         raise CLIError(
-            "Run from a rollout folder containing main.py.", code="INVALID_USAGE"
+            "Run from a rollout folder containing main.py.", code="VALIDATION"
         )
     ctx = resolve_git_workspace_directory_context()
     state = summarize_local_git_state(ctx.workspace_directory)

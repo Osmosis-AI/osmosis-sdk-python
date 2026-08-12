@@ -2,67 +2,50 @@
 
 from __future__ import annotations
 
-import json
 import sys
 from typing import Any
 
 from osmosis_ai.cli._click_compat import Context, UsageError, get_current_context
-from osmosis_ai.cli.errors import CLIError
+from osmosis_ai.cli.command_registry import (
+    COMMAND_GROUPS,
+    REMOVED_TOP_LEVEL_COMMANDS,
+    REMOVED_TWO_TOKEN_COMMANDS,
+    STANDALONE_COMMANDS,
+    THREE_TOKEN_PREFIXES,
+)
+from osmosis_ai.cli.errors import CLIError, CLIErrorCode
+from osmosis_ai.cli.output.jsonutil import dump_cli_json
 from osmosis_ai.consts import PACKAGE_VERSION
 
-_SUPPORTED_TOP_LEVEL_COMMANDS = {
-    "doctor",
-    "upgrade",
-}
 
-_SUPPORTED_COMMAND_GROUPS = {
-    "auth",
-    "benchmark",
-    "dataset",
-    "eval",
-    "model",
-    "rollout",
-    "secret",
-    "template",
-    "train",
-}
-
-_REMOVED_TOP_LEVEL_COMMANDS = {
-    "deploy",
-    "deployment",
-    "init",
-    "link",
-    "login",
-    "logout",
-    "undeploy",
-    "unlink",
-    "workspace",
-    "whoami",
-}
-
-_REMOVED_TWO_TOKEN_COMMANDS = {
-    ("dataset", "delete"),
-    ("model", "delete"),
-    ("rollout", "validate"),
-    ("train", "delete"),
-    ("train", "traces"),
-}
-
-
-def _classify_platform_status(status: int | None) -> str:
+def _classify_platform_status(status: int | None) -> CLIErrorCode:
     if status == 401:
-        return "AUTH_REQUIRED"
+        return CLIErrorCode.AUTH_REQUIRED
     if status == 404:
-        return "NOT_FOUND"
+        return CLIErrorCode.NOT_FOUND
     if status == 409:
-        return "CONFLICT"
+        return CLIErrorCode.CONFLICT
     if status == 426:
-        return "UPGRADE_REQUIRED"
+        return CLIErrorCode.UPGRADE_REQUIRED
     if status == 429:
-        return "RATE_LIMITED"
+        return CLIErrorCode.RATE_LIMITED
     if status == 400:
-        return "VALIDATION"
-    return "PLATFORM_ERROR"
+        return CLIErrorCode.VALIDATION
+    return CLIErrorCode.PLATFORM_ERROR
+
+
+def _platform_error_details(exc: Any) -> dict[str, Any]:
+    details: dict[str, Any] = {}
+    if exc.error_code:
+        details["platform_code"] = exc.error_code
+    if exc.field:
+        details["field"] = exc.field
+    if exc.details:
+        for key, value in exc.details.items():
+            details.setdefault(key, value)
+    if exc.status_code is not None:
+        details["status_code"] = exc.status_code
+    return details
 
 
 def classify_error(exc: BaseException) -> CLIError:
@@ -73,34 +56,33 @@ def classify_error(exc: BaseException) -> CLIError:
     from osmosis_ai.platform.auth.platform_client import (
         AuthenticationExpiredError,
         PlatformAPIError,
+        SubscriptionRequiredError,
     )
 
     if isinstance(exc, AuthenticationExpiredError):
-        return CLIError(str(exc) or "Session expired.", code="AUTH_REQUIRED")
+        return CLIError(str(exc) or "Session expired.", code=CLIErrorCode.AUTH_REQUIRED)
+
+    if isinstance(exc, SubscriptionRequiredError):
+        code = (
+            CLIErrorCode.BILLING_REQUIRED
+            if exc.error_code == "BILLING_REQUIRED"
+            else CLIErrorCode.SUBSCRIPTION_REQUIRED
+        )
+        return CLIError(str(exc), code=code, details=_platform_error_details(exc))
 
     if isinstance(exc, PlatformAPIError):
-        details: dict[str, Any] = {}
-        if exc.error_code:
-            details["platform_code"] = exc.error_code
-        if exc.field:
-            details["field"] = exc.field
-        if exc.details:
-            for key, value in exc.details.items():
-                details.setdefault(key, value)
-        if exc.status_code is not None:
-            details["status_code"] = exc.status_code
         return CLIError(
             str(exc),
             code=_classify_platform_status(exc.status_code),
-            details=details,
+            details=_platform_error_details(exc),
         )
 
     if isinstance(exc, UsageError):
-        return CLIError(str(exc) or "Invalid usage.", code="VALIDATION")
+        return CLIError(str(exc) or "Invalid usage.", code=CLIErrorCode.VALIDATION)
 
     return CLIError(
         "An unexpected internal error occurred.",
-        code="INTERNAL",
+        code=CLIErrorCode.INTERNAL,
         details={"exception_type": type(exc).__name__},
     )
 
@@ -118,7 +100,7 @@ def emit_internal_debug(exc: BaseException, classified: CLIError) -> None:
 
     if isinstance(exc, CLIError):
         return
-    if classified.code != "INTERNAL":
+    if classified.code != CLIErrorCode.INTERNAL:
         return
     if os.environ.get("OSMOSIS_DEBUG") != "1":
         return
@@ -145,21 +127,27 @@ def _argv_command_path(argv: list[str]) -> str:
         return "<root>"
 
     command = tokens[0]
-    if command in _SUPPORTED_TOP_LEVEL_COMMANDS:
-        return command
-    if command in _REMOVED_TOP_LEVEL_COMMANDS:
+    if command in STANDALONE_COMMANDS or command in REMOVED_TOP_LEVEL_COMMANDS:
         return command
     if len(tokens) == 1:
         return command
-    if (command, tokens[1]) in _REMOVED_TWO_TOKEN_COMMANDS:
+    if (command, tokens[1]) in REMOVED_TWO_TOKEN_COMMANDS:
         return " ".join(tokens[:2])
-    if command == "benchmark" and tokens[1] == "runs" and len(tokens) >= 3:
+    if len(tokens) >= 3 and (command, tokens[1]) in THREE_TOKEN_PREFIXES:
         return " ".join(tokens[:3])
-    if command == "eval" and tokens[1] == "cache" and len(tokens) >= 3:
-        return " ".join(tokens[:3])
-    if command in _SUPPORTED_COMMAND_GROUPS:
+    if command in COMMAND_GROUPS:
         return " ".join(tokens[:2])
     return command
+
+
+def _click_subcommand_path(ctx: Context) -> str | None:
+    path = ctx.command_path.strip()
+    if not path:
+        return None
+    parts = path.split()
+    if len(parts) >= 2:
+        return " ".join(parts[1:])
+    return None
 
 
 def command_path_for_error(
@@ -167,15 +155,18 @@ def command_path_for_error(
     *,
     argv: list[str] | None = None,
 ) -> str:
-    """Resolve the command path for the error envelope."""
+    """Resolve the command path for the error envelope.
+
+    Prefer Click's ``command_path`` when the context is already inside a
+    subcommand. Fall back to argv parsed against the same name catalog
+    ``_register_commands`` uses.
+    """
+    if ctx is not None:
+        click_path = _click_subcommand_path(ctx)
+        if click_path is not None:
+            return click_path
     if argv is not None:
         return _argv_command_path(argv)
-    if ctx is not None:
-        path = ctx.command_path
-        parts = path.split(" ", 1)
-        if len(parts) == 2:
-            return parts[1]
-        return path or "<root>"
     return _argv_command_path(sys.argv[1:] if sys.argv[1:] else [])
 
 
@@ -201,10 +192,9 @@ def emit_structured_error_to_stderr(
             "code": err.code,
             "message": err.message,
             "details": err.details,
-            "request_id": err.request_id,
         },
     }
-    sys.stderr.write(json.dumps(envelope, ensure_ascii=False))
+    sys.stderr.write(dump_cli_json(envelope))
     sys.stderr.write("\n")
     sys.stderr.flush()
 
@@ -231,6 +221,6 @@ def emit_structured_warning_to_stderr(
             "message": message,
         },
     }
-    sys.stderr.write(json.dumps(envelope, ensure_ascii=False))
+    sys.stderr.write(dump_cli_json(envelope))
     sys.stderr.write("\n")
     sys.stderr.flush()
