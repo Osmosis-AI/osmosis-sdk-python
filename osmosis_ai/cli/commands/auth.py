@@ -4,11 +4,54 @@ from __future__ import annotations
 
 import typer
 
-from osmosis_ai.cli.output import CommandResult
+from osmosis_ai.cli.output import (
+    CommandResult,
+    OperationResult,
+    OutputFormat,
+    get_output_context,
+)
 
 app: typer.Typer = typer.Typer(
     help="Manage authentication (login, logout, whoami).", no_args_is_help=True
 )
+
+ASCII_ART = r"""
+                       ___           ___           ___           ___           ___                       ___
+            ___       /\  \         /\  \         /\__\         /\  \         /\  \          ___        /\  \
+      __   /\__\     /::\  \       /::\  \       /::|  |       /::\  \       /::\  \        /\  \      /::\  \
+    /\__\  \/__/    /:/\:\  \     /:/\ \  \     /:|:|  |      /:/\:\  \     /:/\ \  \       \:\  \    /:/\ \  \
+   /:/  /  /\__\   /:/  \:\  \   _\:\~\ \  \   /:/|:|__|__   /:/  \:\  \   _\:\~\ \  \      /::\__\  _\:\~\ \  \
+  /:/  /  /:/  /  /:/__/ \:\__\ /\ \:\ \ \__\ /:/ |::::\__\ /:/__/ \:\__\ /\ \:\ \ \__\  __/:/\/__/ /\ \:\ \ \__\
+  \/__/  /:/  /   \:\  \ /:/  / \:\ \:\ \/__/ \/__/~~/:/  / \:\  \ /:/  / \:\ \:\ \/__/ /\/:/  /    \:\ \:\ \/__/
+  /\__\  \/__/     \:\  /:/  /   \:\ \:\__\         /:/  /   \:\  /:/  /   \:\ \:\__\   \::/__/      \:\ \:\__\
+  \/__/             \:\/:/  /     \:\/:/  /        /:/  /     \:\/:/  /     \:\/:/  /    \:\__\       \:\/:/  /
+                     \::/  /       \::/  /        /:/  /       \::/  /       \::/  /      \/__/        \::/  /
+                      \/__/         \/__/         \/__/         \/__/         \/__/                     \/__/
+"""
+
+
+def _print_login_success(result: CommandResult) -> None:
+    if (
+        get_output_context().format is not OutputFormat.rich
+        or not isinstance(result, OperationResult)
+        or result.status != "success"
+        or result.resource is None
+    ):
+        return
+
+    from osmosis_ai.cli.console import console
+
+    resource = result.resource
+    info_lines = [f"Email: {console.escape(str(resource.get('email') or ''))}"]
+    name = resource.get("name")
+    if name:
+        info_lines.append(f"Name: {console.escape(str(name))}")
+    info_lines.append(
+        f"Platform: {console.escape(str(resource.get('platform_url') or ''))}"
+    )
+    expires = str(resource.get("expires_at") or "").partition("T")[0]
+    info_lines.append(f"Expires: {console.escape(expires)}")
+    console.panel("Login Successful", "\n".join(info_lines), style="green")
 
 
 @app.command("login")
@@ -21,9 +64,13 @@ def login(
     ),
 ) -> CommandResult:
     """Authenticate with Osmosis AI."""
+    from osmosis_ai.cli.console import console
     from osmosis_ai.platform.cli.auth import login as _login
 
-    return _login(force=force, token=token)
+    console.print(ASCII_ART, markup=False, highlight=False)
+    result = _login(force=force, token=token)
+    _print_login_success(result)
+    return result
 
 
 @app.command("logout")

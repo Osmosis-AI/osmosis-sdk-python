@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime, timedelta
+from io import StringIO
 
 import pytest
 
 from osmosis_ai.cli import main as cli
+from osmosis_ai.cli.console import console
 from osmosis_ai.platform.auth.credentials import Credentials, UserInfo
 from osmosis_ai.platform.auth.flow import LoginError, VerifyResult
 from osmosis_ai.platform.cli import auth as auth_module
@@ -503,6 +505,9 @@ def test_login_rich_with_env_token_is_verify_only(
     monkeypatch, capsys, fake_verify_result
 ) -> None:
     monkeypatch.setenv("OSMOSIS_TOKEN", "env-token")
+    rich_output = StringIO()
+    monkeypatch.setattr(console, "_file", rich_output)
+    monkeypatch.setattr(console, "_rich_stdout", None)
     verify_calls = []
     save_calls = []
     delete_calls = []
@@ -528,9 +533,17 @@ def test_login_rich_with_env_token_is_verify_only(
     exit_code = cli.main(["auth", "login"])
 
     captured = capsys.readouterr()
+    restored_output = rich_output.getvalue()
     assert exit_code == 0
+    assert "___" in restored_output
     assert captured.out.count("Verified OSMOSIS_TOKEN for brian@example.com.") == 1
-    assert "Login Successful" not in captured.out
+    assert "Login Successful" in restored_output
+    assert "Email" in restored_output
+    assert "brian@example.com" in restored_output
+    assert "Name" in restored_output
+    assert "Brian" in restored_output
+    assert "Platform" in restored_output
+    assert "Expires" in restored_output
     assert "OSMOSIS_TOKEN was not saved to local credentials." in captured.out
     assert verify_calls == ["env-token"]
     assert save_calls == []
