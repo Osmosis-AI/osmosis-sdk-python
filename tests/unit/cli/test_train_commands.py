@@ -1372,6 +1372,71 @@ required = ["OPENAI_API_KEY"]
         assert captured_kwargs["env_config"] == {"LOG_LEVEL": "INFO"}
         assert captured_kwargs["secrets"] == ["OPENAI_API_KEY"]
 
+    def test_json_submit_does_not_getpass_on_tty_when_secret_missing(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+        tmp_path: Path,
+    ) -> None:
+        """TTY + --json + missing secret + --yes must not call getpass."""
+        import sys
+
+        from osmosis_ai.platform.api.models import PaginatedEnvironmentSecrets
+
+        workspace_directory = self._write_project(tmp_path, rollout="r")
+        monkeypatch.chdir(workspace_directory)
+        path = workspace_directory / "configs" / "training" / "train.toml"
+        path.write_text(
+            """
+[experiment]
+rollout = "r"
+entrypoint = "main.py"
+model_path = "m"
+dataset = "d"
+
+[secrets]
+required = ["OPENAI_API_KEY"]
+""".strip(),
+            encoding="utf-8",
+        )
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+
+        def _boom(prompt: str = "") -> str:
+            raise AssertionError(f"getpass must not be called under --json: {prompt}")
+
+        monkeypatch.setattr(
+            "osmosis_ai.platform.cli.secret_resolution.getpass",
+            _boom,
+        )
+
+        class FakeClient:
+            def list_environment_secrets(self, **kwargs):
+                return PaginatedEnvironmentSecrets(
+                    environment_secrets=[],
+                    total_count=0,
+                    has_more=False,
+                )
+
+            def submit_training_run(self, **kwargs):
+                raise AssertionError("API must not be reached when a secret is missing")
+
+        monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr(platform_train_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr(shared_submit_module, "OsmosisClient", FakeClient)
+
+        from osmosis_ai.cli import main as cli
+
+        exit_code = cli.main(["--json", "train", "submit", str(path), "--yes"])
+        captured = capsys.readouterr()
+
+        assert exit_code == 1
+        assert captured.out == ""
+        envelope = json.loads(captured.err)
+        assert envelope["error"]["code"] == "INTERACTIVE_REQUIRED"
+        assert "OPENAI_API_KEY" in envelope["error"]["message"]
+        assert envelope["error"]["details"]["flags"] == ["--secrets-file"]
+
     def test_submit_rejects_non_canonical_training_config_path(
         self,
         monkeypatch: pytest.MonkeyPatch,

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -1239,7 +1238,6 @@ def submit(
                 names=config.secrets.required,
                 secrets_file=secrets_file,
                 stored_names=workspace_names | personal_names,
-                is_tty=sys.stdin.isatty(),
             )
             missing = sorted(
                 name

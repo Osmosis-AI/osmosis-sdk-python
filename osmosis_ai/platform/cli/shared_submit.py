@@ -16,7 +16,6 @@ those, and ``run_cloud_submit`` is the single implementation.
 from __future__ import annotations
 
 import re
-import sys
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -273,7 +272,6 @@ def run_cloud_submit[ConfigT: BaseSubmitConfig](
                 names=list(config.secrets),
                 secrets_file=secrets_file,
                 stored_names=workspace_names | personal_names,
-                is_tty=sys.stdin.isatty(),
             )
             missing = sorted(
                 {
