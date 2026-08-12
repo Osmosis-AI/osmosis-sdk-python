@@ -1241,6 +1241,7 @@ def submit(
         workspace_directory=workspace_directory,
         status_message="Submitting benchmark run...",
         post=_post,
+        provided_secrets=secret_values,
     )
 
     display_next_steps = [

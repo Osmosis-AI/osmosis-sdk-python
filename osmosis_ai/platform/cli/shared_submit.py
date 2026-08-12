@@ -254,6 +254,7 @@ def confirm_remote_fetch_and_post[T](
     branch: str | None = None,
     pinned_commit_sha: str | None = None,
     extra_warnings: list[str] | None = None,
+    provided_secrets: dict[str, str] | None = None,
 ) -> T:
     """Shared tail: remote-fetch notice, confirmation, POST with secret-404 hints."""
     notes, warnings = print_remote_fetch_notice(
@@ -274,9 +275,17 @@ def confirm_remote_fetch_and_post[T](
         try:
             return post()
         except PlatformAPIError as exc:
+            if provided_secrets:
+                from osmosis_ai.platform.cli.secret_redact import (
+                    redact_provided_secrets,
+                )
+
+                exc = redact_provided_secrets(exc, provided_secrets.values())
             enriched = _enrich_missing_secret_error(exc)
             if enriched is not None:
-                raise enriched from exc
+                raise enriched from None
+            if provided_secrets:
+                raise exc from None
             raise
 
 
@@ -380,6 +389,7 @@ def run_cloud_submit[ConfigT: BaseSubmitConfig](
         branch=config.experiment_branch,
         pinned_commit_sha=config.experiment_commit_sha,
         extra_warnings=[*backend_preflight_warnings, *commit_preflight_warnings],
+        provided_secrets=provided_secrets,
     )
 
     display_next_steps, next_steps_structured = spec.build_next_steps(result, config)

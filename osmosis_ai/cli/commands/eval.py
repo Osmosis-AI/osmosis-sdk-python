@@ -44,7 +44,12 @@ def eval_rubric(
         None, "-o", "--output", help="Path to write evaluation results as JSON."
     ),
     api_key: str | None = typer.Option(
-        None, "--api-key", help="API key for the judge model."
+        None,
+        "--api-key",
+        help=(
+            "Deprecated. API key for the judge model; prefer the provider "
+            "environment variable. Will be removed in a future release."
+        ),
     ),
     timeout: float | None = typer.Option(
         None, "--timeout", help="Request timeout in seconds."
@@ -54,6 +59,15 @@ def eval_rubric(
 ) -> CommandResult:
     """Evaluate conversations against a rubric using LLM-as-judge."""
     from osmosis_ai.eval.rubric.cli import RubricCommand
+
+    if api_key is not None:
+        from osmosis_ai.cli.console import console
+
+        console.print_warning(
+            "--api-key is deprecated and will be removed in a future release. "
+            "Set the provider environment variable instead.",
+            code="DEPRECATION",
+        )
 
     return RubricCommand().run(
         data=data,
