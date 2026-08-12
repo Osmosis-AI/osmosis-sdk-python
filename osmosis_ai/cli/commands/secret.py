@@ -20,11 +20,10 @@ argument, which would leak into shell history and the process list.
 
 from __future__ import annotations
 
-from typing import Any
-
 import typer
 
-from osmosis_ai.platform.constants import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
+from osmosis_ai.cli.options import all_option, limit_option
+from osmosis_ai.cli.output import CommandResult
 
 app: typer.Typer = typer.Typer(
     help="Manage secrets (set, list, delete).",
@@ -40,20 +39,14 @@ _SCOPE_HELP = (
 
 @app.command("list")
 def list_secrets(
-    limit: int = typer.Option(
-        DEFAULT_PAGE_SIZE,
-        "--limit",
-        min=1,
-        max=MAX_PAGE_SIZE,
-        help="Maximum number of secrets to show.",
-    ),
-    all_: bool = typer.Option(False, "--all", help="Show all secrets."),
+    limit: int = limit_option("Maximum number of secrets to show."),
+    all_: bool = all_option("Show all secrets."),
     scope: str = typer.Option(
         "all",
         "--scope",
         help="Filter by scope: 'all', 'workspace', or 'personal'.",
     ),
-) -> Any:
+) -> CommandResult:
     """List secrets (names and metadata only; values are never shown)."""
     from osmosis_ai.platform.cli.secret import list_secrets as _list_secrets
 
@@ -74,7 +67,7 @@ def set_secret(
             "to type the value interactively (input is hidden)."
         ),
     ),
-) -> Any:
+) -> CommandResult:
     """Create or update a secret (upsert).
 
     The value is read from --env VARNAME, or typed at a hidden interactive
@@ -92,7 +85,7 @@ def delete_secret(
     yes: bool = typer.Option(
         False, "--yes", "-y", help="Skip the confirmation prompt."
     ),
-) -> Any:
+) -> CommandResult:
     """Delete a secret within the given scope."""
     from osmosis_ai.platform.cli.secret import delete_secret as _delete_secret
 

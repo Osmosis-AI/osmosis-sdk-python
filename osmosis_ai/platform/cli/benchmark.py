@@ -23,7 +23,6 @@ from osmosis_ai.cli.output.display import (
     format_local_datetime,
     format_relative_time,
 )
-from osmosis_ai.cli.prompts import require_confirmation
 from osmosis_ai.platform.api.client import OsmosisClient
 from osmosis_ai.platform.api.models import (
     BENCHMARK_RUN_STATUSES_ERROR,
@@ -1046,6 +1045,8 @@ def download(
 
 def stop(name: str, *, yes: bool) -> OperationResult:
     """Stop a benchmark run."""
+    from osmosis_ai.platform.cli.stop_run import stop_run
+
     context = require_git_workspace_directory_context()
     client = OsmosisClient()
     output = get_output_context()
@@ -1055,28 +1056,19 @@ def stop(name: str, *, yes: bool) -> OperationResult:
             credentials=context.credentials,
             git_identity=context.git_identity,
         )
-    require_confirmation(
-        f'Stop benchmark run "{detail.name}"?',
+    return stop_run(
+        noun="benchmark run",
+        operation="benchmark.stop",
+        confirm_name=detail.name,
         yes=yes,
-        default=False,
-        summary=[("Name", detail.name)],
-    )
-    with output.status("Stopping benchmark run..."):
-        client.stop_benchmark_run(
+        context=context,
+        status_message="Stopping benchmark run...",
+        extra={"id": detail.id, "status": "stopped"},
+        stop=lambda: client.stop_benchmark_run(
             detail.id,
             credentials=context.credentials,
             git_identity=context.git_identity,
-        )
-    return OperationResult(
-        operation="benchmark.stop",
-        status="success",
-        resource={
-            "id": detail.id,
-            "name": detail.name,
-            "status": "stopped",
-            **git_result_context(context),
-        },
-        message=f'Benchmark run "{detail.name}" stopped.',
+        ),
     )
 
 

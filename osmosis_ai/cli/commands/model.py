@@ -11,11 +11,10 @@ training runs:
 
 from __future__ import annotations
 
-from typing import Any
-
 import typer
 
-from osmosis_ai.platform.constants import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
+from osmosis_ai.cli.options import all_option, limit_option
+from osmosis_ai.cli.output import CommandResult
 
 app: typer.Typer = typer.Typer(
     help="Manage models (list, info, deploy, undeploy).",
@@ -25,20 +24,14 @@ app: typer.Typer = typer.Typer(
 
 @app.command("list")
 def list_models(
-    limit: int = typer.Option(
-        DEFAULT_PAGE_SIZE,
-        "--limit",
-        min=1,
-        max=MAX_PAGE_SIZE,
-        help="Maximum number of models to show per type.",
-    ),
-    all_: bool = typer.Option(False, "--all", help="Show all models of each type."),
+    limit: int = limit_option("Maximum number of models to show per type."),
+    all_: bool = all_option("Show all models of each type."),
     type_: str = typer.Option(
         "all",
         "--type",
         help="Filter by model type: 'all', 'base', or 'lora'.",
     ),
-) -> Any:
+) -> CommandResult:
     """List base models and LoRA models as two separate lists."""
     from osmosis_ai.platform.cli.model import list_models as _list_models
 
@@ -50,7 +43,7 @@ def info(
     lora_model_name: str = typer.Argument(
         ..., help="LoRA model name.", metavar="LORA_MODEL"
     ),
-) -> Any:
+) -> CommandResult:
     """Show details for a single LoRA model."""
     from osmosis_ai.platform.cli.model import info as _info
 
@@ -62,7 +55,7 @@ def deploy(
     lora_model_name: str = typer.Argument(
         ..., help="LoRA model name.", metavar="LORA_MODEL"
     ),
-) -> Any:
+) -> CommandResult:
     """Deploy (or reactivate) a LoRA model."""
     from osmosis_ai.platform.cli.model import deploy as _deploy
 
@@ -74,7 +67,7 @@ def undeploy(
     lora_model_name: str = typer.Argument(
         ..., help="LoRA model name.", metavar="LORA_MODEL"
     ),
-) -> Any:
+) -> CommandResult:
     """Undeploy a LoRA model (transition to inactive)."""
     from osmosis_ai.platform.cli.model import undeploy as _undeploy
 

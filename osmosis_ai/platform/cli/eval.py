@@ -25,7 +25,6 @@ from osmosis_ai.cli.output.display import (
     format_local_date,
     format_local_datetime,
 )
-from osmosis_ai.cli.prompts import require_confirmation
 from osmosis_ai.platform.api.client import OsmosisClient
 from osmosis_ai.platform.api.models import (
     EVAL_RUN_STATUSES_ERROR,
@@ -735,28 +734,20 @@ def download(
 
 def stop(name: str, *, yes: bool) -> OperationResult:
     """Stop an evaluation run."""
+    from osmosis_ai.platform.cli.stop_run import stop_run
+
     context = require_git_workspace_directory_context()
-    credentials = context.credentials
-
-    require_confirmation(
-        f'Stop evaluation run "{name}"?',
-        yes=yes,
-        default=False,
-        summary=[("Name", name)],
-    )
-
     client = OsmosisClient()
-    output = get_output_context()
-    with output.status("Stopping evaluation run..."):
-        client.stop_eval_run(
-            name,
-            credentials=credentials,
-            git_identity=context.git_identity,
-        )
-
-    return OperationResult(
+    return stop_run(
+        noun="evaluation run",
         operation="eval.stop",
-        status="success",
-        resource={"name": name, **git_result_context(context)},
-        message=f'Evaluation run "{name}" stopped.',
+        confirm_name=name,
+        yes=yes,
+        context=context,
+        status_message="Stopping evaluation run...",
+        stop=lambda: client.stop_eval_run(
+            name,
+            credentials=context.credentials,
+            git_identity=context.git_identity,
+        ),
     )

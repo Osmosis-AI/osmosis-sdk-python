@@ -7,7 +7,7 @@
 The console script is `osmosis_ai.cli.main:main` (aliases: `osmosis`, `osmosis-ai`, `osmosis_ai`). [../osmosis_ai/cli/main.py](../osmosis_ai/cli/main.py):
 
 - `main()` calls `_register_commands()` once, then runs the Typer `app` with `standalone_mode=False` so it can map exceptions to exit codes itself.
-- `_register_commands()` imports each command group **lazily inside the function**. Groups attach via `app.add_typer(...)`; the standalone `doctor` / `upgrade` commands attach via `app.command(...)`. Two `rich_help_panel`s split the help: `Workflow Commands` (`dataset`, `train`, `model`, `eval`, `benchmark`, `rollout`, `template`, `doctor`) and `Platform Commands` (`auth`, `secret`, `upgrade`).
+- `_register_commands()` imports each command group **lazily inside the function**. Groups attach via `app.add_typer(...)`; the standalone `quickstart` / `doctor` / `upgrade` commands attach via `app.command(...)`. Two `rich_help_panel`s split the help: `Workflow Commands` (`quickstart`, `dataset`, `train`, `model`, `eval`, `benchmark`, `rollout`, `template`, `doctor`) and `Platform Commands` (`auth`, `secret`, `upgrade`).
 - The root `_callback` resolves `--json` / `--plain`, builds an `OutputContext`, installs it on the Typer context, registers `verify_output_emitted` on close, and loads `.env` via `python-dotenv`. After dotenv, non-HTTPS non-loopback `OSMOSIS_PLATFORM_URL` values are refused unless `OSMOSIS_ALLOW_INSECURE_PLATFORM_URL=1`. `hoist_format_selectors` lets the format flags appear anywhere on the line.
 
 ## Command shells delegate; they don't do work
@@ -74,7 +74,7 @@ Unknown exceptions become `INTERNAL` with a generic message. Set `OSMOSIS_DEBUG=
 
 1. Put the Typer shell in `cli/commands/`; put the logic in `platform/cli/` or `eval/`.
 2. Keep module-level imports minimal; lazy-import heavy deps inside the function.
-3. Return a `CommandResult`; never print directly.
+3. Return a `CommandResult`; never print directly. Annotate handlers as `-> CommandResult`. Reuse [../osmosis_ai/cli/options.py](../osmosis_ai/cli/options.py) for `--limit` / `--all` / `--cursor`.
 4. Raise `CLIError` for user-facing failures.
 5. Support non-interactive flows (`--yes`, `--token`, `--env`) so `--json` / `--plain` don't dead-end on a prompt (`INTERACTIVE_REQUIRED`).
 

@@ -26,7 +26,6 @@ from osmosis_ai.cli.output.display import (
     format_local_datetime,
 )
 from osmosis_ai.cli.output.jsonutil import dump_cli_json
-from osmosis_ai.cli.prompts import require_confirmation
 from osmosis_ai.platform.api.client import OsmosisClient
 from osmosis_ai.platform.api.models import (
     RUN_STATUSES_ERROR,
@@ -489,29 +488,22 @@ def info(name: str, *, output: str | None) -> DetailResult:
 
 def stop(name: str, *, yes: bool) -> OperationResult:
     """Stop a training run."""
+    from osmosis_ai.platform.cli.stop_run import stop_run
+
     context = require_git_workspace_directory_context()
-    credentials = context.credentials
-
-    require_confirmation(
-        f'Stop training run "{name}"?',
-        yes=yes,
-        default=False,
-        summary=[("Name", name)],
-    )
-
     client = OsmosisClient()
-    output = get_output_context()
-    with output.status("Stopping training run..."):
-        client.stop_training_run(
-            name,
-            credentials=credentials,
-            git_identity=context.git_identity,
-        )
-    return OperationResult(
+    return stop_run(
+        noun="training run",
         operation="train.stop",
-        status="success",
-        resource={"name": name, **git_result_context(context)},
-        message=f'Training run "{name}" stopped.',
+        confirm_name=name,
+        yes=yes,
+        context=context,
+        status_message="Stopping training run...",
+        stop=lambda: client.stop_training_run(
+            name,
+            credentials=context.credentials,
+            git_identity=context.git_identity,
+        ),
     )
 
 

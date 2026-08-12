@@ -8,9 +8,9 @@ Heavy imports stay inside the command body per the CLI lazy-loading contract.
 
 from __future__ import annotations
 
-from typing import Any
-
 import typer
+
+from osmosis_ai.cli.output import CommandResult
 
 HELP = (
     "Interactive setup: sign in, clone your workspace repository, and get your first "
@@ -25,7 +25,7 @@ def quickstart(
         "-w",
         help="Workspace to set up. Defaults to the clone you run this from.",
     ),
-) -> Any:
+) -> CommandResult:
     from osmosis_ai.platform.cli.quickstart import run_quickstart
 
     return run_quickstart(workspace_name=workspace)

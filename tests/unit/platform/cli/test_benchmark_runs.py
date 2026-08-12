@@ -350,8 +350,7 @@ def test_stop_confirms_and_calls_platform(monkeypatch: pytest.MonkeyPatch) -> No
     )
     monkeypatch.setattr(benchmark_module, "OsmosisClient", FakeClient)
     monkeypatch.setattr(
-        benchmark_module,
-        "require_confirmation",
+        "osmosis_ai.platform.cli.stop_run.require_confirmation",
         lambda prompt, **kwargs: confirmations.append({"prompt": prompt, **kwargs}),
     )
 
@@ -405,8 +404,7 @@ def test_stop_resolves_name_before_stopping_canonical_id(
     )
     monkeypatch.setattr(benchmark_module, "OsmosisClient", FakeClient)
     monkeypatch.setattr(
-        benchmark_module,
-        "require_confirmation",
+        "osmosis_ai.platform.cli.stop_run.require_confirmation",
         lambda *args, **kwargs: None,
     )
 

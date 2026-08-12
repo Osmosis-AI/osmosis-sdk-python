@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
 
 import typer
+
+from osmosis_ai.cli.output import CommandResult
 
 
 def doctor(
@@ -22,7 +23,7 @@ def doctor(
         "--fix",
         help="Create missing scaffold paths. Existing files are never overwritten.",
     ),
-) -> Any:
+) -> CommandResult:
     """Inspect and optionally repair the canonical workspace directory scaffold."""
     from osmosis_ai.platform.cli.workspace_directory import doctor_workspace_directory
 

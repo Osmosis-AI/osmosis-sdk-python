@@ -10,6 +10,8 @@ from typing import Any
 
 import typer
 
+from osmosis_ai.cli.output import CommandResult
+
 app: typer.Typer = typer.Typer(
     help="Add starter templates into your Osmosis workspace directory.",
     no_args_is_help=True,
@@ -24,7 +26,7 @@ def _complete_template_names(ctx: Any, args: list[str], incomplete: str) -> list
 
 
 @app.command("list")
-def list_templates() -> Any:
+def list_templates() -> CommandResult:
     """List starter templates."""
     from osmosis_ai.templates.cli import list_command
 
@@ -47,7 +49,7 @@ def apply(
             "Without --force, the command refuses to clobber existing files."
         ),
     ),
-) -> Any:
+) -> CommandResult:
     """Copy a starter template into the workspace directory's canonical layout.
 
     Files land at ``rollouts/<name>/`` and ``configs/{training,eval}/<name>.toml``

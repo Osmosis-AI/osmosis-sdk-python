@@ -101,7 +101,7 @@ def _complete_with_retry(
     """Call ``client.complete_upload`` with automatic retry on transient errors.
 
     On final failure, prints recovery information so the user can retry
-    manually with ``osmosis dataset complete <id>``.
+    the upload.
     """
     from osmosis_ai.platform.api.upload import BACKOFF_BASE, BACKOFF_CAP, MAX_RETRIES
 

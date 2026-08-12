@@ -3,16 +3,16 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
 
 import typer
 
-from osmosis_ai.cli.output import CommandResult
-from osmosis_ai.platform.constants import (
-    DEFAULT_PAGE_SIZE,
-    MAX_LOG_PAGE_SIZE,
-    MAX_PAGE_SIZE,
+from osmosis_ai.cli.options import (
+    all_option,
+    cursor_option,
+    limit_option,
+    log_limit_option,
 )
+from osmosis_ai.cli.output import CommandResult
 
 app: typer.Typer = typer.Typer(
     help=(
@@ -102,7 +102,7 @@ def eval_submit(
             "Values are never saved and are re-supplied on every run."
         ),
     ),
-) -> Any:
+) -> CommandResult:
     """Submit an evaluation run."""
     from osmosis_ai.platform.cli.eval import submit as _submit
 
@@ -111,15 +111,9 @@ def eval_submit(
 
 @app.command("list")
 def eval_list(
-    limit: int = typer.Option(
-        DEFAULT_PAGE_SIZE,
-        "--limit",
-        min=1,
-        max=MAX_PAGE_SIZE,
-        help="Maximum number of evaluation runs to show.",
-    ),
-    all_: bool = typer.Option(False, "--all", help="Show all evaluation runs."),
-) -> Any:
+    limit: int = limit_option("Maximum number of evaluation runs to show."),
+    all_: bool = all_option("Show all evaluation runs."),
+) -> CommandResult:
     """List evaluation runs for the current workspace directory."""
     from osmosis_ai.platform.cli.eval import list_eval_runs as _list_eval_runs
 
@@ -129,19 +123,9 @@ def eval_list(
 @app.command("logs")
 def eval_logs(
     name: str = typer.Argument(..., help="Evaluation run name."),
-    limit: int = typer.Option(
-        DEFAULT_PAGE_SIZE,
-        "--limit",
-        min=1,
-        max=MAX_LOG_PAGE_SIZE,
-        help="Maximum number of recent log entries to show.",
-    ),
-    cursor: str | None = typer.Option(
-        None,
-        "--cursor",
-        help="Page further back using the next_cursor value from a previous page.",
-    ),
-) -> Any:
+    limit: int = log_limit_option(),
+    cursor: str | None = cursor_option(),
+) -> CommandResult:
     """Show recent logs for an evaluation run, oldest first."""
     from osmosis_ai.platform.cli.eval import logs as _logs
 
@@ -157,7 +141,7 @@ def eval_info(
         "-o",
         help="Run output root (default in rich mode: .osmosis/evals/<run-name>/).",
     ),
-) -> Any:
+) -> CommandResult:
     """Show evaluation run details, results, and metrics."""
     from osmosis_ai.platform.cli.eval import info as _info
 
@@ -197,7 +181,7 @@ def eval_download(
         "-y",
         help="Skip size confirmation.",
     ),
-) -> Any:
+) -> CommandResult:
     """Download evaluation metrics, trajectories, artifacts, or logs."""
     from osmosis_ai.platform.cli.eval import download as _download
 
@@ -215,7 +199,7 @@ def eval_download(
 def eval_stop(
     name: str = typer.Argument(..., help="Evaluation run name."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt."),
-) -> Any:
+) -> CommandResult:
     """Stop an evaluation run."""
     from osmosis_ai.platform.cli.eval import stop as _stop
 
