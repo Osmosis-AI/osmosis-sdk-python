@@ -1,0 +1,26 @@
+docs/cli.md
+  s_f7676f8c9e2a95::t_45b79d9594c52a 63-64
+osmosis_ai/cli/output/error.py
+  s_f7676f8c9e2a95::t_646cdb338a1cee 108-129
+osmosis_ai/cli/main.py
+  s_f7676f8c9e2a95::t_1c0d4236e2e830 168,174,178-179
+  s_f7676f8c9e2a95::t_038d32ff1d3316 30
+tests/unit/cli/output/test_error.py
+  s_f7676f8c9e2a95::t_a987223e4c6fe3 104-153
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "ad66da081c02e959afd53cdfbffb14054cbe1343",
+  "prompts": {},
+  "sessions": {
+    "s_f7676f8c9e2a95": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "4a3d781a-b43d-46fe-8360-ad27c8585a43",
+        "model": "grok-4.6"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}
