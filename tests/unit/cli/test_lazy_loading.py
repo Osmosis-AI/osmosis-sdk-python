@@ -1,15 +1,22 @@
-"""Tests for lazy loading in osmosis_ai.__init__.
+"""Tests for lazy loading in osmosis_ai.__init__ and the CLI entry point.
 
 Verifies that importing ``osmosis_ai`` does NOT eagerly pull in heavy
 dependencies (litellm, openai, fastapi) and that rubric exports remain
 accessible on demand. Rollout SDK types are not re-exported at package
 top level — import from ``osmosis_ai.rollout`` directly.
+
+CLI subprocess probes lock startup import discipline: ``--json`` must not
+pull Rich, and ``--help`` must not pull optional/network stacks.
 """
 
 from __future__ import annotations
 
+import json
+import os
 import subprocess
 import sys
+import tempfile
+import textwrap
 
 import pytest
 
@@ -104,3 +111,84 @@ def test_module_has_getattr():
     """The module must define __getattr__ for rubric lazy loading."""
     assert hasattr(osmosis_ai, "__getattr__")
     assert callable(osmosis_ai.__getattr__)
+
+
+# -- CLI startup import invariants (subprocess) --------------------------------
+
+
+def _sys_modules_after_cli(args: list[str]) -> set[str]:
+    """Return ``sys.modules`` names after ``main(args)`` in a fresh process."""
+    with tempfile.NamedTemporaryFile(
+        prefix="osmosis-modules-", suffix=".json", delete=False
+    ) as dump:
+        dump_path = dump.name
+    script = textwrap.dedent(
+        """\
+        import json
+        import os
+        import sys
+        from osmosis_ai.cli.main import main
+
+        try:
+            main(sys.argv[1:])
+        finally:
+            with open(os.environ["OSMOSIS_MODULE_DUMP"], "w", encoding="utf-8") as fh:
+                json.dump(list(sys.modules), fh)
+        """
+    )
+    env = os.environ.copy()
+    env["OSMOSIS_MODULE_DUMP"] = dump_path
+    try:
+        subprocess.run(
+            [sys.executable, "-c", script, *args],
+            check=False,
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+        with open(dump_path, encoding="utf-8") as fh:
+            loaded = json.load(fh)
+        return set(loaded)
+    finally:
+        os.unlink(dump_path)
+
+
+def _top_level_modules(loaded: set[str]) -> set[str]:
+    return {name.partition(".")[0] for name in loaded}
+
+
+def test_json_cli_does_not_load_rich_stack() -> None:
+    """``osmosis --json <flag>`` must not import rich / pygments / markdown_it.
+
+    Uses ``--json --version`` so command registration still runs, but no
+    handler that lazily imports ``cli.console`` (e.g. dataset list) executes.
+    """
+    loaded = _sys_modules_after_cli(["--json", "--version"])
+    roots = _top_level_modules(loaded)
+    leaked = {"rich", "pygments", "markdown_it"} & roots
+    assert not leaked, f"JSON CLI loaded UI stack: {sorted(leaked)}"
+
+
+def test_help_does_not_load_heavy_optional_deps() -> None:
+    """``osmosis --help`` must not import httpx, keyring, urllib.request, litellm, fastapi."""
+    loaded = _sys_modules_after_cli(["--help"])
+    roots = _top_level_modules(loaded)
+    leaked_roots = {"httpx", "keyring", "litellm", "fastapi"} & roots
+    assert not leaked_roots, f"--help loaded optional deps: {sorted(leaked_roots)}"
+    assert "urllib.request" not in loaded, "urllib.request was loaded during --help"
+
+
+def test_output_package_import_does_not_load_api_models() -> None:
+    """Importing an output submodule must not run serializers → platform.api.models."""
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "from osmosis_ai.cli.output.context import OutputContext; import sys; "
+            "assert 'osmosis_ai.cli.output.serializers' not in sys.modules; "
+            "assert 'osmosis_ai.platform.api.models' not in sys.modules",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr

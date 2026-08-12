@@ -66,7 +66,7 @@ from osmosis_ai.rollout.integrations.agents.openai_agents import OsmosisAgent
 CLI startup must stay fast (~150 ms vs ~1 s), so heavy dependencies load on first use, not at import time:
 
 - **Top-level package** — [../osmosis_ai/__init__.py](../osmosis_ai/__init__.py) resolves rubric exports (`evaluate_rubric`, `RubricResult`, error types) through `__getattr__`. Only `__version__` is eager.
-- **Command shells** — every file in [../osmosis_ai/cli/commands/](../osmosis_ai/cli/commands/) uses function-level imports for heavy deps (`rollout.*`, `platform.api.*`, `platform.cli.*`, `eval.*`). Module-level imports stay light: `typer`, `cli.console`, `cli.errors`, the lightweight `platform.constants`, and stdlib.
+- **Command shells** — every file in [../osmosis_ai/cli/commands/](../osmosis_ai/cli/commands/) uses function-level imports for heavy deps (`rollout.*`, `platform.api.*`, `platform.cli.*`, `eval.*`, `cli.console`). Module-level imports stay light: `typer`, `cli.errors`, the lightweight `platform.constants`, and stdlib.
 - **No eager `cli.main`** — [../osmosis_ai/cli/__init__.py](../osmosis_ai/cli/__init__.py) does not import `cli.main`, which prevents circular imports when rollout/server modules import `cli.console`. The entry point is `osmosis_ai.cli.main:main` directly.
 - **`_litellm_compat.py`** stays at the package top level because `eval/rubric/` depends on it.
 
