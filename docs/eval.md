@@ -7,7 +7,7 @@
 Reads an evaluation config TOML, validates its **structure** locally, and POSTs it to the platform over the same git-sync flow as `osmosis train submit`. The two commands share one implementation — only the literal strings, the config loader, and the API call differ.
 
 - Command shell: [../osmosis_ai/cli/commands/eval.py](../osmosis_ai/cli/commands/eval.py) (`eval_submit`)
-- Handler + submit spec: [../osmosis_ai/platform/cli/eval.py](../osmosis_ai/platform/cli/eval.py) (`submit`, `_EVAL_SUBMIT_SPEC`)
+- Handler + submit spec: [../osmosis_ai/platform/cli/eval.py](../osmosis_ai/platform/cli/eval.py) (`submit`)
 - Config loader: [../osmosis_ai/platform/cli/eval_config.py](../osmosis_ai/platform/cli/eval_config.py)
 - Shared submit flow: [../osmosis_ai/platform/cli/shared_submit.py](../osmosis_ai/platform/cli/shared_submit.py) (`run_cloud_submit`)
 - Shared config primitives: [../osmosis_ai/platform/cli/shared_config.py](../osmosis_ai/platform/cli/shared_config.py)

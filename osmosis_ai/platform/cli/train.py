@@ -4,15 +4,10 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from osmosis_ai.cli.console import console
 from osmosis_ai.cli.errors import CLIError
-from osmosis_ai.cli.metrics_export import (
-    build_export_dict,
-    resolve_default_metrics_output,
-    resolve_metrics_output_path,
-)
 from osmosis_ai.cli.output import (
     DetailField,
     DetailResult,
@@ -40,12 +35,6 @@ from osmosis_ai.platform.api.models import (
     SubmitRunResult,
 )
 from osmosis_ai.platform.auth.platform_client import PlatformAPIError
-from osmosis_ai.platform.cli.shared_submit import CloudSubmitSpec, run_cloud_submit
-from osmosis_ai.platform.cli.training_config import (
-    TrainSubmitConfig,
-    load_train_submit_config,
-    validate_train_submit_context_paths,
-)
 from osmosis_ai.platform.cli.utils import (
     build_logs_result,
     build_run_detail_rows,
@@ -62,6 +51,9 @@ from osmosis_ai.platform.cli.utils import (
     validate_list_options,
 )
 from osmosis_ai.platform.cli.workspace_directory_context import git_result_context
+
+if TYPE_CHECKING:
+    from osmosis_ai.platform.cli.training_config import TrainSubmitConfig
 
 
 def _format_train_config(config: dict[str, Any] | None) -> str | None:
@@ -155,28 +147,30 @@ def _train_next_steps(
     return display, structured
 
 
-_TRAIN_SUBMIT_SPEC: CloudSubmitSpec[TrainSubmitConfig] = CloudSubmitSpec(
-    config_dir="configs/training",
-    command_label="`osmosis train submit`",
-    table_title="Training Run",
-    confirm_prompt="Submit this training run?",
-    status_message="Submitting training run...",
-    operation="train.submit",
-    success_message_format="Training run submitted: {name}",
-    load_config=load_train_submit_config,
-    validate_context=validate_train_submit_context_paths,
-    submit=_submit_training,
-    build_next_steps=_train_next_steps,
-)
-
-
 def submit(
     config_path: Path, *, yes: bool, secrets_file: str | None = None
 ) -> OperationResult:
     """Submit a new training run."""
-    return run_cloud_submit(
-        config_path, yes=yes, spec=_TRAIN_SUBMIT_SPEC, secrets_file=secrets_file
+    from osmosis_ai.platform.cli.shared_submit import CloudSubmitSpec, run_cloud_submit
+    from osmosis_ai.platform.cli.training_config import (
+        load_train_submit_config,
+        validate_train_submit_context_paths,
     )
+
+    spec = CloudSubmitSpec(
+        config_dir="configs/training",
+        command_label="`osmosis train submit`",
+        table_title="Training Run",
+        confirm_prompt="Submit this training run?",
+        status_message="Submitting training run...",
+        operation="train.submit",
+        success_message_format="Training run submitted: {name}",
+        load_config=load_train_submit_config,
+        validate_context=validate_train_submit_context_paths,
+        submit=_submit_training,
+        build_next_steps=_train_next_steps,
+    )
+    return run_cloud_submit(config_path, yes=yes, spec=spec, secrets_file=secrets_file)
 
 
 def list_training_runs(*, limit: int, all_: bool) -> ListResult:
@@ -263,6 +257,12 @@ def logs(name: str, *, limit: int, cursor: str | None = None) -> ListResult:
 
 def info(name: str, *, output: str | None) -> DetailResult:
     """Show training run details, checkpoints, and metrics."""
+    from osmosis_ai.cli.metrics_export import (
+        build_export_dict,
+        resolve_default_metrics_output,
+        resolve_metrics_output_path,
+    )
+
     context = require_git_workspace_directory_context()
     credentials = context.credentials
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from osmosis_ai.cli.console import console
 from osmosis_ai.cli.errors import CLIError
@@ -38,20 +38,6 @@ from osmosis_ai.platform.api.models import (
     SubmitBenchmarkRunResult,
 )
 from osmosis_ai.platform.auth.platform_client import PlatformAPIError
-from osmosis_ai.platform.cli.benchmark_config import (
-    BenchmarkSubmitConfig,
-    load_benchmark_submit_config,
-)
-from osmosis_ai.platform.cli.secret_resolution import resolve_run_secrets
-from osmosis_ai.platform.cli.shared_config import (
-    build_env_table_rows,
-    build_secret_table_rows,
-)
-from osmosis_ai.platform.cli.shared_submit import (
-    _enrich_missing_secret_error,
-    _fetch_secret_scopes,
-    _missing_secret_message,
-)
 from osmosis_ai.platform.cli.utils import (
     build_logs_result,
     format_benchmark_status,
@@ -71,6 +57,9 @@ from osmosis_ai.platform.cli.workspace_directory_contract import (
     ensure_workspace_directory_config_path,
     validate_workspace_directory_contract,
 )
+
+if TYPE_CHECKING:
+    from osmosis_ai.platform.cli.benchmark_config import BenchmarkSubmitConfig
 
 _HLE_PARITY_WARNING = (
     'For HLE, we recommend [tasks] task_set = "parity" so results are '
@@ -1150,6 +1139,18 @@ def submit(
     config_path: Path, *, yes: bool, secrets_file: str | None = None
 ) -> OperationResult:
     """Submit a benchmark run."""
+    from osmosis_ai.platform.cli.benchmark_config import load_benchmark_submit_config
+    from osmosis_ai.platform.cli.secret_resolution import resolve_run_secrets
+    from osmosis_ai.platform.cli.shared_config import (
+        build_env_table_rows,
+        build_secret_table_rows,
+    )
+    from osmosis_ai.platform.cli.shared_submit import (
+        _enrich_missing_secret_error,
+        _fetch_secret_scopes,
+        _missing_secret_message,
+    )
+
     context = require_git_workspace_directory_context()
     workspace_directory = Path(context.workspace_directory)
     validate_workspace_directory_contract(workspace_directory)
