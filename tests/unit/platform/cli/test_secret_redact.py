@@ -14,11 +14,17 @@ from osmosis_ai.platform.auth.platform_client import (
 )
 from osmosis_ai.platform.cli.secret_redact import (
     redact_provided_secrets,
+    redact_secret_text,
     redact_secret_value,
 )
 from osmosis_ai.platform.cli.shared_submit import confirm_remote_fetch_and_post
 
 SENTINEL = "super-secret-value-xyz"
+
+
+def test_redact_empty_secret_leaves_input_unchanged() -> None:
+    assert redact_secret_value("ab", "") == "ab"
+    assert redact_secret_text("ab", "") == "ab"
 
 
 def test_redact_secret_value_redacts_keys_containing_secret() -> None:

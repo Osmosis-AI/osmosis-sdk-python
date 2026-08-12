@@ -117,7 +117,10 @@ def test_module_has_getattr():
 
 
 def _sys_modules_after_cli(
-    args: list[str], *, cwd: str | None = None
+    args: list[str],
+    *,
+    cwd: str | None = None,
+    env_overrides: dict[str, str] | None = None,
 ) -> tuple[int, set[str]]:
     """Return ``(exit_code, sys.modules names)`` after ``main(args)`` in a fresh process."""
     with tempfile.NamedTemporaryFile(
@@ -137,6 +140,8 @@ def _sys_modules_after_cli(
         """
     )
     env = os.environ.copy()
+    if env_overrides:
+        env.update(env_overrides)
     env["OSMOSIS_MODULE_DUMP"] = dump_path
     try:
         subprocess.run(
@@ -169,6 +174,10 @@ def test_json_auth_login_does_not_load_rich_stack() -> None:
         rc, loaded = _sys_modules_after_cli(
             ["--json", "auth", "login", "--token", "fake"],
             cwd=tmp,
+            env_overrides={
+                "OSMOSIS_PLATFORM_URL": "http://127.0.0.1:1",
+                "OSMOSIS_ALLOW_INSECURE_PLATFORM_URL": "1",
+            },
         )
     assert rc != 0
     assert "osmosis_ai.cli.commands.auth" in loaded

@@ -15,6 +15,8 @@ from osmosis_ai.platform.auth.platform_client import PlatformAPIError
 
 def redact_secret_value(data: Any, secret_value: str) -> Any:
     """Return a copy of *data* with the current plaintext secret removed."""
+    if not secret_value:
+        return data
     if isinstance(data, str):
         return data.replace(secret_value, "[REDACTED]")
     if isinstance(data, dict):
@@ -36,6 +38,8 @@ def redact_secret_value(data: Any, secret_value: str) -> Any:
 def redact_secret_text(value: str | None, secret_value: str) -> str | None:
     if value is None:
         return None
+    if not secret_value:
+        return value
     return value.replace(secret_value, "[REDACTED]")
 
 
