@@ -27,6 +27,7 @@ from osmosis_ai.cli.output.context import (
 from osmosis_ai.cli.output.error import (
     classify_error,
     command_path_for_error,
+    emit_internal_debug,
     emit_structured_error_to_stderr,
 )
 from osmosis_ai.cli.output.renderer import render_command_result, verify_output_emitted
@@ -164,16 +165,18 @@ def _handle_cli_error(
     exit_code: int = 1,
 ) -> int:
     output = _output_context_for_error(exc, argv)
+    classified = classify_error(exc)
     if output.format is OutputFormat.json:
         raw_ctx = getattr(exc, "ctx", None)
         ctx = raw_ctx if isinstance(raw_ctx, Context) else None
         command_argv = argv if argv is not None else sys.argv[1:]
         emit_structured_error_to_stderr(
-            classify_error(exc),
+            classified,
             command=command_path_for_error(ctx, argv=command_argv),
         )
     else:
-        _print_error(str(exc))
+        _print_error(classified.message or str(classified))
+    emit_internal_debug(exc, classified)
     return exit_code
 
 

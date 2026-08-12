@@ -101,6 +101,56 @@ def test_unknown_exception_maps_to_internal_with_safe_details() -> None:
     assert "secrets" not in cli_err.message
 
 
+def test_osmos_debug_appends_internal_traceback_after_json_envelope(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setenv("OSMOSIS_DEBUG", "1")
+
+    def boom(*_: Any, **__: Any) -> None:
+        raise RuntimeError("traceback contains secrets")
+
+    monkeypatch.setattr(cli_main, "_register_commands", lambda: None)
+    monkeypatch.setattr(cli_main, "app", boom)
+
+    rc = main(["--json", "dataset", "list"])
+
+    captured = capsys.readouterr()
+    assert rc == 1
+    assert captured.out == ""
+    lines = captured.err.splitlines()
+    envelope = json.loads(lines[0])
+    assert envelope["error"]["code"] == "INTERNAL"
+    assert envelope["error"]["message"] == "An unexpected internal error occurred."
+    assert "secrets" not in envelope["error"]["message"]
+    rest = "\n".join(lines[1:])
+    assert "RuntimeError: traceback contains secrets" in rest
+    assert "Traceback (most recent call last)" in rest
+
+
+def test_internal_json_error_without_debug_omits_original_message(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.delenv("OSMOSIS_DEBUG", raising=False)
+
+    def boom(*_: Any, **__: Any) -> None:
+        raise RuntimeError("traceback contains secrets")
+
+    monkeypatch.setattr(cli_main, "_register_commands", lambda: None)
+    monkeypatch.setattr(cli_main, "app", boom)
+
+    rc = main(["--json", "dataset", "list"])
+
+    captured = capsys.readouterr()
+    assert rc == 1
+    envelope = json.loads(captured.err)
+    assert envelope["error"]["code"] == "INTERNAL"
+    assert envelope["error"]["message"] == "An unexpected internal error occurred."
+    assert "secrets" not in captured.err
+    assert "Traceback" not in captured.err
+
+
 def test_cli_error_is_returned_unchanged() -> None:
     original = CLIError("Bad", code="NOT_FOUND")
     assert classify_error(original) is original

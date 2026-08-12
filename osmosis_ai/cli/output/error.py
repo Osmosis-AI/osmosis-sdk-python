@@ -105,6 +105,28 @@ def classify_error(exc: BaseException) -> CLIError:
     )
 
 
+def emit_internal_debug(exc: BaseException, classified: CLIError) -> None:
+    """Write original message + traceback for INTERNAL errors when debugging.
+
+    ``OSMOSIS_DEBUG=1`` is the only switch (no CLI flag). The JSON error
+    envelope is unchanged; this extra text is appended to stderr after it.
+    Explicit ``CLIError(code="INTERNAL")`` is already structured and is not
+    dumped.
+    """
+    import os
+    import traceback
+
+    if isinstance(exc, CLIError):
+        return
+    if classified.code != "INTERNAL":
+        return
+    if os.environ.get("OSMOSIS_DEBUG") != "1":
+        return
+    sys.stderr.write(f"{type(exc).__name__}: {exc}\n")
+    traceback.print_exception(exc, file=sys.stderr)
+    sys.stderr.flush()
+
+
 def _argv_command_path(argv: list[str]) -> str:
     skip_flags = {"--json", "--plain", "--version", "-V", "--help", "-h"}
     tokens: list[str] = []

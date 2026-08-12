@@ -60,6 +60,8 @@ Raise `CLIError` ([../osmosis_ai/cli/errors.py](../osmosis_ai/cli/errors.py)) â€
 - in JSON mode, `classify_error()` + `emit_structured_error_to_stderr()` write a structured error envelope (with a CLI error `code`, command path, and SDK version) to **stderr** ([../osmosis_ai/cli/output/error.py](../osmosis_ai/cli/output/error.py));
 - otherwise a plain `Error: â€¦` line is printed.
 
+Unknown exceptions become `INTERNAL` with a generic message. Set `OSMOSIS_DEBUG=1` to append the original exception and traceback to stderr (the JSON envelope is unchanged).
+
 `KeyboardInterrupt` / `click.Abort` exit `130`; `typer.Exit` / `SystemExit` preserve their code.
 
 ## Conventions when adding a command
