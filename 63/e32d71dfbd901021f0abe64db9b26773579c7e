@@ -1,0 +1,37 @@
+osmosis_ai/cli/commands/eval.py
+  s_f7676f8c9e2a95::t_30cd8f589d8f87 63-71
+  s_f7676f8c9e2a95::t_3c5cb8ccbb6398 47-52
+osmosis_ai/platform/cli/shared_submit.py
+  s_f7676f8c9e2a95::t_c6ccac7c939490 286-288
+  s_f7676f8c9e2a95::t_e8df31fcebf9cd 279-281
+  s_f7676f8c9e2a95::t_651319c9a10d9e 392
+  s_f7676f8c9e2a95::t_f671eb7499beee 257,278,282-283
+osmosis_ai/platform/cli/secret_redact.py
+  s_f7676f8c9e2a95::t_fddd642f172976 1-59
+tests/unit/cli/test_eval_rubric_json.py
+  s_f7676f8c9e2a95::t_4f0f244dd21990 216-255
+osmosis_ai/platform/cli/benchmark.py
+  s_f7676f8c9e2a95::t_3b8d86024ecf50 1244
+tests/unit/platform/cli/test_secret_redact.py
+  s_f7676f8c9e2a95::t_f30aa8e6404382 1-70
+  s_f7676f8c9e2a95::t_8678de180229f6 71
+osmosis_ai/platform/cli/secret.py
+  s_f7676f8c9e2a95::t_10fafe8c26dfce 31
+  s_f7676f8c9e2a95::t_fbe0a039a503dc 266
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "63e32d71dfbd901021f0abe64db9b26773579c7e",
+  "prompts": {},
+  "sessions": {
+    "s_f7676f8c9e2a95": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "4a3d781a-b43d-46fe-8360-ad27c8585a43",
+        "model": "grok-4.6"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}
