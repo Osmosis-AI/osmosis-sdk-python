@@ -1,0 +1,30 @@
+osmosis_ai/platform/cli/benchmark.py
+  s_f7676f8c9e2a95::t_8c86c4e9200b7c 1142,1144-1145
+  s_f7676f8c9e2a95::t_d40540382c3876 1219-1229,1231-1234,1237,1239-1243
+osmosis_ai/platform/cli/shared_submit.py
+  s_f7676f8c9e2a95::t_5fbe59b9ae2903 355-365,367-370,373-379
+  s_f7676f8c9e2a95::t_e32c58b8218342 208-209
+  s_f7676f8c9e2a95::t_0dd0c32c4aa5ab 1,3-7
+  s_f7676f8c9e2a95::t_d0e286c5aee762 180-207,210-282
+  s_f7676f8c9e2a95::t_adca9f890a688d 416-417
+tests/unit/platform/cli/test_benchmark_submit.py
+  s_f7676f8c9e2a95::t_de48b51c2c7235 359-388,392-407
+  s_f7676f8c9e2a95::t_fda9c837e5bfbe 211
+  s_f7676f8c9e2a95::t_c9ba8da055b266 389-391
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "25a45333f04d7026251e603b87fd97b275abaa09",
+  "prompts": {},
+  "sessions": {
+    "s_f7676f8c9e2a95": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "4a3d781a-b43d-46fe-8360-ad27c8585a43",
+        "model": "grok-4.6"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}
