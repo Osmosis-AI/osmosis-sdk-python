@@ -1,0 +1,26 @@
+tests/unit/cli/test_lazy_loading.py
+  s_c1830aa5399db5::t_5c424f54ef6c81 170-171
+  s_c1830aa5399db5::t_477a1ea83a612c 119-122,134-136,151-152
+  s_c1830aa5399db5::t_2301098c07c3f8 187-188
+  s_c1830aa5399db5::t_feb834ab168dea 198-199
+osmosis_ai/cli/main.py
+  s_c1830aa5399db5::t_5cbad275d18bf7 113
+  s_c1830aa5399db5::t_f5737ff3e7a063 244
+  s_c1830aa5399db5::t_d728c5a9124440 82-85
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "ebadd542943a32cf51ab136aa31e96ff0a9f1a8c",
+  "prompts": {},
+  "sessions": {
+    "s_c1830aa5399db5": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "998667ba-909c-4361-8de8-c7ce4f396673",
+        "model": "grok-4.6"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}
