@@ -109,7 +109,8 @@ def _callback(
 
     Rich output is the default for humans. For AI agents, CI/CD, and scripts, pass `--json` or `--plain` anywhere on the command line, for example: `osmosis dataset list --json` or `osmosis --plain dataset list`.
     """
-    warnings.filterwarnings("ignore")
+    warnings.filterwarnings("ignore", category=DeprecationWarning)
+    warnings.filterwarnings("ignore", category=PendingDeprecationWarning)
     if version:
         _emit_version()
         raise typer.Exit()
@@ -127,9 +128,37 @@ def _callback(
     from dotenv import find_dotenv, load_dotenv
 
     load_dotenv(find_dotenv(usecwd=True))
+    _refuse_insecure_platform_url()
 
 
 _registered = False
+
+
+def _refuse_insecure_platform_url() -> None:
+    """Fail closed on non-HTTPS non-loopback platform URLs after dotenv.
+
+    A cwd ``.env`` can point ``OSMOSIS_PLATFORM_URL`` at http:// while
+    ``OSMOSIS_TOKEN`` is already exported. Opt in with
+    ``OSMOSIS_ALLOW_INSECURE_PLATFORM_URL=1``.
+    """
+    import os
+
+    from osmosis_ai.cli.errors import CLIError
+    from osmosis_ai.platform.auth.config import (
+        get_platform_url,
+        is_insecure_platform_url,
+    )
+
+    platform_url = get_platform_url()
+    if not is_insecure_platform_url(platform_url):
+        return
+    if os.environ.get("OSMOSIS_ALLOW_INSECURE_PLATFORM_URL") == "1":
+        return
+    raise CLIError(
+        f"Refusing non-HTTPS platform URL {platform_url}. "
+        "Set OSMOSIS_ALLOW_INSECURE_PLATFORM_URL=1 to override.",
+        code="VALIDATION",
+    )
 
 
 def _print_error(message: str) -> None:

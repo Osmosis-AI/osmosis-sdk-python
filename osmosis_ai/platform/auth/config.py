@@ -49,16 +49,22 @@ def normalize_platform_url(url: str | None) -> str:
     return urlunparse((scheme, netloc, path, "", "", ""))
 
 
-def _warn_if_insecure_platform_url(platform_url: str) -> None:
+class InsecurePlatformURLWarning(UserWarning):
+    """Non-HTTPS, non-loopback ``OSMOSIS_PLATFORM_URL``."""
+
+
+def is_insecure_platform_url(platform_url: str) -> bool:
+    """True when the URL would send credentials over plaintext to a remote host."""
     parsed = urlparse(platform_url)
-    if (
-        platform_url != DEFAULT_PLATFORM_URL
-        and parsed.scheme.lower() != "https"
-        and not _is_loopback(parsed.hostname or "")
-    ):
+    return parsed.scheme.lower() != "https" and not _is_loopback(parsed.hostname or "")
+
+
+def _warn_if_insecure_platform_url(platform_url: str) -> None:
+    if is_insecure_platform_url(platform_url):
         warnings.warn(
             f"OSMOSIS_PLATFORM_URL is not HTTPS ({platform_url}). "
             "Tokens will be transmitted in plaintext.",
+            InsecurePlatformURLWarning,
             stacklevel=2,
         )
 

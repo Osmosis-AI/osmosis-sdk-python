@@ -8,7 +8,7 @@ The console script is `osmosis_ai.cli.main:main` (aliases: `osmosis`, `osmosis-a
 
 - `main()` calls `_register_commands()` once, then runs the Typer `app` with `standalone_mode=False` so it can map exceptions to exit codes itself.
 - `_register_commands()` imports each command group **lazily inside the function**. Groups attach via `app.add_typer(...)`; the standalone `doctor` / `upgrade` commands attach via `app.command(...)`. Two `rich_help_panel`s split the help: `Workflow Commands` (`dataset`, `train`, `model`, `eval`, `benchmark`, `rollout`, `template`, `doctor`) and `Platform Commands` (`auth`, `secret`, `upgrade`).
-- The root `_callback` resolves `--json` / `--plain`, builds an `OutputContext`, installs it on the Typer context, registers `verify_output_emitted` on close, and loads `.env` via `python-dotenv`. `hoist_format_selectors` lets the format flags appear anywhere on the line.
+- The root `_callback` resolves `--json` / `--plain`, builds an `OutputContext`, installs it on the Typer context, registers `verify_output_emitted` on close, and loads `.env` via `python-dotenv`. After dotenv, non-HTTPS non-loopback `OSMOSIS_PLATFORM_URL` values are refused unless `OSMOSIS_ALLOW_INSECURE_PLATFORM_URL=1`. `hoist_format_selectors` lets the format flags appear anywhere on the line.
 
 ## Command shells delegate; they don't do work
 
