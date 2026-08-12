@@ -116,8 +116,10 @@ def test_module_has_getattr():
 # -- CLI startup import invariants (subprocess) --------------------------------
 
 
-def _sys_modules_after_cli(args: list[str], *, cwd: str | None = None) -> set[str]:
-    """Return ``sys.modules`` names after ``main(args)`` in a fresh process."""
+def _sys_modules_after_cli(
+    args: list[str], *, cwd: str | None = None
+) -> tuple[int, set[str]]:
+    """Return ``(exit_code, sys.modules names)`` after ``main(args)`` in a fresh process."""
     with tempfile.NamedTemporaryFile(
         prefix="osmosis-modules-", suffix=".json", delete=False
     ) as dump:
@@ -129,11 +131,9 @@ def _sys_modules_after_cli(args: list[str], *, cwd: str | None = None) -> set[st
         import sys
         from osmosis_ai.cli.main import main
 
-        try:
-            main(sys.argv[1:])
-        finally:
-            with open(os.environ["OSMOSIS_MODULE_DUMP"], "w", encoding="utf-8") as fh:
-                json.dump(list(sys.modules), fh)
+        rc = main(sys.argv[1:])
+        with open(os.environ["OSMOSIS_MODULE_DUMP"], "w", encoding="utf-8") as fh:
+            json.dump({"rc": rc, "modules": list(sys.modules)}, fh)
         """
     )
     env = os.environ.copy()
@@ -148,8 +148,8 @@ def _sys_modules_after_cli(args: list[str], *, cwd: str | None = None) -> set[st
             cwd=cwd,
         )
         with open(dump_path, encoding="utf-8") as fh:
-            loaded = json.load(fh)
-        return set(loaded)
+            payload = json.load(fh)
+        return payload["rc"], set(payload["modules"])
     finally:
         os.unlink(dump_path)
 
@@ -167,7 +167,8 @@ def test_json_cli_does_not_load_rich_stack() -> None:
     the Rich stack just because it was imported.
     """
     with tempfile.TemporaryDirectory() as tmp:
-        loaded = _sys_modules_after_cli(["--json", "dataset", "list"], cwd=tmp)
+        rc, loaded = _sys_modules_after_cli(["--json", "dataset", "list"], cwd=tmp)
+    assert rc == 1
     assert "osmosis_ai.platform.cli.dataset" in loaded
     assert "osmosis_ai.cli.console" in loaded
     roots = _top_level_modules(loaded)
@@ -183,7 +184,8 @@ def test_json_train_list_does_not_load_pydantic() -> None:
     in a scratch cwd — no login or network required.
     """
     with tempfile.TemporaryDirectory() as tmp:
-        loaded = _sys_modules_after_cli(["--json", "train", "list"], cwd=tmp)
+        rc, loaded = _sys_modules_after_cli(["--json", "train", "list"], cwd=tmp)
+    assert rc == 1
     assert "osmosis_ai.platform.cli.train" in loaded
     roots = _top_level_modules(loaded)
     leaked = {"rich", "pygments", "markdown_it"} & roots
@@ -193,7 +195,8 @@ def test_json_train_list_does_not_load_pydantic() -> None:
 
 def test_help_does_not_load_heavy_optional_deps() -> None:
     """``osmosis --help`` must not import httpx, keyring, urllib.request, litellm, fastapi."""
-    loaded = _sys_modules_after_cli(["--help"])
+    rc, loaded = _sys_modules_after_cli(["--help"])
+    assert rc == 0
     roots = _top_level_modules(loaded)
     leaked_roots = {"httpx", "keyring", "litellm", "fastapi"} & roots
     assert not leaked_roots, f"--help loaded optional deps: {sorted(leaked_roots)}"

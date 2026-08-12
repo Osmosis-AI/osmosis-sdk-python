@@ -79,6 +79,10 @@ app: typer.Typer = typer.Typer(
 )
 
 
+def _emit_version() -> None:
+    typer.echo(f"{package_name} {PACKAGE_VERSION}")
+
+
 @app.callback(invoke_without_command=True)
 def _callback(
     ctx: typer.Context,
@@ -106,7 +110,7 @@ def _callback(
     """
     warnings.filterwarnings("ignore")
     if version:
-        typer.echo(f"{package_name} {PACKAGE_VERSION}")
+        _emit_version()
         raise typer.Exit()
 
     selected_format = resolve_format_selectors(
@@ -237,7 +241,7 @@ def main(argv: list[str] | None = None) -> int:
     # Bare -V/--version skips command registration. Combined with other flags
     # (e.g. --json --version) still goes through Typer so output stays identical.
     if argv == ["--version"] or argv == ["-V"]:
-        typer.echo(f"{package_name} {PACKAGE_VERSION}")
+        _emit_version()
         return 0
     _register_commands()
     argv = hoist_format_selectors(argv)
