@@ -336,7 +336,7 @@ def login(*, force: bool = False, token: str | None = None) -> OperationResult:
             return _login_with_env_token(env_token=env_token)
 
         output = get_output_context()
-        if output.format is not OutputFormat.rich or not output.interactive:
+        if output.format is not OutputFormat.rich:
             raise CLIError(
                 "Login is interactive in this mode. Pass --token or set OSMOSIS_TOKEN.",
                 code="INTERACTIVE_REQUIRED",

@@ -87,7 +87,7 @@ def classify_error(exc: BaseException) -> CLIError:
     )
 
 
-def emit_internal_debug(exc: BaseException, classified: CLIError) -> None:
+def emit_internal_debug(exc: BaseException, classified: CLIError | None = None) -> None:
     """Write original message + traceback for INTERNAL errors when debugging.
 
     ``OSMOSIS_DEBUG=1`` is the only switch (no CLI flag). The JSON error
@@ -98,11 +98,13 @@ def emit_internal_debug(exc: BaseException, classified: CLIError) -> None:
     import os
     import traceback
 
+    if os.environ.get("OSMOSIS_DEBUG") != "1":
+        return
     if isinstance(exc, CLIError):
         return
-    if classified.code != CLIErrorCode.INTERNAL:
+    if classified is not None and classified.code != CLIErrorCode.INTERNAL:
         return
-    if os.environ.get("OSMOSIS_DEBUG") != "1":
+    if classified is None and isinstance(exc, UsageError):
         return
     sys.stderr.write(f"{type(exc).__name__}: {exc}\n")
     traceback.print_exception(exc, file=sys.stderr)

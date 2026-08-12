@@ -7,7 +7,11 @@ from pathlib import Path
 import pytest
 
 from osmosis_ai.cli.output.context import OutputFormat, override_output_context
-from osmosis_ai.platform.auth.platform_client import PlatformAPIError
+from osmosis_ai.cli.output.error import classify_error
+from osmosis_ai.platform.auth.platform_client import (
+    PlatformAPIError,
+    SubscriptionRequiredError,
+)
 from osmosis_ai.platform.cli.secret_redact import redact_provided_secrets
 from osmosis_ai.platform.cli.shared_submit import confirm_remote_fetch_and_post
 
@@ -28,6 +32,23 @@ def test_redact_provided_secrets_scrubs_message_and_details() -> None:
     assert SENTINEL not in str(redacted)
     assert "[REDACTED]" in str(redacted)
     assert SENTINEL not in (redacted.error_code or "")
+    assert SENTINEL not in (redacted.field or "")
+    assert SENTINEL not in str(redacted.details)
+
+
+def test_redaction_preserves_subscription_error_classification() -> None:
+    exc = SubscriptionRequiredError(
+        f"Subscription required for {SENTINEL}",
+        error_code="SUBSCRIPTION_REQUIRED",
+        field=f"secret_{SENTINEL}",
+        details={"echo": SENTINEL},
+    )
+
+    redacted = redact_provided_secrets(exc, [SENTINEL])
+
+    assert isinstance(redacted, SubscriptionRequiredError)
+    assert classify_error(redacted).code == "SUBSCRIPTION_REQUIRED"
+    assert SENTINEL not in str(redacted)
     assert SENTINEL not in (redacted.field or "")
     assert SENTINEL not in str(redacted.details)
 

@@ -6,6 +6,7 @@ provided secret back onto stderr or the JSON error envelope.
 
 from __future__ import annotations
 
+import copy
 from collections.abc import Iterable
 from typing import Any
 
@@ -40,13 +41,12 @@ def redact_secret_platform_error(
     exc: PlatformAPIError, secret_value: str
 ) -> PlatformAPIError:
     """Clone a PlatformAPIError with any echoed secret value removed."""
-    return PlatformAPIError(
-        redact_secret_text(str(exc), secret_value) or "",
-        status_code=exc.status_code,
-        error_code=redact_secret_text(exc.error_code, secret_value),
-        field=redact_secret_text(exc.field, secret_value),
-        details=redact_secret_value(exc.details, secret_value),
-    )
+    redacted = copy.copy(exc)
+    redacted.args = (redact_secret_text(str(exc), secret_value) or "",)
+    redacted.error_code = redact_secret_text(exc.error_code, secret_value)
+    redacted.field = redact_secret_text(exc.field, secret_value)
+    redacted.details = redact_secret_value(exc.details, secret_value)
+    return redacted
 
 
 def redact_provided_secrets(

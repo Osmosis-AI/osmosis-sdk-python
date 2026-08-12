@@ -333,6 +333,28 @@ def test_login_keyboardinterrupt_propagates(monkeypatch) -> None:
         auth_module.login(force=False, token=None)
 
 
+def test_device_login_allows_rich_mode_with_redirected_stdin(monkeypatch) -> None:
+    """Rich device login does not read stdin and must work without a TTY."""
+    monkeypatch.delenv("OSMOSIS_TOKEN", raising=False)
+    expected = auth_module._login_operation_result(
+        email="a@example.com",
+        name="User",
+        expires_at=datetime.now(UTC) + timedelta(days=30),
+        source="device",
+        saved=True,
+    )
+    monkeypatch.setattr(
+        auth_module,
+        "_login_with_device_flow",
+        lambda *, force: expected,
+    )
+
+    with override_output_context(format=OutputFormat.rich, interactive=False):
+        result = auth_module.login(force=False, token=None)
+
+    assert result is expected
+
+
 def test_whoami_prints_local_identity_outside_workspace_directory(monkeypatch) -> None:
     """whoami should not require workspace directory setup outside repositories."""
     creds = _make_credentials(user_id="user_1")

@@ -110,8 +110,7 @@ def _callback(
 
     Rich output is the default for humans. For AI agents, CI/CD, and scripts, pass `--json` or `--plain` anywhere on the command line, for example: `osmosis dataset list --json` or `osmosis --plain dataset list`.
     """
-    warnings.filterwarnings("ignore", category=DeprecationWarning)
-    warnings.filterwarnings("ignore", category=PendingDeprecationWarning)
+    warnings.filterwarnings("ignore")
     if version:
         _emit_version()
         raise typer.Exit()
@@ -144,6 +143,9 @@ def _refuse_insecure_platform_url() -> None:
     """
     import os
 
+    if os.environ.get("OSMOSIS_PLATFORM_URL") is None:
+        return
+
     from osmosis_ai.cli.errors import CLIError
     from osmosis_ai.platform.auth.config import (
         get_platform_url,
@@ -153,6 +155,13 @@ def _refuse_insecure_platform_url() -> None:
     platform_url = get_platform_url()
     if not is_insecure_platform_url(platform_url):
         return
+    from osmosis_ai.cli.console import console
+
+    console.print_warning(
+        f"OSMOSIS_PLATFORM_URL is not HTTPS ({platform_url}). "
+        "Tokens will be transmitted in plaintext.",
+        code="INSECURE_PLATFORM_URL",
+    )
     if os.environ.get("OSMOSIS_ALLOW_INSECURE_PLATFORM_URL") == "1":
         return
     raise CLIError(
@@ -195,8 +204,9 @@ def _handle_cli_error(
     exit_code: int = 1,
 ) -> int:
     output = _output_context_for_error(exc, argv)
-    classified = classify_error(exc)
+    classified = None
     if output.format is OutputFormat.json:
+        classified = classify_error(exc)
         raw_ctx = getattr(exc, "ctx", None)
         ctx = raw_ctx if isinstance(raw_ctx, Context) else None
         if ctx is None:
@@ -210,7 +220,7 @@ def _handle_cli_error(
             command=command_path_for_error(ctx, argv=command_argv),
         )
     else:
-        _print_error(classified.message or str(classified))
+        _print_error(str(exc))
     emit_internal_debug(exc, classified)
     return exit_code
 

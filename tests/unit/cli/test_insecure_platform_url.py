@@ -62,13 +62,15 @@ def test_cwd_dotenv_http_platform_url_fails_closed_without_connecting(
     )
     monkeypatch.setattr("urllib.request.urlopen", _must_not_connect)
 
-    with pytest.warns(InsecurePlatformURLWarning, match="not HTTPS"):
-        rc = cli.main(["--json", "auth", "whoami"])
+    rc = cli.main(["--json", "auth", "whoami"])
 
     captured = capsys.readouterr()
     assert rc == 1
     assert captured.out == ""
-    error = json.loads(captured.err)["error"]
+    stderr_envelopes = [json.loads(line) for line in captured.err.splitlines()]
+    assert stderr_envelopes[0]["warning"]["code"] == "INSECURE_PLATFORM_URL"
+    assert "http://example.invalid" in stderr_envelopes[0]["warning"]["message"]
+    error = stderr_envelopes[1]["error"]
     assert error["code"] == "VALIDATION"
     assert "http://example.invalid" in error["message"]
     assert "OSMOSIS_ALLOW_INSECURE_PLATFORM_URL=1" in error["message"]
@@ -87,12 +89,13 @@ def test_insecure_platform_url_allowed_with_opt_in(
         encoding="utf-8",
     )
 
-    with pytest.warns(InsecurePlatformURLWarning, match="not HTTPS"):
-        rc = cli.main(["--json", "auth", "login"])
+    rc = cli.main(["--json", "auth", "login"])
 
     captured = capsys.readouterr()
     assert rc == 1
-    error = json.loads(captured.err)["error"]
+    stderr_envelopes = [json.loads(line) for line in captured.err.splitlines()]
+    assert stderr_envelopes[0]["warning"]["code"] == "INSECURE_PLATFORM_URL"
+    error = stderr_envelopes[1]["error"]
     assert error["code"] == "INTERACTIVE_REQUIRED"
 
 

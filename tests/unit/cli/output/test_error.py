@@ -174,6 +174,25 @@ def test_internal_json_error_without_debug_omits_original_message(
     assert "Traceback" not in captured.err
 
 
+def test_rich_internal_error_prints_original_message(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    def boom(*_: Any, **__: Any) -> None:
+        raise RuntimeError("human-readable root cause")
+
+    monkeypatch.setattr(cli_main, "_register_commands", lambda: None)
+    monkeypatch.setattr(cli_main, "app", boom)
+
+    rc = main(["dataset", "list"])
+
+    captured = capsys.readouterr()
+    assert rc == 1
+    assert captured.out == ""
+    assert "Error: human-readable root cause" in captured.err
+    assert "An unexpected internal error occurred." not in captured.err
+
+
 def test_cli_error_is_returned_unchanged() -> None:
     original = CLIError("Bad", code="NOT_FOUND")
     assert classify_error(original) is original
