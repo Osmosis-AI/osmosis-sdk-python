@@ -203,7 +203,12 @@ def emit_structured_error_to_stderr(
             "details": err.details,
         },
     }
-    sys.stderr.write(dump_cli_json(envelope))
+    try:
+        serialized = dump_cli_json(envelope)
+    except CLIError as exc:
+        envelope["error"]["details"] = {"details_omitted": type(exc).__name__}
+        serialized = dump_cli_json(envelope)
+    sys.stderr.write(serialized)
     sys.stderr.write("\n")
     sys.stderr.flush()
 

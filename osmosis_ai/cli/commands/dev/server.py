@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import NoReturn
+
 import typer
 
 from osmosis_ai.cli.options import all_option, limit_option
@@ -54,10 +56,11 @@ def logs(
         max=MAX_LOG_PAGE_SIZE,
         help="Number of recent log lines to show.",
     ),
-) -> CommandResult:
+) -> NoReturn:
     """Show logs for a remote rollout server."""
     from osmosis_ai.platform.cli.dev_server import logs as _logs
 
+    # _logs always raises typer.Exit or KeyboardInterrupt; there is no CommandResult.
     _logs(server_id, follow=follow, tail=tail)
 
 

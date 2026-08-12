@@ -50,6 +50,20 @@ def test_envelope_keys_match_golden() -> None:
     assert "request_id" not in envelope["error"]
 
 
+def test_emit_structured_error_omits_unserializable_details() -> None:
+    err = CLIError(
+        "boom",
+        code="INTERNAL",
+        details={"value": float("nan")},
+    )
+
+    envelope = _capture_envelope(err)
+
+    assert envelope["error"]["code"] == "INTERNAL"
+    assert envelope["error"]["message"] == "boom"
+    assert envelope["error"]["details"] == {"details_omitted": "CLIError"}
+
+
 def test_envelope_includes_platform_details() -> None:
     err = PlatformAPIError(
         "Validation failed.",

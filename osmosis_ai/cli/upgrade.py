@@ -66,6 +66,15 @@ def _detect_install_method() -> str:
     return "pip"
 
 
+def _manual_upgrade_message(prefix: str) -> str:
+    return (
+        f"{prefix} You can try manually:\n"
+        f"  uv tool upgrade {package_name}\n"
+        f"  pipx upgrade {package_name}\n"
+        f"  pip install --upgrade {package_name}"
+    )
+
+
 def _get_upgrade_commands(method: str) -> list[list[str]]:
     """Return the shell commands to try for upgrading the package."""
     commands: dict[str, list[list[str]]] = {
@@ -178,7 +187,7 @@ def upgrade() -> OperationResult:
                     message=f"Successfully upgraded to {latest}.",
                 )
             last_failure = CLIError(
-                "Upgrade failed.",
+                _manual_upgrade_message("Upgrade failed."),
                 code="PLATFORM_ERROR",
                 details=_upgrade_resource(
                     installed=installed,
@@ -191,7 +200,7 @@ def upgrade() -> OperationResult:
             )
         except subprocess.TimeoutExpired:
             last_failure = CLIError(
-                "Upgrade command timed out.",
+                _manual_upgrade_message("Upgrade command timed out."),
                 code="PLATFORM_ERROR",
                 details=_upgrade_resource(
                     installed=installed,
@@ -202,7 +211,7 @@ def upgrade() -> OperationResult:
             )
         except Exception as exc:
             last_failure = CLIError(
-                "Error running upgrade.",
+                _manual_upgrade_message("Error running upgrade."),
                 code="PLATFORM_ERROR",
                 details=_upgrade_resource(
                     installed=installed,
@@ -216,10 +225,7 @@ def upgrade() -> OperationResult:
     if last_failure is not None:
         raise last_failure
     raise CLIError(
-        "Upgrade failed. You can try manually:\n"
-        f"  uv tool upgrade {package_name}\n"
-        f"  pipx upgrade {package_name}\n"
-        f"  pip install --upgrade {package_name}",
+        _manual_upgrade_message("Upgrade failed."),
         code="PLATFORM_ERROR",
         details=_upgrade_resource(
             installed=installed,
