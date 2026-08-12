@@ -103,6 +103,17 @@ def test_list_command_returns_list_result_in_rich(workspace_template: Path) -> N
     assert result.has_more is False
 
 
+def test_list_command_restores_rich_empty_state(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(template_cli, "list_templates", lambda: [])
+
+    result = list_command()
+
+    assert result.items == []
+    assert result.display_hints == ["No templates are currently available."]
+
+
 def test_list_command_empty_message_uses_user_facing_template_terms(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

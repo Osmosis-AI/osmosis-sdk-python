@@ -508,6 +508,7 @@ def print_remote_fetch_notice(
     branch: str | None,
     pinned_commit_sha: str | None,
     extra_warnings: list[str] | None = None,
+    warn_on_missing_commit_sha: bool = True,
 ) -> tuple[list[str], list[str]]:
     """Remind the user that remote submissions pull *code* from the connected
     Git remote while reading *config values* from the local TOML file.
@@ -521,7 +522,9 @@ def print_remote_fetch_notice(
 
     ``extra_warnings`` lets callers fold in advisories computed elsewhere (e.g.
     the pinned-commit preflight) so they appear in the same Rich panel and in
-    the returned ``warnings`` list.
+    the returned ``warnings`` list. ``warn_on_missing_commit_sha`` can be
+    disabled for config formats, such as benchmark TOML, that do not support a
+    pinned commit.
 
     Returns ``(notes, warnings)`` as plain-text lists so callers can surface
     the same context in non-rich modes (e.g. the JSON error envelope when
@@ -569,10 +572,11 @@ def print_remote_fetch_notice(
         if state is not None and state.branch and state.head_sha:
             notes.append(f"Local branch: {state.branch} @ {state.head_sha[:8]}")
         notes.append("Make sure your code changes are committed and pushed.")
-        warnings.append(
-            "Platform source selection may differ from your local branch when no "
-            "commit_sha is set."
-        )
+        if warn_on_missing_commit_sha:
+            warnings.append(
+                "Platform source selection may differ from your local branch when no "
+                "commit_sha is set."
+            )
     notes.append(
         "Config values come from your local TOML file and are submitted "
         "as-is — uncommitted edits to the config still apply."

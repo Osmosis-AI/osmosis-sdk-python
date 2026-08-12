@@ -373,12 +373,14 @@ def test_submit_prints_remote_fetch_notice(
         branch: str | None,
         pinned_commit_sha: str | None,
         extra_warnings: list[str] | None = None,
+        warn_on_missing_commit_sha: bool = True,
     ) -> tuple[list[str], list[str]]:
         notice.update(
             workspace_directory=workspace_directory,
             branch=branch,
             pinned_commit_sha=pinned_commit_sha,
             extra_warnings=list(extra_warnings or []),
+            warn_on_missing_commit_sha=warn_on_missing_commit_sha,
         )
         return (
             ["Osmosis will fetch code from the Platform-connected repository."],
@@ -405,3 +407,4 @@ def test_submit_prints_remote_fetch_notice(
     assert notice["branch"] is None
     assert notice["pinned_commit_sha"] is None
     assert notice["extra_warnings"] == []
+    assert notice["warn_on_missing_commit_sha"] is False

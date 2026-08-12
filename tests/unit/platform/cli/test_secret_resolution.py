@@ -44,15 +44,19 @@ def test_non_tty_lists_every_missing_name_at_once(
     monkeypatch.delenv("A_KEY", raising=False)
     monkeypatch.delenv("B_KEY", raising=False)
 
-    with pytest.raises(CLIError, match=r"A_KEY.*B_KEY") as exc:
-        resolve_run_secrets(
-            names=["A_KEY", "B_KEY"],
-            secrets_file=None,
-            stored_names=set(),
-        )
+    with override_output_context(format=OutputFormat.rich, interactive=False):
+        with pytest.raises(CLIError, match=r"A_KEY.*B_KEY") as exc:
+            resolve_run_secrets(
+                names=["A_KEY", "B_KEY"],
+                secrets_file=None,
+                stored_names=set(),
+            )
 
     assert exc.value.code == "INTERACTIVE_REQUIRED"
-    assert exc.value.details["flags"] == ["--secrets-file"]
+    assert exc.value.details == {
+        "missing": ["A_KEY", "B_KEY"],
+        "flags": ["--secrets-file"],
+    }
     assert "--secrets-file" in exc.value.message
 
 
@@ -187,7 +191,10 @@ def test_json_mode_does_not_getpass_even_when_tty_is_claimed(
     assert "A_KEY" in err.message
     assert "B_KEY" in err.message
     assert "--secrets-file" in err.message
-    assert err.details["flags"] == ["--secrets-file"]
+    assert err.details == {
+        "missing": ["A_KEY", "B_KEY"],
+        "flags": ["--secrets-file"],
+    }
 
 
 def test_plain_mode_does_not_getpass_even_when_tty_is_claimed(

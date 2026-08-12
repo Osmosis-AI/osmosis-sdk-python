@@ -98,6 +98,6 @@ def resolve_run_secrets(
             + ". Export them, pass --secrets-file, or save them with "
             "`osmosis secret set <NAME>`.",
             code="INTERACTIVE_REQUIRED",
-            details={"flags": ["--secrets-file"]},
+            details={"missing": missing, "flags": ["--secrets-file"]},
         )
     return resolved

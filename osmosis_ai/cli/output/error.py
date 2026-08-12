@@ -92,22 +92,29 @@ def emit_internal_debug(exc: BaseException, classified: CLIError | None = None) 
 
     ``OSMOSIS_DEBUG=1`` is the only switch (no CLI flag). The JSON error
     envelope is unchanged; this extra text is appended to stderr after it.
-    Explicit ``CLIError(code="INTERNAL")`` is already structured and is not
-    dumped.
+    Explicit ``CLIError(code="INTERNAL")`` values dump an attached cause or
+    context, but never repeat the structured wrapper itself.
     """
     import os
     import traceback
 
     if os.environ.get("OSMOSIS_DEBUG") != "1":
         return
+    debug_exc = exc
     if isinstance(exc, CLIError):
-        return
-    if classified is not None and classified.code != CLIErrorCode.INTERNAL:
-        return
-    if classified is None and isinstance(exc, UsageError):
-        return
-    sys.stderr.write(f"{type(exc).__name__}: {exc}\n")
-    traceback.print_exception(exc, file=sys.stderr)
+        if exc.code != CLIErrorCode.INTERNAL:
+            return
+        nested = exc.__cause__ or exc.__context__
+        if nested is None:
+            return
+        debug_exc = nested
+    else:
+        if classified is not None and classified.code != CLIErrorCode.INTERNAL:
+            return
+        if classified is None and isinstance(exc, UsageError):
+            return
+    sys.stderr.write(f"{type(debug_exc).__name__}: {debug_exc}\n")
+    traceback.print_exception(debug_exc, file=sys.stderr)
     sys.stderr.flush()
 
 

@@ -697,3 +697,38 @@ def test_logout_json_with_env_token_only_does_not_reset_session(
     ]
     assert "unset OSMOSIS_TOKEN" in json.dumps(payload)
     assert calls == [("load_credentials", False)]
+
+
+def test_logout_rich_with_env_token_only_prints_unset_once(monkeypatch, capsys) -> None:
+    monkeypatch.setenv("OSMOSIS_TOKEN", "env-token")
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.load_credentials",
+        lambda *, include_env=False: None,
+    )
+
+    exit_code = cli.main(["auth", "logout"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert captured.out.count("Run 'unset OSMOSIS_TOKEN' to logout.") == 1
+
+
+def test_logout_escape_behaves_like_decline(monkeypatch, capsys) -> None:
+    monkeypatch.delenv("OSMOSIS_TOKEN", raising=False)
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    monkeypatch.setattr("osmosis_ai.platform.auth.load_credentials", _credentials)
+    monkeypatch.setattr("osmosis_ai.cli.prompts.confirm", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.local_config.reset_session",
+        lambda: pytest.fail("cancelled logout must not reset the session"),
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.platform_client.revoke_cli_token",
+        lambda credentials: pytest.fail("cancelled logout must not revoke the token"),
+    )
+
+    exit_code = cli.main(["auth", "logout"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert "Cancelled." in captured.out

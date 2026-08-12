@@ -151,6 +151,39 @@ def test_osmos_debug_appends_internal_traceback_after_json_envelope(
     assert "Traceback (most recent call last)" in rest
 
 
+@pytest.mark.parametrize("explicit_cause", [True, False], ids=["cause", "context"])
+def test_osmos_debug_dumps_nested_internal_cli_error(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    *,
+    explicit_cause: bool,
+) -> None:
+    monkeypatch.setenv("OSMOSIS_DEBUG", "1")
+
+    def boom(*_: Any, **__: Any) -> None:
+        nested: ValueError
+        try:
+            raise ValueError("nested serialization failure")
+        except ValueError as exc:
+            nested = exc
+        error = CLIError("Renderer failed.", code="INTERNAL")
+        if explicit_cause:
+            raise error from nested
+        error.__context__ = nested
+        raise error
+
+    monkeypatch.setattr(cli_main, "_register_commands", lambda: None)
+    monkeypatch.setattr(cli_main, "app", boom)
+
+    rc = main(["--json", "dataset", "list"])
+
+    captured = capsys.readouterr()
+    lines = captured.err.splitlines()
+    assert rc == 1
+    assert json.loads(lines[0])["error"]["code"] == "INTERNAL"
+    assert "ValueError: nested serialization failure" in "\n".join(lines[1:])
+
+
 def test_internal_json_error_without_debug_omits_original_message(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],

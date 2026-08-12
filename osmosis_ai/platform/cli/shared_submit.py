@@ -255,6 +255,7 @@ def confirm_remote_fetch_and_post[T](
     pinned_commit_sha: str | None = None,
     extra_warnings: list[str] | None = None,
     provided_secrets: dict[str, str] | None = None,
+    warn_on_missing_commit_sha: bool = True,
 ) -> T:
     """Shared tail: remote-fetch notice, confirmation, POST with secret-404 hints."""
     notes, warnings = print_remote_fetch_notice(
@@ -262,6 +263,7 @@ def confirm_remote_fetch_and_post[T](
         branch=branch,
         pinned_commit_sha=pinned_commit_sha,
         extra_warnings=extra_warnings,
+        warn_on_missing_commit_sha=warn_on_missing_commit_sha,
     )
     require_confirmation(
         confirm_prompt,

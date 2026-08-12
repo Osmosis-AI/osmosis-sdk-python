@@ -1234,6 +1234,7 @@ def submit(
         status_message="Submitting benchmark run...",
         post=_post,
         provided_secrets=secret_values,
+        warn_on_missing_commit_sha=False,
     )
 
     display_next_steps = [

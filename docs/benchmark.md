@@ -4,7 +4,7 @@
 
 ## `osmosis benchmark submit`
 
-Reads a benchmark run config TOML, validates its **structure** locally, and POSTs it to the platform. Unlike `osmosis eval submit` and `osmosis train submit` — which share `run_cloud_submit` — benchmark submit has its own flow, because it fans out across multiple agents and carries secret references the other two do not.
+Reads a benchmark run config TOML, validates its **structure** locally, and POSTs it to the platform. Benchmark submit owns the config-specific front half because it fans out across multiple agents and carries extra secret references, then joins the same `prepare_submit_secrets` / `confirm_remote_fetch_and_post` tail used by `run_cloud_submit`.
 
 - Command shell: [../osmosis_ai/cli/commands/benchmark.py](../osmosis_ai/cli/commands/benchmark.py) (`benchmark_submit`)
 - Handler: [../osmosis_ai/platform/cli/benchmark.py](../osmosis_ai/platform/cli/benchmark.py) (`submit`, `_submit_benchmark`)
@@ -104,8 +104,9 @@ As with eval, the SDK validates **structure only**; the backend owns value-level
 3. Load + validate the TOML (`load_benchmark_submit_config`), including env-var names and all secret-reference rules.
 4. Render the run summary, per-agent model table, and env table. The displayed `attempts_per_task` and `max_concurrent_attempts` fall back to `1` and `4`, mirroring the route's defaults.
 5. Warn with code `HLE_PARITY_RECOMMENDED` when the benchmark is HLE and `task_set` is not `"parity"`, since published HLE scores are parity-based. The name match is case-insensitive so a casing typo still surfaces the guidance, and the route's own case-sensitive error follows.
-6. If any secret is referenced, fetch workspace + personal scopes, resolve `[secrets]` names, and **fail fast** on names that are neither stored nor supplied. If the scope lookup itself fails, names render without a scope rather than blocking the submit — the server still validates.
-7. Confirm (skipped with `--yes`), then POST via `client.submit_benchmark_run`. A missing-secret error from the platform is enriched with the same add-secret hint.
+6. If any secret is referenced, fetch workspace + personal scopes, resolve `[secrets]` names, and **fail fast** on names that are neither stored nor supplied. Non-interactive resolution raises `INTERACTIVE_REQUIRED` with `details.missing` and `details.flags = ["--secrets-file"]`. If the scope lookup itself fails, names render without a scope rather than blocking the submit — the server still validates.
+7. Build the shared remote-fetch notice: local dirty-tree, unpushed-commit, and missing-upstream warnings are surfaced, while the generic "no `commit_sha`" warning is omitted because benchmark TOML has no `commit_sha` field. Config values still come from the local TOML.
+8. Confirm (skipped with `--yes`), then POST via `client.submit_benchmark_run`. Outside an interactive rich session, a missing `--yes` raises `INTERACTIVE_REQUIRED`; its details include `prompt`, `summary`, `notes`, and `warnings` when git warnings are present. A missing-secret error from the platform is enriched with the same add-secret hint.
 
 The result is an `OperationResult` whose next-steps point at `osmosis benchmark runs info <name>`, `osmosis benchmark runs list`, and the platform URL.
 

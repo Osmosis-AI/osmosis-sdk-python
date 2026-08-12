@@ -56,6 +56,7 @@ def list_command() -> ListResult:
         has_more=False,
         next_offset=None,
         columns=[ListColumn(key="name", label="Name")],
+        display_hints=(["No templates are currently available."] if not names else []),
     )
 
 

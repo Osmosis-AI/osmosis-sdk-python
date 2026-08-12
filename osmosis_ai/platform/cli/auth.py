@@ -369,7 +369,6 @@ def logout(*, skip_confirm: bool = False) -> OperationResult:
                     "platform_url": get_platform_url(),
                 },
                 message="OSMOSIS_TOKEN is set. Run 'unset OSMOSIS_TOKEN' to logout.",
-                display_next_steps=["Run 'unset OSMOSIS_TOKEN' to logout."],
                 next_steps_structured=[
                     {"action": "unset_env", "name": "OSMOSIS_TOKEN"}
                 ],
@@ -388,8 +387,6 @@ def logout(*, skip_confirm: bool = False) -> OperationResult:
                 code="INTERACTIVE_REQUIRED",
             )
         confirmed = confirm("Logout from Osmosis AI?", default=False)
-        if confirmed is None:
-            raise KeyboardInterrupt
         if not confirmed:
             return OperationResult(
                 operation="auth.logout",

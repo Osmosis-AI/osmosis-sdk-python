@@ -41,5 +41,5 @@ class CLIError(Exception):
     ) -> None:
         super().__init__(message)
         self.message = message
-        self.code = CLIErrorCode(code)
+        self.code: CLIErrorCode = CLIErrorCode(code)
         self.details: dict[str, Any] = dict(details) if details else {}
