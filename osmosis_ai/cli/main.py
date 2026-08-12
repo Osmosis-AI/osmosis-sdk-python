@@ -6,7 +6,6 @@ import warnings
 
 import typer
 import typer.core
-from dotenv import find_dotenv, load_dotenv
 
 from osmosis_ai.cli._click_compat import (
     ClickException,
@@ -80,6 +79,10 @@ app: typer.Typer = typer.Typer(
 )
 
 
+def _emit_version() -> None:
+    typer.echo(f"{package_name} {PACKAGE_VERSION}")
+
+
 @app.callback(invoke_without_command=True)
 def _callback(
     ctx: typer.Context,
@@ -107,7 +110,7 @@ def _callback(
     """
     warnings.filterwarnings("ignore")
     if version:
-        typer.echo(f"{package_name} {PACKAGE_VERSION}")
+        _emit_version()
         raise typer.Exit()
 
     selected_format = resolve_format_selectors(
@@ -120,6 +123,8 @@ def _callback(
     )
     install_output_context(ctx, output)
     ctx.call_on_close(verify_output_emitted)
+    from dotenv import find_dotenv, load_dotenv
+
     load_dotenv(find_dotenv(usecwd=True))
 
 
@@ -232,8 +237,14 @@ def _register_commands() -> None:
 
 def main(argv: list[str] | None = None) -> int:
     """Entry point for the Osmosis CLI."""
+    argv = argv if argv is not None else sys.argv[1:]
+    # Bare -V/--version skips command registration. Combined with other flags
+    # (e.g. --json --version) still goes through Typer so output stays identical.
+    if argv == ["--version"] or argv == ["-V"]:
+        _emit_version()
+        return 0
     _register_commands()
-    argv = hoist_format_selectors(argv if argv is not None else sys.argv[1:])
+    argv = hoist_format_selectors(argv)
     try:
         result = app(argv, standalone_mode=False)
         # standalone_mode=False returns the command result on success, or the

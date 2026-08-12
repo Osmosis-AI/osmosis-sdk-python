@@ -552,7 +552,7 @@ def test_login_rich_with_invalid_env_token_mentions_unset(
         ),
     )
     monkeypatch.setattr(
-        "osmosis_ai.cli.commands.auth.console.print_error",
+        "osmosis_ai.cli.console.console.print_error",
         lambda message: errors.append(message),
     )
 

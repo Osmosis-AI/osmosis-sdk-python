@@ -4,6 +4,9 @@ Rich automatically strips ANSI control codes when output is not directed
 to a terminal (e.g., piped to a file), and respects the NO_COLOR
 environment variable.
 
+Rich is imported on first use in rich mode so ``--json`` / ``--plain``
+paths can import this module without loading the UI stack.
+
 Usage:
     from osmosis_ai.cli.console import console
 
@@ -18,20 +21,19 @@ from __future__ import annotations
 import sys
 from collections.abc import Generator
 from contextlib import contextmanager
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from rich import box
-from rich.console import Console as RichConsole
-from rich.markup import escape as rich_escape
-from rich.panel import Panel
-from rich.style import Style
-from rich.table import Table
-from rich.text import Text
+if TYPE_CHECKING:
+    from rich.console import Console as RichConsole
+    from rich.text import Text
 
 
 def _url_link_text(
     url: str, label: str | None = None, style: str | None = None
 ) -> Text:
+    from rich.style import Style
+    from rich.text import Text
+
     link_style = Style(link=url)
     if style:
         link_style = Style.parse(style) + link_style
@@ -61,15 +63,27 @@ class Console:
             no_color: Disable all colors, even in TTY mode.
             width: Fixed terminal width (for testing). None = auto-detect.
         """
-        file = file or sys.stdout
+        self._file = file or sys.stdout
+        self._stderr_file = sys.stderr
+        self._force_terminal = force_terminal
         self._no_color = no_color
 
         # When TERM=dumb, Rich's Console.size short-circuits to 80x25 unless both width and
         # height are set; width alone is ignored (see rich.console.Console.size).
-        rich_size: dict[str, Any] = {}
+        self._rich_size: dict[str, Any] = {}
         if width is not None:
-            rich_size["width"] = width
-            rich_size["height"] = 25
+            self._rich_size["width"] = width
+            self._rich_size["height"] = 25
+
+        self._rich_stdout: RichConsole | None = None
+        self._rich_stderr_console: RichConsole | None = None
+        # Rich Status of a currently-live spinner, if any. print_warning stops
+        # it before printing and restarts it after, so the transient spinner
+        # line is not left stranded on screen mid-spin.
+        self._active_status: Any = None
+
+    def _make_rich_console(self, *, file: Any, **extra: Any) -> RichConsole:
+        from rich.console import Console as RichConsole
 
         # Disable Rich's default auto-highlighter: ReprHighlighter recolors
         # numbers, hex strings, UUIDs, URLs, etc. inside printed strings,
@@ -77,23 +91,28 @@ class Console:
         # a "green" message would show mixed colors on tokens like
         # "step-40-lora" or "2d7a22"). Callers can opt back in per-call via
         # `console.print(..., highlight=True)`.
-        self._rich = RichConsole(
+        return RichConsole(
             file=file,
-            force_terminal=force_terminal,
-            no_color=no_color,
+            no_color=self._no_color,
             highlight=False,
-            **rich_size,
+            **self._rich_size,
+            **extra,
         )
-        self._rich_stderr = RichConsole(
-            file=sys.stderr,
-            no_color=no_color,
-            highlight=False,
-            **rich_size,
-        )
-        # Rich Status of a currently-live spinner, if any. print_warning stops
-        # it before printing and restarts it after, so the transient spinner
-        # line is not left stranded on screen mid-spin.
-        self._active_status: Any = None
+
+    @property
+    def _rich(self) -> RichConsole:
+        if self._rich_stdout is None:
+            self._rich_stdout = self._make_rich_console(
+                file=self._file,
+                force_terminal=self._force_terminal,
+            )
+        return self._rich_stdout
+
+    @property
+    def _rich_stderr(self) -> RichConsole:
+        if self._rich_stderr_console is None:
+            self._rich_stderr_console = self._make_rich_console(file=self._stderr_file)
+        return self._rich_stderr_console
 
     @property
     def is_tty(self) -> bool:
@@ -240,6 +259,8 @@ class Console:
         """
         if not self._is_rich_mode():
             return
+        from rich.panel import Panel
+
         panel = Panel(content, title=title, border_style=style, padding=padding)
         self._rich.print(panel)
 
@@ -259,6 +280,9 @@ class Console:
         """
         if not self._is_rich_mode():
             return
+        from rich import box
+        from rich.table import Table
+
         table = Table(
             title=title,
             box=box.ROUNDED,
@@ -285,6 +309,8 @@ class Console:
         """
         if text is None:
             return ""
+        from rich.markup import escape as rich_escape
+
         return rich_escape(str(text))
 
     def format_styled(self, text: str, style: str) -> str:
@@ -299,6 +325,8 @@ class Console:
         Returns:
             Styled text string with Rich markup.
         """
+        from rich.markup import escape as rich_escape
+
         return f"[{style}]{rich_escape(text)}[/{style}]"
 
     def format_text(self, text: Any, style: str | None = None) -> Text:
@@ -306,6 +334,8 @@ class Console:
 
         Use this for dynamic values that should never be parsed as Rich markup.
         """
+        from rich.text import Text
+
         value = "" if text is None else str(text)
         if style is None:
             return Text(value)

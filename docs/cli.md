@@ -17,7 +17,7 @@ Files in [../osmosis_ai/cli/commands/](../osmosis_ai/cli/commands/) are thin Typ
 - platform-facing logic lives in [../osmosis_ai/platform/cli/](../osmosis_ai/platform/cli/) (e.g. `dataset.py`, `train.py`, `eval.py`, `secret.py`);
 - eval/rubric logic lives in [../osmosis_ai/eval/](../osmosis_ai/eval/).
 
-Module-level imports in `commands/` are kept light: `typer`, `cli.console`, `cli.errors`, the lightweight `osmosis_ai.platform.constants` (pagination limits), and stdlib. Everything heavy (`rollout.*`, `platform.api.*`, `platform.cli.*`, `eval.*`) must be imported **inside the function** to keep CLI startup fast — see the lazy-loading section of [architecture.md](./architecture.md).
+Module-level imports in `commands/` are kept light: `typer`, `cli.errors`, the lightweight `osmosis_ai.platform.constants` (pagination limits), and stdlib. Everything heavy (`rollout.*`, `platform.api.*`, `platform.cli.*`, `eval.*`, `cli.console`) must be imported **inside the function** to keep CLI startup fast — see the lazy-loading section of [architecture.md](./architecture.md).
 
 `osmosis benchmark` puts the benchmark first, mirroring the platform's
 Benchmarks pages: top-level `list` and `info` act on benchmarks (the workspace
@@ -49,7 +49,7 @@ Serializers that turn API models into these shapes live in [../osmosis_ai/cli/ou
 
 [../osmosis_ai/cli/output/renderer.py](../osmosis_ai/cli/output/renderer.py) builds the machine contract. Every JSON success envelope carries `schema_version: 1` and a shape matching the result type (`_envelope_list`, `_envelope_sectioned_list`, `_envelope_detail`, `_envelope_operation`, `_envelope_message`). Rich is the default for humans; `--plain` is intentionally low-noise text (not a strict schema).
 
-The output context, format enum, and selector resolution live in [../osmosis_ai/cli/output/context.py](../osmosis_ai/cli/output/context.py); the full output surface is re-exported from [../osmosis_ai/cli/output/__init__.py](../osmosis_ai/cli/output/__init__.py).
+The output context, format enum, and selector resolution live in [../osmosis_ai/cli/output/context.py](../osmosis_ai/cli/output/context.py); the full output surface is re-exported from [../osmosis_ai/cli/output/__init__.py](../osmosis_ai/cli/output/__init__.py). Serializer names are lazy (PEP 562) so importing the package does not load platform API models.
 
 ## Errors
 

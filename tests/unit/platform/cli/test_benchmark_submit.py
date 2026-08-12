@@ -9,6 +9,7 @@ from typing import Any
 import pytest
 
 import osmosis_ai.platform.cli.benchmark as benchmark_module
+import osmosis_ai.platform.cli.shared_submit as shared_submit_module
 from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.cli.output import OperationResult
 from osmosis_ai.platform.api.models import SubmitBenchmarkRunResult
@@ -130,7 +131,7 @@ def test_submit_sends_benchmark_config_and_returns_operation_result(
     )
     monkeypatch.setattr(benchmark_module, "OsmosisClient", FakeClient)
     monkeypatch.setattr(
-        benchmark_module,
+        shared_submit_module,
         "_fetch_secret_scopes",
         lambda *args, **kwargs: ({"OPENAI_API_KEY", "CURSOR_API_KEY"}, set()),
     )
@@ -195,7 +196,7 @@ def test_submit_warns_before_confirmation_for_hle_without_parity(
     )
     monkeypatch.setattr(benchmark_module, "OsmosisClient", _FakeSubmitClient)
     monkeypatch.setattr(
-        benchmark_module,
+        shared_submit_module,
         "_fetch_secret_scopes",
         lambda *args, **kwargs: ({"OPENAI_API_KEY", "HF_TOKEN"}, set()),
     )
@@ -241,7 +242,7 @@ def test_submit_does_not_warn_when_hle_uses_parity(
     )
     monkeypatch.setattr(benchmark_module, "OsmosisClient", _FakeSubmitClient)
     monkeypatch.setattr(
-        benchmark_module,
+        shared_submit_module,
         "_fetch_secret_scopes",
         lambda *args, **kwargs: ({"OPENAI_API_KEY", "HF_TOKEN"}, set()),
     )
@@ -275,7 +276,7 @@ def test_submit_warns_before_hle_missing_secret_failure(
     )
     monkeypatch.setattr(benchmark_module, "OsmosisClient", _FakeSubmitClient)
     monkeypatch.setattr(
-        benchmark_module,
+        shared_submit_module,
         "_fetch_secret_scopes",
         lambda *args, **kwargs: (set(), set()),
     )
@@ -343,7 +344,7 @@ required = ["WEATHER_API_KEY"]
     )
     monkeypatch.setattr(benchmark_module, "OsmosisClient", FakeClient)
     monkeypatch.setattr(
-        benchmark_module,
+        shared_submit_module,
         "_fetch_secret_scopes",
         lambda *args, **kwargs: ({"OPENAI_API_KEY"}, set()),
     )

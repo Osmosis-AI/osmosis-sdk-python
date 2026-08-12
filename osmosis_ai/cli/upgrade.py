@@ -6,12 +6,10 @@ import json
 import shutil
 import subprocess
 import sys
-import urllib.request
 from typing import Any
 
 import typer
 
-from osmosis_ai.cli.console import console
 from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.cli.output import OperationResult, OutputFormat, get_output_context
 from osmosis_ai.consts import PACKAGE_VERSION, package_name
@@ -46,6 +44,8 @@ def _is_up_to_date(installed: str, latest: str) -> bool:
 
 def _fetch_latest_version() -> str | None:
     """Fetch the latest version from PyPI."""
+    import urllib.request
+
     try:
         req = urllib.request.Request(PYPI_URL, headers={"Accept": "application/json"})
         with urllib.request.urlopen(req, timeout=10) as resp:
@@ -115,6 +115,8 @@ def _upgrade_resource(
 
 def upgrade() -> Any:
     """Upgrade the Osmosis CLI to the latest version."""
+    from osmosis_ai.cli.console import console
+
     installed = PACKAGE_VERSION
     output = get_output_context()
     structured_output = output.format is not OutputFormat.rich

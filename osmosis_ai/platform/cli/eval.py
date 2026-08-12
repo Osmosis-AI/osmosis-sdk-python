@@ -5,15 +5,10 @@ from __future__ import annotations
 import math
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from osmosis_ai.cli.console import console
 from osmosis_ai.cli.errors import CLIError
-from osmosis_ai.cli.metrics_export import (
-    METRICS_EXPORT_MIGRATION_NOTICE,
-    build_eval_export_dict,
-    resolve_eval_metrics_output,
-)
 from osmosis_ai.cli.output import (
     DetailResult,
     DetailSection,
@@ -39,12 +34,6 @@ from osmosis_ai.platform.api.models import (
     SubmitRunResult,
 )
 from osmosis_ai.platform.auth.platform_client import PlatformAPIError
-from osmosis_ai.platform.cli.eval_config import (
-    EvalSubmitConfig,
-    load_eval_submit_config,
-    validate_eval_submit_context_paths,
-)
-from osmosis_ai.platform.cli.shared_submit import CloudSubmitSpec, run_cloud_submit
 from osmosis_ai.platform.cli.utils import (
     build_logs_result,
     format_env_config,
@@ -59,6 +48,9 @@ from osmosis_ai.platform.cli.utils import (
     validate_list_options,
 )
 from osmosis_ai.platform.cli.workspace_directory_context import git_result_context
+
+if TYPE_CHECKING:
+    from osmosis_ai.platform.cli.eval_config import EvalSubmitConfig
 
 
 def _ref_name(ref: dict[str, Any] | None) -> str | None:
@@ -347,28 +339,30 @@ def _eval_next_steps(
     return display, structured
 
 
-_EVAL_SUBMIT_SPEC: CloudSubmitSpec[EvalSubmitConfig] = CloudSubmitSpec(
-    config_dir="configs/eval",
-    command_label="`osmosis eval submit`",
-    table_title="Evaluation Run",
-    confirm_prompt="Submit this evaluation run?",
-    status_message="Submitting evaluation run...",
-    operation="eval.submit",
-    success_message_format="Evaluation run submitted: {name}",
-    load_config=load_eval_submit_config,
-    validate_context=validate_eval_submit_context_paths,
-    submit=_submit_eval,
-    build_next_steps=_eval_next_steps,
-)
-
-
 def submit(
     config_path: Path, *, yes: bool, secrets_file: str | None = None
 ) -> OperationResult:
     """Submit an evaluation run."""
-    return run_cloud_submit(
-        config_path, yes=yes, spec=_EVAL_SUBMIT_SPEC, secrets_file=secrets_file
+    from osmosis_ai.platform.cli.eval_config import (
+        load_eval_submit_config,
+        validate_eval_submit_context_paths,
     )
+    from osmosis_ai.platform.cli.shared_submit import CloudSubmitSpec, run_cloud_submit
+
+    spec = CloudSubmitSpec(
+        config_dir="configs/eval",
+        command_label="`osmosis eval submit`",
+        table_title="Evaluation Run",
+        confirm_prompt="Submit this evaluation run?",
+        status_message="Submitting evaluation run...",
+        operation="eval.submit",
+        success_message_format="Evaluation run submitted: {name}",
+        load_config=load_eval_submit_config,
+        validate_context=validate_eval_submit_context_paths,
+        submit=_submit_eval,
+        build_next_steps=_eval_next_steps,
+    )
+    return run_cloud_submit(config_path, yes=yes, spec=spec, secrets_file=secrets_file)
 
 
 def list_eval_runs(*, limit: int, all_: bool) -> ListResult:
@@ -456,6 +450,12 @@ def logs(name: str, *, limit: int, cursor: str | None = None) -> ListResult:
 
 def info(name: str, *, output: str | None) -> DetailResult:
     """Show evaluation run details, results, and metrics."""
+    from osmosis_ai.cli.metrics_export import (
+        METRICS_EXPORT_MIGRATION_NOTICE,
+        build_eval_export_dict,
+        resolve_eval_metrics_output,
+    )
+
     context = require_git_workspace_directory_context()
     credentials = context.credentials
 

@@ -270,8 +270,7 @@ def test_login_success_prompts_clone_and_doctor_not_workspace_link(
         lambda **kw: (result, new_creds),
     )
     monkeypatch.setattr(
-        auth_module,
-        "console",
+        "osmosis_ai.cli.console.console",
         Console(force_terminal=False, no_color=True, width=100),
     )
 
@@ -302,8 +301,7 @@ def test_login_next_steps_omit_workspace_specific_guidance(monkeypatch, capsys) 
         lambda **kw: (result, new_creds),
     )
     monkeypatch.setattr(
-        auth_module,
-        "console",
+        "osmosis_ai.cli.console.console",
         Console(force_terminal=False, no_color=True, width=100),
     )
 
@@ -339,8 +337,7 @@ def test_whoami_prints_local_identity_outside_workspace_directory(monkeypatch) -
         lambda: (_ for _ in ()).throw(CLIError("not in workspace directory")),
     )
     monkeypatch.setattr(
-        auth_module,
-        "console",
+        "osmosis_ai.cli.console.console",
         Console(file=output, force_terminal=False, no_color=True, width=80),
     )
 

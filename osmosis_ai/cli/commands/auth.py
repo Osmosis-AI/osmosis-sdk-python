@@ -8,7 +8,6 @@ from typing import Any
 
 import typer
 
-from osmosis_ai.cli.console import console
 from osmosis_ai.cli.errors import CLIError
 
 app: typer.Typer = typer.Typer(
@@ -298,6 +297,7 @@ def _machine_login_with_env_token(*, env_token: str) -> Any:
 
 def _rich_login(force: bool, token: str | None) -> Any:
     """Run rich, interactive login behavior."""
+    from osmosis_ai.cli.console import console
     from osmosis_ai.platform.auth import (
         LoginError,
         device_login,
@@ -425,6 +425,7 @@ def logout(
     ),
 ) -> Any:
     """Logout from Osmosis AI CLI."""
+    from osmosis_ai.cli.console import console
     from osmosis_ai.cli.output import OperationResult, OutputFormat, get_output_context
     from osmosis_ai.cli.prompts import confirm
     from osmosis_ai.platform.auth import load_credentials
@@ -523,6 +524,7 @@ def logout(
 @app.command("whoami")
 def whoami() -> Any:
     """Show current authenticated user."""
+    from osmosis_ai.cli.console import console
     from osmosis_ai.cli.output import (
         DetailField,
         DetailResult,
