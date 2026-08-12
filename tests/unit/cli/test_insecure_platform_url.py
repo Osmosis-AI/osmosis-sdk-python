@@ -99,6 +99,23 @@ def test_insecure_platform_url_allowed_with_opt_in(
     assert error["code"] == "INTERACTIVE_REQUIRED"
 
 
+def test_invalid_platform_url_port_is_validation_not_internal(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setenv("OSMOSIS_PLATFORM_URL", "http://host:notaport")
+    monkeypatch.delenv("OSMOSIS_ALLOW_INSECURE_PLATFORM_URL", raising=False)
+
+    rc = cli.main(["--json", "auth", "whoami"])
+
+    captured = capsys.readouterr()
+    assert rc == 1
+    assert captured.out == ""
+    envelope = json.loads(captured.err)
+    assert envelope["error"]["code"] == "VALIDATION"
+    assert "http://host:notaport" in envelope["error"]["message"]
+
+
 def test_loopback_http_platform_url_is_allowed(
     _dotenv_platform_url: Path,
     monkeypatch: pytest.MonkeyPatch,

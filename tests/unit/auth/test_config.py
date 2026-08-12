@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.platform.auth.config import get_platform_url, normalize_platform_url
 
 
@@ -29,3 +30,17 @@ def test_get_platform_url_normalizes_env_trailing_slash(
     monkeypatch.setenv("OSMOSIS_PLATFORM_URL", "https://platform.osmosis.ai/")
 
     assert get_platform_url() == "https://platform.osmosis.ai"
+
+
+@pytest.mark.parametrize(
+    "raw_url",
+    ["http://host:notaport", "http://[::1"],
+)
+def test_normalize_platform_url_invalid_port_or_ipv6_raises_validation(
+    raw_url: str,
+) -> None:
+    with pytest.raises(CLIError) as exc_info:
+        normalize_platform_url(raw_url)
+
+    assert exc_info.value.code == "VALIDATION"
+    assert raw_url in exc_info.value.message

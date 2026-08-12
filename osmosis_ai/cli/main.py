@@ -210,10 +210,7 @@ def _handle_cli_error(
         raw_ctx = getattr(exc, "ctx", None)
         ctx = raw_ctx if isinstance(raw_ctx, Context) else None
         if ctx is None:
-            try:
-                ctx = get_current_context(silent=True)
-            except RuntimeError:
-                ctx = None
+            ctx = get_current_context(silent=True)
         command_argv = argv if argv is not None else sys.argv[1:]
         emit_structured_error_to_stderr(
             classified,

@@ -12,10 +12,32 @@ from osmosis_ai.platform.auth.platform_client import (
     PlatformAPIError,
     SubscriptionRequiredError,
 )
-from osmosis_ai.platform.cli.secret_redact import redact_provided_secrets
+from osmosis_ai.platform.cli.secret_redact import (
+    redact_provided_secrets,
+    redact_secret_value,
+)
 from osmosis_ai.platform.cli.shared_submit import confirm_remote_fetch_and_post
 
 SENTINEL = "super-secret-value-xyz"
+
+
+def test_redact_secret_value_redacts_keys_containing_secret() -> None:
+    data = {
+        f"echo-{SENTINEL}": "ok",
+        "value": "not-the-secret",
+        "secret": "also-not-the-secret",
+        "secret_value": "still-not-the-secret",
+        "nested": {f"{SENTINEL}-k": SENTINEL},
+    }
+
+    redacted = redact_secret_value(data, SENTINEL)
+
+    assert SENTINEL not in str(redacted)
+    assert redacted["echo-[REDACTED]"] == "ok"
+    assert redacted["value"] == "[REDACTED]"
+    assert redacted["secret"] == "[REDACTED]"
+    assert redacted["secret_value"] == "[REDACTED]"
+    assert redacted["nested"] == {"[REDACTED]-k": "[REDACTED]"}
 
 
 def test_redact_provided_secrets_scrubs_message_and_details() -> None:

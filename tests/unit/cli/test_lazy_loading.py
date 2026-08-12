@@ -158,6 +158,25 @@ def _top_level_modules(loaded: set[str]) -> set[str]:
     return {name.partition(".")[0] for name in loaded}
 
 
+def test_json_auth_login_does_not_load_rich_stack() -> None:
+    """``osmosis --json auth login --token fake`` must not import rich.
+
+    Login used to read ``console.width`` before checking output format, which
+    materializes RichConsole. The fail path (invalid token) is enough: the
+    banner must not run at all in JSON mode.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        rc, loaded = _sys_modules_after_cli(
+            ["--json", "auth", "login", "--token", "fake"],
+            cwd=tmp,
+        )
+    assert rc != 0
+    assert "osmosis_ai.cli.commands.auth" in loaded
+    roots = _top_level_modules(loaded)
+    leaked = {"rich", "pygments", "markdown_it"} & roots
+    assert not leaked, f"JSON auth login loaded UI stack: {sorted(leaked)}"
+
+
 def test_json_cli_does_not_load_rich_stack() -> None:
     """``osmosis --json dataset list`` must not import rich / pygments / markdown_it.
 

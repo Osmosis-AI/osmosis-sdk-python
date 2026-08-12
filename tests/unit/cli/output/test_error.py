@@ -19,6 +19,7 @@ from osmosis_ai.cli.main import main
 from osmosis_ai.cli.output.error import (
     classify_error,
     command_path_for_error,
+    emit_internal_debug,
     emit_structured_error_to_stderr,
 )
 from osmosis_ai.platform.auth.platform_client import (
@@ -219,6 +220,53 @@ def test_internal_json_error_without_debug_omits_original_message(
     assert envelope["error"]["message"] == "An unexpected internal error occurred."
     assert "secrets" not in captured.err
     assert "Traceback" not in captured.err
+
+
+def test_osmos_debug_rich_omits_traceback_for_platform_error(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setenv("OSMOSIS_DEBUG", "1")
+
+    def boom(*_: Any, **__: Any) -> None:
+        raise PlatformAPIError("dataset missing", status_code=404)
+
+    monkeypatch.setattr(cli_main, "_register_commands", lambda: None)
+    monkeypatch.setattr(cli_main, "app", boom)
+
+    rc = main(["dataset", "list"])
+
+    captured = capsys.readouterr()
+    assert rc == 1
+    assert "Error: dataset missing" in captured.err
+    assert "Traceback" not in captured.err
+
+
+def test_emit_internal_debug_classifies_lazily_when_unclassified(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setenv("OSMOSIS_DEBUG", "1")
+
+    emit_internal_debug(PlatformAPIError("dataset missing", status_code=404))
+
+    assert capsys.readouterr().err == ""
+
+
+def test_emit_internal_debug_still_dumps_unclassified_internal(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setenv("OSMOSIS_DEBUG", "1")
+
+    try:
+        raise RuntimeError("boom")
+    except RuntimeError as exc:
+        emit_internal_debug(exc)
+
+    err = capsys.readouterr().err
+    assert "RuntimeError: boom" in err
+    assert "Traceback (most recent call last)" in err
 
 
 def test_rich_internal_error_prints_original_message(

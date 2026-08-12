@@ -8,6 +8,8 @@ from ipaddress import ip_address
 from pathlib import Path
 from urllib.parse import urlparse, urlunparse
 
+from osmosis_ai.cli.errors import CLIError
+
 # Platform URL - can be overridden via environment variable for local development
 DEFAULT_PLATFORM_URL = "https://platform.osmosis.ai"
 
@@ -26,16 +28,18 @@ def normalize_platform_url(url: str | None) -> str:
     """Return the canonical platform base URL used for requests and storage keys."""
     raw = (url or DEFAULT_PLATFORM_URL).strip() or DEFAULT_PLATFORM_URL
     raw = raw.rstrip("/")
-    parsed = urlparse(raw)
-    if not parsed.scheme or not parsed.netloc:
-        return raw
-
-    scheme = parsed.scheme.lower()
-    hostname = (parsed.hostname or "").lower()
     try:
+        parsed = urlparse(raw)
+        if not parsed.scheme or not parsed.netloc:
+            return raw
+        scheme = parsed.scheme.lower()
+        hostname = (parsed.hostname or "").lower()
         port = parsed.port
     except ValueError:
-        raise ValueError(f"Invalid OSMOSIS_PLATFORM_URL port in '{raw}'") from None
+        raise CLIError(
+            f"Invalid OSMOSIS_PLATFORM_URL '{raw}'",
+            code="VALIDATION",
+        ) from None
     # IPv6 literals contain colons and must stay bracketed inside the netloc.
     host_for_netloc = f"[{hostname}]" if ":" in hostname else hostname
     if port is not None and not (

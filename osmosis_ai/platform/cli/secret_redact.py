@@ -18,14 +18,16 @@ def redact_secret_value(data: Any, secret_value: str) -> Any:
     if isinstance(data, str):
         return data.replace(secret_value, "[REDACTED]")
     if isinstance(data, dict):
-        return {
-            key: (
-                "[REDACTED]"
-                if str(key).lower() in {"value", "secret", "secret_value"}
-                else redact_secret_value(value, secret_value)
+        redacted: dict[Any, Any] = {}
+        for key, value in data.items():
+            out_key: Any = (
+                key.replace(secret_value, "[REDACTED]") if isinstance(key, str) else key
             )
-            for key, value in data.items()
-        }
+            if str(key).lower() in {"value", "secret", "secret_value"}:
+                redacted[out_key] = "[REDACTED]"
+            else:
+                redacted[out_key] = redact_secret_value(value, secret_value)
+        return redacted
     if isinstance(data, list):
         return [redact_secret_value(value, secret_value) for value in data]
     return data

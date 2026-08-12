@@ -15,6 +15,7 @@ app: typer.Typer = typer.Typer(
     help="Manage authentication (login, logout, whoami).", no_args_is_help=True
 )
 
+ASCII_ART_MIN_WIDTH = 113
 ASCII_ART = r"""
                        ___           ___           ___           ___           ___                       ___
             ___       /\  \         /\  \         /\__\         /\  \         /\  \          ___        /\  \
@@ -52,6 +53,7 @@ def _print_login_success(result: CommandResult) -> None:
     expires = str(resource.get("expires_at") or "").partition("T")[0]
     info_lines.append(f"Expires: {console.escape(expires)}")
     console.panel("Login Successful", "\n".join(info_lines), style="green")
+    result.message = None
 
 
 @app.command("login")
@@ -64,10 +66,17 @@ def login(
     ),
 ) -> CommandResult:
     """Authenticate with Osmosis AI."""
-    from osmosis_ai.cli.console import console
     from osmosis_ai.platform.cli.auth import login as _login
 
-    console.print(ASCII_ART, markup=False, highlight=False)
+    if get_output_context().format is OutputFormat.rich:
+        from osmosis_ai.cli.console import console
+
+        if console.width >= ASCII_ART_MIN_WIDTH:
+            console.print(ASCII_ART, markup=False, highlight=False)
+        else:
+            console.print()
+            console.print("  Osmosis AI", style="bold magenta")
+            console.print()
     result = _login(force=force, token=token)
     _print_login_success(result)
     return result

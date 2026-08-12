@@ -93,7 +93,9 @@ def emit_internal_debug(exc: BaseException, classified: CLIError | None = None) 
     ``OSMOSIS_DEBUG=1`` is the only switch (no CLI flag). The JSON error
     envelope is unchanged; this extra text is appended to stderr after it.
     Explicit ``CLIError(code="INTERNAL")`` values dump an attached cause or
-    context, but never repeat the structured wrapper itself.
+    context, but never repeat the structured wrapper itself. When
+    ``classified`` is omitted, the exception is classified lazily so
+    recoverable platform errors do not dump a traceback.
     """
     import os
     import traceback
@@ -109,9 +111,9 @@ def emit_internal_debug(exc: BaseException, classified: CLIError | None = None) 
             return
         debug_exc = nested
     else:
-        if classified is not None and classified.code != CLIErrorCode.INTERNAL:
-            return
-        if classified is None and isinstance(exc, UsageError):
+        if classified is None:
+            classified = classify_error(exc)
+        if classified.code != CLIErrorCode.INTERNAL:
             return
     sys.stderr.write(f"{type(debug_exc).__name__}: {debug_exc}\n")
     traceback.print_exception(debug_exc, file=sys.stderr)
@@ -187,10 +189,7 @@ def emit_structured_error_to_stderr(
 ) -> None:
     """Write the JSON-mode error envelope to stderr."""
     if command is None:
-        try:
-            ctx = get_current_context(silent=True)
-        except RuntimeError:
-            ctx = None
+        ctx = get_current_context(silent=True)
         command = command_path_for_error(ctx)
 
     envelope: dict[str, Any] = {

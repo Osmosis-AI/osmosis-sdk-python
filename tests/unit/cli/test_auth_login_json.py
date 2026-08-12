@@ -52,6 +52,40 @@ def _credentials(
     )
 
 
+def _stub_env_token_login(
+    monkeypatch: pytest.MonkeyPatch, fake_verify_result: VerifyResult
+) -> list[str]:
+    monkeypatch.setenv("OSMOSIS_TOKEN", "env-token")
+    verify_calls: list[str] = []
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.verify_token",
+        lambda token, git_identity=None: (
+            verify_calls.append(token) or fake_verify_result
+        ),
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.credentials.save_credentials",
+        lambda creds: pytest.fail("env-token login must not save credentials"),
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.credentials.delete_credentials",
+        lambda: pytest.fail("env-token login must not delete credentials"),
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.device_login",
+        lambda: pytest.fail("device login should not run when OSMOSIS_TOKEN is set"),
+    )
+    return verify_calls
+
+
+def _force_console_width(monkeypatch: pytest.MonkeyPatch, width: int) -> StringIO:
+    rich_output = StringIO()
+    monkeypatch.setattr(console, "_file", rich_output)
+    monkeypatch.setattr(console, "_rich_size", {"width": width, "height": 25})
+    monkeypatch.setattr(console, "_rich_stdout", None)
+    return rich_output
+
+
 def test_login_json_with_token_returns_operation_result(
     monkeypatch, capsys, fake_verify_result
 ) -> None:
@@ -497,6 +531,7 @@ def test_login_json_with_env_token_is_verify_only(
     assert payload["resource"]["source"] == "environment"
     assert payload["resource"]["verified"] is True
     assert payload["resource"]["saved"] is False
+    assert payload["message"] == "Verified OSMOSIS_TOKEN for brian@example.com."
     assert save_calls == []
     assert delete_calls == []
 
@@ -504,31 +539,8 @@ def test_login_json_with_env_token_is_verify_only(
 def test_login_rich_with_env_token_is_verify_only(
     monkeypatch, capsys, fake_verify_result
 ) -> None:
-    monkeypatch.setenv("OSMOSIS_TOKEN", "env-token")
-    rich_output = StringIO()
-    monkeypatch.setattr(console, "_file", rich_output)
-    monkeypatch.setattr(console, "_rich_stdout", None)
-    verify_calls = []
-    save_calls = []
-    delete_calls = []
-    monkeypatch.setattr(
-        "osmosis_ai.platform.auth.verify_token",
-        lambda token, git_identity=None: (
-            verify_calls.append(token) or fake_verify_result
-        ),
-    )
-    monkeypatch.setattr(
-        "osmosis_ai.platform.auth.credentials.save_credentials",
-        lambda creds: save_calls.append(creds),
-    )
-    monkeypatch.setattr(
-        "osmosis_ai.platform.auth.credentials.delete_credentials",
-        lambda: delete_calls.append(True),
-    )
-    monkeypatch.setattr(
-        "osmosis_ai.platform.auth.device_login",
-        lambda: pytest.fail("device login should not run when OSMOSIS_TOKEN is set"),
-    )
+    verify_calls = _stub_env_token_login(monkeypatch, fake_verify_result)
+    rich_output = _force_console_width(monkeypatch, width=120)
 
     exit_code = cli.main(["auth", "login"])
 
@@ -536,7 +548,9 @@ def test_login_rich_with_env_token_is_verify_only(
     restored_output = rich_output.getvalue()
     assert exit_code == 0
     assert "___" in restored_output
-    assert captured.out.count("Verified OSMOSIS_TOKEN for brian@example.com.") == 1
+    assert "Osmosis AI" not in restored_output
+    assert "Verified OSMOSIS_TOKEN for brian@example.com." not in captured.out
+    assert "Verified OSMOSIS_TOKEN for brian@example.com." not in restored_output
     assert "Login Successful" in restored_output
     assert "Email" in restored_output
     assert "brian@example.com" in restored_output
@@ -546,8 +560,23 @@ def test_login_rich_with_env_token_is_verify_only(
     assert "Expires" in restored_output
     assert "OSMOSIS_TOKEN was not saved to local credentials." in captured.out
     assert verify_calls == ["env-token"]
-    assert save_calls == []
-    assert delete_calls == []
+
+
+def test_login_rich_prints_compact_banner_when_console_is_narrow(
+    monkeypatch, capsys, fake_verify_result
+) -> None:
+    _stub_env_token_login(monkeypatch, fake_verify_result)
+    rich_output = _force_console_width(monkeypatch, width=112)
+
+    exit_code = cli.main(["auth", "login"])
+
+    captured = capsys.readouterr()
+    restored_output = rich_output.getvalue()
+    assert exit_code == 0
+    assert "___" not in restored_output
+    assert "Osmosis AI" in restored_output
+    assert "Login Successful" in restored_output
+    assert "Verified OSMOSIS_TOKEN for brian@example.com." not in captured.out
 
 
 @pytest.mark.parametrize(
