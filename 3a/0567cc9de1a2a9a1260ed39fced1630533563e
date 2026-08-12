@@ -1,0 +1,27 @@
+osmosis_ai/platform/cli/secret_resolution.py
+  s_f7676f8c9e2a95::t_1fbb1e5779f72c 11,60-66,71,83-90,99-101
+tests/unit/platform/cli/test_secret_resolution.py
+  s_f7676f8c9e2a95::t_04126a9cce9c32 20,28,36,64,102,115,126,150
+  s_f7676f8c9e2a95::t_15a254f8c43b44 47,54-56
+  s_f7676f8c9e2a95::t_8258f328f0bdec 8
+  s_f7676f8c9e2a95::t_0acbe4e7cd3fd9 152-243
+tests/unit/cli/test_train_commands.py
+  s_f7676f8c9e2a95::t_04126a9cce9c32 1430
+  s_f7676f8c9e2a95::t_27ab5fe313643d 1375-1429,1431-1439
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "3a0567cc9de1a2a9a1260ed39fced1630533563e",
+  "prompts": {},
+  "sessions": {
+    "s_f7676f8c9e2a95": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "4a3d781a-b43d-46fe-8360-ad27c8585a43",
+        "model": "grok-4.6"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}
