@@ -83,8 +83,6 @@ def _abort_upload(
 # (weekly cron Lambda + S3 lifecycle rules), so this retry is the
 # primary client-side defense, not the only one.
 
-from osmosis_ai.platform.api.upload import BACKOFF_BASE, BACKOFF_CAP, MAX_RETRIES
-
 PARQUET_VALIDATION_SKIPPED_WARNING = (
     "pyarrow not installed; parquet content validation skipped. "
     "Install with: pip install 'osmosis-ai[parquet]'"
@@ -105,6 +103,8 @@ def _complete_with_retry(
     On final failure, prints recovery information so the user can retry
     manually with ``osmosis dataset complete <id>``.
     """
+    from osmosis_ai.platform.api.upload import BACKOFF_BASE, BACKOFF_CAP, MAX_RETRIES
+
     last_error: Exception | None = None
     for attempt in range(MAX_RETRIES):
         if attempt > 0:

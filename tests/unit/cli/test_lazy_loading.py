@@ -116,7 +116,7 @@ def test_module_has_getattr():
 # -- CLI startup import invariants (subprocess) --------------------------------
 
 
-def _sys_modules_after_cli(args: list[str]) -> set[str]:
+def _sys_modules_after_cli(args: list[str], *, cwd: str | None = None) -> set[str]:
     """Return ``sys.modules`` names after ``main(args)`` in a fresh process."""
     with tempfile.NamedTemporaryFile(
         prefix="osmosis-modules-", suffix=".json", delete=False
@@ -145,6 +145,7 @@ def _sys_modules_after_cli(args: list[str]) -> set[str]:
             capture_output=True,
             text=True,
             env=env,
+            cwd=cwd,
         )
         with open(dump_path, encoding="utf-8") as fh:
             loaded = json.load(fh)
@@ -158,12 +159,17 @@ def _top_level_modules(loaded: set[str]) -> set[str]:
 
 
 def test_json_cli_does_not_load_rich_stack() -> None:
-    """``osmosis --json <flag>`` must not import rich / pygments / markdown_it.
+    """``osmosis --json dataset list`` must not import rich / pygments / markdown_it.
 
-    Uses ``--json --version`` so command registration still runs, but no
-    handler that lazily imports ``cli.console`` (e.g. dataset list) executes.
+    Runs a real command in a scratch cwd so the handler imports ``cli.console``
+    (via ``platform.cli.dataset``) and then fails closed on workspace
+    validation — no login or network required. ``cli.console`` must not pull
+    the Rich stack just because it was imported.
     """
-    loaded = _sys_modules_after_cli(["--json", "--version"])
+    with tempfile.TemporaryDirectory() as tmp:
+        loaded = _sys_modules_after_cli(["--json", "dataset", "list"], cwd=tmp)
+    assert "osmosis_ai.platform.cli.dataset" in loaded
+    assert "osmosis_ai.cli.console" in loaded
     roots = _top_level_modules(loaded)
     leaked = {"rich", "pygments", "markdown_it"} & roots
     assert not leaked, f"JSON CLI loaded UI stack: {sorted(leaked)}"
