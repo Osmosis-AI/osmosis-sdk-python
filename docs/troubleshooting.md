@@ -61,7 +61,7 @@ Local validation requires at least 4 rows and a `.csv` / `.jsonl` / `.parquet` e
 
 ## Rubric (`osmosis eval rubric` / `evaluate_rubric`)
 
-- `MissingAPIKeyError` — set the provider env var (e.g. `OPENAI_API_KEY`) or pass `api_key` / `--api-key`.
+- `MissingAPIKeyError` — set the provider env var (e.g. `OPENAI_API_KEY`) or pass `api_key` programmatically. The CLI still accepts `--api-key` for compatibility, but it is deprecated and emits a `DEPRECATION` warning; prefer the provider environment variable.
 - `ModelNotFoundError` — wrong model identifier or no account access.
 - `ProviderRequestError` — quota, rate limit, network, or a non-JSON model response; raise the `timeout` for slow providers.
 

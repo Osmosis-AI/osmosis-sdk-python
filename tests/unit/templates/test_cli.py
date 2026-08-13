@@ -93,15 +93,25 @@ def test_list_command_returns_list_result_in_json(workspace_template: Path) -> N
     assert result.has_more is False
 
 
-def test_list_command_returns_none_in_rich(workspace_template: Path) -> None:
-    # Rich-mode list_command prints inline through the shared Console
-    # (which caches sys.stdout at import time, defeating capsys/capfd);
-    # the contract under test here is that the function returns None so
-    # the result_callback skips the structured renderer.
+def test_list_command_returns_list_result_in_rich(workspace_template: Path) -> None:
     with override_output_context(format=OutputFormat.rich):
         result = list_command()
 
-    assert result is None
+    assert result is not None
+    assert any(item["name"] == "multiply-local-strands" for item in result.items)
+    assert result.total_count == len(result.items)
+    assert result.has_more is False
+
+
+def test_list_command_restores_rich_empty_state(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(template_cli, "list_templates", lambda: [])
+
+    result = list_command()
+
+    assert result.items == []
+    assert result.display_hints == ["No templates are currently available."]
 
 
 def test_list_command_empty_message_uses_user_facing_template_terms(

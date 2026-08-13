@@ -77,9 +77,9 @@ Names listed in `[secrets]` do not have to be saved in the platform secret store
 1. `--secrets-file <path>` — a dotenv file of `NAME=value` lines; `-` reads stdin, for piping from a secret manager.
 2. The process environment.
 3. The platform secret store — a name already saved in the workspace or personal scope is left for the platform to resolve and is never sent from the CLI.
-4. An interactive `getpass` prompt, only when stdin is a TTY.
+4. An interactive `getpass` prompt, only when `OutputContext.interactive` is true (rich output with a TTY). `--json` and `--plain` never prompt, even when stdin is a TTY.
 
-Values supplied this way are never written to disk and must be re-supplied on every run. Outside a TTY, every unresolved name is reported at once so CI shows the whole gap rather than one name per retry.
+Values supplied this way are never written to disk and must be re-supplied on every run. Outside an interactive output context, every unresolved name is reported at once as `INTERACTIVE_REQUIRED`; `details.missing` lists the names and `details.flags` lists `--secrets-file`, so CI shows the whole gap rather than one name per retry.
 
 `osmosis train submit` shares this flow exactly. `osmosis benchmark submit` uses the same flag and ordering, but its configs reference secrets from several places and only `[secrets]` names may be supplied per run — see [benchmark.md](./benchmark.md#secret-references).
 

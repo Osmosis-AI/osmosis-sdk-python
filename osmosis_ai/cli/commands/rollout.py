@@ -2,16 +2,12 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Annotated, Any
+from typing import Annotated
 
 import typer
 
-from osmosis_ai.platform.constants import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
-
-if TYPE_CHECKING:
-    from osmosis_ai.cli.output import CommandResult
-else:
-    CommandResult = Any
+from osmosis_ai.cli.options import all_option, limit_option
+from osmosis_ai.cli.output import CommandResult
 
 app: typer.Typer = typer.Typer(
     help="Manage rollouts (init, list).",
@@ -34,7 +30,7 @@ def init(
             "<name>.toml. Without --force, the command refuses to clobber existing paths."
         ),
     ),
-) -> CommandResult | None:
+) -> CommandResult:
     """Scaffold a new rollout from the workspace template placeholders.
 
     Creates ``rollouts/<name>/{main.py,pyproject.toml,README.md}`` and
@@ -48,19 +44,13 @@ def init(
 
 @app.command("list")
 def list_rollouts(
-    limit: int = typer.Option(
-        DEFAULT_PAGE_SIZE,
-        "--limit",
-        min=1,
-        max=MAX_PAGE_SIZE,
-        help="Maximum number of rollouts to show.",
-    ),
-    all_: bool = typer.Option(False, "--all", help="Show all rollouts."),
+    limit: int = limit_option("Maximum number of rollouts to show."),
+    all_: bool = all_option("Show all rollouts."),
     branch: Annotated[
         str | None,
         typer.Option("--branch", help="List rollouts synced from this branch."),
     ] = None,
-) -> Any:
+) -> CommandResult:
     """List rollouts for the current workspace directory."""
     from osmosis_ai.platform.cli.rollout import list_rollouts as _list_rollouts
 

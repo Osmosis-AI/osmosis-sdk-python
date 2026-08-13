@@ -146,8 +146,9 @@ class TestPlatformRequest:
         """Verify CLIError when no credentials exist."""
         mock_load.return_value = None
 
-        with pytest.raises(CLIError, match="Not logged in"):
+        with pytest.raises(CLIError, match="Not logged in") as exc_info:
             platform_request("/api/test")
+        assert exc_info.value.code == "AUTH_REQUIRED"
 
     @patch("osmosis_ai.platform.auth.platform_client.urlopen")
     @patch("osmosis_ai.platform.auth.platform_client.load_credentials")
@@ -929,8 +930,9 @@ class TestPlatformRequest:
         """Verify CLIError when load_credentials returns None."""
         mock_load.return_value = None
 
-        with pytest.raises(CLIError, match="Not logged in"):
+        with pytest.raises(CLIError, match="Not logged in") as exc_info:
             platform_request("/api/test", credentials=None)
+        assert exc_info.value.code == "AUTH_REQUIRED"
 
     # -------------------------------------------------------------------------
     # CLI Version Header
@@ -1240,8 +1242,9 @@ class TestPlatformStream:
     def test_raises_when_no_credentials_found(self, mock_load: MagicMock) -> None:
         mock_load.return_value = None
 
-        with pytest.raises(CLIError):
+        with pytest.raises(CLIError) as exc_info:
             list(platform_stream("/api/stream", require_git_repo=False))
+        assert exc_info.value.code == "AUTH_REQUIRED"
 
     @patch("osmosis_ai.platform.auth.platform_client.urlopen")
     @patch("osmosis_ai.platform.auth.platform_client.load_credentials")

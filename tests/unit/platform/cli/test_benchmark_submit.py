@@ -208,7 +208,7 @@ def test_submit_warns_before_confirmation_for_hle_without_parity(
         ),
     )
     monkeypatch.setattr(
-        benchmark_module,
+        shared_submit_module,
         "require_confirmation",
         lambda *args, **kwargs: events.append(("confirmation", None)),
     )
@@ -356,3 +356,55 @@ required = ["WEATHER_API_KEY"]
         "provided": {"WEATHER_API_KEY": "super-secret"},
     }
     assert "super-secret" not in json.dumps(asdict(result), default=str)
+
+
+def test_submit_prints_remote_fetch_notice(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Benchmark submit shares train/eval's dirty-tree / unpushed preflight."""
+    workspace = _make_workspace(tmp_path / "workspace")
+    config_path = _write_config(workspace / "configs" / "benchmark" / "smoke.toml")
+    notice: dict[str, Any] = {}
+
+    def fake_notice(
+        workspace_directory: Path,
+        *,
+        branch: str | None,
+        pinned_commit_sha: str | None,
+        extra_warnings: list[str] | None = None,
+        warn_on_missing_commit_sha: bool = True,
+    ) -> tuple[list[str], list[str]]:
+        notice.update(
+            workspace_directory=workspace_directory,
+            branch=branch,
+            pinned_commit_sha=pinned_commit_sha,
+            extra_warnings=list(extra_warnings or []),
+            warn_on_missing_commit_sha=warn_on_missing_commit_sha,
+        )
+        return (
+            ["Osmosis will fetch code from the Platform-connected repository."],
+            ["Uncommitted changes detected"],
+        )
+
+    monkeypatch.setattr(
+        benchmark_module,
+        "require_git_workspace_directory_context",
+        lambda: _context(workspace),
+    )
+    monkeypatch.setattr(benchmark_module, "OsmosisClient", _FakeSubmitClient)
+    monkeypatch.setattr(
+        shared_submit_module,
+        "_fetch_secret_scopes",
+        lambda *args, **kwargs: ({"OPENAI_API_KEY", "CURSOR_API_KEY"}, set()),
+    )
+    monkeypatch.setattr(shared_submit_module, "print_remote_fetch_notice", fake_notice)
+
+    result = benchmark_module.submit(config_path, yes=True)
+
+    assert result.status == "success"
+    assert notice["workspace_directory"] == workspace
+    assert notice["branch"] is None
+    assert notice["pinned_commit_sha"] is None
+    assert notice["extra_warnings"] == []
+    assert notice["warn_on_missing_commit_sha"] is False

@@ -1,1 +1,1 @@
-"""Platform CLI commands: authentication, workspace, and dataset management."""
+"""Platform CLI business logic for auth, workspace, datasets, training, eval, benchmarks, secrets, and related commands."""

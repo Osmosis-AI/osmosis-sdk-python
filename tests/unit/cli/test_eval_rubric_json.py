@@ -211,3 +211,81 @@ def test_eval_rubric_does_not_require_project(
     assert captured.err == ""
     assert calls
     assert calls[0]["data"] == "records.jsonl"
+
+
+def test_eval_rubric_api_key_emits_deprecation_warning(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+    capsys,
+) -> None:
+    data_path = tmp_path / "records.jsonl"
+    data_path.write_text(
+        json.dumps({"solution_str": "answer", "id": "row-1"}) + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.eval.rubric.cli.evaluate_rubric",
+        AsyncMock(return_value=RubricResult(score=1.0, explanation="ok")),
+    )
+
+    exit_code = cli.main(
+        [
+            "--json",
+            "eval",
+            "rubric",
+            "-d",
+            str(data_path),
+            "--rubric",
+            "Score quality.",
+            "--model",
+            "openai/gpt-5.4",
+            "--api-key",
+            "sk-test",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    payload = json.loads(captured.out)
+    assert payload["status"] == "success"
+    warning = json.loads(captured.err)
+    assert warning["warning"]["code"] == "DEPRECATION"
+    assert "--api-key is deprecated" in warning["warning"]["message"]
+
+
+def test_eval_rubric_json_errors_are_stderr_cli_error(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+    capsys,
+) -> None:
+    data_path = tmp_path / "records.jsonl"
+    data_path.write_text(
+        json.dumps({"solution_str": "answer", "id": "row-1"}) + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.eval.rubric.cli.evaluate_rubric",
+        AsyncMock(side_effect=ValueError("provider down")),
+    )
+
+    exit_code = cli.main(
+        [
+            "--json",
+            "eval",
+            "rubric",
+            "-d",
+            str(data_path),
+            "--rubric",
+            "Score quality.",
+            "--model",
+            "openai/gpt-5.4",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert captured.out == ""
+    error = json.loads(captured.err)["error"]
+    assert error["code"] == "PLATFORM_ERROR"
+    assert error["message"] == "Rubric evaluation completed with errors."
+    assert error["details"]["error_count"] == 1

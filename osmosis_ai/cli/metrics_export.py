@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import datetime
+import math
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.cli.paths import parse_cli_path
@@ -208,6 +209,17 @@ def _epoch_ms_to_iso(epoch_ms: int) -> str:
     return dt.isoformat()
 
 
+def _json_safe(value: Any) -> Any:
+    """Replace non-finite floats with ``None`` so exports are RFC 8259 JSON."""
+    if isinstance(value, float) and not math.isfinite(value):
+        return None
+    if isinstance(value, dict):
+        return {key: _json_safe(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_json_safe(item) for item in value]
+    return value
+
+
 def build_export_dict(
     run: TrainingRunDetail,
     metrics: TrainingRunMetrics,
@@ -280,11 +292,16 @@ def build_export_dict(
             }
         )
 
-    return {
-        "training_run": training_run,
-        "summary": summary,
-        "metrics": export_metrics,
-    }
+    return cast(
+        dict[str, Any],
+        _json_safe(
+            {
+                "training_run": training_run,
+                "summary": summary,
+                "metrics": export_metrics,
+            }
+        ),
+    )
 
 
 def build_eval_export_dict(
@@ -352,4 +369,4 @@ def build_eval_export_dict(
     if metrics.pass_at_k:
         summary["pass_at_k"] = [{"k": p.k, "value": p.value} for p in metrics.pass_at_k]
 
-    return {"eval_run": eval_run, "summary": summary}
+    return cast(dict[str, Any], _json_safe({"eval_run": eval_run, "summary": summary}))

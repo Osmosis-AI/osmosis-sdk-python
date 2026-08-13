@@ -2,15 +2,15 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 import typer
 
-from osmosis_ai.platform.constants import (
-    DEFAULT_PAGE_SIZE,
-    MAX_LOG_PAGE_SIZE,
-    MAX_PAGE_SIZE,
+from osmosis_ai.cli.options import (
+    all_option,
+    cursor_option,
+    limit_option,
+    log_limit_option,
 )
+from osmosis_ai.cli.output import CommandResult
 
 app: typer.Typer = typer.Typer(
     help="Manage datasets (upload, download, list, info, preview, validate).",
@@ -27,7 +27,7 @@ def upload(
         help="Replace an existing dataset with the same name.",
     ),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt."),
-) -> Any:
+) -> CommandResult:
     """Upload a dataset file."""
     from osmosis_ai.platform.cli.dataset import upload as _upload
 
@@ -48,7 +48,7 @@ def download(
         "--overwrite",
         help="Replace the destination file if it already exists.",
     ),
-) -> Any:
+) -> CommandResult:
     """Download a dataset file."""
     from osmosis_ai.platform.cli.dataset import download as _download
 
@@ -57,15 +57,9 @@ def download(
 
 @app.command("list")
 def list_datasets(
-    limit: int = typer.Option(
-        DEFAULT_PAGE_SIZE,
-        "--limit",
-        min=1,
-        max=MAX_PAGE_SIZE,
-        help="Maximum number of datasets to show.",
-    ),
-    all_: bool = typer.Option(False, "--all", help="Show all datasets."),
-) -> Any:
+    limit: int = limit_option("Maximum number of datasets to show."),
+    all_: bool = all_option("Show all datasets."),
+) -> CommandResult:
     """List datasets."""
     from osmosis_ai.platform.cli.dataset import list_datasets as _list_datasets
 
@@ -75,7 +69,7 @@ def list_datasets(
 @app.command("info")
 def info(
     name: str = typer.Argument(..., help="Dataset name."),
-) -> Any:
+) -> CommandResult:
     """Show dataset details and processing status."""
     from osmosis_ai.platform.cli.dataset import info as _info
 
@@ -85,19 +79,9 @@ def info(
 @app.command("logs")
 def logs(
     name: str = typer.Argument(..., help="Dataset name."),
-    limit: int = typer.Option(
-        DEFAULT_PAGE_SIZE,
-        "--limit",
-        min=1,
-        max=MAX_LOG_PAGE_SIZE,
-        help="Maximum number of recent log entries to show.",
-    ),
-    cursor: str | None = typer.Option(
-        None,
-        "--cursor",
-        help="Page further back using the next_cursor value from a previous page.",
-    ),
-) -> Any:
+    limit: int = log_limit_option(),
+    cursor: str | None = cursor_option(),
+) -> CommandResult:
     """Show recent logs for a dataset, oldest first."""
     from osmosis_ai.platform.cli.dataset import logs as _logs
 
@@ -108,7 +92,7 @@ def logs(
 def preview(
     name: str = typer.Argument(..., help="Dataset name."),
     rows: int = typer.Option(5, "--rows", help="Number of rows to show."),
-) -> Any:
+) -> CommandResult:
     """Preview dataset rows."""
     from osmosis_ai.platform.cli.dataset import preview as _preview
 
@@ -118,7 +102,7 @@ def preview(
 @app.command("validate")
 def validate(
     file: str = typer.Argument(..., help="Path to the file to validate."),
-) -> Any:
+) -> CommandResult:
     """Validate a dataset file locally."""
     from osmosis_ai.platform.cli.dataset import validate as _validate
 

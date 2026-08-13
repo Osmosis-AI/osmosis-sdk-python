@@ -101,7 +101,7 @@ def _complete_with_retry(
     """Call ``client.complete_upload`` with automatic retry on transient errors.
 
     On final failure, prints recovery information so the user can retry
-    manually with ``osmosis dataset complete <id>``.
+    the upload.
     """
     from osmosis_ai.platform.api.upload import BACKOFF_BASE, BACKOFF_CAP, MAX_RETRIES
 
@@ -315,7 +315,7 @@ def _perform_upload(
                 credentials=credentials,
                 git_identity=git_identity,
             )
-            raise CLIError("Upload cancelled by user.") from None
+            raise
         except Exception as e:
             _abort_upload(
                 client,
@@ -346,7 +346,7 @@ def _perform_upload(
                 credentials=credentials,
                 git_identity=git_identity,
             )
-            raise CLIError("Upload cancelled by user.") from None
+            raise
         except Exception as e:
             _abort_upload(
                 client,
@@ -379,11 +379,13 @@ def upload(
     file_path, ext, file_size = _check_file_basics(file)
 
     # Validate file contents before uploading
-    errors = _validate_file(file_path, ext)
+    errors, warnings = _validate_file_with_warnings(file_path, ext)
     if errors:
         raise CLIError(
             "File validation failed:\n" + "\n".join(f"  - {e}" for e in errors)
         )
+    for warning in warnings:
+        console.print_warning(warning, code="PARQUET_VALIDATION_SKIPPED")
 
     overwrite_warning = (
         "--overwrite will replace the existing dataset with the same name."
@@ -433,6 +435,7 @@ def upload(
         message=f"Dataset uploaded: {dataset.file_name}",
         display_next_steps=display_next_steps,
         next_steps_structured=next_steps_structured,
+        extra={"warnings": warnings} if warnings else {},
     )
 
 

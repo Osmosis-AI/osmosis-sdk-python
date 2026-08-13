@@ -2,20 +2,22 @@
 
 from __future__ import annotations
 
-from osmosis_ai.cli.errors import CLIError
+import pytest
+
+from osmosis_ai.cli.errors import CLIError, CLIErrorCode
 
 
 def test_positional_message_defaults_to_validation() -> None:
     err = CLIError("Something went wrong.")
     assert err.message == "Something went wrong."
     assert str(err) == "Something went wrong."
-    assert err.code == "VALIDATION"
+    assert err.code == CLIErrorCode.VALIDATION
     assert err.details == {}
-    assert err.request_id is None
 
 
 def test_explicit_code_is_preserved() -> None:
     err = CLIError("Not found.", code="NOT_FOUND")
+    assert err.code == CLIErrorCode.NOT_FOUND
     assert err.code == "NOT_FOUND"
 
 
@@ -31,9 +33,9 @@ def test_details_default_is_empty_dict() -> None:
     assert CLIError("Other").details == {}
 
 
-def test_request_id_is_optional() -> None:
-    err = CLIError("Bad", request_id="req_abc")
-    assert err.request_id == "req_abc"
+def test_unknown_error_code_is_rejected() -> None:
+    with pytest.raises(ValueError, match="NOT_A_REAL_CODE"):
+        CLIError("Bad", code="NOT_A_REAL_CODE")
 
 
 def test_empty_message_is_allowed() -> None:

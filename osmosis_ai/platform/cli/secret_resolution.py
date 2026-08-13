@@ -8,6 +8,7 @@ from getpass import getpass
 from pathlib import Path
 
 from osmosis_ai.cli.errors import CLIError
+from osmosis_ai.cli.output.context import get_output_context
 
 
 def _unquote(value: str) -> str:
@@ -53,16 +54,21 @@ def resolve_run_secrets(
     names: list[str],
     secrets_file: str | None,
     stored_names: set[str],
-    is_tty: bool,
 ) -> dict[str, str]:
     """Values for ``names``, by first hit: secrets file, process environment,
     interactive prompt. A name already in the secret store is omitted so the
-    platform resolves it. Outside a TTY every unresolved name is reported at
-    once, so CI shows the whole gap rather than one name per retry.
+    platform resolves it.
+
+    Prompting is gated on ``get_output_context().interactive`` (rich + TTY),
+    never on ``stdin.isatty()`` alone: ``--json`` / ``--plain`` on a developer
+    terminal must not dead-end on ``getpass``. Outside an interactive session
+    every unresolved name is reported at once as ``INTERACTIVE_REQUIRED``.
+    Empty prompted values are rejected.
     """
     from_file = _read_dotenv(secrets_file) if secrets_file else {}
     resolved: dict[str, str] = {}
     missing: list[str] = []
+    interactive = get_output_context().interactive
 
     for name in names:
         if name in from_file:
@@ -74,8 +80,14 @@ def resolve_run_secrets(
             continue
         if name in stored_names:
             continue
-        if is_tty:
-            resolved[name] = getpass(f"Value for {name}: ")
+        if interactive:
+            value = getpass(f"Value for {name}: ")
+            if not value:
+                raise CLIError(
+                    f"Secret value for {name} must not be empty.",
+                    code="VALIDATION",
+                )
+            resolved[name] = value
             continue
         missing.append(name)
 
@@ -84,6 +96,8 @@ def resolve_run_secrets(
             "No value found for: "
             + ", ".join(missing)
             + ". Export them, pass --secrets-file, or save them with "
-            "`osmosis secret set <NAME>`."
+            "`osmosis secret set <NAME>`.",
+            code="INTERACTIVE_REQUIRED",
+            details={"missing": missing, "flags": ["--secrets-file"]},
         )
     return resolved

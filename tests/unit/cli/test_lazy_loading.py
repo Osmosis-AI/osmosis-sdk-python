@@ -117,7 +117,10 @@ def test_module_has_getattr():
 
 
 def _sys_modules_after_cli(
-    args: list[str], *, cwd: str | None = None
+    args: list[str],
+    *,
+    cwd: str | None = None,
+    env_overrides: dict[str, str] | None = None,
 ) -> tuple[int, set[str]]:
     """Return ``(exit_code, sys.modules names)`` after ``main(args)`` in a fresh process."""
     with tempfile.NamedTemporaryFile(
@@ -137,6 +140,8 @@ def _sys_modules_after_cli(
         """
     )
     env = os.environ.copy()
+    if env_overrides:
+        env.update(env_overrides)
     env["OSMOSIS_MODULE_DUMP"] = dump_path
     try:
         subprocess.run(
@@ -156,6 +161,29 @@ def _sys_modules_after_cli(
 
 def _top_level_modules(loaded: set[str]) -> set[str]:
     return {name.partition(".")[0] for name in loaded}
+
+
+def test_json_auth_login_does_not_load_rich_stack() -> None:
+    """``osmosis --json auth login --token fake`` must not import rich.
+
+    Login used to read ``console.width`` before checking output format, which
+    materializes RichConsole. The fail path (invalid token) is enough: the
+    banner must not run at all in JSON mode.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        rc, loaded = _sys_modules_after_cli(
+            ["--json", "auth", "login", "--token", "fake"],
+            cwd=tmp,
+            env_overrides={
+                "OSMOSIS_PLATFORM_URL": "http://127.0.0.1:1",
+                "OSMOSIS_ALLOW_INSECURE_PLATFORM_URL": "1",
+            },
+        )
+    assert rc != 0
+    assert "osmosis_ai.cli.commands.auth" in loaded
+    roots = _top_level_modules(loaded)
+    leaked = {"rich", "pygments", "markdown_it"} & roots
+    assert not leaked, f"JSON auth login loaded UI stack: {sorted(leaked)}"
 
 
 def test_json_cli_does_not_load_rich_stack() -> None:
@@ -194,13 +222,73 @@ def test_json_train_list_does_not_load_pydantic() -> None:
 
 
 def test_help_does_not_load_heavy_optional_deps() -> None:
-    """``osmosis --help`` must not import httpx, keyring, urllib.request, litellm, fastapi."""
+    """``osmosis --help`` must not import httpx, keyring, urllib.request, litellm, fastapi, or the rollout SDK."""
     rc, loaded = _sys_modules_after_cli(["--help"])
     assert rc == 0
     roots = _top_level_modules(loaded)
     leaked_roots = {"httpx", "keyring", "litellm", "fastapi"} & roots
     assert not leaked_roots, f"--help loaded optional deps: {sorted(leaked_roots)}"
     assert "urllib.request" not in loaded, "urllib.request was loaded during --help"
+    leaked_rollout = [
+        name
+        for name in loaded
+        if name == "osmosis_ai.rollout" or name.startswith("osmosis_ai.rollout.")
+    ]
+    assert not leaked_rollout, f"--help loaded rollout SDK: {leaked_rollout}"
+
+
+def test_rich_usage_error_does_not_load_auth_or_keyring() -> None:
+    """A shell-only usage error must not import platform auth or keyring."""
+    rc, loaded = _sys_modules_after_cli(["dataset", "lst"])
+
+    assert rc == 2
+    assert "keyring" not in _top_level_modules(loaded)
+    leaked_auth = [
+        name
+        for name in loaded
+        if name == "osmosis_ai.platform.auth"
+        or name.startswith("osmosis_ai.platform.auth.")
+    ]
+    assert not leaked_auth, f"rich usage error loaded platform auth: {leaked_auth}"
+
+
+def test_json_usage_error_does_not_load_auth_or_keyring() -> None:
+    """``--json`` usage errors must stay as import-light as rich ones."""
+    rc, loaded = _sys_modules_after_cli(["--json", "dataset", "lst"])
+
+    assert rc == 2
+    assert "keyring" not in _top_level_modules(loaded)
+    leaked_auth = [
+        name
+        for name in loaded
+        if name == "osmosis_ai.platform.auth"
+        or name.startswith("osmosis_ai.platform.auth.")
+    ]
+    assert not leaked_auth, f"JSON usage error loaded platform auth: {leaked_auth}"
+
+
+def test_register_commands_does_not_load_heavy_deps() -> None:
+    """``_register_commands()`` must not import litellm, fastapi, or the rollout SDK."""
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "from osmosis_ai.cli.main import _register_commands; "
+                "import sys; "
+                "_register_commands(); "
+                "loaded = sys.modules; "
+                "assert 'litellm' not in loaded, 'litellm'; "
+                "assert 'fastapi' not in loaded, 'fastapi'; "
+                "assert not any("
+                "n == 'osmosis_ai.rollout' or n.startswith('osmosis_ai.rollout.') "
+                "for n in loaded), 'rollout'"
+            ),
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
 
 
 def test_output_package_import_does_not_load_api_models() -> None:

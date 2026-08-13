@@ -559,7 +559,7 @@ def platform_request(
     if credentials is None:
         credentials = load_credentials()
     if credentials is None:
-        raise CLIError(MSG_NOT_LOGGED_IN)
+        raise CLIError(MSG_NOT_LOGGED_IN, code="AUTH_REQUIRED")
     using_env_token = _credentials_match_env_token(credentials)
 
     url = f"{_platform_url()}{endpoint}"
@@ -653,7 +653,7 @@ def platform_stream(
     if credentials is None:
         credentials = load_credentials()
     if credentials is None:
-        raise CLIError(MSG_NOT_LOGGED_IN)
+        raise CLIError(MSG_NOT_LOGGED_IN, code="AUTH_REQUIRED")
     using_env_token = _credentials_match_env_token(credentials)
 
     url = f"{_platform_url()}{endpoint}"

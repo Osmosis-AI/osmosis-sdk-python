@@ -13,6 +13,7 @@ from osmosis_ai.cli._click_compat import (
     Context,
     NoArgsIsHelpError,
     UsageError,
+    get_current_context,
 )
 from osmosis_ai.cli.output.context import (
     OutputContext,
@@ -27,6 +28,7 @@ from osmosis_ai.cli.output.context import (
 from osmosis_ai.cli.output.error import (
     classify_error,
     command_path_for_error,
+    emit_internal_debug,
     emit_structured_error_to_stderr,
 )
 from osmosis_ai.cli.output.renderer import render_command_result, verify_output_emitted
@@ -126,9 +128,47 @@ def _callback(
     from dotenv import find_dotenv, load_dotenv
 
     load_dotenv(find_dotenv(usecwd=True))
+    _refuse_insecure_platform_url()
 
 
 _registered = False
+
+
+def _refuse_insecure_platform_url() -> None:
+    """Fail closed on non-HTTPS non-loopback platform URLs after dotenv.
+
+    A cwd ``.env`` can point ``OSMOSIS_PLATFORM_URL`` at http:// while
+    ``OSMOSIS_TOKEN`` is already exported. Opt in with
+    ``OSMOSIS_ALLOW_INSECURE_PLATFORM_URL=1``.
+    """
+    import os
+
+    if os.environ.get("OSMOSIS_PLATFORM_URL") is None:
+        return
+
+    from osmosis_ai.cli.errors import CLIError
+    from osmosis_ai.platform.auth.config import (
+        get_platform_url,
+        is_insecure_platform_url,
+    )
+
+    platform_url = get_platform_url()
+    if not is_insecure_platform_url(platform_url):
+        return
+    from osmosis_ai.cli.console import console
+
+    console.print_warning(
+        f"OSMOSIS_PLATFORM_URL is not HTTPS ({platform_url}). "
+        "Tokens will be transmitted in plaintext.",
+        code="INSECURE_PLATFORM_URL",
+    )
+    if os.environ.get("OSMOSIS_ALLOW_INSECURE_PLATFORM_URL") == "1":
+        return
+    raise CLIError(
+        f"Refusing non-HTTPS platform URL {platform_url}. "
+        "Set OSMOSIS_ALLOW_INSECURE_PLATFORM_URL=1 to override.",
+        code="VALIDATION",
+    )
 
 
 def _print_error(message: str) -> None:
@@ -164,16 +204,21 @@ def _handle_cli_error(
     exit_code: int = 1,
 ) -> int:
     output = _output_context_for_error(exc, argv)
+    classified = None
     if output.format is OutputFormat.json:
+        classified = classify_error(exc)
         raw_ctx = getattr(exc, "ctx", None)
         ctx = raw_ctx if isinstance(raw_ctx, Context) else None
+        if ctx is None:
+            ctx = get_current_context(silent=True)
         command_argv = argv if argv is not None else sys.argv[1:]
         emit_structured_error_to_stderr(
-            classify_error(exc),
+            classified,
             command=command_path_for_error(ctx, argv=command_argv),
         )
     else:
         _print_error(str(exc))
+    emit_internal_debug(exc, classified)
     return exit_code
 
 
@@ -191,6 +236,7 @@ def _register_commands() -> None:
 
     get_completion_inspect_parameters()
     # -- Command groups --
+    from osmosis_ai.cli import command_registry as cmdreg
     from osmosis_ai.cli.commands.auth import app as auth_app
     from osmosis_ai.cli.commands.benchmark import app as benchmark_app
     from osmosis_ai.cli.commands.dataset import app as dataset_app
@@ -207,32 +253,32 @@ def _register_commands() -> None:
     from osmosis_ai.cli.commands.quickstart import HELP as QUICKSTART_HELP
     from osmosis_ai.cli.commands.quickstart import quickstart
 
-    app.command("quickstart", help=QUICKSTART_HELP, rich_help_panel=_WORKFLOW)(
-        quickstart
-    )
+    app.command(
+        cmdreg.STANDALONE_QUICKSTART, help=QUICKSTART_HELP, rich_help_panel=_WORKFLOW
+    )(quickstart)
 
-    app.add_typer(dataset_app, name="dataset", rich_help_panel=_WORKFLOW)
-    app.add_typer(train_app, name="train", rich_help_panel=_WORKFLOW)
-    app.add_typer(model_app, name="model", rich_help_panel=_WORKFLOW)
-    app.add_typer(eval_app, name="eval", rich_help_panel=_WORKFLOW)
-    app.add_typer(benchmark_app, name="benchmark", rich_help_panel=_WORKFLOW)
-    app.add_typer(rollout_app, name="rollout", rich_help_panel=_WORKFLOW)
-    app.add_typer(template_app, name="template", rich_help_panel=_WORKFLOW)
+    app.add_typer(dataset_app, name=cmdreg.GROUP_DATASET, rich_help_panel=_WORKFLOW)
+    app.add_typer(train_app, name=cmdreg.GROUP_TRAIN, rich_help_panel=_WORKFLOW)
+    app.add_typer(model_app, name=cmdreg.GROUP_MODEL, rich_help_panel=_WORKFLOW)
+    app.add_typer(eval_app, name=cmdreg.GROUP_EVAL, rich_help_panel=_WORKFLOW)
+    app.add_typer(benchmark_app, name=cmdreg.GROUP_BENCHMARK, rich_help_panel=_WORKFLOW)
+    app.add_typer(rollout_app, name=cmdreg.GROUP_ROLLOUT, rich_help_panel=_WORKFLOW)
+    app.add_typer(template_app, name=cmdreg.GROUP_TEMPLATE, rich_help_panel=_WORKFLOW)
 
     from osmosis_ai.cli.commands.dev import app as dev_app
 
-    app.add_typer(dev_app, name="dev", hidden=True)
+    app.add_typer(dev_app, name=cmdreg.GROUP_DEV, hidden=True)
 
-    app.add_typer(auth_app, name="auth", rich_help_panel=_PLATFORM)
-    app.add_typer(secret_app, name="secret", rich_help_panel=_PLATFORM)
+    app.add_typer(auth_app, name=cmdreg.GROUP_AUTH, rich_help_panel=_PLATFORM)
+    app.add_typer(secret_app, name=cmdreg.GROUP_SECRET, rich_help_panel=_PLATFORM)
 
     from osmosis_ai.cli.commands.workspace import doctor
 
-    app.command("doctor", rich_help_panel=_WORKFLOW)(doctor)
+    app.command(cmdreg.STANDALONE_DOCTOR, rich_help_panel=_WORKFLOW)(doctor)
 
     from osmosis_ai.cli.upgrade import upgrade
 
-    app.command("upgrade", rich_help_panel=_PLATFORM)(upgrade)
+    app.command(cmdreg.STANDALONE_UPGRADE, rich_help_panel=_PLATFORM)(upgrade)
 
 
 def main(argv: list[str] | None = None) -> int:

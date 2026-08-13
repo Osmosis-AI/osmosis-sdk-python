@@ -81,10 +81,13 @@ def test_upgrade_json_failed_subprocess_is_parseable_nonzero(
 
     captured = capsys.readouterr()
     assert exit_code == 1
-    assert captured.err == ""
-    payload = json.loads(captured.out)
-    assert payload["status"] == "failed"
-    assert payload["resource"]["stderr"] == "failed\n"
+    assert captured.out == ""
+    payload = json.loads(captured.err)
+    assert payload["error"]["code"] == "PLATFORM_ERROR"
+    assert payload["error"]["details"]["stderr"] == "failed\n"
+    assert "uv tool upgrade osmosis-ai" in payload["error"]["message"]
+    assert "pipx upgrade osmosis-ai" in payload["error"]["message"]
+    assert "pip install --upgrade osmosis-ai" in payload["error"]["message"]
 
 
 def test_upgrade_json_tries_next_fallback_after_failed_command(
@@ -118,3 +121,28 @@ def test_upgrade_json_tries_next_fallback_after_failed_command(
     assert payload["status"] == "success"
     assert len(calls) == 2
     assert payload["resource"]["command"] == calls[1]
+
+
+def test_upgrade_timeout_includes_manual_recovery_in_message(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys,
+) -> None:
+    monkeypatch.setattr(
+        "osmosis_ai.cli.upgrade._fetch_latest_version", lambda: "99.0.0"
+    )
+    monkeypatch.setattr("osmosis_ai.cli.upgrade._detect_install_method", lambda: "pipx")
+    monkeypatch.setattr("shutil.which", lambda command: f"/usr/bin/{command}")
+
+    def fake_run(cmd, **kwargs):
+        raise subprocess.TimeoutExpired(cmd, 120)
+
+    monkeypatch.setattr("subprocess.run", fake_run)
+
+    exit_code = cli.main(["upgrade"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert "Upgrade command timed out." in captured.err
+    assert "uv tool upgrade osmosis-ai" in captured.err
+    assert "pipx upgrade osmosis-ai" in captured.err
+    assert "pip install --upgrade osmosis-ai" in captured.err

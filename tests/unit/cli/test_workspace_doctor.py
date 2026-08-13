@@ -34,6 +34,14 @@ def workspace_template(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return root
 
 
+def _failed_doctor_details(capsys) -> dict:
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    error = json.loads(captured.err)["error"]
+    assert error["code"] == "VALIDATION"
+    return error["details"]
+
+
 def _make_workspace_directory(root: Path) -> Path:
     subprocess.run(
         ["git", "init", "-b", "main", str(root)],
@@ -52,16 +60,15 @@ def test_project_doctor_dry_run_reports_missing_paths(
     rc = main(["--json", "doctor"])
 
     assert rc == 1
-    payload = json.loads(capsys.readouterr().out)
-    assert payload["status"] == "failed"
-    assert "rollouts/" in payload["resource"]["missing"]
-    assert "configs/training/" in payload["resource"]["missing"]
-    assert ".osmosis/cache/" not in payload["resource"]["missing"]
-    assert "rollouts/.gitkeep" not in payload["resource"]["missing"]
-    assert "AGENTS.md" in payload["resource"]["missing"]
-    assert payload["resource"]["fixed"] is False
-    assert payload["resource"]["valid"] is False
-    assert payload["resource"]["required_paths"] == [
+    payload = _failed_doctor_details(capsys)
+    assert "rollouts/" in payload["missing"]
+    assert "configs/training/" in payload["missing"]
+    assert ".osmosis/cache/" not in payload["missing"]
+    assert "rollouts/.gitkeep" not in payload["missing"]
+    assert "AGENTS.md" in payload["missing"]
+    assert payload["fixed"] is False
+    assert payload["valid"] is False
+    assert payload["required_paths"] == [
         "rollouts/",
         "configs/training/",
         "configs/eval/",
@@ -137,11 +144,11 @@ def test_project_doctor_reports_invalid_git_origin_warning(
 
     rc = main(["--json", "doctor"])
 
-    payload = json.loads(capsys.readouterr().out)
+    payload = _failed_doctor_details(capsys)
     assert rc == 1
-    assert payload["resource"]["git"]["identity"] is None
-    assert payload["resource"]["git"]["remote_url"] is None
-    assert "hosted on github.com" in payload["resource"]["git"]["warning"]
+    assert payload["git"]["identity"] is None
+    assert payload["git"]["remote_url"] is None
+    assert "hosted on github.com" in payload["git"]["warning"]
 
 
 def test_project_doctor_does_not_report_missing_gitkeep_for_existing_directory(
@@ -154,9 +161,9 @@ def test_project_doctor_does_not_report_missing_gitkeep_for_existing_directory(
     rc = main(["--json", "doctor"])
 
     assert rc == 1
-    payload = json.loads(capsys.readouterr().out)
-    assert "rollouts/" not in payload["resource"]["missing"]
-    assert "rollouts/.gitkeep" not in payload["resource"]["missing"]
+    payload = _failed_doctor_details(capsys)
+    assert "rollouts/" not in payload["missing"]
+    assert "rollouts/.gitkeep" not in payload["missing"]
 
 
 def test_project_doctor_plain_reports_actionable_summary(
@@ -168,7 +175,7 @@ def test_project_doctor_plain_reports_actionable_summary(
     rc = main(["--plain", "doctor"])
 
     assert rc == 1
-    output = capsys.readouterr().out
+    output = capsys.readouterr().err
     assert "Workspace doctor found missing scaffold paths." in output
     assert f"Workspace directory: {project}" in output
     assert "Missing scaffold paths:" in output
@@ -194,8 +201,8 @@ def test_project_doctor_dry_run_does_not_require_workspace_template(
     rc = main(["--json", "doctor"])
 
     assert rc == 1
-    payload = json.loads(capsys.readouterr().out)
-    assert "AGENTS.md" in payload["resource"]["missing"]
+    payload = _failed_doctor_details(capsys)
+    assert "AGENTS.md" in payload["missing"]
 
 
 def test_project_doctor_rejects_yes_option(tmp_path: Path, monkeypatch, capsys) -> None:
@@ -307,10 +314,10 @@ def test_project_doctor_reports_linked_workspace(
 
     rc = main(["--json", "doctor"])
 
-    payload = json.loads(capsys.readouterr().out)
+    payload = _failed_doctor_details(capsys)
     assert rc == 1  # scaffold is still missing — workspace lookup is orthogonal
     assert verify_calls == [{"token": "token", "git_identity": "acme/rollouts"}]
-    assert payload["resource"]["workspace"] == {
+    assert payload["workspace"] == {
         "id": "ws_1",
         "name": "Acme Workspace",
         "role": "admin",
@@ -343,7 +350,7 @@ def test_project_doctor_plain_shows_linked_workspace_line(
     rc = main(["--plain", "doctor"])
 
     assert rc == 1
-    assert "Linked workspace: Acme Workspace" in capsys.readouterr().out
+    assert "Linked workspace: Acme Workspace" in capsys.readouterr().err
 
 
 def test_project_doctor_degrades_when_workspace_lookup_fails(
@@ -366,9 +373,9 @@ def test_project_doctor_degrades_when_workspace_lookup_fails(
 
     rc = main(["--json", "doctor"])
 
-    payload = json.loads(capsys.readouterr().out)
+    payload = _failed_doctor_details(capsys)
     assert rc == 1
-    assert payload["resource"]["workspace"] is None
+    assert payload["workspace"] is None
 
 
 def test_project_doctor_skips_workspace_lookup_without_git_identity(
@@ -388,6 +395,6 @@ def test_project_doctor_skips_workspace_lookup_without_git_identity(
 
     rc = main(["--json", "doctor"])
 
-    payload = json.loads(capsys.readouterr().out)
+    payload = _failed_doctor_details(capsys)
     assert rc == 1
-    assert payload["resource"]["workspace"] is None
+    assert payload["workspace"] is None

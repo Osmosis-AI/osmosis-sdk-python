@@ -22,6 +22,8 @@ PRESERVED_ROOT_COMMANDS = [
     "template",
     "eval",
     "upgrade",
+    "quickstart",
+    "secret",
 ]
 
 # Commands registered but intentionally hidden from --help output.

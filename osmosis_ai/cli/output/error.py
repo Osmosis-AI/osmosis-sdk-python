@@ -2,67 +2,50 @@
 
 from __future__ import annotations
 
-import json
 import sys
 from typing import Any
 
 from osmosis_ai.cli._click_compat import Context, UsageError, get_current_context
-from osmosis_ai.cli.errors import CLIError
+from osmosis_ai.cli.command_registry import (
+    COMMAND_GROUPS,
+    REMOVED_TOP_LEVEL_COMMANDS,
+    REMOVED_TWO_TOKEN_COMMANDS,
+    STANDALONE_COMMANDS,
+    THREE_TOKEN_PREFIXES,
+)
+from osmosis_ai.cli.errors import CLIError, CLIErrorCode
+from osmosis_ai.cli.output.jsonutil import dump_cli_json
 from osmosis_ai.consts import PACKAGE_VERSION
 
-_SUPPORTED_TOP_LEVEL_COMMANDS = {
-    "doctor",
-    "upgrade",
-}
 
-_SUPPORTED_COMMAND_GROUPS = {
-    "auth",
-    "benchmark",
-    "dataset",
-    "eval",
-    "model",
-    "rollout",
-    "secret",
-    "template",
-    "train",
-}
-
-_REMOVED_TOP_LEVEL_COMMANDS = {
-    "deploy",
-    "deployment",
-    "init",
-    "link",
-    "login",
-    "logout",
-    "undeploy",
-    "unlink",
-    "workspace",
-    "whoami",
-}
-
-_REMOVED_TWO_TOKEN_COMMANDS = {
-    ("dataset", "delete"),
-    ("model", "delete"),
-    ("rollout", "validate"),
-    ("train", "delete"),
-    ("train", "traces"),
-}
-
-
-def _classify_platform_status(status: int | None) -> str:
+def _classify_platform_status(status: int | None) -> CLIErrorCode:
     if status == 401:
-        return "AUTH_REQUIRED"
+        return CLIErrorCode.AUTH_REQUIRED
     if status == 404:
-        return "NOT_FOUND"
+        return CLIErrorCode.NOT_FOUND
     if status == 409:
-        return "CONFLICT"
+        return CLIErrorCode.CONFLICT
     if status == 426:
-        return "UPGRADE_REQUIRED"
+        return CLIErrorCode.UPGRADE_REQUIRED
     if status == 429:
-        return "RATE_LIMITED"
+        return CLIErrorCode.RATE_LIMITED
     if status == 400:
-        return "VALIDATION"
-    return "PLATFORM_ERROR"
+        return CLIErrorCode.VALIDATION
+    return CLIErrorCode.PLATFORM_ERROR
+
+
+def _platform_error_details(exc: Any) -> dict[str, Any]:
+    details: dict[str, Any] = {}
+    if exc.error_code:
+        details["platform_code"] = exc.error_code
+    if exc.field:
+        details["field"] = exc.field
+    if exc.details:
+        for key, value in exc.details.items():
+            details.setdefault(key, value)
+    if exc.status_code is not None:
+        details["status_code"] = exc.status_code
+    return details
 
 
 def classify_error(exc: BaseException) -> CLIError:
@@ -70,39 +53,75 @@ def classify_error(exc: BaseException) -> CLIError:
     if isinstance(exc, CLIError):
         return exc
 
+    # Resolved before the platform import: usage errors must stay import-light,
+    # and the auth package can itself raise (bad OSMOSIS_PLATFORM_URL evaluates
+    # at import time) — importing it while handling an error would replace the
+    # envelope with a traceback.
+    if isinstance(exc, UsageError):
+        return CLIError(str(exc) or "Invalid usage.", code=CLIErrorCode.VALIDATION)
+
     from osmosis_ai.platform.auth.platform_client import (
         AuthenticationExpiredError,
         PlatformAPIError,
+        SubscriptionRequiredError,
     )
 
     if isinstance(exc, AuthenticationExpiredError):
-        return CLIError(str(exc) or "Session expired.", code="AUTH_REQUIRED")
+        return CLIError(str(exc) or "Session expired.", code=CLIErrorCode.AUTH_REQUIRED)
+
+    if isinstance(exc, SubscriptionRequiredError):
+        code = (
+            CLIErrorCode.BILLING_REQUIRED
+            if exc.error_code == "BILLING_REQUIRED"
+            else CLIErrorCode.SUBSCRIPTION_REQUIRED
+        )
+        return CLIError(str(exc), code=code, details=_platform_error_details(exc))
 
     if isinstance(exc, PlatformAPIError):
-        details: dict[str, Any] = {}
-        if exc.error_code:
-            details["platform_code"] = exc.error_code
-        if exc.field:
-            details["field"] = exc.field
-        if exc.details:
-            for key, value in exc.details.items():
-                details.setdefault(key, value)
-        if exc.status_code is not None:
-            details["status_code"] = exc.status_code
         return CLIError(
             str(exc),
             code=_classify_platform_status(exc.status_code),
-            details=details,
+            details=_platform_error_details(exc),
         )
-
-    if isinstance(exc, UsageError):
-        return CLIError(str(exc) or "Invalid usage.", code="VALIDATION")
 
     return CLIError(
         "An unexpected internal error occurred.",
-        code="INTERNAL",
+        code=CLIErrorCode.INTERNAL,
         details={"exception_type": type(exc).__name__},
     )
+
+
+def emit_internal_debug(exc: BaseException, classified: CLIError | None = None) -> None:
+    """Write original message + traceback for INTERNAL errors when debugging.
+
+    ``OSMOSIS_DEBUG=1`` is the only switch (no CLI flag). The JSON error
+    envelope is unchanged; this extra text is appended to stderr after it.
+    Explicit ``CLIError(code="INTERNAL")`` values dump an attached cause or
+    context, but never repeat the structured wrapper itself. When
+    ``classified`` is omitted, the exception is classified lazily so
+    recoverable platform errors do not dump a traceback.
+    """
+    import os
+    import traceback
+
+    if os.environ.get("OSMOSIS_DEBUG") != "1":
+        return
+    debug_exc = exc
+    if isinstance(exc, CLIError):
+        if exc.code != CLIErrorCode.INTERNAL:
+            return
+        nested = exc.__cause__ or exc.__context__
+        if nested is None:
+            return
+        debug_exc = nested
+    else:
+        if classified is None:
+            classified = classify_error(exc)
+        if classified.code != CLIErrorCode.INTERNAL:
+            return
+    sys.stderr.write(f"{type(debug_exc).__name__}: {debug_exc}\n")
+    traceback.print_exception(debug_exc, file=sys.stderr)
+    sys.stderr.flush()
 
 
 def _argv_command_path(argv: list[str]) -> str:
@@ -123,21 +142,36 @@ def _argv_command_path(argv: list[str]) -> str:
         return "<root>"
 
     command = tokens[0]
-    if command in _SUPPORTED_TOP_LEVEL_COMMANDS:
-        return command
-    if command in _REMOVED_TOP_LEVEL_COMMANDS:
+    if command in STANDALONE_COMMANDS or command in REMOVED_TOP_LEVEL_COMMANDS:
         return command
     if len(tokens) == 1:
         return command
-    if (command, tokens[1]) in _REMOVED_TWO_TOKEN_COMMANDS:
+    if (command, tokens[1]) in REMOVED_TWO_TOKEN_COMMANDS:
         return " ".join(tokens[:2])
-    if command == "benchmark" and tokens[1] == "runs" and len(tokens) >= 3:
+    if len(tokens) >= 3 and (command, tokens[1]) in THREE_TOKEN_PREFIXES:
         return " ".join(tokens[:3])
-    if command == "eval" and tokens[1] == "cache" and len(tokens) >= 3:
-        return " ".join(tokens[:3])
-    if command in _SUPPORTED_COMMAND_GROUPS:
+    if command in COMMAND_GROUPS:
         return " ".join(tokens[:2])
     return command
+
+
+def _click_subcommand_path(ctx: Context) -> str | None:
+    path = ctx.command_path.strip()
+    if not path:
+        return None
+    # The root program name can contain spaces (Click reports "python -m pkg"
+    # for -m invocations), so it must be stripped as a prefix, not as the
+    # first whitespace token.
+    root_name = (ctx.find_root().info_name or "").strip()
+    if root_name:
+        if path == root_name:
+            return None
+        if path.startswith(root_name + " "):
+            return path[len(root_name) + 1 :].strip() or None
+    parts = path.split()
+    if len(parts) >= 2:
+        return " ".join(parts[1:])
+    return None
 
 
 def command_path_for_error(
@@ -145,16 +179,26 @@ def command_path_for_error(
     *,
     argv: list[str] | None = None,
 ) -> str:
-    """Resolve the command path for the error envelope."""
-    if argv is not None:
-        return _argv_command_path(argv)
+    """Resolve the command path for the error envelope.
+
+    Prefer Click's ``command_path`` when the context is already inside a
+    subcommand. Fall back to argv parsed against the same name catalog
+    ``_register_commands`` uses. Removed commands are the exception: they only
+    exist in argv (the Click context stops at the parent group), so they are
+    matched first.
+    """
+    argv_path = _argv_command_path(argv if argv is not None else sys.argv[1:])
+    tokens = argv_path.split()
+    if tokens and (
+        tokens[0] in REMOVED_TOP_LEVEL_COMMANDS
+        or (len(tokens) == 2 and (tokens[0], tokens[1]) in REMOVED_TWO_TOKEN_COMMANDS)
+    ):
+        return argv_path
     if ctx is not None:
-        path = ctx.command_path
-        parts = path.split(" ", 1)
-        if len(parts) == 2:
-            return parts[1]
-        return path or "<root>"
-    return _argv_command_path(sys.argv[1:] if sys.argv[1:] else [])
+        click_path = _click_subcommand_path(ctx)
+        if click_path is not None:
+            return click_path
+    return argv_path
 
 
 def emit_structured_error_to_stderr(
@@ -165,10 +209,7 @@ def emit_structured_error_to_stderr(
 ) -> None:
     """Write the JSON-mode error envelope to stderr."""
     if command is None:
-        try:
-            ctx = get_current_context(silent=True)
-        except RuntimeError:
-            ctx = None
+        ctx = get_current_context(silent=True)
         command = command_path_for_error(ctx)
 
     envelope: dict[str, Any] = {
@@ -179,10 +220,14 @@ def emit_structured_error_to_stderr(
             "code": err.code,
             "message": err.message,
             "details": err.details,
-            "request_id": err.request_id,
         },
     }
-    sys.stderr.write(json.dumps(envelope, ensure_ascii=False))
+    try:
+        serialized = dump_cli_json(envelope)
+    except CLIError as exc:
+        envelope["error"]["details"] = {"details_omitted": type(exc).__name__}
+        serialized = dump_cli_json(envelope)
+    sys.stderr.write(serialized)
     sys.stderr.write("\n")
     sys.stderr.flush()
 
@@ -209,6 +254,6 @@ def emit_structured_warning_to_stderr(
             "message": message,
         },
     }
-    sys.stderr.write(json.dumps(envelope, ensure_ascii=False))
+    sys.stderr.write(dump_cli_json(envelope))
     sys.stderr.write("\n")
     sys.stderr.flush()

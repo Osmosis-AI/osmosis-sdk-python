@@ -7,8 +7,8 @@
 The console script is `osmosis_ai.cli.main:main` (aliases: `osmosis`, `osmosis-ai`, `osmosis_ai`). [../osmosis_ai/cli/main.py](../osmosis_ai/cli/main.py):
 
 - `main()` calls `_register_commands()` once, then runs the Typer `app` with `standalone_mode=False` so it can map exceptions to exit codes itself.
-- `_register_commands()` imports each command group **lazily inside the function**. Groups attach via `app.add_typer(...)`; the standalone `doctor` / `upgrade` commands attach via `app.command(...)`. Two `rich_help_panel`s split the help: `Workflow Commands` (`dataset`, `train`, `model`, `eval`, `benchmark`, `rollout`, `template`, `doctor`) and `Platform Commands` (`auth`, `secret`, `upgrade`).
-- The root `_callback` resolves `--json` / `--plain`, builds an `OutputContext`, installs it on the Typer context, registers `verify_output_emitted` on close, and loads `.env` via `python-dotenv`. `hoist_format_selectors` lets the format flags appear anywhere on the line.
+- `_register_commands()` imports each command group **lazily inside the function**. Groups attach via `app.add_typer(...)`; the standalone `quickstart` / `doctor` / `upgrade` commands attach via `app.command(...)`. Two `rich_help_panel`s split the help: `Workflow Commands` (`quickstart`, `dataset`, `train`, `model`, `eval`, `benchmark`, `rollout`, `template`, `doctor`) and `Platform Commands` (`auth`, `secret`, `upgrade`).
+- The root `_callback` resolves `--json` / `--plain`, builds an `OutputContext`, installs it on the Typer context, registers `verify_output_emitted` on close, and loads `.env` via `python-dotenv`. After dotenv, non-HTTPS non-loopback `OSMOSIS_PLATFORM_URL` values are refused unless `OSMOSIS_ALLOW_INSECURE_PLATFORM_URL=1`. `hoist_format_selectors` lets the format flags appear anywhere on the line.
 
 ## Command shells delegate; they don't do work
 
@@ -51,12 +51,22 @@ Serializers that turn API models into these shapes live in [../osmosis_ai/cli/ou
 
 The output context, format enum, and selector resolution live in [../osmosis_ai/cli/output/context.py](../osmosis_ai/cli/output/context.py); the full output surface is re-exported from [../osmosis_ai/cli/output/__init__.py](../osmosis_ai/cli/output/__init__.py). Serializer names are lazy (PEP 562) so importing the package does not load platform API models.
 
+Hidden `osmosis dev server logs` is a streaming exception to the envelope contract: `--json` writes NDJSON lines (`{"timestamp", "message"}`) to stdout and exits via `typer.Exit(0)` rather than a `schema_version: 1` list envelope. `--follow` off is still that stream, not a final list envelope.
+
 ## Errors
 
-Raise `CLIError` ([../osmosis_ai/cli/errors.py](../osmosis_ai/cli/errors.py)) — the single error type shared by every domain. `main()` funnels all exceptions through `_handle_cli_error`:
+Raise `CLIError` ([../osmosis_ai/cli/errors.py](../osmosis_ai/cli/errors.py)) — the single error type shared by every domain. `CLIError.code` is a `CLIErrorCode` `StrEnum`. `main()` funnels all exceptions through `_handle_cli_error`:
 
 - in JSON mode, `classify_error()` + `emit_structured_error_to_stderr()` write a structured error envelope (with a CLI error `code`, command path, and SDK version) to **stderr** ([../osmosis_ai/cli/output/error.py](../osmosis_ai/cli/output/error.py));
 - otherwise a plain `Error: …` line is printed.
+
+Command path prefers Click's `command_path` when the context is already inside a subcommand; otherwise argv is parsed against the same name catalog `_register_commands` uses ([../osmosis_ai/cli/command_registry.py](../osmosis_ai/cli/command_registry.py)), including three-token prefixes such as `dev server up` and `benchmark runs download`.
+
+Not-logged-in failures use `AUTH_REQUIRED`. `SubscriptionRequiredError` maps to `SUBSCRIPTION_REQUIRED` or `BILLING_REQUIRED` from the platform `error_code`; a generic HTTP 403 stays `PLATFORM_ERROR`. The error object has `code`, `message`, and `details` only — `request_id` is omitted because the platform client does not expose one.
+
+JSON success and error envelopes are encoded with `allow_nan=False`. Non-finite metric values are sanitized to `null` in train/eval metrics exports (including the file written by `train info --output`); any remaining non-finite float fails the command rather than emitting invalid JSON.
+
+Unknown exceptions become `INTERNAL` with a generic message. Set `OSMOSIS_DEBUG=1` to append the original exception and traceback to stderr (the JSON envelope is unchanged).
 
 `KeyboardInterrupt` / `click.Abort` exit `130`; `typer.Exit` / `SystemExit` preserve their code.
 
@@ -64,7 +74,7 @@ Raise `CLIError` ([../osmosis_ai/cli/errors.py](../osmosis_ai/cli/errors.py)) �
 
 1. Put the Typer shell in `cli/commands/`; put the logic in `platform/cli/` or `eval/`.
 2. Keep module-level imports minimal; lazy-import heavy deps inside the function.
-3. Return a `CommandResult`; never print directly.
+3. Return a `CommandResult`; never print directly. Annotate handlers as `-> CommandResult`. Reuse [../osmosis_ai/cli/options.py](../osmosis_ai/cli/options.py) for `--limit` / `--all` / `--cursor`.
 4. Raise `CLIError` for user-facing failures.
 5. Support non-interactive flows (`--yes`, `--token`, `--env`) so `--json` / `--plain` don't dead-end on a prompt (`INTERACTIVE_REQUIRED`).
 

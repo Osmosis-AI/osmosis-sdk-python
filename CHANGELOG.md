@@ -4,6 +4,16 @@ This file records changes to `osmosis-ai`. For earlier versions, see [GitHub Rel
 
 ## Unreleased
 
+### Changed
+
+- Standardized the CLI machine contract: `--json` errors now contain `{code, message, details}` without `request_id`, command paths come from the live command registry, authentication/subscription/billing failures use dedicated codes, and non-finite values can no longer produce invalid JSON ([#304](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/304)).
+- CLI command handlers now return typed `CommandResult` values; failed upgrade, doctor, and rubric commands emit stderr errors, while machine-readable warnings use JSON Lines envelopes ([#304](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/304)).
+
+### Fixed
+
+- Prevented `--json` and `--plain` submits from prompting for missing secrets, surfaced all missing names in `INTERACTIVE_REQUIRED` details, redacted supplied secrets from platform errors without losing specialized error codes, and restored rich login presentation ([#304](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/304)).
+- Refused insecure non-loopback platform URLs unless explicitly allowed, kept insecure-URL warnings machine-readable, and preserved lazy CLI startup paths without loading authentication dependencies for shell-only usage errors ([#304](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/304)).
+
 ## 0.3.0 - 2026-08-11
 
 ### Breaking Changes

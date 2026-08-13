@@ -1,22 +1,15 @@
-"""Shared orchestration for ``osmosis train submit`` and ``osmosis eval submit``.
+"""Shared orchestration for cloud submit (train, eval, and benchmark).
 
-Both submit flows follow the same script:
-
-1. resolve the git/workspace context and validate the config path,
-2. load + validate the TOML config,
-3. render a confirmation table and prompt the user,
-4. POST to the platform API,
-5. return an ``OperationResult`` describing the new run.
-
-The only meaningful differences are the literal strings, the loader, and the
-shape of the API call / next-step suggestions. ``CloudSubmitSpec`` parametrises
-those, and ``run_cloud_submit`` is the single implementation.
+Train and eval follow the same script via ``CloudSubmitSpec`` /
+``run_cloud_submit``. Benchmark TOML is a different shape (no
+``BaseSubmitConfig``, no ``commit_sha``), so it renders its own summary
+tables and HLE warning, then joins the shared tail:
+``prepare_submit_secrets`` → ``confirm_remote_fetch_and_post``.
 """
 
 from __future__ import annotations
 
 import re
-import sys
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -184,6 +177,120 @@ def _enrich_missing_secret_error(
     )
 
 
+def prepare_submit_secrets(
+    *,
+    prompt_names: list[str],
+    required_names: list[str],
+    secrets_file: str | None,
+    credentials: Any,
+    git_identity: str,
+    full_summary: list[tuple[str, str]],
+) -> dict[str, str]:
+    """Resolve provided secrets, print the secrets table, extend ``full_summary``.
+
+    ``prompt_names`` may be supplied at submit (file / env / interactive).
+    ``required_names`` must exist as a stored record or a provided value.
+    Train/eval pass the same list for both; benchmark prompts only
+    ``[secrets].required`` while requiring every referenced secret.
+
+    Returns ``{}`` without printing when ``required_names`` is empty.
+    """
+    if not required_names:
+        return {}
+
+    provided_secrets: dict[str, str] = {}
+    scopes = _fetch_secret_scopes(
+        OsmosisClient(),
+        credentials=credentials,
+        git_identity=git_identity,
+    )
+    if scopes is None:
+        # Lookup failed — show names without a confident scope rather than
+        # blocking the submit or mislabeling; the server still validates.
+        secret_rows = [(name, "–") for name in sorted(required_names)]
+    else:
+        workspace_names, personal_names = scopes
+        provided_secrets = resolve_run_secrets(
+            names=list(prompt_names),
+            secrets_file=secrets_file,
+            stored_names=workspace_names | personal_names,
+        )
+        missing = sorted(
+            {
+                name
+                for name in required_names
+                if name not in workspace_names
+                and name not in personal_names
+                and name not in provided_secrets
+            }
+        )
+        if missing:
+            raise CLIError(_missing_secret_message(missing))
+        stored_rows = build_secret_table_rows(
+            [name for name in required_names if name not in provided_secrets],
+            user_secret_names=personal_names,
+            workspace_secret_names=workspace_names,
+        )
+        secret_rows = sorted(
+            [*stored_rows, *((name, "Run") for name in provided_secrets)]
+        )
+    console.table(
+        secret_rows,
+        title=f"Secrets ({len(secret_rows)})",
+        headers=("Name", "Scope"),
+    )
+    full_summary.extend((f"secret.{name}", scope) for name, scope in secret_rows)
+    return provided_secrets
+
+
+def confirm_remote_fetch_and_post[T](
+    *,
+    yes: bool,
+    confirm_prompt: str,
+    full_summary: list[tuple[str, str]],
+    workspace_directory: Path,
+    status_message: str,
+    post: Callable[[], T],
+    branch: str | None = None,
+    pinned_commit_sha: str | None = None,
+    extra_warnings: list[str] | None = None,
+    provided_secrets: dict[str, str] | None = None,
+    warn_on_missing_commit_sha: bool = True,
+) -> T:
+    """Shared tail: remote-fetch notice, confirmation, POST with secret-404 hints."""
+    notes, warnings = print_remote_fetch_notice(
+        workspace_directory,
+        branch=branch,
+        pinned_commit_sha=pinned_commit_sha,
+        extra_warnings=extra_warnings,
+        warn_on_missing_commit_sha=warn_on_missing_commit_sha,
+    )
+    require_confirmation(
+        confirm_prompt,
+        yes=yes,
+        summary=full_summary,
+        notes=notes,
+        warnings=warnings,
+    )
+    output = get_output_context()
+    with output.status(status_message):
+        try:
+            return post()
+        except PlatformAPIError as exc:
+            if provided_secrets:
+                from osmosis_ai.platform.cli.secret_redact import (
+                    redact_provided_secrets,
+                )
+
+                exc = redact_provided_secrets(exc, provided_secrets.values())
+            enriched = _enrich_missing_secret_error(exc)
+            if enriched is not None:
+                raise enriched from None
+            if provided_secrets:
+                raise exc from None
+            raise
+
+
 def run_cloud_submit[ConfigT: BaseSubmitConfig](
     config_path: Path,
     *,
@@ -256,82 +363,36 @@ def run_cloud_submit[ConfigT: BaseSubmitConfig](
         )
         full_summary.extend((f"env.{name}", value) for name, value in env_rows)
 
-    provided_secrets: dict[str, str] = {}
-    if config.secrets:
-        scopes = _fetch_secret_scopes(
-            OsmosisClient(),
-            credentials=context.credentials,
-            git_identity=context.git_identity,
-        )
-        if scopes is None:
-            # Lookup failed — show names without a confident scope rather than
-            # blocking the submit or mislabeling; the server still validates.
-            secret_rows = [(name, "–") for name in sorted(config.secrets)]
-        else:
-            workspace_names, personal_names = scopes
-            provided_secrets = resolve_run_secrets(
-                names=list(config.secrets),
-                secrets_file=secrets_file,
-                stored_names=workspace_names | personal_names,
-                is_tty=sys.stdin.isatty(),
-            )
-            missing = sorted(
-                {
-                    name
-                    for name in config.secrets
-                    if name not in workspace_names
-                    and name not in personal_names
-                    and name not in provided_secrets
-                }
-            )
-            if missing:
-                raise CLIError(_missing_secret_message(missing))
-            stored_rows = build_secret_table_rows(
-                [name for name in config.secrets if name not in provided_secrets],
-                user_secret_names=personal_names,
-                workspace_secret_names=workspace_names,
-            )
-            secret_rows = sorted(
-                [*stored_rows, *((name, "Run") for name in provided_secrets)]
-            )
-        console.table(
-            secret_rows,
-            title=f"Secrets ({len(secret_rows)})",
-            headers=("Name", "Scope"),
-        )
-        full_summary.extend((f"secret.{name}", scope) for name, scope in secret_rows)
+    provided_secrets = prepare_submit_secrets(
+        prompt_names=list(config.secrets),
+        required_names=list(config.secrets),
+        secrets_file=secrets_file,
+        credentials=context.credentials,
+        git_identity=context.git_identity,
+        full_summary=full_summary,
+    )
 
-    notes, warnings = print_remote_fetch_notice(
-        workspace_directory,
+    def _post() -> SubmitRunResult:
+        return spec.submit(
+            OsmosisClient(),
+            config,
+            context.credentials,
+            context.git_identity,
+            provided_secrets,
+        )
+
+    result = confirm_remote_fetch_and_post(
+        yes=yes,
+        confirm_prompt=spec.confirm_prompt,
+        full_summary=full_summary,
+        workspace_directory=workspace_directory,
+        status_message=spec.status_message,
+        post=_post,
         branch=config.experiment_branch,
         pinned_commit_sha=config.experiment_commit_sha,
         extra_warnings=[*backend_preflight_warnings, *commit_preflight_warnings],
+        provided_secrets=provided_secrets,
     )
-
-    require_confirmation(
-        spec.confirm_prompt,
-        yes=yes,
-        summary=full_summary,
-        notes=notes,
-        warnings=warnings,
-    )
-
-    client = OsmosisClient()
-    output = get_output_context()
-    with output.status(spec.status_message):
-        try:
-            result = spec.submit(
-                client,
-                config,
-                context.credentials,
-                context.git_identity,
-                provided_secrets,
-            )
-        except PlatformAPIError as exc:
-            enriched = _enrich_missing_secret_error(exc)
-            if enriched is not None:
-                raise enriched from exc
-            raise
 
     display_next_steps, next_steps_structured = spec.build_next_steps(result, config)
 
@@ -364,5 +425,7 @@ def run_cloud_submit[ConfigT: BaseSubmitConfig](
 
 __all__ = [
     "CloudSubmitSpec",
+    "confirm_remote_fetch_and_post",
+    "prepare_submit_secrets",
     "run_cloud_submit",
 ]

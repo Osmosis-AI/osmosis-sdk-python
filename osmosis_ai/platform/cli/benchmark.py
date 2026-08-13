@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -24,7 +23,6 @@ from osmosis_ai.cli.output.display import (
     format_local_datetime,
     format_relative_time,
 )
-from osmosis_ai.cli.prompts import require_confirmation
 from osmosis_ai.platform.api.client import OsmosisClient
 from osmosis_ai.platform.api.models import (
     BENCHMARK_RUN_STATUSES_ERROR,
@@ -1047,6 +1045,8 @@ def download(
 
 def stop(name: str, *, yes: bool) -> OperationResult:
     """Stop a benchmark run."""
+    from osmosis_ai.platform.cli.stop_run import stop_run
+
     context = require_git_workspace_directory_context()
     client = OsmosisClient()
     output = get_output_context()
@@ -1056,28 +1056,19 @@ def stop(name: str, *, yes: bool) -> OperationResult:
             credentials=context.credentials,
             git_identity=context.git_identity,
         )
-    require_confirmation(
-        f'Stop benchmark run "{detail.name}"?',
+    return stop_run(
+        noun="benchmark run",
+        operation="benchmark.stop",
+        confirm_name=detail.name,
         yes=yes,
-        default=False,
-        summary=[("Name", detail.name)],
-    )
-    with output.status("Stopping benchmark run..."):
-        client.stop_benchmark_run(
+        context=context,
+        status_message="Stopping benchmark run...",
+        extra={"id": detail.id, "status": "stopped"},
+        stop=lambda: client.stop_benchmark_run(
             detail.id,
             credentials=context.credentials,
             git_identity=context.git_identity,
-        )
-    return OperationResult(
-        operation="benchmark.stop",
-        status="success",
-        resource={
-            "id": detail.id,
-            "name": detail.name,
-            "status": "stopped",
-            **git_result_context(context),
-        },
-        message=f'Benchmark run "{detail.name}" stopped.',
+        ),
     )
 
 
@@ -1140,15 +1131,10 @@ def submit(
 ) -> OperationResult:
     """Submit a benchmark run."""
     from osmosis_ai.platform.cli.benchmark_config import load_benchmark_submit_config
-    from osmosis_ai.platform.cli.secret_resolution import resolve_run_secrets
-    from osmosis_ai.platform.cli.shared_config import (
-        build_env_table_rows,
-        build_secret_table_rows,
-    )
+    from osmosis_ai.platform.cli.shared_config import build_env_table_rows
     from osmosis_ai.platform.cli.shared_submit import (
-        _enrich_missing_secret_error,
-        _fetch_secret_scopes,
-        _missing_secret_message,
+        confirm_remote_fetch_and_post,
+        prepare_submit_secrets,
     )
 
     context = require_git_workspace_directory_context()
@@ -1222,70 +1208,34 @@ def submit(
 
     _warn_if_hle_without_parity(config)
 
-    secret_values: dict[str, str] = {}
-    if config.required_secrets:
-        scopes = _fetch_secret_scopes(
-            OsmosisClient(),
-            credentials=context.credentials,
-            git_identity=context.git_identity,
-        )
-        if scopes is None:
-            secret_rows = [(name, "–") for name in sorted(config.required_secrets)]
-        else:
-            workspace_names, personal_names = scopes
-            # Names under [secrets] may be supplied at submit; every other
-            # reference must already exist as a record.
-            secret_values = resolve_run_secrets(
-                names=config.secrets.required,
-                secrets_file=secrets_file,
-                stored_names=workspace_names | personal_names,
-                is_tty=sys.stdin.isatty(),
-            )
-            missing = sorted(
-                name
-                for name in config.required_secrets
-                if name not in workspace_names
-                and name not in personal_names
-                and name not in secret_values
-            )
-            if missing:
-                raise CLIError(_missing_secret_message(missing))
-            stored_rows = build_secret_table_rows(
-                [name for name in config.required_secrets if name not in secret_values],
-                user_secret_names=personal_names,
-                workspace_secret_names=workspace_names,
-            )
-            secret_rows = sorted(
-                [*stored_rows, *((name, "Run") for name in secret_values)]
-            )
-        console.table(
-            secret_rows,
-            title=f"Secrets ({len(secret_rows)})",
-            headers=("Name", "Scope"),
-        )
-        full_summary.extend((f"secret.{name}", scope) for name, scope in secret_rows)
-
-    require_confirmation(
-        "Submit this benchmark run?",
-        yes=yes,
-        summary=full_summary,
+    secret_values = prepare_submit_secrets(
+        prompt_names=config.secrets.required,
+        required_names=config.required_secrets,
+        secrets_file=secrets_file,
+        credentials=context.credentials,
+        git_identity=context.git_identity,
+        full_summary=full_summary,
     )
 
-    output = get_output_context()
-    with output.status("Submitting benchmark run..."):
-        try:
-            result = _submit_benchmark(
-                OsmosisClient(),
-                config,
-                context.credentials,
-                context.git_identity,
-                secret_values,
-            )
-        except PlatformAPIError as exc:
-            enriched = _enrich_missing_secret_error(exc)
-            if enriched is not None:
-                raise enriched from exc
-            raise
+    def _post() -> SubmitBenchmarkRunResult:
+        return _submit_benchmark(
+            OsmosisClient(),
+            config,
+            context.credentials,
+            context.git_identity,
+            secret_values,
+        )
+
+    result = confirm_remote_fetch_and_post(
+        yes=yes,
+        confirm_prompt="Submit this benchmark run?",
+        full_summary=full_summary,
+        workspace_directory=workspace_directory,
+        status_message="Submitting benchmark run...",
+        post=_post,
+        provided_secrets=secret_values,
+        warn_on_missing_commit_sha=False,
+    )
 
     display_next_steps = [
         f"Status: {result.status}",

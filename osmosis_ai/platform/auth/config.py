@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import os
-import warnings
 from ipaddress import ip_address
 from pathlib import Path
 from urllib.parse import urlparse, urlunparse
+
+from osmosis_ai.cli.errors import CLIError
 
 # Platform URL - can be overridden via environment variable for local development
 DEFAULT_PLATFORM_URL = "https://platform.osmosis.ai"
@@ -26,16 +27,31 @@ def normalize_platform_url(url: str | None) -> str:
     """Return the canonical platform base URL used for requests and storage keys."""
     raw = (url or DEFAULT_PLATFORM_URL).strip() or DEFAULT_PLATFORM_URL
     raw = raw.rstrip("/")
-    parsed = urlparse(raw)
-    if not parsed.scheme or not parsed.netloc:
-        return raw
-
-    scheme = parsed.scheme.lower()
-    hostname = (parsed.hostname or "").lower()
     try:
+        working = raw
+        head = urlparse(working)
+        if not (head.scheme and head.netloc):
+            # Dev .env files commonly carry scheme-less URLs like
+            # localhost:3000; urlparse reads the host as the scheme there,
+            # which used to fail every command downstream. A substring check
+            # on "://" would misread a query that embeds a URL.
+            probe = urlparse(f"//{working}")
+            scheme = "http" if _is_loopback((probe.hostname or "").lower()) else "https"
+            working = f"{scheme}://{working}"
+        parsed = urlparse(working)
+        if not parsed.scheme or not parsed.netloc:
+            return raw
+        scheme = parsed.scheme.lower()
+        hostname = (parsed.hostname or "").lower()
         port = parsed.port
     except ValueError:
-        raise ValueError(f"Invalid OSMOSIS_PLATFORM_URL port in '{raw}'") from None
+        # This also runs while ``osmosis_ai.platform.auth`` is being imported
+        # (PLATFORM_URL below), so the message must stand on its own and the
+        # error must stay a CLIError the envelope path can classify.
+        raise CLIError(
+            f"Invalid platform URL '{raw}'",
+            code="VALIDATION",
+        ) from None
     # IPv6 literals contain colons and must stay bracketed inside the netloc.
     host_for_netloc = f"[{hostname}]" if ":" in hostname else hostname
     if port is not None and not (
@@ -49,27 +65,22 @@ def normalize_platform_url(url: str | None) -> str:
     return urlunparse((scheme, netloc, path, "", "", ""))
 
 
-def _warn_if_insecure_platform_url(platform_url: str) -> None:
+def is_insecure_platform_url(platform_url: str) -> bool:
+    """True when the URL would send credentials over plaintext to a remote host.
+
+    Surfacing insecure URLs is the CLI's job (``_refuse_insecure_platform_url``
+    in ``cli/main.py``): a ``warnings.warn`` here would be suppressed by the
+    CLI's warning filter in every supported path.
+    """
     parsed = urlparse(platform_url)
-    if (
-        platform_url != DEFAULT_PLATFORM_URL
-        and parsed.scheme.lower() != "https"
-        and not _is_loopback(parsed.hostname or "")
-    ):
-        warnings.warn(
-            f"OSMOSIS_PLATFORM_URL is not HTTPS ({platform_url}). "
-            "Tokens will be transmitted in plaintext.",
-            stacklevel=2,
-        )
+    return parsed.scheme.lower() != "https" and not _is_loopback(parsed.hostname or "")
 
 
 def get_platform_url() -> str:
     """Resolve the active platform URL from the current process environment."""
-    platform_url = normalize_platform_url(
+    return normalize_platform_url(
         os.environ.get("OSMOSIS_PLATFORM_URL", DEFAULT_PLATFORM_URL)
     )
-    _warn_if_insecure_platform_url(platform_url)
-    return platform_url
 
 
 PLATFORM_URL = get_platform_url()

@@ -4,13 +4,15 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime, timedelta
+from io import StringIO
 
 import pytest
 
-import osmosis_ai.cli.commands.auth as auth_module
 from osmosis_ai.cli import main as cli
+from osmosis_ai.cli.console import console
 from osmosis_ai.platform.auth.credentials import Credentials, UserInfo
 from osmosis_ai.platform.auth.flow import LoginError, VerifyResult
+from osmosis_ai.platform.cli import auth as auth_module
 
 
 @pytest.fixture
@@ -48,6 +50,40 @@ def _credentials(
         user=UserInfo(id=user_id, email=email, name=None),
         token_id=token_id,
     )
+
+
+def _stub_env_token_login(
+    monkeypatch: pytest.MonkeyPatch, fake_verify_result: VerifyResult
+) -> list[str]:
+    monkeypatch.setenv("OSMOSIS_TOKEN", "env-token")
+    verify_calls: list[str] = []
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.verify_token",
+        lambda token, git_identity=None: (
+            verify_calls.append(token) or fake_verify_result
+        ),
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.credentials.save_credentials",
+        lambda creds: pytest.fail("env-token login must not save credentials"),
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.credentials.delete_credentials",
+        lambda: pytest.fail("env-token login must not delete credentials"),
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.device_login",
+        lambda: pytest.fail("device login should not run when OSMOSIS_TOKEN is set"),
+    )
+    return verify_calls
+
+
+def _force_console_width(monkeypatch: pytest.MonkeyPatch, width: int) -> StringIO:
+    rich_output = StringIO()
+    monkeypatch.setattr(console, "_file", rich_output)
+    monkeypatch.setattr(console, "_rich_size", {"width": width, "height": 25})
+    monkeypatch.setattr(console, "_rich_stdout", None)
+    return rich_output
 
 
 def test_login_json_with_token_returns_operation_result(
@@ -415,7 +451,7 @@ def test_login_json_force_restores_old_credentials_when_new_save_fails(
     )
 
     with pytest.raises(OSError, match="disk full"):
-        auth_module._machine_login_with_token(token="new-token", force=True)
+        auth_module._login_with_token(token="new-token", force=True)
 
     assert calls == ["clear_all_local_data", "save_new", "restore_old"]
 
@@ -495,6 +531,7 @@ def test_login_json_with_env_token_is_verify_only(
     assert payload["resource"]["source"] == "environment"
     assert payload["resource"]["verified"] is True
     assert payload["resource"]["saved"] is False
+    assert payload["message"] == "Verified OSMOSIS_TOKEN for brian@example.com."
     assert save_calls == []
     assert delete_calls == []
 
@@ -502,38 +539,44 @@ def test_login_json_with_env_token_is_verify_only(
 def test_login_rich_with_env_token_is_verify_only(
     monkeypatch, capsys, fake_verify_result
 ) -> None:
-    monkeypatch.setenv("OSMOSIS_TOKEN", "env-token")
-    verify_calls = []
-    save_calls = []
-    delete_calls = []
-    monkeypatch.setattr(
-        "osmosis_ai.platform.auth.verify_token",
-        lambda token, git_identity=None: (
-            verify_calls.append(token) or fake_verify_result
-        ),
-    )
-    monkeypatch.setattr(
-        "osmosis_ai.platform.auth.credentials.save_credentials",
-        lambda creds: save_calls.append(creds),
-    )
-    monkeypatch.setattr(
-        "osmosis_ai.platform.auth.credentials.delete_credentials",
-        lambda: delete_calls.append(True),
-    )
-    monkeypatch.setattr(
-        "osmosis_ai.platform.auth.device_login",
-        lambda: pytest.fail("device login should not run when OSMOSIS_TOKEN is set"),
-    )
+    verify_calls = _stub_env_token_login(monkeypatch, fake_verify_result)
+    rich_output = _force_console_width(monkeypatch, width=120)
 
     exit_code = cli.main(["auth", "login"])
 
     captured = capsys.readouterr()
+    restored_output = rich_output.getvalue()
     assert exit_code == 0
-    assert "Verified OSMOSIS_TOKEN for brian@example.com." in captured.out
+    assert "___" in restored_output
+    assert "Osmosis AI" not in restored_output
+    assert "Verified OSMOSIS_TOKEN for brian@example.com." not in captured.out
+    assert "Verified OSMOSIS_TOKEN for brian@example.com." not in restored_output
+    assert "Login Successful" in restored_output
+    assert "Email" in restored_output
+    assert "brian@example.com" in restored_output
+    assert "Name" in restored_output
+    assert "Brian" in restored_output
+    assert "Platform" in restored_output
+    assert "Expires" in restored_output
     assert "OSMOSIS_TOKEN was not saved to local credentials." in captured.out
     assert verify_calls == ["env-token"]
-    assert save_calls == []
-    assert delete_calls == []
+
+
+def test_login_rich_prints_compact_banner_when_console_is_narrow(
+    monkeypatch, capsys, fake_verify_result
+) -> None:
+    _stub_env_token_login(monkeypatch, fake_verify_result)
+    rich_output = _force_console_width(monkeypatch, width=112)
+
+    exit_code = cli.main(["auth", "login"])
+
+    captured = capsys.readouterr()
+    restored_output = rich_output.getvalue()
+    assert exit_code == 0
+    assert "___" not in restored_output
+    assert "Osmosis AI" in restored_output
+    assert "Login Successful" in restored_output
+    assert "Verified OSMOSIS_TOKEN for brian@example.com." not in captured.out
 
 
 @pytest.mark.parametrize(
@@ -544,22 +587,16 @@ def test_login_rich_with_invalid_env_token_mentions_unset(
     monkeypatch, capsys, error_code: str
 ) -> None:
     monkeypatch.setenv("OSMOSIS_TOKEN", "bad-env-token")
-    errors = []
     monkeypatch.setattr(
         "osmosis_ai.platform.auth.verify_token",
         lambda token, git_identity=None: (_ for _ in ()).throw(
             LoginError("Token is invalid.", code=error_code)
         ),
     )
-    monkeypatch.setattr(
-        "osmosis_ai.cli.console.console.print_error",
-        lambda message: errors.append(message),
-    )
 
     exit_code = cli.main(["auth", "login"])
 
-    capsys.readouterr()
-    message = errors[0]
+    message = capsys.readouterr().err
     assert exit_code == 1
     assert "OSMOSIS_TOKEN environment variable is invalid or expired" in message
     assert "unset OSMOSIS_TOKEN" in message
@@ -689,3 +726,38 @@ def test_logout_json_with_env_token_only_does_not_reset_session(
     ]
     assert "unset OSMOSIS_TOKEN" in json.dumps(payload)
     assert calls == [("load_credentials", False)]
+
+
+def test_logout_rich_with_env_token_only_prints_unset_once(monkeypatch, capsys) -> None:
+    monkeypatch.setenv("OSMOSIS_TOKEN", "env-token")
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.load_credentials",
+        lambda *, include_env=False: None,
+    )
+
+    exit_code = cli.main(["auth", "logout"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert captured.out.count("Run 'unset OSMOSIS_TOKEN' to logout.") == 1
+
+
+def test_logout_escape_behaves_like_decline(monkeypatch, capsys) -> None:
+    monkeypatch.delenv("OSMOSIS_TOKEN", raising=False)
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    monkeypatch.setattr("osmosis_ai.platform.auth.load_credentials", _credentials)
+    monkeypatch.setattr("osmosis_ai.cli.prompts.confirm", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.local_config.reset_session",
+        lambda: pytest.fail("cancelled logout must not reset the session"),
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.platform_client.revoke_cli_token",
+        lambda credentials: pytest.fail("cancelled logout must not revoke the token"),
+    )
+
+    exit_code = cli.main(["auth", "logout"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert "Cancelled." in captured.out

@@ -40,8 +40,9 @@ class TestRequireCredentialsMessages:
     def test_no_credentials_raises_cli_error_not_logged_in(self, _mock: object) -> None:
         from osmosis_ai.platform.cli.utils import require_credentials
 
-        with pytest.raises(CLIError, match="Not logged in"):
+        with pytest.raises(CLIError, match="Not logged in") as exc_info:
             require_credentials()
+        assert exc_info.value.code == "AUTH_REQUIRED"
 
     @patch("osmosis_ai.platform.cli.utils.load_credentials")
     def test_expired_credentials_raises_auth_expired(self, mock_load: object) -> None:
@@ -75,8 +76,9 @@ class TestPlatformRequestMessages:
     def test_no_credentials_does_not_say_expired(self, _mock: object) -> None:
         from osmosis_ai.platform.auth.platform_client import platform_request
 
-        with pytest.raises(CLIError, match="Not logged in"):
+        with pytest.raises(CLIError, match="Not logged in") as exc_info:
             platform_request("/api/test")
+        assert exc_info.value.code == "AUTH_REQUIRED"
 
 
 class TestMainExceptionHandlerMessages:

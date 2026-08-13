@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, NoReturn
 
 import typer
 
@@ -30,7 +30,7 @@ def up(*, ttl_hours: int | None, yes: bool = False) -> OperationResult:
     cwd = Path.cwd()
     if not (cwd / "main.py").is_file():
         raise CLIError(
-            "Run from a rollout folder containing main.py.", code="INVALID_USAGE"
+            "Run from a rollout folder containing main.py.", code="VALIDATION"
         )
     ctx = resolve_git_workspace_directory_context()
     state = summarize_local_git_state(ctx.workspace_directory)
@@ -164,7 +164,7 @@ def _emit_entries(entries: list[LogEntry], fmt: OutputFormat) -> None:
         )
 
 
-def logs(server_id: str, *, follow: bool | None, tail: int) -> None:
+def logs(server_id: str, *, follow: bool | None, tail: int) -> NoReturn:
     """Show logs for a remote rollout server.
 
     In rich mode logs stream live (attach); with ``--json``/``--plain`` the last
@@ -190,6 +190,7 @@ def logs(server_id: str, *, follow: bool | None, tail: int) -> None:
         except KeyboardInterrupt:
             if fmt is OutputFormat.rich:
                 console.print(f"\nDetached from {server_id}.", style="dim")
+            raise
     else:
         page = client.get_dev_rollout_server_logs(
             server_id,
