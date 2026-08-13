@@ -116,6 +116,44 @@ class TestDevServerUp:
         assert "provisioning" in result.message
         assert FAKE_SERVER["url"] in result.message
         assert "osmosis dev server list" in result.message
+        assert result.display_next_steps == []
+
+    def test_up_prints_api_key(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        rollout_dir = tmp_path / "rollouts" / "multiply"
+        rollout_dir.mkdir(parents=True)
+        (rollout_dir / "main.py").write_text("# main", encoding="utf-8")
+
+        monkeypatch.setattr(
+            dev_server_module,
+            "resolve_git_workspace_directory_context",
+            lambda: _fake_ctx(workspace_directory=tmp_path),
+        )
+        monkeypatch.setattr(
+            dev_server_module,
+            "summarize_local_git_state",
+            lambda cwd: _fake_git_state(),
+        )
+        monkeypatch.setattr(
+            dev_server_module,
+            "check_pinned_commit",
+            lambda **kwargs: _fake_pinned_check(),
+        )
+        monkeypatch.setattr(Path, "cwd", classmethod(lambda cls: rollout_dir))
+
+        provisioned = {**FAKE_SERVER, "api_key": "key-from-platform"}
+
+        class FakeClient:
+            def provision_dev_rollout_server(self, **kwargs):
+                return provisioned
+
+        monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr(dev_server_module, "OsmosisClient", FakeClient)
+
+        result = dev_server_module.up(ttl_hours=24, yes=False)
+
+        assert result.display_next_steps == ["api_key: key-from-platform"]
 
     def test_up_no_ttl_passes_none(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
