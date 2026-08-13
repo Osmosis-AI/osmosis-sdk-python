@@ -1,0 +1,34 @@
+osmosis_ai/platform/auth/config.py
+  s_fe2c638675d04c::t_0bc3e5c8858443 32-40,47-49,51
+tests/unit/auth/test_config.py
+  s_fe2c638675d04c::t_22ae3a4996b0f2 27-44
+tests/unit/cli/test_lazy_loading.py
+  s_fe2c638675d04c::t_88ae4201aa7d67 255-269
+osmosis_ai/cli/output/error.py
+  s_fe2c638675d04c::t_ec42fd9f0b426b 56-62
+  s_fe2c638675d04c::t_2531c80ccca390 162-170,186-188,190-196,201
+tests/unit/cli/output/test_error.py
+  s_fe2c638675d04c::t_1811f879e6a94b 420-422
+  s_fe2c638675d04c::t_e66266b8dc6c37 411-414
+  s_fe2c638675d04c::t_b7d38bd3d80dbe 428-431
+  s_fe2c638675d04c::t_620a4e0984c376 409-410,415-419,423-427,432-437
+tests/unit/cli/test_insecure_platform_url.py
+  s_fe2c638675d04c::t_7c241916a8d00c 147-151
+  s_fe2c638675d04c::t_a69fa7825f56eb 119-146,152-168
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "bd32101a6debdcd10e2c2e033a923a75c267c6b4",
+  "prompts": {},
+  "sessions": {
+    "s_fe2c638675d04c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5689ec6a-26be-431e-a873-d58ec68efd11",
+        "model": "claude-fable-5"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}
