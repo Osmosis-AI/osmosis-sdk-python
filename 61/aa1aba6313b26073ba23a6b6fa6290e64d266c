@@ -1,0 +1,25 @@
+tests/unit/cli/test_insecure_platform_url.py
+  s_fe2c638675d04c::t_07ddad33e0a1a8 7
+  s_fe2c638675d04c::t_57f38850e10e70 35,38,40-41
+tests/unit/auth/test_config.py
+  s_fe2c638675d04c::t_64884d1b1fc7b7 35-36
+osmosis_ai/platform/auth/config.py
+  s_fe2c638675d04c::t_bebd245bd53236 32-33,35-37
+  s_fe2c638675d04c::t_bb737d19cdc7e8 69-74,81
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "61aa1aba6313b26073ba23a6b6fa6290e64d266c",
+  "prompts": {},
+  "sessions": {
+    "s_fe2c638675d04c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5689ec6a-26be-431e-a873-d58ec68efd11",
+        "model": "claude-fable-5"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}
