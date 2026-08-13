@@ -23,7 +23,7 @@ The package (`osmosis_ai/`) is organized into top-level domains. See [architectu
 | Eval helpers | [../osmosis_ai/eval/](../osmosis_ai/eval/) | Rubric (LLM-as-judge) | `from osmosis_ai.eval.rubric import evaluate_rubric` |
 | Workspace templates | [../osmosis_ai/templates/](../osmosis_ai/templates/) | `osmosis template` recipe catalog + source resolution | (internal) |
 
-The single `osmosis-ai` distribution always includes the CLI and framework-neutral rollout core. Install extras only for the feature you use: `server`, `strands`, `openai-agents`, `harbor`, `rubric`, `parquet`, or `full`. The Harbor extra installs plain Harbor for an externally provided SkyPilot runtime; Daytona is retired, and Harbor's `skypilot` extra is intentionally unsupported.
+The single `osmosis-ai` distribution always includes the CLI and framework-neutral rollout core. Install extras only for the feature you use: `server`, `strands`, `openai-agents`, `harbor`, `rubric`, `parquet`, `eval-run`, or `full`. The Harbor extra installs plain Harbor for an externally provided SkyPilot runtime; Daytona is retired, and Harbor's `skypilot` extra is intentionally unsupported.
 
 ## Pages
 

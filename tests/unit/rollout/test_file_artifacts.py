@@ -5,11 +5,15 @@ from pathlib import Path
 
 import pytest
 
+from osmosis_ai.rollout.agent_workflow import AgentWorkflow
+from osmosis_ai.rollout.backend.local.backend import LocalBackend
+from osmosis_ai.rollout.types import AgentWorkflowConfig
 from osmosis_ai.rollout.utils import file_artifacts
 from osmosis_ai.rollout.utils.file_artifacts import (
     artifact_tree_state,
     copy_artifact_tree,
     create_rollout_artifacts_dir,
+    default_artifact_root,
 )
 
 
@@ -208,3 +212,63 @@ class TestCopyArtifactTree:
         assert copied == 1
         assert not (destination / "workflow.txt").exists()
         assert (destination / "grader.txt").read_text() == "grader"
+
+
+class _StubWorkflow(AgentWorkflow):
+    async def run(self, ctx):
+        return None
+
+
+class TestDefaultArtifactRoot:
+    def test_falls_back_to_home_osmosis_when_env_unset(self, monkeypatch):
+        monkeypatch.delenv("_OSMOSIS_ROLLOUT_ARTIFACT_ROOT", raising=False)
+
+        assert default_artifact_root() == Path.home() / ".osmosis"
+
+    def test_returns_env_override_without_changing_home(self, tmp_path, monkeypatch):
+        home_before = Path.home()
+        override = tmp_path / "rollout_trials"
+        monkeypatch.setenv("_OSMOSIS_ROLLOUT_ARTIFACT_ROOT", str(override))
+
+        assert default_artifact_root() == override
+        assert Path.home() == home_before
+
+    def test_local_backend_observes_override_at_construction(
+        self, tmp_path, monkeypatch
+    ):
+        home_before = Path.home()
+        override = tmp_path / "local_trials"
+        monkeypatch.setenv("_OSMOSIS_ROLLOUT_ARTIFACT_ROOT", str(override))
+
+        backend = LocalBackend(
+            workflow=_StubWorkflow,
+            workflow_config=AgentWorkflowConfig(name="test"),
+        )
+
+        assert backend.artifact_root == override
+        assert Path.home() == home_before
+
+    def test_harbor_backend_observes_override_at_construction(
+        self, tmp_path, monkeypatch
+    ):
+        from harbor.trial.queue import TrialQueue
+
+        from osmosis_ai.rollout.backend.harbor.backend import HarborBackend
+
+        home_before = Path.home()
+        override = tmp_path / "harbor_trials"
+        monkeypatch.setenv("_OSMOSIS_ROLLOUT_ARTIFACT_ROOT", str(override))
+
+        task = tmp_path / "template-task"
+        (task / "environment").mkdir(parents=True)
+        (task / "environment" / "Dockerfile").write_text("FROM python:3.12-slim\n")
+        (task / "task.toml").write_text('[task]\nname = "template-task"\n')
+
+        backend = HarborBackend(
+            orchestrator=TrialQueue(n_concurrent=1),
+            tasks_dir=task,
+            agent="terminus-2",
+        )
+
+        assert backend.artifact_root == override
+        assert Path.home() == home_before

@@ -1,9 +1,14 @@
+import asyncio
+import hashlib
+import json
 import logging
+import os
 import traceback
 import uuid
+from functools import partial
 from typing import Any
 
-from fastapi import BackgroundTasks, FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException
 
 from osmosis_ai.rollout.backend.base import ExecutionBackend
 from osmosis_ai.rollout.context import RolloutContext
@@ -28,8 +33,28 @@ from osmosis_ai.rollout.types import (
     RolloutStatusResponse,
 )
 from osmosis_ai.rollout.utils.http import post_json_with_retry
+from osmosis_ai.rollout.utils.ttl_cache import TtlCache
 
 logger: logging.Logger = logging.getLogger(__name__)
+
+# Credentials never enter the idempotency digest.
+_IDEMPOTENCY_EXCLUDED_FIELDS = {"controller_api_key", "llm_api_key"}
+
+# Completed idempotency digests are retained for this window so a duplicate
+# retry of a finished rollout dedupes instead of re-executing. 15 minutes
+# comfortably covers the driver's retry/status-recovery horizon while keeping
+# memory bounded on long-lived training servers (same window as the Harbor
+# backend's STATUS_RETENTION_SEC). Active entries never expire.
+_COMPLETED_DIGEST_TTL_SEC = 900.0
+
+
+def _canonical_request_digest(request: RolloutInitRequest) -> str:
+    """Stable digest of one init body, excluding callback/LLM secrets."""
+    payload = request.model_dump(mode="json", exclude=_IDEMPOTENCY_EXCLUDED_FIELDS)
+    encoded = json.dumps(
+        payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True
+    )
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
 def _configure_default_logging() -> None:
@@ -56,16 +81,55 @@ def create_rollout_server(
     if configure_logging:
         _configure_default_logging()
     app = FastAPI(lifespan=lifespan)
+    # Idempotency: rollout_id -> canonical request digest. Active entries
+    # cover scheduled/running executions and never expire; when execution
+    # finishes, only id + digest move into bounded recent retention. Digests
+    # only; raw payloads and credentials are not retained. /status stays
+    # backend-authoritative.
+    active_digests: dict[str, str] = {}
+    completed_digests: TtlCache[str, str] = TtlCache(_COMPLETED_DIGEST_TTL_SEC)
+    # Strong references so eagerly scheduled rollout tasks are never GC'd.
+    scheduled_tasks: set[asyncio.Task[None]] = set()
+    # The instance id env var is immutable for the process lifetime.
+    instance_id = os.environ.get("_OSMOSIS_ROLLOUT_INSTANCE_ID")
 
     @app.get("/health")
     async def health() -> dict[str, Any]:
-        return backend.health()
+        payload = dict(backend.health())
+        if instance_id:
+            payload["instance_id"] = instance_id
+        return payload
 
-    # 202: the rollout is queued and runs after this response returns.
+    def _finish_rollout_task(rollout_id: str | None, task: asyncio.Task[None]) -> None:
+        scheduled_tasks.discard(task)
+        if rollout_id is not None:
+            digest = active_digests.pop(rollout_id, None)
+            if digest is not None:
+                completed_digests.set(rollout_id, digest)
+        if not task.cancelled():
+            exc = task.exception()
+            if exc is not None:
+                logger.error("Rollout task for %s crashed", rollout_id, exc_info=exc)
+
+    # 202: the rollout is scheduled before this response is sent, so a
+    # failed/disconnected response cannot record a digest for an execution
+    # that never ran (the retry would dedupe against it and hang forever).
     @app.post("/rollout", status_code=202)
-    async def rollout(
-        request: RolloutInitRequest, background_tasks: BackgroundTasks
-    ) -> RolloutInitResponse:
+    async def rollout(request: RolloutInitRequest) -> RolloutInitResponse:
+        rollout_id = request.rollout_id or None
+        digest: str | None = None
+        if rollout_id is not None:
+            digest = _canonical_request_digest(request)
+            existing = active_digests.get(rollout_id)
+            if existing is None:
+                existing = completed_digests.get(rollout_id)
+            if existing is not None:
+                if existing == digest:
+                    return RolloutInitResponse()
+                raise HTTPException(
+                    status_code=409,
+                    detail="conflicting duplicate rollout_id",
+                )
         if not backend.has_capacity():
             raise HTTPException(
                 status_code=429,
@@ -73,20 +137,24 @@ def create_rollout_server(
                 headers={"Retry-After": "5"},
             )
         try:
-            background_tasks.add_task(_handle_rollout, backend, request)
-            return RolloutInitResponse()
+            task = asyncio.create_task(_handle_rollout(backend, request))
         except Exception as e:
             logger.error(traceback.format_exc())
             raise HTTPException(status_code=500, detail=str(e)) from e
+        scheduled_tasks.add(task)
+        if rollout_id is not None and digest is not None:
+            active_digests[rollout_id] = digest
+        task.add_done_callback(partial(_finish_rollout_task, rollout_id))
+        return RolloutInitResponse()
 
     @app.get("/rollout/{rollout_id}/status")
     async def rollout_status(rollout_id: str) -> RolloutStatusResponse:
         state = backend.rollout_status(rollout_id)
-        if state is None:
-            return RolloutStatusResponse(
-                rollout_id=rollout_id, status=RolloutStatus.UNKNOWN
-            )
-        return RolloutStatusResponse(rollout_id=rollout_id, **state)
+        if state is not None:
+            return RolloutStatusResponse(rollout_id=rollout_id, **state)
+        return RolloutStatusResponse(
+            rollout_id=rollout_id, status=RolloutStatus.UNKNOWN
+        )
 
     @app.post("/rollout/cancel")
     async def cancel(request: CancelRolloutsRequest) -> CancelRolloutsResponse:
@@ -120,9 +188,14 @@ async def _handle_rollout(
     rollout_id = request.rollout_id or uuid.uuid4().hex
     auth = ControllerAuth(api_key=request.controller_api_key)
 
+    llm_api_key = (
+        request.controller_api_key
+        if request.llm_api_key is None
+        else request.llm_api_key
+    )
     rollout_ctx = RolloutContext(
         chat_completions_url=request.chat_completions_url,
-        api_key=request.controller_api_key,
+        api_key=llm_api_key,
         rollout_id=rollout_id,
     )
 

@@ -1659,6 +1659,12 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
+eval-run = [
+    { name = "aiohttp" },
+    { name = "click" },
+    { name = "fastapi" },
+    { name = "uvicorn" },
+]
 full = [
     { name = "aiohttp" },
     { name = "click" },
@@ -1733,10 +1739,12 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "aiohttp", marker = "extra == 'eval-run'", specifier = ">=3.14.3" },
     { name = "aiohttp", marker = "extra == 'harbor'", specifier = ">=3.14.3" },
     { name = "aiohttp", marker = "extra == 'openai-agents'", specifier = ">=3.14.3" },
     { name = "aiohttp", marker = "extra == 'rubric'", specifier = ">=3.14.3" },
     { name = "aiohttp", marker = "extra == 'strands'", specifier = ">=3.14.3" },
+    { name = "click", marker = "extra == 'eval-run'", specifier = ">=8.3.3" },
     { name = "click", marker = "extra == 'harbor'", specifier = ">=8.3.3" },
     { name = "click", marker = "extra == 'openai-agents'", specifier = ">=8.3.3" },
     { name = "click", marker = "extra == 'rubric'", specifier = ">=8.3.3" },
@@ -1744,6 +1752,7 @@ requires-dist = [
     { name = "click", marker = "extra == 'strands'", specifier = ">=8.3.3" },
     { name = "cryptography", specifier = ">=50.0.0" },
     { name = "dockerfile-parse", marker = "extra == 'harbor'", specifier = ">=2.0.1,<3.0.0" },
+    { name = "fastapi", marker = "extra == 'eval-run'", specifier = ">=0.100.0,<1.0.0" },
     { name = "fastapi", marker = "extra == 'server'", specifier = ">=0.100.0,<1.0.0" },
     { name = "harbor", marker = "extra == 'harbor'", specifier = ">=0.20.0,<0.21" },
     { name = "httpx", specifier = ">=0.25.0,<1.0.0" },
@@ -1759,7 +1768,7 @@ requires-dist = [
     { name = "orjson", marker = "extra == 'openai-agents'", specifier = ">=3.11.6,<4.0" },
     { name = "orjson", marker = "extra == 'rubric'", specifier = ">=3.11.6,<4.0" },
     { name = "orjson", marker = "extra == 'strands'", specifier = ">=3.11.6,<4.0" },
-    { name = "osmosis-ai", extras = ["harbor", "openai-agents", "parquet", "rubric", "server", "strands"], marker = "extra == 'full'" },
+    { name = "osmosis-ai", extras = ["eval-run", "harbor", "openai-agents", "parquet", "rubric", "server", "strands"], marker = "extra == 'full'" },
     { name = "packaging", specifier = ">=24.0" },
     { name = "platformdirs", marker = "extra == 'harbor'", specifier = ">=4.0" },
     { name = "prompt-toolkit", specifier = ">=3.0.0,<4.0.0" },
@@ -1774,9 +1783,10 @@ requires-dist = [
     { name = "tqdm", marker = "extra == 'rubric'", specifier = ">=4.0.0,<5.0.0" },
     { name = "typer", specifier = ">=0.27,<0.28" },
     { name = "uv", marker = "extra == 'harbor'", specifier = ">=0.9.7,<0.13" },
+    { name = "uvicorn", marker = "extra == 'eval-run'", specifier = ">=0.23.0,<1.0.0" },
     { name = "uvicorn", marker = "extra == 'server'", specifier = ">=0.23.0,<1.0.0" },
 ]
-provides-extras = ["server", "strands", "openai-agents", "harbor", "rubric", "parquet", "full"]
+provides-extras = ["server", "strands", "openai-agents", "harbor", "rubric", "parquet", "eval-run", "full"]
 
 [package.metadata.requires-dev]
 dev = [

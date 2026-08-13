@@ -2,11 +2,18 @@
 
 from __future__ import annotations
 
+import asyncio
+import json
 from collections.abc import Sequence
+from typing import Any
 
+import httpx
+import pytest
 from fastapi.testclient import TestClient
+from httpx import ASGITransport
 
 from osmosis_ai.rollout.backend.base import ExecutionBackend, ResultCallback
+from osmosis_ai.rollout.server import app as server_app_module
 from osmosis_ai.rollout.server import create_rollout_server
 from osmosis_ai.rollout.types import ExecutionRequest
 
@@ -15,6 +22,7 @@ class StubBackend(ExecutionBackend):
     def __init__(self, capacity: bool = True) -> None:
         self.capacity = capacity
         self.executed = False
+        self.execute_count = 0
         self.cancel_args: tuple | None = None
 
     async def execute(
@@ -24,6 +32,7 @@ class StubBackend(ExecutionBackend):
         on_grader_complete: ResultCallback | None = None,
     ) -> None:
         self.executed = True
+        self.execute_count += 1
 
     def has_capacity(self) -> bool:
         return self.capacity
@@ -41,6 +50,9 @@ class StubBackend(ExecutionBackend):
         if rollout_id == "known":
             return {"status": "success", "reward": 1.0, "err_message": None}
         return None
+
+    def health(self) -> dict:
+        return {"status": "ok", "backend": "stub", "max_queue_depth": 2}
 
 
 def init_body() -> dict:
@@ -114,3 +126,225 @@ def test_status_unknown_rollout():
     body = client.get("/rollout/nope/status").json()
     assert body["status"] == "unknown"
     assert body["reward"] is None
+
+
+def test_accepted_rollout_status_is_backend_authoritative_unknown():
+    client = TestClient(create_rollout_server(backend=StubBackend()))
+    assert client.post("/rollout", json=init_body()).status_code == 202
+    body = client.get("/rollout/r1/status").json()
+    assert body["status"] == "unknown"
+    assert body["rollout_id"] == "r1"
+
+
+def test_local_backend_status_is_unknown_not_queued() -> None:
+    from osmosis_ai.rollout.agent_workflow import AgentWorkflow
+    from osmosis_ai.rollout.backend.local.backend import LocalBackend
+    from osmosis_ai.rollout.context import AgentWorkflowContext
+
+    class _NoopWorkflow(AgentWorkflow):
+        async def run(self, ctx: AgentWorkflowContext) -> list[dict[str, str]]:
+            return [{"role": "assistant", "content": "ok"}]
+
+    backend = LocalBackend(workflow=_NoopWorkflow)
+
+    async def _noop_execute(
+        request: ExecutionRequest,
+        on_workflow_complete: ResultCallback,
+        on_grader_complete: ResultCallback | None = None,
+    ) -> None:
+        return None
+
+    backend.execute = _noop_execute  # type: ignore[method-assign]
+    client = TestClient(create_rollout_server(backend=backend))
+    assert client.post("/rollout", json=init_body()).status_code == 202
+    body = client.get("/rollout/r1/status").json()
+    assert body["status"] == "unknown"
+
+
+def test_identical_duplicate_schedules_once() -> None:
+    backend = StubBackend()
+    client = TestClient(create_rollout_server(backend=backend))
+    assert client.post("/rollout", json=init_body()).status_code == 202
+    assert client.post("/rollout", json=init_body()).status_code == 202
+    assert backend.execute_count == 1
+
+
+def test_conflicting_duplicate_returns_409() -> None:
+    backend = StubBackend()
+    client = TestClient(create_rollout_server(backend=backend))
+    assert client.post("/rollout", json=init_body()).status_code == 202
+    conflict = init_body()
+    conflict["initial_messages"] = [{"role": "user", "content": "other"}]
+    response = client.post("/rollout", json=conflict)
+    assert response.status_code == 409
+    assert backend.execute_count == 1
+
+
+def test_duplicate_check_precedes_capacity() -> None:
+    backend = StubBackend()
+    client = TestClient(create_rollout_server(backend=backend))
+    assert client.post("/rollout", json=init_body()).status_code == 202
+    backend.capacity = False
+    assert client.post("/rollout", json=init_body()).status_code == 202
+    conflict = init_body()
+    conflict["label"] = "other"
+    assert client.post("/rollout", json=conflict).status_code == 409
+    assert backend.execute_count == 1
+
+
+def test_idempotency_digest_excludes_credentials() -> None:
+    backend = StubBackend()
+    client = TestClient(create_rollout_server(backend=backend))
+    first = init_body()
+    first["controller_api_key"] = "controller-a"
+    first["llm_api_key"] = "session-a"
+    second = init_body()
+    second["controller_api_key"] = "controller-b"
+    second["llm_api_key"] = "session-b"
+    assert client.post("/rollout", json=first).status_code == 202
+    assert client.post("/rollout", json=second).status_code == 202
+    assert backend.execute_count == 1
+
+
+def test_schedule_failure_removes_digest_so_retry_can_admit(monkeypatch) -> None:
+    real_handle_rollout = server_app_module._handle_rollout
+
+    def boom(*args: Any, **kwargs: Any) -> None:
+        raise RuntimeError("cannot schedule")
+
+    monkeypatch.setattr(server_app_module, "_handle_rollout", boom)
+    backend = StubBackend()
+    client = TestClient(create_rollout_server(backend=backend))
+    response = client.post("/rollout", json=init_body())
+    assert response.status_code == 500
+    assert backend.execute_count == 0
+    monkeypatch.setattr(server_app_module, "_handle_rollout", real_handle_rollout)
+    assert client.post("/rollout", json=init_body()).status_code == 202
+    assert backend.execute_count == 1
+
+
+class BlockingStubBackend(StubBackend):
+    """Backend whose execution blocks until the test releases it."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.release = asyncio.Event()
+
+    async def execute(
+        self,
+        request: ExecutionRequest,
+        on_workflow_complete: ResultCallback,
+        on_grader_complete: ResultCallback | None = None,
+    ) -> None:
+        self.executed = True
+        self.execute_count += 1
+        await self.release.wait()
+
+
+async def _post_rollout_with_failing_send(app: Any, body: dict) -> None:
+    """Drive one POST /rollout whose response send fails (client vanished)."""
+    payload = json.dumps(body).encode()
+    scope = {
+        "type": "http",
+        "asgi": {"version": "3.0"},
+        "http_version": "1.1",
+        "method": "POST",
+        "scheme": "http",
+        "path": "/rollout",
+        "raw_path": b"/rollout",
+        "query_string": b"",
+        "root_path": "",
+        "headers": [
+            (b"content-type", b"application/json"),
+            (b"content-length", str(len(payload)).encode()),
+        ],
+        "client": ("127.0.0.1", 1234),
+        "server": ("127.0.0.1", 80),
+    }
+
+    async def receive() -> dict:
+        return {"type": "http.request", "body": payload, "more_body": False}
+
+    async def send(message: dict) -> None:
+        raise ConnectionResetError("client disconnected before the response")
+
+    with pytest.raises(ConnectionResetError):
+        await app(scope, receive, send)
+
+
+async def _settle() -> None:
+    for _ in range(10):
+        await asyncio.sleep(0)
+
+
+async def test_execution_survives_failed_response_send() -> None:
+    backend = StubBackend()
+    app = create_rollout_server(backend=backend)
+    await _post_rollout_with_failing_send(app, init_body())
+    await _settle()
+    assert backend.execute_count == 1
+
+
+async def test_retry_after_failed_send_returns_202_without_second_execution() -> None:
+    backend = StubBackend()
+    app = create_rollout_server(backend=backend)
+    await _post_rollout_with_failing_send(app, init_body())
+    await _settle()
+    async with httpx.AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://rollout"
+    ) as client:
+        response = await client.post("/rollout", json=init_body())
+    assert response.status_code == 202
+    await _settle()
+    assert backend.execute_count == 1
+
+
+async def test_completed_digest_expires_while_active_entry_does_not(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(server_app_module, "_COMPLETED_DIGEST_TTL_SEC", 0.05)
+    backend = BlockingStubBackend()
+    app = create_rollout_server(backend=backend)
+    async with httpx.AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://rollout"
+    ) as client:
+        assert (await client.post("/rollout", json=init_body())).status_code == 202
+        await asyncio.sleep(0.1)  # older than the TTL but still executing
+        assert (await client.post("/rollout", json=init_body())).status_code == 202
+        assert backend.execute_count == 1
+
+        backend.release.set()
+        await _settle()
+        assert (await client.post("/rollout", json=init_body())).status_code == 202
+        assert backend.execute_count == 1  # completed entry dedupes within TTL
+
+        await asyncio.sleep(0.1)  # completed entry ages out
+        assert (await client.post("/rollout", json=init_body())).status_code == 202
+        await _settle()
+        assert backend.execute_count == 2
+
+
+def test_health_instance_id_is_captured_at_construction(monkeypatch) -> None:
+    monkeypatch.setenv("_OSMOSIS_ROLLOUT_INSTANCE_ID", "srv-initial")
+    app = create_rollout_server(backend=StubBackend())
+    monkeypatch.setenv("_OSMOSIS_ROLLOUT_INSTANCE_ID", "srv-mutated")
+    client = TestClient(app)
+    assert client.get("/health").json()["instance_id"] == "srv-initial"
+
+
+def test_health_omits_instance_id_when_env_absent(monkeypatch):
+    monkeypatch.delenv("_OSMOSIS_ROLLOUT_INSTANCE_ID", raising=False)
+    client = TestClient(create_rollout_server(backend=StubBackend()))
+    body = client.get("/health").json()
+    assert body == {"status": "ok", "backend": "stub", "max_queue_depth": 2}
+    assert "instance_id" not in body
+
+
+def test_health_exposes_instance_id_and_preserves_backend_fields(monkeypatch):
+    monkeypatch.setenv("_OSMOSIS_ROLLOUT_INSTANCE_ID", "srv-abc123")
+    client = TestClient(create_rollout_server(backend=StubBackend()))
+    body = client.get("/health").json()
+    assert body["status"] == "ok"
+    assert body["backend"] == "stub"
+    assert body["max_queue_depth"] == 2
+    assert body["instance_id"] == "srv-abc123"

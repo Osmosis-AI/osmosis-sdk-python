@@ -170,6 +170,8 @@ def test_framework_neutral_core_imports_without_optional_dependencies() -> None:
             "osmosis_ai.rollout.types.protocol",
             "osmosis_ai.rollout.utils.errors",
             "osmosis_ai.rollout.utils.ttl_cache",
+            "osmosis_ai.rollout.controller.store",
+            "osmosis_ai.rollout.driver",
         ):
             importlib.import_module(module_name)
         """
@@ -328,6 +330,24 @@ def test_extra_modules_table_matches_pyproject_extras() -> None:
             "litellm",
             "rubric",
         ),
+        (
+            "osmosis_ai.rollout.controller",
+            "create_callback_app",
+            "fastapi",
+            "eval-run",
+        ),
+        (
+            "osmosis_ai.rollout.controller",
+            "EvalProxyClient",
+            "aiohttp",
+            "eval-run",
+        ),
+        (
+            "osmosis_ai.rollout.http_driver",
+            "HttpRolloutDriver",
+            "aiohttp",
+            "eval-run",
+        ),
     ],
 )
 def test_missing_optional_dependency_names_the_install_extra(
@@ -384,3 +404,31 @@ def test_agent_integration_classes_use_canonical_module_paths() -> None:
         OsmosisStrandsAgent.__module__
         == "osmosis_ai.rollout.integrations.agents.strands"
     )
+
+
+def test_callback_store_imports_without_eval_run_extra() -> None:
+    result = _run_python(
+        """
+        import builtins
+        import sys
+
+        real_import = builtins.__import__
+        blocked = {"aiohttp", "fastapi", "uvicorn"}
+
+        def guarded_import(name, globals=None, locals=None, fromlist=(), level=0):
+            root = name.partition(".")[0]
+            if root in blocked:
+                raise ModuleNotFoundError("No module named " + repr(root), name=root)
+            return real_import(name, globals, locals, fromlist, level)
+
+        builtins.__import__ = guarded_import
+        from osmosis_ai.rollout.controller import CallbackStore
+        from osmosis_ai.rollout.driver import RolloutRunRequest
+
+        CallbackStore()
+        RolloutRunRequest(messages=[])
+        loaded_roots = {name.partition(".")[0] for name in sys.modules}
+        assert not (blocked & loaded_roots)
+        """
+    )
+    assert result.returncode == 0, result.stderr

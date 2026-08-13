@@ -69,6 +69,7 @@ EXTRA_REQUIREMENTS: dict[str, set[str]] = {
     },
     "rubric": {"aiohttp", "click", "litellm", "orjson", "tqdm"},
     "parquet": {"pyarrow"},
+    "eval-run": {"aiohttp", "click", "fastapi", "uvicorn"},
     "full": {"osmosis-ai"},
 }
 
@@ -194,6 +195,7 @@ BARE_IMPORTABLE_MODULES = (
     "osmosis_ai.rollout.types.protocol",
     "osmosis_ai.rollout.utils.errors",
     "osmosis_ai.rollout.utils.ttl_cache",
+    "osmosis_ai.rollout.controller.store",
 )
 
 # Leaf modules that must stay unimportable until their extra is installed.
@@ -206,6 +208,9 @@ EXTRA_ONLY_MODULES = (
     "osmosis_ai.rollout.integrations.agents.openai_agents",
     "osmosis_ai.rollout.integrations.agents.strands",
     "osmosis_ai.rollout.server.app",
+    "osmosis_ai.rollout.controller.listener",
+    "osmosis_ai.rollout.controller.proxy_client",
+    "osmosis_ai.rollout.http_driver",
 )
 
 
@@ -218,6 +223,12 @@ def _assert_extra_only_modules_absent() -> None:
         except ModuleNotFoundError as error:
             if module_name == "osmosis_ai.packaging":
                 assert 'pip install "osmosis-ai[harbor]"' in str(error), str(error)
+            elif module_name in {
+                "osmosis_ai.rollout.controller.listener",
+                "osmosis_ai.rollout.controller.proxy_client",
+                "osmosis_ai.rollout.http_driver",
+            }:
+                assert 'pip install "osmosis-ai[eval-run]"' in str(error), str(error)
             continue
         raise AssertionError(f"{module_name} imported without its extra")
 
@@ -322,6 +333,17 @@ def _smoke_parquet() -> None:
     assert callable(dataset.validate)
 
 
+def _smoke_eval_run() -> None:
+    _assert_public_exports(
+        "osmosis_ai.rollout.controller",
+        ("CallbackStore", "CallbackListener", "EvalProxyClient"),
+    )
+    _assert_public_exports(
+        "osmosis_ai.rollout.http_driver",
+        ("HttpRolloutDriver",),
+    )
+
+
 SCENARIO_SMOKE: dict[str, Callable[[], None]] = {
     "bare": _smoke_bare,
     "server": _smoke_server,
@@ -330,6 +352,7 @@ SCENARIO_SMOKE: dict[str, Callable[[], None]] = {
     "harbor": _smoke_harbor,
     "rubric": _smoke_rubric,
     "parquet": _smoke_parquet,
+    "eval-run": _smoke_eval_run,
 }
 
 SCENARIO_PRESENT: dict[str, set[str]] = {
@@ -340,6 +363,7 @@ SCENARIO_PRESENT: dict[str, set[str]] = {
     "harbor": {"dockerfile-parse", "harbor", "platformdirs", "toml", "uv"},
     "rubric": {"litellm", "orjson", "tqdm"},
     "parquet": {"pyarrow"},
+    "eval-run": {"aiohttp", "fastapi", "uvicorn"},
     "full": {
         "fastapi",
         "dockerfile-parse",
@@ -433,6 +457,19 @@ SCENARIO_ABSENT: dict[str, set[str]] = {
         "tqdm",
         "uv",
         "uvicorn",
+    },
+    "eval-run": {
+        "dockerfile-parse",
+        "harbor",
+        "litellm",
+        "openai-agents",
+        "orjson",
+        "platformdirs",
+        "pyarrow",
+        "strands-agents",
+        "toml",
+        "tqdm",
+        "uv",
     },
     "full": set(),
 }

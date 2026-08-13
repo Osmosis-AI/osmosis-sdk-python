@@ -22,6 +22,13 @@ class RolloutInitRequest(BaseModel):
     the body for debug logging on the rollout-server side and for
     correlation in user-side dashboards; the SDK does not rely on it for
     routing, so it is optional.
+
+    ``controller_api_key`` authenticates callbacks back to the controller
+    listener. ``llm_api_key`` authenticates the agent to
+    ``chat_completions_url`` (the eval-proxy session token). When
+    ``llm_api_key`` is omitted (``None``), the server falls back to
+    ``controller_api_key`` so existing single-secret callers keep working.
+    An explicit empty string is rejected; only ``None`` triggers fallback.
     """
 
     initial_messages: list[MessageDict]
@@ -32,6 +39,7 @@ class RolloutInitRequest(BaseModel):
 
     chat_completions_url: str
     controller_api_key: str | None = None
+    llm_api_key: str | None = None
     completion_callback_url: str
     grader_callback_url: str | None = None
 
@@ -47,6 +55,18 @@ class RolloutInitRequest(BaseModel):
         if value is None:
             return None
         return ensure_single_path_segment(value, label="rollout_id")
+
+    @field_validator("llm_api_key")
+    @classmethod
+    def _validate_llm_api_key(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        if value == "":
+            raise ValueError(
+                "llm_api_key must be omitted or a non-empty string; "
+                "empty string is not a legacy fallback"
+            )
+        return value
 
     @field_validator("agent_timeout_sec", "grader_timeout_sec")
     @classmethod
