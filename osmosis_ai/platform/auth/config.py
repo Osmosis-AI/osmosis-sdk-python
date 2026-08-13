@@ -29,15 +29,26 @@ def normalize_platform_url(url: str | None) -> str:
     raw = (url or DEFAULT_PLATFORM_URL).strip() or DEFAULT_PLATFORM_URL
     raw = raw.rstrip("/")
     try:
-        parsed = urlparse(raw)
+        working = raw
+        if "://" not in working:
+            # Dev .env files commonly carry scheme-less URLs like
+            # localhost:3000; without a scheme urlparse reads the host as the
+            # scheme, which used to fail every command downstream.
+            probe = urlparse(f"//{working}")
+            scheme = "http" if _is_loopback((probe.hostname or "").lower()) else "https"
+            working = f"{scheme}://{working}"
+        parsed = urlparse(working)
         if not parsed.scheme or not parsed.netloc:
             return raw
         scheme = parsed.scheme.lower()
         hostname = (parsed.hostname or "").lower()
         port = parsed.port
     except ValueError:
+        # This also runs while ``osmosis_ai.platform.auth`` is being imported
+        # (PLATFORM_URL below), so the message must stand on its own and the
+        # error must stay a CLIError the envelope path can classify.
         raise CLIError(
-            f"Invalid OSMOSIS_PLATFORM_URL '{raw}'",
+            f"Invalid platform URL '{raw}'",
             code="VALIDATION",
         ) from None
     # IPv6 literals contain colons and must stay bracketed inside the netloc.

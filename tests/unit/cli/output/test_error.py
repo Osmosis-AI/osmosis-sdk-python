@@ -406,6 +406,35 @@ def test_json_unknown_command_from_main_without_argv_uses_process_argv(
     assert envelope["error"]["code"] == "VALIDATION"
 
 
+def test_command_path_strips_multi_token_program_name() -> None:
+    """Click reports ``python -m pkg`` as the root name for -m invocations."""
+    root = Context(
+        typer.core.TyperCommand(name="root"),
+        info_name="python -m osmosis_ai.cli.main",
+    )
+    assert (
+        command_path_for_error(root, argv=["definitely-unknown", "extra"])
+        == "definitely-unknown"
+    )
+
+    child = Context(
+        typer.core.TyperCommand(name="dataset"), info_name="dataset", parent=root
+    )
+    assert command_path_for_error(child, argv=["dataset", "list"]) == "dataset"
+
+
+def test_command_path_removed_two_token_command_wins_over_context() -> None:
+    """The Click context stops at the group; removed commands only exist in argv."""
+    root = Context(typer.core.TyperCommand(name="osmosis"), info_name="osmosis")
+    child = Context(
+        typer.core.TyperCommand(name="dataset"), info_name="dataset", parent=root
+    )
+    assert (
+        command_path_for_error(child, argv=["--json", "dataset", "delete", "x"])
+        == "dataset delete"
+    )
+
+
 def test_main_maps_click_abort_to_interrupt_exit_code(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -24,6 +24,24 @@ def test_normalize_platform_url_strips_trailing_slashes(
     assert normalize_platform_url(raw_url) == expected
 
 
+@pytest.mark.parametrize(
+    ("raw_url", "expected"),
+    [
+        ("localhost:3000", "http://localhost:3000"),
+        ("127.0.0.1:8000", "http://127.0.0.1:8000"),
+        ("[::1]:3000", "http://[::1]:3000"),
+        ("platform.osmosis.ai", "https://platform.osmosis.ai"),
+        ("staging.osmosis.ai:8443", "https://staging.osmosis.ai:8443"),
+    ],
+)
+def test_normalize_platform_url_adds_scheme_when_missing(
+    raw_url: str,
+    expected: str,
+) -> None:
+    """Scheme-less dev URLs get http:// for loopback and https:// otherwise."""
+    assert normalize_platform_url(raw_url) == expected
+
+
 def test_get_platform_url_normalizes_env_trailing_slash(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

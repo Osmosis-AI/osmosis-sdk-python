@@ -116,6 +116,56 @@ def test_invalid_platform_url_port_is_validation_not_internal(
     assert "http://host:notaport" in envelope["error"]["message"]
 
 
+def test_schemeless_loopback_platform_url_is_allowed(
+    _dotenv_platform_url: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A scheme-less loopback URL like ``localhost:3000`` normalizes to http."""
+    tmp_path = _dotenv_platform_url
+    monkeypatch.delenv("OSMOSIS_TOKEN", raising=False)
+    monkeypatch.delenv("OSMOSIS_ALLOW_INSECURE_PLATFORM_URL", raising=False)
+    (tmp_path / ".env").write_text(
+        "OSMOSIS_PLATFORM_URL=localhost:3000\n",
+        encoding="utf-8",
+    )
+
+    rc = cli.main(["--json", "auth", "login"])
+
+    captured = capsys.readouterr()
+    assert rc == 1
+    error = json.loads(captured.err)["error"]
+    assert error["code"] == "INTERACTIVE_REQUIRED"
+
+
+def test_invalid_platform_url_emits_envelope_in_fresh_process(tmp_path: Path) -> None:
+    """A bad URL must not escape as an import-time traceback while handling errors."""
+    import subprocess
+    import sys as _sys
+
+    result = subprocess.run(
+        [
+            _sys.executable,
+            "-c",
+            "from osmosis_ai.cli.main import main; raise SystemExit(main(['--json', 'dataset', 'list']))",
+        ],
+        capture_output=True,
+        text=True,
+        cwd=tmp_path,
+        env={
+            **os.environ,
+            "OSMOSIS_PLATFORM_URL": "https://host:notaport",
+            "OSMOSIS_TOKEN": "tok",
+        },
+    )
+
+    assert result.returncode == 1
+    assert "Traceback" not in result.stderr
+    error = json.loads(result.stderr.splitlines()[0])["error"]
+    assert error["code"] == "VALIDATION"
+    assert "Invalid platform URL" in error["message"]
+
+
 def test_loopback_http_platform_url_is_allowed(
     _dotenv_platform_url: Path,
     monkeypatch: pytest.MonkeyPatch,

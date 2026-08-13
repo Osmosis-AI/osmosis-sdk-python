@@ -252,6 +252,21 @@ def test_rich_usage_error_does_not_load_auth_or_keyring() -> None:
     assert not leaked_auth, f"rich usage error loaded platform auth: {leaked_auth}"
 
 
+def test_json_usage_error_does_not_load_auth_or_keyring() -> None:
+    """``--json`` usage errors must stay as import-light as rich ones."""
+    rc, loaded = _sys_modules_after_cli(["--json", "dataset", "lst"])
+
+    assert rc == 2
+    assert "keyring" not in _top_level_modules(loaded)
+    leaked_auth = [
+        name
+        for name in loaded
+        if name == "osmosis_ai.platform.auth"
+        or name.startswith("osmosis_ai.platform.auth.")
+    ]
+    assert not leaked_auth, f"JSON usage error loaded platform auth: {leaked_auth}"
+
+
 def test_register_commands_does_not_load_heavy_deps() -> None:
     """``_register_commands()`` must not import litellm, fastapi, or the rollout SDK."""
     result = subprocess.run(

@@ -53,6 +53,13 @@ def classify_error(exc: BaseException) -> CLIError:
     if isinstance(exc, CLIError):
         return exc
 
+    # Resolved before the platform import: usage errors must stay import-light,
+    # and the auth package can itself raise (bad OSMOSIS_PLATFORM_URL evaluates
+    # at import time) — importing it while handling an error would replace the
+    # envelope with a traceback.
+    if isinstance(exc, UsageError):
+        return CLIError(str(exc) or "Invalid usage.", code=CLIErrorCode.VALIDATION)
+
     from osmosis_ai.platform.auth.platform_client import (
         AuthenticationExpiredError,
         PlatformAPIError,
@@ -76,9 +83,6 @@ def classify_error(exc: BaseException) -> CLIError:
             code=_classify_platform_status(exc.status_code),
             details=_platform_error_details(exc),
         )
-
-    if isinstance(exc, UsageError):
-        return CLIError(str(exc) or "Invalid usage.", code=CLIErrorCode.VALIDATION)
 
     return CLIError(
         "An unexpected internal error occurred.",
@@ -155,6 +159,15 @@ def _click_subcommand_path(ctx: Context) -> str | None:
     path = ctx.command_path.strip()
     if not path:
         return None
+    # The root program name can contain spaces (Click reports "python -m pkg"
+    # for -m invocations), so it must be stripped as a prefix, not as the
+    # first whitespace token.
+    root_name = (ctx.find_root().info_name or "").strip()
+    if root_name:
+        if path == root_name:
+            return None
+        if path.startswith(root_name + " "):
+            return path[len(root_name) + 1 :].strip() or None
     parts = path.split()
     if len(parts) >= 2:
         return " ".join(parts[1:])
@@ -170,15 +183,22 @@ def command_path_for_error(
 
     Prefer Click's ``command_path`` when the context is already inside a
     subcommand. Fall back to argv parsed against the same name catalog
-    ``_register_commands`` uses.
+    ``_register_commands`` uses. Removed commands are the exception: they only
+    exist in argv (the Click context stops at the parent group), so they are
+    matched first.
     """
+    argv_path = _argv_command_path(argv if argv is not None else sys.argv[1:])
+    tokens = argv_path.split()
+    if tokens and (
+        tokens[0] in REMOVED_TOP_LEVEL_COMMANDS
+        or (len(tokens) == 2 and (tokens[0], tokens[1]) in REMOVED_TWO_TOKEN_COMMANDS)
+    ):
+        return argv_path
     if ctx is not None:
         click_path = _click_subcommand_path(ctx)
         if click_path is not None:
             return click_path
-    if argv is not None:
-        return _argv_command_path(argv)
-    return _argv_command_path(sys.argv[1:] if sys.argv[1:] else [])
+    return argv_path
 
 
 def emit_structured_error_to_stderr(
