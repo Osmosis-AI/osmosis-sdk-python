@@ -67,11 +67,15 @@ def up(*, ttl_hours: int | None, yes: bool = False) -> OperationResult:
         credentials=ctx.credentials,
         git_identity=ctx.git_identity,
     )
+    api_key = result.get("api_key")
     return OperationResult(
         operation="dev.server.up",
         status="success",
         resource=result,
         message=f"Rollout server provisioning at {result['url']} — it may take a few minutes to become ready; check with 'osmosis dev server list'.",
+        display_next_steps=(
+            [f"api_key: {api_key}"] if isinstance(api_key, str) and api_key else []
+        ),
     )
 
 
