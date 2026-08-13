@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import json
 import os
+import warnings
 from pathlib import Path
 
 import pytest
 
 from osmosis_ai.cli import main as cli
 from osmosis_ai.platform.auth.config import (
-    InsecurePlatformURLWarning,
     get_platform_url,
     is_insecure_platform_url,
 )
@@ -32,11 +32,13 @@ def test_is_insecure_platform_url_distinguishes_loopback() -> None:
     assert is_insecure_platform_url("https://platform.osmosis.ai") is False
 
 
-def test_get_platform_url_emits_named_insecure_warning(
+def test_get_platform_url_is_silent_for_insecure_url(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Surfacing insecure URLs is the CLI gate's job; the resolver stays quiet."""
     monkeypatch.setenv("OSMOSIS_PLATFORM_URL", "http://example.invalid")
-    with pytest.warns(InsecurePlatformURLWarning, match="not HTTPS"):
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
         assert get_platform_url() == "http://example.invalid"
 
 

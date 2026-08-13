@@ -32,6 +32,8 @@ def test_normalize_platform_url_strips_trailing_slashes(
         ("[::1]:3000", "http://[::1]:3000"),
         ("platform.osmosis.ai", "https://platform.osmosis.ai"),
         ("staging.osmosis.ai:8443", "https://staging.osmosis.ai:8443"),
+        # "://" in the query must not be mistaken for a scheme.
+        ("localhost:3000/cb?next=https://x", "http://localhost:3000/cb"),
     ],
 )
 def test_normalize_platform_url_adds_scheme_when_missing(

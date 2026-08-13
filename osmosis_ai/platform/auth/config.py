@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-import warnings
 from ipaddress import ip_address
 from pathlib import Path
 from urllib.parse import urlparse, urlunparse
@@ -30,10 +29,12 @@ def normalize_platform_url(url: str | None) -> str:
     raw = raw.rstrip("/")
     try:
         working = raw
-        if "://" not in working:
+        head = urlparse(working)
+        if not (head.scheme and head.netloc):
             # Dev .env files commonly carry scheme-less URLs like
-            # localhost:3000; without a scheme urlparse reads the host as the
-            # scheme, which used to fail every command downstream.
+            # localhost:3000; urlparse reads the host as the scheme there,
+            # which used to fail every command downstream. A substring check
+            # on "://" would misread a query that embeds a URL.
             probe = urlparse(f"//{working}")
             scheme = "http" if _is_loopback((probe.hostname or "").lower()) else "https"
             working = f"{scheme}://{working}"
@@ -64,33 +65,22 @@ def normalize_platform_url(url: str | None) -> str:
     return urlunparse((scheme, netloc, path, "", "", ""))
 
 
-class InsecurePlatformURLWarning(UserWarning):
-    """Non-HTTPS, non-loopback ``OSMOSIS_PLATFORM_URL``."""
-
-
 def is_insecure_platform_url(platform_url: str) -> bool:
-    """True when the URL would send credentials over plaintext to a remote host."""
+    """True when the URL would send credentials over plaintext to a remote host.
+
+    Surfacing insecure URLs is the CLI's job (``_refuse_insecure_platform_url``
+    in ``cli/main.py``): a ``warnings.warn`` here would be suppressed by the
+    CLI's warning filter in every supported path.
+    """
     parsed = urlparse(platform_url)
     return parsed.scheme.lower() != "https" and not _is_loopback(parsed.hostname or "")
 
 
-def _warn_if_insecure_platform_url(platform_url: str) -> None:
-    if is_insecure_platform_url(platform_url):
-        warnings.warn(
-            f"OSMOSIS_PLATFORM_URL is not HTTPS ({platform_url}). "
-            "Tokens will be transmitted in plaintext.",
-            InsecurePlatformURLWarning,
-            stacklevel=2,
-        )
-
-
 def get_platform_url() -> str:
     """Resolve the active platform URL from the current process environment."""
-    platform_url = normalize_platform_url(
+    return normalize_platform_url(
         os.environ.get("OSMOSIS_PLATFORM_URL", DEFAULT_PLATFORM_URL)
     )
-    _warn_if_insecure_platform_url(platform_url)
-    return platform_url
 
 
 PLATFORM_URL = get_platform_url()
