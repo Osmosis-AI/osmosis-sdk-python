@@ -23,13 +23,16 @@ uses the session bearer token.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import secrets
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import quote
+
+import httpx
 
 from osmosis_ai._imports import raise_optional_dependency_error
 
@@ -295,8 +298,83 @@ class EvalProxyClient:
             return payload
 
 
+@dataclass(frozen=True)
+class EvalProxyStubUpstream:
+    """A real OpenAI-compatible provider behind the contract stub.
+
+    The stub answers with a canned completion by default, which is enough to
+    exercise the wire contract but scores zero against any real grader. Pointing
+    it at a provider lets a local end-to-end run produce genuine rewards while
+    the hosted eval-proxy service is still being built -- the frozen request and
+    SSE contract is unchanged, only the response body becomes real.
+
+    ``api_key`` is held in memory and never logged or persisted.
+    """
+
+    base_url: str
+    api_key: str = field(repr=False)
+    timeout_sec: float = 600.0
+
+    def chat_url(self) -> str:
+        return f"{self.base_url.rstrip('/')}/chat/completions"
+
+
+def _upstream_model(model_path: str) -> str:
+    """Strip the LiteLLM provider prefix: ``openai/gpt-5-mini`` -> ``gpt-5-mini``."""
+    _, separator, remainder = model_path.partition("/")
+    return remainder if separator and remainder else model_path
+
+
+def _record_usage(session: dict[str, Any], payload: Mapping[str, Any]) -> None:
+    usage = payload.get("usage")
+    if not isinstance(usage, Mapping):
+        return
+    totals = session["usage"]
+    for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
+        value = usage.get(key)
+        if isinstance(value, int) and not isinstance(value, bool):
+            totals[key] = totals.get(key, 0) + value
+
+
+async def _relay_upstream_chat(
+    *,
+    upstream: EvalProxyStubUpstream,
+    session: dict[str, Any],
+    body: Mapping[str, Any],
+) -> AsyncIterator[str]:
+    """Forward one chat request upstream and relay its SSE stream verbatim.
+
+    ``include_usage`` is forced on so metering never depends on the client
+    asking for it, matching the production requirement.
+    """
+    forwarded = dict(body)
+    forwarded["model"] = _upstream_model(session["model_path"])
+    forwarded["stream"] = True
+    forwarded["stream_options"] = {"include_usage": True}
+    headers = {"Authorization": f"Bearer {upstream.api_key}"}
+    async with httpx.AsyncClient(timeout=upstream.timeout_sec) as client:
+        async with client.stream(
+            "POST", upstream.chat_url(), json=forwarded, headers=headers
+        ) as response:
+            if response.status_code >= 400:
+                detail = (await response.aread()).decode(errors="replace")[:500]
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"upstream provider returned {response.status_code}: {detail}",
+                )
+            async for line in response.aiter_lines():
+                if line.startswith("data: "):
+                    data = line[len("data: ") :].strip()
+                    if data and data != "[DONE]":
+                        with contextlib.suppress(json.JSONDecodeError, TypeError):
+                            _record_usage(session, json.loads(data))
+                yield f"{line}\n"
+
+
 def create_eval_proxy_stub_app(
-    *, platform_token: str = _DEFAULT_STUB_PLATFORM_TOKEN
+    *,
+    platform_token: str = _DEFAULT_STUB_PLATFORM_TOKEN,
+    upstream: EvalProxyStubUpstream | None = None,
 ) -> FastAPI:
     """Local contract stub for SDK tests. Not a production eval-proxy."""
     app = FastAPI()
@@ -345,11 +423,11 @@ def create_eval_proxy_stub_app(
         app.state.sessions[rollout_id] = {
             "token": token,
             "model_path": model_path,
-            "usage": {
-                "prompt_tokens": 1,
-                "completion_tokens": 1,
-                "total_tokens": 2,
-            },
+            "usage": (
+                {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+                if upstream is not None
+                else {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}
+            ),
         }
         return {
             "rollout_id": rollout_id,
@@ -365,7 +443,7 @@ def create_eval_proxy_stub_app(
         request: Request,
         authorization: str | None = Header(default=None),
     ) -> StreamingResponse:
-        _require_session(rollout_id, authorization)
+        session = _require_session(rollout_id, authorization)
         body = await request.json()
         if not isinstance(body, dict):
             raise HTTPException(status_code=400, detail="expected a JSON object")
@@ -385,6 +463,12 @@ def create_eval_proxy_stub_app(
             raise HTTPException(
                 status_code=400,
                 detail="include_usage must be true when present",
+            )
+
+        if upstream is not None:
+            return StreamingResponse(
+                _relay_upstream_chat(upstream=upstream, session=session, body=body),
+                media_type="text/event-stream",
             )
 
         async def events() -> AsyncIterator[str]:

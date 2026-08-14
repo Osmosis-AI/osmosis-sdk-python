@@ -21,6 +21,7 @@ if TYPE_CHECKING:
         EvalProxyClient,
         EvalProxyError,
         EvalProxySession,
+        EvalProxyStubUpstream,
         create_eval_proxy_stub_app,
     )
     from osmosis_ai.rollout.controller.store import (
@@ -51,6 +52,10 @@ _EXPORTS: dict[str, tuple[str, str]] = {
     "EvalProxySession": (
         "osmosis_ai.rollout.controller.proxy_client",
         "EvalProxySession",
+    ),
+    "EvalProxyStubUpstream": (
+        "osmosis_ai.rollout.controller.proxy_client",
+        "EvalProxyStubUpstream",
     ),
     "TerminalCallbackResult": (
         "osmosis_ai.rollout.controller.store",
@@ -98,6 +103,7 @@ __all__ = [
     "EvalProxyClient",
     "EvalProxyError",
     "EvalProxySession",
+    "EvalProxyStubUpstream",
     "TerminalCallbackResult",
     "UnknownRolloutIdError",
     "create_callback_app",

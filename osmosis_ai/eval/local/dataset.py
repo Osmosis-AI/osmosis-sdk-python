@@ -647,3 +647,25 @@ def _platform_extension(record: Any) -> str:
         f"dataset {name or record.id!r} has no recognizable format; expected one "
         f"of {sorted(VALID_EXTENSIONS)}"
     )
+
+
+def format_row_selector(indices: Sequence[int]) -> str:
+    """Render row indices as a compact normalized selector, e.g. ``"0-9,12"``.
+
+    Used in the manifest's resolved-input lock: a compact string keeps the lock
+    readable and its diff meaningful even for a large selection, where a literal
+    index list would dominate the file.
+    """
+    ordered = sorted(set(indices))
+    if not ordered:
+        return ""
+    parts: list[str] = []
+    start = previous = ordered[0]
+    for index in ordered[1:]:
+        if index == previous + 1:
+            previous = index
+            continue
+        parts.append(str(start) if start == previous else f"{start}-{previous}")
+        start = previous = index
+    parts.append(str(start) if start == previous else f"{start}-{previous}")
+    return ",".join(parts)

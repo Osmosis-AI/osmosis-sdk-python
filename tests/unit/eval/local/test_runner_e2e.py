@@ -1,0 +1,462 @@
+"""LocalBackend end-to-end: a real rollout-server subprocess and a real stub proxy.
+
+These tests spawn the rollout server the way ``osmosis eval run`` does, so they
+cover the parts no in-process fake can: artifact-root override, HTTP dispatch,
+callback delivery, journal-before-ack ordering, and resume across processes.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+from pathlib import Path
+
+import pytest
+
+from osmosis_ai.eval.local.dataset import select_rows
+from osmosis_ai.eval.local.runner import LocalEvalOptions, ResumeRefusedError
+from osmosis_ai.eval.local.state import TerminalJournal, TerminalRecord, utc_now
+
+from .conftest import RecordingHooks, RunnerHarness
+
+pytestmark = pytest.mark.slow
+
+
+async def test_a_full_run_produces_the_download_layout(harness: RunnerHarness) -> None:
+    summary = await harness.runner().run()
+
+    assert summary.total_work_items == 4
+    assert summary.dispatched == 4
+    assert summary.succeeded == 4
+
+    run_dir = harness.run_dir()
+    for name in (
+        "manifest.json",
+        "events.jsonl",
+        "index.jsonl",
+        "progress.json",
+        "summary.jsonl",
+        "metrics.json",
+        "logs.txt",
+    ):
+        assert (run_dir / name).is_file(), name
+    assert (run_dir / "rollout_trials").is_dir()
+
+    rows = harness.index_rows()
+    assert [(row["row_index"], row["run_index"]) for row in rows] == [
+        (0, 0),
+        (1, 0),
+        (2, 0),
+        (3, 0),
+    ]
+    for row in rows:
+        assert len(row["rollout_id"]) == 32
+        assert row["trajectory_filename"] == "trajectory.json"
+        assert isinstance(row["duration_ms"], float)
+    assert (run_dir / "summary.jsonl").read_text() == (
+        run_dir / "index.jsonl"
+    ).read_text()
+
+
+async def test_the_stub_completion_is_graded_and_rewarded(
+    harness: RunnerHarness,
+) -> None:
+    # The contract stub replies "ok" and every row's label is "ok", so a correct
+    # end-to-end path yields reward 1.0 -- this is the reward-plumbing assertion.
+    summary = await harness.runner().run()
+    assert summary.succeeded == 4
+    assert summary.metrics["pass_rate"] == 1
+    assert summary.metrics["graded"] == 4
+    rewards = {row["reward"] for row in harness.index_rows()}
+    assert rewards == {1.0}
+
+
+async def test_tokens_come_from_the_proxy_usage_api(harness: RunnerHarness) -> None:
+    await harness.runner().run()
+    # The stub meters 2 tokens per session.
+    assert {row["tokens"] for row in harness.index_rows()} == {2}
+    assert harness.run_dir().joinpath("metrics.json").is_file()
+    metrics = json.loads((harness.run_dir() / "metrics.json").read_text())
+    assert metrics["summary"]["tokens_used"] == 8
+
+
+async def test_trajectories_and_projections_are_written(harness: RunnerHarness) -> None:
+    await harness.runner().run()
+    run_dir = harness.run_dir()
+    for row_index in range(4):
+        projection = run_dir / "trajectories" / f"row_{row_index}_run_0.json"
+        assert projection.is_file()
+        document = json.loads(projection.read_text())
+        rollout_id = document["extra"]["osmosis"]["rollout_id"]
+        canonical = run_dir / "rollout_trials" / rollout_id / "trajectory.json"
+        assert canonical.is_file()
+        # Independent copies: editing the projection must not touch the source.
+        assert projection.resolve() != canonical.resolve()
+        assert document["extra"]["osmosis"]["request_extra_fields"] == {
+            "row_index": row_index,
+            "run_index": 0,
+        }
+
+
+async def test_artifacts_are_projected_when_the_workflow_writes_them(
+    harness: RunnerHarness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("OSMOSIS_TEST_WRITE_ARTIFACT", "1")
+    await harness.runner().run()
+    projected = sorted((harness.run_dir() / "artifacts").glob("row_*_run_0/note.txt"))
+    assert len(projected) == 4
+    assert projected[0].read_text() == "ok"
+
+
+async def test_progress_json_reports_the_dataset_size(harness: RunnerHarness) -> None:
+    selection = select_rows(harness.dataset.path, row_selector=(1, 2))
+    await harness.runner(selection=selection).run()
+    assert json.loads((harness.run_dir() / "progress.json").read_text()) == {
+        "total_runs": 2,
+        "sampled_rows": 2,
+        "total_dataset_rows": 4,
+    }
+
+
+async def test_row_index_is_the_position_in_the_selected_set(
+    harness: RunnerHarness,
+) -> None:
+    selection = select_rows(harness.dataset.path, row_selector=(2, 3))
+    await harness.runner(selection=selection).run()
+    rows = harness.index_rows()
+    assert [row["row_index"] for row in rows] == [0, 1]
+    # The dataset offset survives in the journal, for local UX and provenance.
+    assert [line["source_row_index"] for line in harness.journal_lines()] == [2, 3]
+
+
+async def test_multiple_attempts_per_row(harness: RunnerHarness) -> None:
+    selection = select_rows(harness.dataset.path, row_selector=(0,))
+    summary = await harness.runner(spec=harness.spec(n=3), selection=selection).run()
+    assert summary.total_work_items == 3
+    rows = harness.index_rows()
+    assert [row["run_index"] for row in rows] == [0, 1, 2]
+    assert summary.metrics["n_runs"] == 3
+    assert len(summary.metrics["pass_at_k"]) >= 2
+
+
+async def test_logs_txt_uses_the_download_line_format(harness: RunnerHarness) -> None:
+    await harness.runner().run()
+    lines = (harness.run_dir() / "logs.txt").read_text().splitlines()
+    assert lines, "no log lines written"
+    for line in lines:
+        stamp, level, rest = line.split(" ", 2)
+        assert stamp.endswith("Z")
+        assert level in ("INFO", "WARNING", "ERROR")
+        assert rest.startswith("[")
+    assert any("[rollout-server]" in line for line in lines)
+
+
+# --------------------------------------------------------------------------- #
+# Resume, fresh, retry
+# --------------------------------------------------------------------------- #
+
+
+async def test_a_second_run_of_the_same_name_dispatches_nothing(
+    harness: RunnerHarness,
+) -> None:
+    await harness.runner().run()
+    hooks = RecordingHooks()
+    summary = await harness.runner(hooks=hooks).run()
+    assert summary.dispatched == 0
+    assert summary.resumed == 4
+    assert hooks.confirmations == []
+    # No pending work means credentials and the subprocess are never needed.
+    assert hooks.secret_requests == []
+    assert all(row["resumed"] is True for row in harness.index_rows())
+
+
+async def test_a_partial_journal_reruns_only_the_missing_items(
+    harness: RunnerHarness,
+) -> None:
+    # Simulate a crash after two work items were durably journaled.
+    await harness.runner(
+        selection=select_rows(harness.dataset.path, row_selector=(0, 1))
+    ).run()
+    first_pass = {(r["row_index"], r["run_index"]) for r in harness.index_rows()}
+    assert first_pass == {(0, 0), (1, 0)}
+
+    hooks = RecordingHooks()
+    summary = await harness.runner(
+        hooks=hooks,
+        options=LocalEvalOptions(name="run-1", yes=True),
+        selection=select_rows(harness.dataset.path, row_selector=(0, 1)),
+    ).run()
+    assert summary.dispatched == 0
+    assert summary.resumed == 2
+
+
+async def test_a_changed_fingerprint_refuses_with_a_field_diff(
+    harness: RunnerHarness,
+) -> None:
+    await harness.runner().run()
+    with pytest.raises(ResumeRefusedError) as excinfo:
+        await harness.runner(spec=harness.spec(model_path="openai/gpt-4o")).run()
+    message = str(excinfo.value)
+    assert "model_path" in message
+    assert "--fresh" in message
+    assert [diff.field for diff in excinfo.value.diffs] == ["model_path"]
+
+
+async def test_changed_rollout_code_refuses_resume(harness: RunnerHarness) -> None:
+    await harness.runner().run()
+    (harness.rollout_dir / "extra.py").write_text("# a code change\n")
+    with pytest.raises(ResumeRefusedError, match=r"rollout\.source_digest"):
+        await harness.runner().run()
+
+
+async def test_fresh_archives_the_previous_results_under_the_same_name(
+    harness: RunnerHarness,
+) -> None:
+    await harness.runner().run()
+    original_manifest = json.loads((harness.run_dir() / "manifest.json").read_text())
+
+    hooks = RecordingHooks()
+    summary = await harness.runner(
+        hooks=hooks,
+        spec=harness.spec(model_path="openai/gpt-4o"),
+        options=LocalEvalOptions(name="run-1", yes=True, fresh=True),
+    ).run()
+
+    assert summary.dispatched == 4
+    assert summary.resumed == 0
+    archives = sorted(harness.output_root.glob("run-1.archive-*"))
+    assert len(archives) == 1
+    # Archive, never silent-delete: the old journal is still readable.
+    assert (archives[0] / "events.jsonl").is_file()
+    assert json.loads((archives[0] / "manifest.json").read_text()) == original_manifest
+    assert any("archived previous results" in note for note in hooks.notes)
+
+
+async def test_retry_failed_reruns_failures_with_a_fresh_rollout_id(
+    harness: RunnerHarness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("OSMOSIS_TEST_GRADER_CRASH", "1")
+    selection = select_rows(harness.dataset.path, row_selector=(0,))
+    first = await harness.runner(selection=selection).run()
+    assert first.failed == 1
+    failed_rollout_id = harness.index_rows()[0]["rollout_id"]
+
+    monkeypatch.delenv("OSMOSIS_TEST_GRADER_CRASH")
+    second = await harness.runner(
+        selection=selection,
+        options=LocalEvalOptions(name="run-1", yes=True, retry_failed=True),
+    ).run()
+    assert second.succeeded == 1
+    row = harness.index_rows()[0]
+    assert row["status"] == "success"
+    assert row["rollout_id"] != failed_rollout_id
+    # Both attempts stay in the journal; the later one wins.
+    assert len(harness.journal_lines()) == 2
+    # The superseded attempt's artifacts remain for diagnosis.
+    assert (harness.run_dir() / "rollout_trials" / failed_rollout_id).is_dir()
+
+
+async def test_failures_are_skipped_by_default_on_resume(
+    harness: RunnerHarness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("OSMOSIS_TEST_GRADER_CRASH", "1")
+    selection = select_rows(harness.dataset.path, row_selector=(0,))
+    await harness.runner(selection=selection).run()
+
+    monkeypatch.delenv("OSMOSIS_TEST_GRADER_CRASH")
+    summary = await harness.runner(selection=selection).run()
+    assert summary.dispatched == 0
+    assert summary.failed == 1
+
+
+async def test_a_durably_journaled_item_never_reruns(harness: RunnerHarness) -> None:
+    """The kill -9 gate, exercised by pre-seeding the journal directly."""
+    run_dir = harness.run_dir()
+    selection = select_rows(harness.dataset.path, row_selector=(0, 1))
+    # Create the run so its manifest matches, then journal one result by hand.
+    await harness.runner(selection=selection).run()
+    baseline = harness.journal_lines()
+    assert len(baseline) == 2
+
+    # A journal that already covers every work item leaves nothing to dispatch,
+    # even though no rollout directory for the hand-written id exists.
+    journal = TerminalJournal(run_dir / "events.jsonl")
+    replay = journal.replay()
+    journal.open_for_append(replay)
+    try:
+        await journal.append(
+            TerminalRecord(
+                row_index=0,
+                run_index=0,
+                rollout_id="f" * 32,
+                status="failed",
+                recorded_at=utc_now(),
+                source_row_index=0,
+                duration_ms=1.0,
+                error_type="hand_written",
+            )
+        )
+    finally:
+        journal.close()
+
+    summary = await harness.runner(selection=selection).run()
+    assert summary.dispatched == 0
+    row = next(r for r in harness.index_rows() if r["row_index"] == 0)
+    assert row["rollout_id"] == "f" * 32
+    assert row["error_type"] == "hand_written"
+    # No trajectory exists for the hand-written attempt, so the key is omitted.
+    assert "trajectory_filename" not in row
+
+
+# --------------------------------------------------------------------------- #
+# Failure and skip handling
+# --------------------------------------------------------------------------- #
+
+
+async def test_a_grader_crash_is_a_terminal_failure(
+    harness: RunnerHarness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("OSMOSIS_TEST_GRADER_CRASH", "1")
+    summary = await harness.runner().run()
+    assert summary.failed == 4
+    assert summary.metrics["graded"] == 0
+    assert summary.metrics["pass_rate"] == 0
+    assert len(summary.failures) == 4
+    assert summary.failures[0].rollout_dir.is_dir()
+
+
+async def test_remove_sample_becomes_a_skipped_row(
+    harness: RunnerHarness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("OSMOSIS_TEST_REMOVE_SAMPLE", "1")
+    summary = await harness.runner().run()
+    assert summary.skipped == 4
+    assert summary.metrics["skipped"] == 4
+    assert summary.metrics["completed_samples"] == 0
+    assert all(row["status"] == "skipped" for row in harness.index_rows())
+
+
+async def test_a_missing_entrypoint_fails_before_dispatch(
+    harness: RunnerHarness,
+) -> None:
+    from osmosis_ai.eval.local.runner import LocalEvalError
+
+    with pytest.raises(LocalEvalError, match="entrypoint"):
+        await harness.runner(spec=harness.spec(entrypoint="absent.py")).run()
+
+
+# --------------------------------------------------------------------------- #
+# Concurrency and confirmation
+# --------------------------------------------------------------------------- #
+
+
+async def test_batch_size_bounds_in_flight_work(harness: RunnerHarness) -> None:
+    summary = await harness.runner(spec=harness.spec(batch_size=2)).run()
+    assert summary.dispatched == 4
+
+
+async def test_max_in_flight_overrides_batch_size(harness: RunnerHarness) -> None:
+    summary = await harness.runner(
+        spec=harness.spec(batch_size=1),
+        options=LocalEvalOptions(name="run-1", yes=True, max_in_flight=4),
+    ).run()
+    assert summary.dispatched == 4
+
+
+async def test_confirmation_receives_the_pending_count(harness: RunnerHarness) -> None:
+    hooks = RecordingHooks()
+    await harness.runner(hooks=hooks).run()
+    assert hooks.confirmations == [(4, "openai/gpt-5-mini")]
+    assert hooks.progress_snapshots[-1].completed == 4
+
+
+async def test_declining_confirmation_dispatches_nothing(
+    harness: RunnerHarness,
+) -> None:
+    hooks = RecordingHooks(refuse_confirmation=True)
+    with pytest.raises(RuntimeError, match="declined"):
+        await harness.runner(hooks=hooks).run()
+    assert harness.index_rows() == []
+    # The run directory and manifest exist, so the next attempt resumes cleanly.
+    assert (harness.run_dir() / "manifest.json").is_file()
+
+
+async def test_secrets_are_requested_only_when_work_is_pending(
+    harness: RunnerHarness,
+) -> None:
+    hooks = RecordingHooks()
+    await harness.runner(
+        hooks=hooks, spec=harness.spec(secret_names=("MY_TOKEN",))
+    ).run()
+    assert hooks.secret_requests == [["MY_TOKEN"]]
+
+
+async def test_a_second_supervisor_is_refused(harness: RunnerHarness) -> None:
+    from osmosis_ai.eval.local.state import RunLock, RunLockedError
+
+    lock_path = harness.output_root / ".locks" / "run-1.lock"
+    with RunLock(lock_path):
+        with pytest.raises(RunLockedError, match="already holds"):
+            await harness.runner().run()
+
+
+async def test_the_child_record_is_cleared_after_a_clean_shutdown(
+    harness: RunnerHarness,
+) -> None:
+    from osmosis_ai.eval.local.state import RunLock
+
+    await harness.runner().run()
+    with RunLock(harness.output_root / ".locks" / "run-1.lock") as lock:
+        assert lock.read_child() is None
+
+
+async def test_the_rollout_server_child_does_not_outlive_the_run(
+    harness: RunnerHarness,
+) -> None:
+    await harness.runner().run()
+    logs = (harness.run_dir() / "logs.txt").read_text()
+    port_line = next(
+        line for line in logs.splitlines() if "rollout server healthy" in line
+    )
+    port = json.loads(port_line[port_line.index("{") :])["port"]
+    import socket
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.settimeout(1.0)
+        assert sock.connect_ex(("127.0.0.1", port)) != 0
+
+
+async def test_an_unnamed_run_gets_a_generated_directory(
+    harness: RunnerHarness,
+) -> None:
+    summary = await harness.runner(options=LocalEvalOptions(yes=True)).run()
+    assert summary.run_name.startswith("echo-eval-")
+    assert summary.run_dir.name == summary.run_name
+    assert (summary.run_dir / "index.jsonl").is_file()
+
+
+async def test_the_manifest_records_provenance_but_no_secret_values(
+    harness: RunnerHarness,
+) -> None:
+    hooks = RecordingHooks(secrets={"MY_TOKEN": "super-secret-value"})
+    await harness.runner(
+        hooks=hooks, spec=harness.spec(secret_names=("MY_TOKEN",))
+    ).run()
+    run_dir = harness.run_dir()
+    manifest_text = (run_dir / "manifest.json").read_text()
+    assert "super-secret-value" not in manifest_text
+    assert "MY_TOKEN" in manifest_text
+    assert "super-secret-value" not in (run_dir / "logs.txt").read_text()
+    assert "super-secret-value" not in (run_dir / "events.jsonl").read_text()
+    manifest = json.loads(manifest_text)
+    assert manifest["provenance"]["sdk_version"]
+    assert manifest["schema_version"] == 1
+
+
+def test_the_e2e_rollout_project_is_isolated_from_the_repo_venv(
+    rollout_project: Path,
+) -> None:
+    # The supervisor launches the entrypoint with the current interpreter, so a
+    # rollout project needs no virtualenv of its own.
+    assert not (rollout_project / ".venv").exists()
+    assert os.access(rollout_project / "main.py", os.R_OK)
