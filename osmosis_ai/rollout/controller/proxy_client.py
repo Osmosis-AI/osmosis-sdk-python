@@ -68,6 +68,11 @@ _DEFAULT_STUB_PLATFORM_TOKEN = "platform-token"
 # keeps running in the background if it outlives this window.
 _FAILED_CREATE_CLOSE_TIMEOUT_SEC = 10.0
 
+# Total timeout for management calls on the client-owned session: small JSON
+# round-trips must fail fast instead of inheriting aiohttp's 300s default.
+# A caller-supplied session keeps whatever timeout the caller configured.
+_MANAGEMENT_REQUEST_TIMEOUT_SEC = 30.0
+
 
 class EvalProxyError(Exception):
     """HTTP or contract failure talking to the eval-proxy.
@@ -163,11 +168,15 @@ class EvalProxyClient:
                 row_index=row_index,
                 run_index=run_index,
             )
-        except BaseException:
+        except (Exception, asyncio.CancelledError):
             # The create may have reached the server even when the response
             # is invalid or this coroutine is cancelled; close by requested
             # id so a half-created session is not leaked. The original
-            # exception always propagates.
+            # exception always propagates. Process-level exits
+            # (KeyboardInterrupt, SystemExit, GeneratorExit) skip the network
+            # cleanup: awaiting here would delay shutdown, and awaiting during
+            # GeneratorExit is illegal; the eval-proxy session TTL reaps the
+            # leftover.
             await self._close_after_failed_create(rollout_id)
             raise
 
@@ -178,7 +187,7 @@ class EvalProxyClient:
             await asyncio.wait_for(
                 asyncio.shield(closer), _FAILED_CREATE_CLOSE_TIMEOUT_SEC
             )
-        except BaseException:
+        except (Exception, asyncio.CancelledError):
             # Best effort only: the shielded close keeps running even if this
             # wait times out or is cancelled again, and close failures are
             # just logged.
@@ -268,7 +277,9 @@ class EvalProxyClient:
 
     async def _ensure_session(self) -> aiohttp.ClientSession:
         if self._session is None or self._session.closed:
-            self._session = aiohttp.ClientSession()
+            self._session = aiohttp.ClientSession(
+                timeout=aiohttp.ClientTimeout(total=_MANAGEMENT_REQUEST_TIMEOUT_SEC)
+            )
             self._owns_session = True
         return self._session
 
@@ -283,7 +294,7 @@ class EvalProxyClient:
         headers = {"Authorization": f"Bearer {self._auth_token}"}
         url = f"{self._base_url}{path}"
         async with session.request(method, url, json=json, headers=headers) as response:
-            if response.status >= 400:
+            if not 200 <= response.status < 300:
                 detail = await response.text()
                 raise EvalProxyError(
                     f"eval-proxy {method} {path} failed: {response.status} {detail}",

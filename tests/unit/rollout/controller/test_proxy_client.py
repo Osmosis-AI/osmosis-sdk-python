@@ -426,6 +426,7 @@ async def test_failed_create_cleanup_wait_is_bounded(monkeypatch) -> None:
 
     async with LocalhostUvicornServer(app) as server:
         client = EvalProxyClient(base_url=server.base_url, auth_token=PLATFORM_TOKEN)
+        tasks_before = asyncio.all_tasks()
         task = asyncio.create_task(
             client.create_session(rollout_id=ROLLOUT_ID, model_path=MODEL_PATH)
         )
@@ -444,6 +445,11 @@ async def test_failed_create_cleanup_wait_is_bounded(monkeypatch) -> None:
         finally:
             release.set()
             await asyncio.gather(task, return_exceptions=True)
+            # Join the background best-effort closer (and the released DELETE
+            # handler) so aclose() and test teardown never race live tasks.
+            leftovers = asyncio.all_tasks() - tasks_before - {task}
+            if leftovers:
+                await asyncio.wait(leftovers, timeout=2.0)
             await client.aclose()
 
 
