@@ -1,0 +1,19 @@
+osmosis_ai/rollout/controller/proxy_client.py
+  s_b85671a769aa52::t_74758474efcd77 3
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "bef7e70a6fe42088cef3e7de7a9f74d4320e1587",
+  "prompts": {},
+  "sessions": {
+    "s_b85671a769aa52": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "445d71cb-0321-48fb-a491-8d9b0aa48c90",
+        "model": "claude-fable-5"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}
