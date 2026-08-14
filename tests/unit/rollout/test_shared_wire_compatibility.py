@@ -73,13 +73,17 @@ def test_init_request_without_llm_api_key_is_valid() -> None:
 async def test_omitted_llm_api_key_preserves_controller_api_key_fallback(
     monkeypatch,
 ) -> None:
-    async def _record(*, url, payload, headers):
+    async def _no_network(*, url, payload, headers):
         class _Resp:
             status_code = 200
 
         return _Resp()
 
-    monkeypatch.setattr(app_module, "post_json_with_retry", _record)
+    # Isolation only, not an exercised path: the stub backend never invokes
+    # the completion/grader callbacks, so no callback POST is expected here.
+    # The patch guarantees that a future _handle_rollout change cannot reach
+    # a real network from this test.
+    monkeypatch.setattr(app_module, "post_json_with_retry", _no_network)
     backend = _ContextCapturingBackend()
     request = RolloutInitRequest.model_validate(_load("init_request.json"))
     await _handle_rollout(backend, request)

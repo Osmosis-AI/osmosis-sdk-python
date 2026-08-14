@@ -102,14 +102,18 @@ def create_rollout_server(
 
     def _finish_rollout_task(rollout_id: str | None, task: asyncio.Task[None]) -> None:
         scheduled_tasks.discard(task)
-        if rollout_id is not None:
-            digest = active_digests.pop(rollout_id, None)
-            if digest is not None:
-                completed_digests.set(rollout_id, digest)
-        if not task.cancelled():
-            exc = task.exception()
-            if exc is not None:
-                logger.error("Rollout task for %s crashed", rollout_id, exc_info=exc)
+        exc = None if task.cancelled() else task.exception()
+        if exc is not None:
+            logger.error("Rollout task for %s crashed", rollout_id, exc_info=exc)
+        if rollout_id is None:
+            return
+        digest = active_digests.pop(rollout_id, None)
+        # A crashed or cancelled task never delivered its terminal callbacks,
+        # so its digest must not enter completed retention: a duplicate retry
+        # would dedupe into a 202 and wait forever for a callback that is
+        # never coming. Dropping the digest lets the retry re-execute.
+        if digest is not None and exc is None and not task.cancelled():
+            completed_digests.set(rollout_id, digest)
 
     # 202: the rollout is scheduled before this response is sent, so a
     # failed/disconnected response cannot record a digest for an execution

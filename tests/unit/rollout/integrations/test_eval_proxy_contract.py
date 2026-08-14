@@ -92,7 +92,5 @@ async def test_strands_sends_frozen_wire_contract(eval_proxy_stub) -> None:
     assert body["model"] == EVAL_PROXY_WIRE_MODEL
     assert body["stream"] is True
     stream_options = body.get("stream_options")
-    if stream_options is not None:
-        assert stream_options.get("include_usage") is True
-    else:
-        pytest.fail("Strands must send include_usage=true when stream_options is set")
+    assert stream_options is not None, "Strands must always send stream_options"
+    assert stream_options.get("include_usage") is True

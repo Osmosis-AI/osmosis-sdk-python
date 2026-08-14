@@ -299,29 +299,67 @@ async def test_retry_after_failed_send_returns_202_without_second_execution() ->
     assert backend.execute_count == 1
 
 
-async def test_completed_digest_expires_while_active_entry_does_not(
-    monkeypatch,
-) -> None:
-    monkeypatch.setattr(server_app_module, "_COMPLETED_DIGEST_TTL_SEC", 0.05)
+async def test_completed_digest_dedupes_within_ttl(monkeypatch) -> None:
+    # Generous TTL: the entry cannot age out mid-test on a slow event loop.
+    monkeypatch.setattr(server_app_module, "_COMPLETED_DIGEST_TTL_SEC", 300.0)
     backend = BlockingStubBackend()
     app = create_rollout_server(backend=backend)
     async with httpx.AsyncClient(
         transport=ASGITransport(app=app), base_url="http://rollout"
     ) as client:
         assert (await client.post("/rollout", json=init_body())).status_code == 202
-        await asyncio.sleep(0.1)  # older than the TTL but still executing
-        assert (await client.post("/rollout", json=init_body())).status_code == 202
-        assert backend.execute_count == 1
-
         backend.release.set()
         await _settle()
         assert (await client.post("/rollout", json=init_body())).status_code == 202
+        await _settle()
         assert backend.execute_count == 1  # completed entry dedupes within TTL
 
-        await asyncio.sleep(0.1)  # completed entry ages out
+
+async def test_active_digest_outlives_ttl_and_completed_digest_expires(
+    monkeypatch,
+) -> None:
+    # Tiny TTL with sleeps several multiples longer: a slow event loop only
+    # pushes every assertion further in its safe direction (active entries
+    # never expire; completed entries only age further past the TTL).
+    monkeypatch.setattr(server_app_module, "_COMPLETED_DIGEST_TTL_SEC", 0.01)
+    backend = BlockingStubBackend()
+    app = create_rollout_server(backend=backend)
+    async with httpx.AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://rollout"
+    ) as client:
+        assert (await client.post("/rollout", json=init_body())).status_code == 202
+        await asyncio.sleep(0.05)  # far older than the TTL, still executing
+        assert (await client.post("/rollout", json=init_body())).status_code == 202
+        assert backend.execute_count == 1  # active entry never expires
+
+        backend.release.set()
+        await _settle()
+        await asyncio.sleep(0.05)  # completed entry ages out
         assert (await client.post("/rollout", json=init_body())).status_code == 202
         await _settle()
         assert backend.execute_count == 2
+
+
+async def test_retry_after_scheduled_task_crash_reexecutes(monkeypatch) -> None:
+    # A crashed task never delivered its terminal callbacks, so its digest
+    # must not enter completed retention: the duplicate retry would dedupe
+    # into a 202 and wait forever for callbacks that are never coming.
+    calls: list[str | None] = []
+
+    async def _crash(backend: ExecutionBackend, request: Any) -> None:
+        calls.append(request.rollout_id)
+        raise RuntimeError("boom before any callback")
+
+    monkeypatch.setattr(server_app_module, "_handle_rollout", _crash)
+    app = create_rollout_server(backend=StubBackend())
+    async with httpx.AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://rollout"
+    ) as client:
+        assert (await client.post("/rollout", json=init_body())).status_code == 202
+        await _settle()
+        assert (await client.post("/rollout", json=init_body())).status_code == 202
+        await _settle()
+    assert calls == ["r1", "r1"]
 
 
 def test_health_instance_id_is_captured_at_construction(monkeypatch) -> None:

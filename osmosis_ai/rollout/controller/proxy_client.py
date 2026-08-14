@@ -272,7 +272,12 @@ class EvalProxyClient:
                 )
             if response.status == 204:
                 return {}
-            payload = await response.json()
+            try:
+                payload = await response.json()
+            except (aiohttp.ContentTypeError, ValueError) as exc:
+                raise EvalProxyError(
+                    f"eval-proxy {method} {path} returned invalid JSON"
+                ) from exc
             if not isinstance(payload, dict):
                 raise EvalProxyError("eval-proxy returned a non-object JSON body")
             return payload

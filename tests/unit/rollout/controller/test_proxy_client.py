@@ -188,6 +188,36 @@ async def test_client_create_session_surfaces_http_errors() -> None:
             await client.aclose()
 
 
+@pytest.mark.parametrize(
+    "content,media_type",
+    [
+        ("not-json", "text/plain"),  # aiohttp.ContentTypeError
+        ("{truncated", "application/json"),  # json.JSONDecodeError
+    ],
+)
+async def test_malformed_2xx_body_raises_eval_proxy_error(
+    content: str, media_type: str
+) -> None:
+    from fastapi import FastAPI
+    from fastapi.responses import Response
+
+    app = FastAPI()
+
+    @app.post("/v1/eval-sessions")
+    async def create() -> Response:
+        return Response(content=content, media_type=media_type)
+
+    async with LocalhostUvicornServer(app) as server:
+        client = EvalProxyClient(base_url=server.base_url, auth_token=PLATFORM_TOKEN)
+        try:
+            with pytest.raises(EvalProxyError, match="invalid JSON"):
+                await client.create_session(
+                    rollout_id=ROLLOUT_ID, model_path=MODEL_PATH
+                )
+        finally:
+            await client.aclose()
+
+
 def _create_response_app(body: dict) -> object:
     from fastapi import FastAPI
 
