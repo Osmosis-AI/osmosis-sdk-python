@@ -1,0 +1,36 @@
+docs/eval-run-local.md
+  s_26895092d338d1::t_d9b557ef6fc2de 105,107-109
+  s_26895092d338d1::t_86f42b60b2692a 130
+tests/unit/rollout/test_harbor_trial_logs.py
+  s_26895092d338d1::t_58b94319262d09 142-181
+tests/unit/rollout/test_harbor_egress.py
+  s_26895092d338d1::t_843c17d92702b6 11,193-309
+osmosis_ai/rollout/backend/harbor/artifacts.py
+  s_26895092d338d1::t_df58305b711ae5 118,120-122
+  s_26895092d338d1::t_aedd20d82e49ec 50-52,56-76,108
+osmosis_ai/eval/local/runner.py
+  s_26895092d338d1::t_ac4af47b512b59 793-795
+  s_26895092d338d1::t_ab05fe66d558fe 834-838
+  s_26895092d338d1::t_81ee6a6eaf58d8 763-764
+  s_26895092d338d1::t_5353cb78e3a706 102-105,778-792,796-833
+osmosis_ai/rollout/backend/harbor/environment.py
+  s_26895092d338d1::t_b24f48178f7d84 97-98,100-104,108-126
+  s_26895092d338d1::t_8dc954c0881b8d 105-107,168-170
+  s_26895092d338d1::t_1ee15056f275f6 142-151,153-155,160,162-167,172-176
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "2a1c6f0fe1f43cbf7af45322866b6f4a75bd9036",
+  "prompts": {},
+  "sessions": {
+    "s_26895092d338d1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "0877fe01-fd08-4a72-a80e-af1ad8944608",
+        "model": "claude-opus-5"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}
