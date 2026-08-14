@@ -8,7 +8,6 @@ anywhere with one ``pip install`` — a rollout container or a user's own box.
 
 from __future__ import annotations
 
-import hashlib
 import os
 import shutil
 import subprocess
@@ -26,6 +25,11 @@ from packaging.requirements import Requirement
 from packaging.utils import canonicalize_name
 
 from osmosis_ai._imports import raise_optional_dependency_error
+from osmosis_ai.source_scan import (
+    EXCLUDE_DIRS,
+    reject_directory_symlinks,
+    source_digest,
+)
 
 # Only the Harbor backend packages rollout projects, so these ship with that
 # extra rather than the base install.
@@ -54,18 +58,6 @@ GRADER_MAIN_TEMPLATE = """\
 def grader_main():
     runner.grader_main({grader_class}, {grader_config})
 """
-
-EXCLUDE_DIRS = {
-    "__pycache__",
-    ".git",
-    ".venv",
-    "venv",
-    "dist",
-    "build",
-    "node_modules",
-    ".pytest_cache",
-    ".ruff_cache",
-}
 
 # PyPA's ``src/`` layout, which ``uv init --lib`` also produces.
 SRC_LAYOUT_DIR = "src"
@@ -104,41 +96,18 @@ def _uv_executable() -> str:
 
 
 def content_hash(path: Path, *, extra: str = "", exclude: Path | None = None) -> str:
-    digest = hashlib.sha256(extra.encode())
-    for file in sorted(
-        p
-        for p in path.rglob("*")
-        if p.is_file()
-        and not (set(p.relative_to(path).parts) & EXCLUDE_DIRS)
-        and not (exclude is not None and p.is_relative_to(exclude))
-    ):
-        digest.update(str(file.relative_to(path)).encode())
-        digest.update(file.read_bytes())
-    return digest.hexdigest()[:32]
+    """Bundle cache key: the shared source digest, truncated."""
+    return source_digest(path, extra=extra, exclude=exclude)[:32]
 
 
 def _reject_directory_symlinks(path: Path, *, exclude: Path | None) -> None:
     """Refuse to build through directory (or broken) symlinks.
 
-    ``content_hash`` cannot see through them — ``rglob`` does not recurse into
-    symlinked directories — while the ``copytree`` staging below dereferences
-    them into the build, so the cache key would not describe what actually
-    ships and a mutated link target would keep serving the stale cached wheel.
-    A link resolving into the build output tree would even recurse. File
-    symlinks stay allowed: hashing and staging both read the target's bytes,
-    so the two agree. Walks the same exclusion rules as ``content_hash``.
+    The bundle cache key cannot see through them, while the ``copytree``
+    staging below dereferences them into the build, so the key would not
+    describe what actually ships.
     """
-    for p in path.rglob("*"):
-        if set(p.relative_to(path).parts) & EXCLUDE_DIRS:
-            continue
-        if exclude is not None and p.is_relative_to(exclude):
-            continue
-        if p.is_symlink() and not p.is_file():
-            raise ValueError(
-                f"bundle source contains a directory or broken symlink: "
-                f"{p} -> {os.readlink(p)}; replace it with a real directory "
-                "or file so the bundle cache can hash what it ships"
-            )
+    reject_directory_symlinks(path, exclude=exclude, label="bundle source")
 
 
 def _stage_ignore(exclude: Path | None) -> Callable[[str, list[str]], set[str]]:
