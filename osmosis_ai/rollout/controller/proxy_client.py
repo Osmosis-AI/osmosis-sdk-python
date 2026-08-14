@@ -1,6 +1,6 @@
 """Eval-proxy session client and local OpenAI-compatible contract stub.
 
-Frozen production contract (Phase 0):
+Frozen production contract:
 - integration model ``openai/osmosis-rollout``
 - wire body model ``osmosis-rollout``
 - ``POST /v1/eval-sessions`` bound to ``rollout_id`` + ``model_path``
