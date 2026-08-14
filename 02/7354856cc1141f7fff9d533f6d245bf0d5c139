@@ -1,0 +1,19 @@
+docs/eval-run-local.md
+  s_b85671a769aa52::t_7a2b0d6f6a6721 18-19
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "027354856cc1141f7fff9d533f6d245bf0d5c139",
+  "prompts": {},
+  "sessions": {
+    "s_b85671a769aa52": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "445d71cb-0321-48fb-a491-8d9b0aa48c90",
+        "model": "claude-fable-5"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}
