@@ -10,6 +10,7 @@ import httpx
 import pytest
 from httpx import ASGITransport
 
+from osmosis_ai.rollout.controller import proxy_client as proxy_client_module
 from osmosis_ai.rollout.controller.listener import LocalhostUvicornServer
 from osmosis_ai.rollout.controller.proxy_client import (
     EVAL_PROXY_INTEGRATION_MODEL,
@@ -178,14 +179,19 @@ async def test_client_create_session_posts_frozen_fields_only() -> None:
 
 
 async def test_client_create_session_surfaces_http_errors() -> None:
+    # Drive a real HTTP error: an invalid rollout_id would be rejected by
+    # local validation before any request, so use a wrong platform token.
     app = create_eval_proxy_stub_app()
     async with LocalhostUvicornServer(app) as server:
-        client = EvalProxyClient(base_url=server.base_url, auth_token=PLATFORM_TOKEN)
+        client = EvalProxyClient(base_url=server.base_url, auth_token="wrong-token")
         try:
-            with pytest.raises(EvalProxyError):
-                await client.create_session(rollout_id="", model_path=MODEL_PATH)
+            with pytest.raises(EvalProxyError) as excinfo:
+                await client.create_session(
+                    rollout_id=ROLLOUT_ID, model_path=MODEL_PATH
+                )
         finally:
             await client.aclose()
+    assert excinfo.value.status_code == 401
 
 
 @pytest.mark.parametrize("bad_id", ["..", ".", "a/b", "a\\b", "", "a\x00b"])
@@ -398,6 +404,53 @@ async def test_cancelled_create_attempts_cleanup_without_masking_cancellation() 
         finally:
             await client.aclose()
     assert closed == [ROLLOUT_ID]
+
+
+async def test_failed_create_cleanup_wait_is_bounded(monkeypatch) -> None:
+    from fastapi import FastAPI, HTTPException
+
+    monkeypatch.setattr(proxy_client_module, "_FAILED_CREATE_CLOSE_TIMEOUT_SEC", 0.05)
+    delete_entered = asyncio.Event()
+    release = asyncio.Event()
+    app = FastAPI()
+
+    @app.post("/v1/eval-sessions")
+    async def create() -> dict:
+        raise HTTPException(status_code=502, detail="upstream exploded")
+
+    @app.delete("/v1/eval-sessions/{rollout_id}")
+    async def close(rollout_id: str) -> dict:
+        delete_entered.set()
+        await release.wait()
+        return {"ok": True}
+
+    async with LocalhostUvicornServer(app) as server:
+        client = EvalProxyClient(base_url=server.base_url, auth_token=PLATFORM_TOKEN)
+        tasks_before = asyncio.all_tasks()
+        task = asyncio.create_task(
+            client.create_session(rollout_id=ROLLOUT_ID, model_path=MODEL_PATH)
+        )
+        try:
+            # No cancellation here: the task must come back on its own once
+            # the bounded cleanup wait expires, despite the hanging DELETE.
+            done, _pending = await asyncio.wait({task}, timeout=2.0)
+            assert task in done, (
+                "create_session must return within the bounded cleanup wait "
+                "even when the cleanup DELETE hangs"
+            )
+            with pytest.raises(EvalProxyError) as excinfo:
+                task.result()
+            assert excinfo.value.status_code == 502
+            await asyncio.wait_for(delete_entered.wait(), timeout=2.0)
+        finally:
+            release.set()
+            await asyncio.gather(task, return_exceptions=True)
+            # Join the background best-effort closer (and the released DELETE
+            # handler) so aclose() and test teardown never race live tasks.
+            leftovers = asyncio.all_tasks() - tasks_before - {task}
+            if leftovers:
+                await asyncio.wait(leftovers, timeout=2.0)
+            await client.aclose()
 
 
 async def test_management_routes_use_platform_token_not_session_token() -> None:
