@@ -1,0 +1,19 @@
+{
+  "description": "Every attempt failed with no reward: graded is 0 and pass_rate must not divide by zero.",
+  "pass_threshold": 1.0,
+  "index": [
+    {"row_index": 0, "run_index": 0, "rollout_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "status": "failed", "error_type": "callback_timeout", "duration_ms": 450000.0},
+    {"row_index": 1, "run_index": 0, "rollout_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "status": "failed", "error_type": "workflow_error", "duration_ms": 1200.0}
+  ],
+  "expected": {
+    "total_samples": 2,
+    "completed_samples": 2,
+    "graded": 0,
+    "passed": 0,
+    "failed": 2,
+    "skipped": 0,
+    "pass_rate": 0,
+    "pass_threshold": 1.0,
+    "tokens_used": 0
+  }
+}

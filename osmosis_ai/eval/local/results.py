@@ -1,0 +1,510 @@
+"""Result materialization: contract-linted snapshots and user projections.
+
+Every file here is a **projection** rebuilt from the terminal journal and the
+canonical ``rollout_trials/`` tree; none of it decides whether work reruns
+(design ``local-eval-run-plan.md`` §11).
+
+The contract lint exists because the platform drops malformed ``index.jsonl``
+lines *silently* (§2.2): a missing ``duration_ms`` or a non-32-hex rollout id
+costs a sample with no error anywhere. Validating at write time turns a silent
+data loss into a loud local failure.
+"""
+
+from __future__ import annotations
+
+import json
+import re
+import statistics
+from collections.abc import Iterable, Mapping, Sequence
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+from osmosis_ai.eval.local.state import (
+    TerminalRecord,
+    WorkKey,
+    atomic_write_bytes,
+    atomic_write_json,
+    drop_none_values,
+)
+
+#: ``uuid4().hex`` -- the platform's artifact path contract (§2.2).
+ROLLOUT_ID_RE = re.compile(r"^[0-9a-f]{32}$")
+#: The consumer's filename regex; a ``/`` here makes the trajectory invisible.
+TRAJECTORY_FILENAME_RE = re.compile(r"^trajectory[A-Za-z0-9._-]*\.json$")
+
+CANONICAL_TRAJECTORY_FILENAME = "trajectory.json"
+INDEX_FILENAME = "index.jsonl"
+PROGRESS_FILENAME = "progress.json"
+SUMMARY_FILENAME = "summary.jsonl"
+METRICS_FILENAME = "metrics.json"
+TRIALS_DIRNAME = "rollout_trials"
+TRAJECTORIES_DIRNAME = "trajectories"
+ARTIFACTS_DIRNAME = "artifacts"
+
+#: Reserved on both sides of the download contract (§2.6).
+_RESERVED_ARTIFACT_MANIFEST = "manifest.json"
+
+_VALID_STATUSES: frozenset[str] = frozenset({"success", "failed", "skipped"})
+
+
+class IndexContractError(RuntimeError):
+    """An index line would be silently dropped by the platform."""
+
+
+class ArtifactProjectionError(RuntimeError):
+    """An artifact path is unsafe to copy into the user projection."""
+
+
+# --------------------------------------------------------------------------- #
+# index.jsonl
+# --------------------------------------------------------------------------- #
+
+
+def lint_index_row(row: Mapping[str, Any]) -> list[str]:
+    """Return every §2.2 violation in *row*. Empty means the platform accepts it."""
+    problems: list[str] = []
+
+    for key in ("row_index", "run_index", "duration_ms"):
+        value = row.get(key)
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            problems.append(f"{key} must be a number (the line is dropped otherwise)")
+
+    status = row.get("status")
+    if status not in _VALID_STATUSES:
+        problems.append(
+            f"status must be one of {sorted(_VALID_STATUSES)}, got {status!r}"
+        )
+
+    if any(value is None for value in row.values()):
+        nulls = sorted(key for key, value in row.items() if value is None)
+        problems.append(
+            f"None-valued keys must be omitted, not written as null: {nulls}"
+        )
+
+    rollout_id = row.get("rollout_id")
+    sample_id = row.get("sample_id")
+    if rollout_id is None and sample_id is None:
+        problems.append("at least one of rollout_id or sample_id is required")
+    if rollout_id is not None and (
+        not isinstance(rollout_id, str) or not ROLLOUT_ID_RE.fullmatch(rollout_id)
+    ):
+        problems.append(
+            "rollout_id must be 32 lowercase hex characters, or the trajectory "
+            f"and artifacts are silently omitted from download: {rollout_id!r}"
+        )
+
+    filename = row.get("trajectory_filename")
+    if filename is not None and (
+        not isinstance(filename, str) or not TRAJECTORY_FILENAME_RE.fullmatch(filename)
+    ):
+        problems.append(
+            "trajectory_filename must match ^trajectory[A-Za-z0-9._-]*\\.json$ with "
+            f"no path separator: {filename!r}"
+        )
+    return problems
+
+
+def build_index_row(
+    record: TerminalRecord,
+    *,
+    trajectory_filename: str | None = None,
+    resumed: bool = False,
+) -> dict[str, Any]:
+    """Project one terminal record into an ``index.jsonl`` row.
+
+    ``resumed`` marks a result carried forward from an earlier invocation of the
+    same named run, matching the cloud controller's carry-forward flag.
+    """
+    row = drop_none_values(
+        {
+            "row_index": record.row_index,
+            "run_index": record.run_index,
+            "rollout_id": record.rollout_id,
+            "trajectory_filename": trajectory_filename,
+            "status": record.status,
+            "reward": record.reward,
+            "tokens": record.tokens,
+            "duration_ms": record.duration_ms,
+            "error_type": record.error_type,
+            "resumed": True if resumed else None,
+        }
+    )
+    problems = lint_index_row(row)
+    if problems:
+        raise IndexContractError(
+            f"index row for row {record.row_index} run {record.run_index} violates "
+            "the platform contract: " + "; ".join(problems)
+        )
+    return row
+
+
+def render_index_lines(rows: Sequence[Mapping[str, Any]]) -> bytes:
+    """Serialize index rows, sorted by ``(row_index, run_index)``."""
+    ordered = sorted(rows, key=lambda row: (row["row_index"], row["run_index"]))
+    return "".join(
+        json.dumps(row, ensure_ascii=False, allow_nan=False) + "\n" for row in ordered
+    ).encode("utf-8")
+
+
+# --------------------------------------------------------------------------- #
+# ATIF identity
+# --------------------------------------------------------------------------- #
+
+
+def atif_rollout_identity(document: Mapping[str, Any]) -> str | None:
+    """Resolve the rollout id the platform converter will read from an ATIF doc.
+
+    Order per §2.3: ``extra.osmosis.rollout_id``, then top-level ``session_id``,
+    then the prefix before the first ``/`` in ``trajectory_id``. A bare
+    ``trajectory_id`` with no ``/`` is **not** a valid fallback -- the platform
+    converter drops that document, so accepting it locally would let a run look
+    healthy and upload blind.
+    """
+    extra = document.get("extra")
+    if isinstance(extra, Mapping):
+        osmosis = extra.get("osmosis")
+        if isinstance(osmosis, Mapping):
+            candidate = osmosis.get("rollout_id")
+            if isinstance(candidate, str) and candidate:
+                return candidate
+    session_id = document.get("session_id")
+    if isinstance(session_id, str) and session_id:
+        return session_id
+    trajectory_id = document.get("trajectory_id")
+    if isinstance(trajectory_id, str) and "/" in trajectory_id:
+        prefix = trajectory_id.split("/", 1)[0]
+        if prefix:
+            return prefix
+    return None
+
+
+def read_valid_trajectory(path: Path, *, rollout_id: str) -> dict[str, Any] | None:
+    """Return the ATIF document at *path* when it parses and its identity matches.
+
+    ``None`` covers every reason the platform would ignore the file: absent,
+    unparseable, not a single JSON object, or an identity that disagrees with the
+    directory name. The terminal result stays valid either way (§11.3).
+    """
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    if atif_rollout_identity(payload) != rollout_id:
+        return None
+    return payload
+
+
+# --------------------------------------------------------------------------- #
+# Metrics (§2.5)
+# --------------------------------------------------------------------------- #
+
+
+def pass_at_k(*, attempts: int, passes: int, k: int) -> float:
+    """Unbiased pass@k for one work row (Chen et al.)."""
+    if k > attempts:
+        raise ValueError("k must not exceed the attempt count")
+    if attempts - passes < k:
+        return 1.0
+    value = 1.0
+    for index in range(k):
+        value *= (attempts - passes - index) / (attempts - index)
+    return 1.0 - value
+
+
+def _powers_of_two_up_to(limit: int) -> list[int]:
+    values: list[int] = []
+    k = 1
+    while k <= limit:
+        values.append(k)
+        k *= 2
+    return values
+
+
+def aggregate_metrics(
+    rows: Iterable[Mapping[str, Any]], *, pass_threshold: float
+) -> dict[str, Any]:
+    """Replicate the platform worker's ``_aggregate_from_index`` summary (§2.5).
+
+    ``scored`` excludes skipped rows; ``passed`` is ``reward >= pass_threshold``.
+    Platform finalize always recomputes this, so a local number is a display
+    convenience -- but it must agree, or a user sees two truths.
+    """
+    materialized = list(rows)
+    passes_by_row: dict[int, int] = {}
+    attempts_by_row: dict[int, int] = {}
+    rewards: list[float] = []
+    passed = scored = skipped = failed = 0
+    tokens_used = 0
+    max_run_index = -1
+
+    for row in materialized:
+        status = row.get("status")
+        run_index = row.get("run_index")
+        if isinstance(run_index, int):
+            max_run_index = max(max_run_index, run_index)
+        tokens = row.get("tokens")
+        if isinstance(tokens, int) and not isinstance(tokens, bool):
+            tokens_used += tokens
+        if status == "skipped":
+            skipped += 1
+            continue
+        if status == "failed":
+            failed += 1
+        row_index = row.get("row_index")
+        reward = row.get("reward")
+        if isinstance(reward, (int, float)) and not isinstance(reward, bool):
+            scored += 1
+            rewards.append(float(reward))
+            is_pass = float(reward) >= pass_threshold
+            if is_pass:
+                passed += 1
+            if isinstance(row_index, int):
+                attempts_by_row[row_index] = attempts_by_row.get(row_index, 0) + 1
+                passes_by_row[row_index] = passes_by_row.get(row_index, 0) + int(
+                    is_pass
+                )
+
+    total_samples = len(materialized)
+    summary: dict[str, Any] = {
+        "total_samples": total_samples,
+        "completed_samples": total_samples - skipped,
+        "graded": scored,
+        "passed": passed,
+        "failed": failed,
+        "skipped": skipped,
+        "pass_rate": (passed / scored) if scored else 0,
+        "pass_threshold": pass_threshold,
+        "tokens_used": tokens_used,
+    }
+    if rewards:
+        summary["reward_stats"] = {
+            "mean": statistics.fmean(rewards),
+            "median": statistics.median(rewards),
+            "std": statistics.pstdev(rewards) if len(rewards) > 1 else 0.0,
+            "min": min(rewards),
+            "max": max(rewards),
+        }
+
+    n_runs = max_run_index + 1
+    if n_runs >= 2:
+        summary["n_runs"] = n_runs
+        # pass@k needs at least two points to be worth plotting, so it appears
+        # only for multi-attempt runs.
+        points: list[dict[str, Any]] = []
+        for k in _powers_of_two_up_to(n_runs):
+            eligible = [
+                pass_at_k(
+                    attempts=attempts_by_row[row_index],
+                    passes=passes_by_row[row_index],
+                    k=k,
+                )
+                for row_index in sorted(attempts_by_row)
+                if attempts_by_row[row_index] >= k
+            ]
+            if eligible:
+                points.append({"k": k, "value": statistics.fmean(eligible)})
+        if len(points) >= 2:
+            summary["pass_at_k"] = points
+    return summary
+
+
+# --------------------------------------------------------------------------- #
+# Projections
+# --------------------------------------------------------------------------- #
+
+
+def projection_stem(row_index: int, run_index: int) -> str:
+    return f"row_{row_index}_run_{run_index}"
+
+
+def safe_artifact_relative_paths(artifacts_dir: Path) -> list[Path]:
+    """Enumerate copyable artifact paths, refusing anything unsafe.
+
+    ``rollout_trials/<id>/artifacts/**`` is the one tree the platform renders
+    wholesale, so a symlink or traversal here would exfiltrate host files into a
+    user-visible projection and, later, into an upload.
+    """
+    if not artifacts_dir.is_dir():
+        return []
+    resolved_root = artifacts_dir.resolve()
+    selected: list[Path] = []
+    for candidate in sorted(artifacts_dir.rglob("*")):
+        relative = candidate.relative_to(artifacts_dir)
+        if candidate.is_symlink():
+            raise ArtifactProjectionError(
+                f"refusing to project artifact symlink {candidate}"
+            )
+        if not candidate.is_file():
+            continue
+        if any(part in ("", ".", "..") for part in relative.parts):
+            raise ArtifactProjectionError(f"unsafe artifact path {relative}")
+        if len(relative.parts) == 1 and relative.name == _RESERVED_ARTIFACT_MANIFEST:
+            # Reserved server-side index name; excluded on both sides (§2.6).
+            continue
+        if not candidate.resolve().is_relative_to(resolved_root):
+            raise ArtifactProjectionError(
+                f"artifact path {relative} escapes the artifact root"
+            )
+        selected.append(relative)
+    return selected
+
+
+def copy_projection_file(source: Path, destination: Path) -> None:
+    """Copy bytes into the user projection, never linking to the upload source.
+
+    Editing ``trajectories/row_*`` must not mutate
+    ``rollout_trials/<id>/trajectory.json``, so this is always an independent
+    copy written through the atomic helper.
+    """
+    atomic_write_bytes(destination, source.read_bytes())
+
+
+# --------------------------------------------------------------------------- #
+# Snapshot writer
+# --------------------------------------------------------------------------- #
+
+
+@dataclass(frozen=True)
+class RunIdentity:
+    """The ``eval_run`` block of ``metrics.json``: layer-2 display only."""
+
+    local_run_id: str
+    run_name: str
+    dataset_name: str
+    model_name: str
+    rollout_name: str
+    started_at: str
+    status: str = "running"
+    completed_at: str | None = None
+    duration_ms: float = 0.0
+
+    def to_payload(self) -> dict[str, Any]:
+        return drop_none_values(
+            {
+                "id": self.local_run_id,
+                "status": self.status,
+                "name": self.run_name,
+                "dataset_name": self.dataset_name,
+                "model_name": self.model_name,
+                "rollout_name": self.rollout_name,
+                "duration_ms": self.duration_ms,
+                "started_at": self.started_at,
+                "completed_at": self.completed_at,
+            }
+        )
+
+
+@dataclass(frozen=True)
+class SelectedAttempt:
+    """One work item's selected terminal attempt, with its trajectory verdict."""
+
+    record: TerminalRecord
+    resumed: bool
+    trajectory_filename: str | None
+
+
+def select_attempts(
+    latest: Mapping[WorkKey, TerminalRecord],
+    *,
+    trials_dir: Path,
+    resumed_keys: Iterable[WorkKey] = (),
+) -> list[SelectedAttempt]:
+    """Bind each work item's terminal record to a verified trajectory, if any.
+
+    Re-checked against the filesystem on every refresh, so a trajectory written
+    just before a crash is picked up on restart with no extra state event
+    (§11.3).
+    """
+    resumed = set(resumed_keys)
+    selected: list[SelectedAttempt] = []
+    for key in sorted(latest):
+        record = latest[key]
+        trajectory_path = trials_dir / record.rollout_id / CANONICAL_TRAJECTORY_FILENAME
+        document = read_valid_trajectory(trajectory_path, rollout_id=record.rollout_id)
+        selected.append(
+            SelectedAttempt(
+                record=record,
+                resumed=key in resumed,
+                trajectory_filename=(
+                    CANONICAL_TRAJECTORY_FILENAME if document is not None else None
+                ),
+            )
+        )
+    return selected
+
+
+class Materializer:
+    """Writes every projection for one run directory.
+
+    Snapshots are refreshed while the run is live, so partial output must always
+    be readable: every file goes through the atomic write helper.
+    """
+
+    def __init__(self, run_dir: Path) -> None:
+        self._run_dir = run_dir
+
+    @property
+    def trials_dir(self) -> Path:
+        return self._run_dir / TRIALS_DIRNAME
+
+    def refresh(
+        self,
+        attempts: Sequence[SelectedAttempt],
+        *,
+        identity: RunIdentity,
+        pass_threshold: float,
+        sampled_rows: int,
+        total_dataset_rows: int,
+        total_runs: int,
+    ) -> list[dict[str, Any]]:
+        """Rewrite index, progress, summary, metrics, and both projections."""
+        rows = [
+            build_index_row(
+                attempt.record,
+                trajectory_filename=attempt.trajectory_filename,
+                resumed=attempt.resumed,
+            )
+            for attempt in attempts
+        ]
+        payload = render_index_lines(rows)
+        atomic_write_bytes(self._run_dir / INDEX_FILENAME, payload)
+        # summary.jsonl is index.jsonl verbatim, not a second schema (§2.4).
+        atomic_write_bytes(self._run_dir / SUMMARY_FILENAME, payload)
+        atomic_write_json(
+            self._run_dir / PROGRESS_FILENAME,
+            {
+                "total_runs": total_runs,
+                "sampled_rows": sampled_rows,
+                "total_dataset_rows": total_dataset_rows,
+            },
+        )
+        atomic_write_json(
+            self._run_dir / METRICS_FILENAME,
+            {
+                "eval_run": identity.to_payload(),
+                "summary": aggregate_metrics(rows, pass_threshold=pass_threshold),
+            },
+        )
+        for attempt in attempts:
+            self.project_attempt(attempt)
+        return rows
+
+    def project_attempt(self, attempt: SelectedAttempt) -> None:
+        """Copy the selected attempt's trajectory and artifacts to top level."""
+        record = attempt.record
+        stem = projection_stem(record.row_index, record.run_index)
+        rollout_dir = self.trials_dir / record.rollout_id
+        if attempt.trajectory_filename is not None:
+            copy_projection_file(
+                rollout_dir / attempt.trajectory_filename,
+                self._run_dir / TRAJECTORIES_DIRNAME / f"{stem}.json",
+            )
+        artifacts_dir = rollout_dir / ARTIFACTS_DIRNAME
+        for relative in safe_artifact_relative_paths(artifacts_dir):
+            copy_projection_file(
+                artifacts_dir / relative,
+                self._run_dir / ARTIFACTS_DIRNAME / stem / relative,
+            )

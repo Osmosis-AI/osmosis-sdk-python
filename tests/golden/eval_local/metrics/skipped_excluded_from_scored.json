@@ -1,0 +1,22 @@
+{
+  "description": "remove_sample rows are skipped: excluded from scored, so pass_rate divides by graded only.",
+  "pass_threshold": 0.5,
+  "index": [
+    {"row_index": 0, "run_index": 0, "rollout_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "status": "success", "reward": 1.0, "tokens": 100, "duration_ms": 10.0},
+    {"row_index": 1, "run_index": 0, "rollout_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "status": "success", "reward": 0.25, "tokens": 200, "duration_ms": 20.0},
+    {"row_index": 2, "run_index": 0, "rollout_id": "cccccccccccccccccccccccccccccccc", "status": "skipped", "tokens": 5, "duration_ms": 5.0},
+    {"row_index": 3, "run_index": 0, "rollout_id": "dddddddddddddddddddddddddddddddd", "status": "failed", "error_type": "grader_timeout", "duration_ms": 30.0}
+  ],
+  "expected": {
+    "total_samples": 4,
+    "completed_samples": 3,
+    "graded": 2,
+    "passed": 1,
+    "failed": 1,
+    "skipped": 1,
+    "pass_rate": 0.5,
+    "pass_threshold": 0.5,
+    "tokens_used": 305,
+    "reward_stats": {"mean": 0.625, "median": 0.625, "std": 0.375, "min": 0.25, "max": 1.0}
+  }
+}
