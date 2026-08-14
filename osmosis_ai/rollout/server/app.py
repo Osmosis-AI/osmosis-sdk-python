@@ -89,7 +89,7 @@ def create_rollout_server(
     active_digests: dict[str, str] = {}
     completed_digests: TtlCache[str, str] = TtlCache(_COMPLETED_DIGEST_TTL_SEC)
     # Strong references so eagerly scheduled rollout tasks are never GC'd.
-    scheduled_tasks: set[asyncio.Task[None]] = set()
+    scheduled_tasks: set[asyncio.Task[bool]] = set()
     # The instance id env var is immutable for the process lifetime.
     instance_id = os.environ.get("_OSMOSIS_ROLLOUT_INSTANCE_ID")
 
@@ -100,7 +100,7 @@ def create_rollout_server(
             payload["instance_id"] = instance_id
         return payload
 
-    def _finish_rollout_task(rollout_id: str | None, task: asyncio.Task[None]) -> None:
+    def _finish_rollout_task(rollout_id: str | None, task: asyncio.Task[bool]) -> None:
         scheduled_tasks.discard(task)
         exc = None if task.cancelled() else task.exception()
         if exc is not None:
@@ -108,11 +108,13 @@ def create_rollout_server(
         if rollout_id is None:
             return
         digest = active_digests.pop(rollout_id, None)
-        # A crashed or cancelled task never delivered its terminal callbacks,
-        # so its digest must not enter completed retention: a duplicate retry
-        # would dedupe into a 202 and wait forever for a callback that is
+        # Retain the digest only when every required terminal callback was
+        # delivered. A crashed, cancelled, or delivery-failed task left the
+        # controller without its terminal callback; a duplicate retry deduped
+        # against it would get a 202 and wait forever for a callback that is
         # never coming. Dropping the digest lets the retry re-execute.
-        if digest is not None and exc is None and not task.cancelled():
+        delivered = not task.cancelled() and exc is None and task.result()
+        if digest is not None and delivered:
             completed_digests.set(rollout_id, digest)
 
     # 202: the rollout is scheduled before this response is sent, so a
@@ -185,7 +187,11 @@ def create_rollout_server(
 
 async def _handle_rollout(
     backend: ExecutionBackend, request: RolloutInitRequest
-) -> None:
+) -> bool:
+    """Execute one rollout; return whether every required terminal callback
+    was delivered (the completion callback, plus the grader callback when
+    ``grader_callback_url`` is set). The admission layer retains the
+    idempotency digest only for delivered rollouts."""
     # Routing identity is in the URLs; ``rollout_id`` in the body is debug
     # metadata. We prefer the caller's id (so logs/cache rows correlate
     # across systems) and synthesize one only if the caller omits it.
@@ -362,6 +368,7 @@ async def _handle_rollout(
                     ).model_dump(),
                     headers=auth.as_bearer_headers(),
                 )
+                completion_posted = True
                 report = report_from_response(resp) or report
             except Exception:
                 logger.error(
@@ -387,3 +394,4 @@ async def _handle_rollout(
                 report=report,
                 diagnostics=last_diagnostics,
             )
+    return completion_posted and (not request.grader_callback_url or grader_posted)

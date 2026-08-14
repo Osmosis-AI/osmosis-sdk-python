@@ -188,6 +188,23 @@ async def test_client_create_session_surfaces_http_errors() -> None:
             await client.aclose()
 
 
+@pytest.mark.parametrize("bad_id", ["..", ".", "a/b", "a\\b", "", "a\x00b"])
+async def test_session_methods_reject_non_single_segment_ids(bad_id: str) -> None:
+    # quote() leaves dots intact and HTTP stacks normalize dot segments, so
+    # these ids must be rejected before any request is built. The unreachable
+    # base_url guarantees the test fails loudly if a request were attempted.
+    client = EvalProxyClient(base_url="http://127.0.0.1:1", auth_token=PLATFORM_TOKEN)
+    try:
+        with pytest.raises(EvalProxyError, match="single path segment"):
+            await client.create_session(rollout_id=bad_id, model_path=MODEL_PATH)
+        with pytest.raises(EvalProxyError, match="single path segment"):
+            await client.close_session(bad_id)
+        with pytest.raises(EvalProxyError, match="single path segment"):
+            await client.get_usage(bad_id)
+    finally:
+        await client.aclose()
+
+
 @pytest.mark.parametrize(
     "content,media_type",
     [

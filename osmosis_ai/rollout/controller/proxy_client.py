@@ -93,8 +93,19 @@ class EvalProxySession:
     run_index: int | None = None
 
 
+def _require_single_segment_id(rollout_id: str) -> str:
+    # quote() cannot make "." or ".." safe: dots are unreserved characters,
+    # and HTTP stacks normalize dot segments before the request leaves the
+    # client, silently retargeting management calls outside the session path.
+    if not is_single_path_segment(rollout_id):
+        raise EvalProxyError(
+            f"rollout_id must be a single path segment, got {rollout_id!r}"
+        )
+    return rollout_id
+
+
 def _session_api_base(rollout_id: str) -> str:
-    return f"/v1/eval-sessions/{quote(rollout_id, safe='')}"
+    return f"/v1/eval-sessions/{quote(_require_single_segment_id(rollout_id), safe='')}"
 
 
 def _consume_best_effort_close(task: asyncio.Task[None]) -> None:
@@ -130,6 +141,7 @@ class EvalProxyClient:
         row_index: int | None = None,
         run_index: int | None = None,
     ) -> EvalProxySession:
+        _require_single_segment_id(rollout_id)
         payload: dict[str, Any] = {
             "rollout_id": rollout_id,
             "model_path": model_path,
@@ -242,10 +254,10 @@ class EvalProxyClient:
         return await self._request_json("GET", self._usage_path(rollout_id))
 
     def _close_path(self, rollout_id: str) -> str:
-        return f"/v1/eval-sessions/{quote(rollout_id, safe='')}"
+        return _session_api_base(rollout_id)
 
     def _usage_path(self, rollout_id: str) -> str:
-        return f"/v1/eval-sessions/{quote(rollout_id, safe='')}/usage"
+        return f"{_session_api_base(rollout_id)}/usage"
 
     async def _ensure_session(self) -> aiohttp.ClientSession:
         if self._session is None or self._session.closed:

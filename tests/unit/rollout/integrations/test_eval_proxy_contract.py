@@ -4,8 +4,17 @@ from __future__ import annotations
 
 import pytest
 
+# Skip before importing anything that pulls optional extras: the osmosis
+# imports below require the eval-run extra, and the integrations under test
+# require their own extras. importorskip only protects what comes after it.
+pytest.importorskip("agents")
+pytest.importorskip("litellm")
+pytest.importorskip("strands")
+
 from osmosis_ai.rollout.context import RolloutContext
-from osmosis_ai.rollout.controller.listener import LocalhostUvicornServer
+from osmosis_ai.rollout.controller.listener import (
+    LocalhostUvicornServer,
+)
 from osmosis_ai.rollout.controller.proxy_client import (
     EVAL_PROXY_INTEGRATION_MODEL,
     EVAL_PROXY_WIRE_MODEL,
@@ -15,10 +24,6 @@ from osmosis_ai.rollout.controller.proxy_client import (
 
 ROLLOUT_ID = "e" * 32
 MODEL_PATH = "openai/gpt-4.1-mini"
-
-pytest.importorskip("agents")
-pytest.importorskip("litellm")
-pytest.importorskip("strands")
 
 
 @pytest.fixture

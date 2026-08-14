@@ -15,7 +15,24 @@ from httpx import ASGITransport
 from osmosis_ai.rollout.backend.base import ExecutionBackend, ResultCallback
 from osmosis_ai.rollout.server import app as server_app_module
 from osmosis_ai.rollout.server import create_rollout_server
-from osmosis_ai.rollout.types import ExecutionRequest
+from osmosis_ai.rollout.types import ExecutionRequest, ExecutionResult, RolloutStatus
+
+
+@pytest.fixture(autouse=True)
+def _isolate_side_effects(monkeypatch):
+    """Terminal callbacks succeed without a network; archiving is disabled."""
+
+    async def _delivered(*, url, payload, headers):
+        class _Resp:
+            status_code = 200
+
+        return _Resp()
+
+    async def _no_archive(**kwargs):
+        return None
+
+    monkeypatch.setattr(server_app_module, "post_json_with_retry", _delivered)
+    monkeypatch.setattr(server_app_module, "save_trajectory", _no_archive)
 
 
 class StubBackend(ExecutionBackend):
@@ -33,6 +50,7 @@ class StubBackend(ExecutionBackend):
     ) -> None:
         self.executed = True
         self.execute_count += 1
+        await on_workflow_complete(ExecutionResult(status=RolloutStatus.SUCCESS))
 
     def has_capacity(self) -> bool:
         return self.capacity
@@ -239,6 +257,7 @@ class BlockingStubBackend(StubBackend):
         self.executed = True
         self.execute_count += 1
         await self.release.wait()
+        await on_workflow_complete(ExecutionResult(status=RolloutStatus.SUCCESS))
 
 
 async def _post_rollout_with_failing_send(app: Any, body: dict) -> None:
@@ -338,6 +357,27 @@ async def test_active_digest_outlives_ttl_and_completed_digest_expires(
         assert (await client.post("/rollout", json=init_body())).status_code == 202
         await _settle()
         assert backend.execute_count == 2
+
+
+async def test_retry_after_callback_delivery_failure_reexecutes(monkeypatch) -> None:
+    # The task finishes without an exception, but the terminal callback was
+    # never delivered (the controller saw nothing). The digest must be
+    # dropped so the retry re-executes instead of deduping into a 202 that
+    # waits forever.
+    async def _unreachable(*, url, payload, headers):
+        raise RuntimeError("listener unreachable")
+
+    monkeypatch.setattr(server_app_module, "post_json_with_retry", _unreachable)
+    backend = StubBackend()
+    app = create_rollout_server(backend=backend)
+    async with httpx.AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://rollout"
+    ) as client:
+        assert (await client.post("/rollout", json=init_body())).status_code == 202
+        await _settle()
+        assert (await client.post("/rollout", json=init_body())).status_code == 202
+        await _settle()
+    assert backend.execute_count == 2
 
 
 async def test_retry_after_scheduled_task_crash_reexecutes(monkeypatch) -> None:
