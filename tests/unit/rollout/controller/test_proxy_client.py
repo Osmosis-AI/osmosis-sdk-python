@@ -194,6 +194,29 @@ async def test_client_create_session_surfaces_http_errors() -> None:
     assert excinfo.value.status_code == 401
 
 
+async def test_error_contract_holds_for_raise_for_status_sessions() -> None:
+    # A caller-supplied session with raise_for_status=True must not replace
+    # the client's EvalProxyError contract with aiohttp.ClientResponseError.
+    import aiohttp
+
+    app = create_eval_proxy_stub_app()
+    async with LocalhostUvicornServer(app) as server:
+        session = aiohttp.ClientSession(raise_for_status=True)
+        try:
+            client = EvalProxyClient(
+                base_url=server.base_url,
+                auth_token="wrong-token",
+                session=session,
+            )
+            with pytest.raises(EvalProxyError) as excinfo:
+                await client.create_session(
+                    rollout_id=ROLLOUT_ID, model_path=MODEL_PATH
+                )
+        finally:
+            await session.close()
+    assert excinfo.value.status_code == 401
+
+
 @pytest.mark.parametrize("bad_id", ["..", ".", "a/b", "a\\b", "", "a\x00b"])
 async def test_session_methods_reject_non_single_segment_ids(bad_id: str) -> None:
     # quote() leaves dots intact and HTTP stacks normalize dot segments, so

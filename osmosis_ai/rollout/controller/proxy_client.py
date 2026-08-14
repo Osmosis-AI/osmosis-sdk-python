@@ -296,7 +296,11 @@ class EvalProxyClient:
         session = await self._ensure_session()
         headers = {"Authorization": f"Bearer {self._auth_token}"}
         url = f"{self._base_url}{path}"
-        async with session.request(method, url, json=json, headers=headers) as response:
+        # A caller-supplied session may enable raise_for_status; the error
+        # contract here is EvalProxyError, so keep status handling local.
+        async with session.request(
+            method, url, json=json, headers=headers, raise_for_status=False
+        ) as response:
             if not 200 <= response.status < 300:
                 detail = await response.text()
                 raise EvalProxyError(
