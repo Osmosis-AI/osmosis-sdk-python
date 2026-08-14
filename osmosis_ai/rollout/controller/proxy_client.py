@@ -64,6 +64,10 @@ _CREATE_FORBIDDEN_FIELDS = frozenset(
 )
 _DEFAULT_STUB_PLATFORM_TOKEN = "platform-token"
 
+# Bounded wait for the best-effort close after a failed create; the close
+# keeps running in the background if it outlives this window.
+_FAILED_CREATE_CLOSE_TIMEOUT_SEC = 10.0
+
 
 class EvalProxyError(Exception):
     """HTTP or contract failure talking to the eval-proxy.
@@ -171,10 +175,13 @@ class EvalProxyClient:
         closer = asyncio.ensure_future(self.close_session(rollout_id))
         closer.add_done_callback(_consume_best_effort_close)
         try:
-            await asyncio.shield(closer)
+            await asyncio.wait_for(
+                asyncio.shield(closer), _FAILED_CREATE_CLOSE_TIMEOUT_SEC
+            )
         except BaseException:
             # Best effort only: the shielded close keeps running even if this
-            # wait is cancelled again, and close failures are just logged.
+            # wait times out or is cancelled again, and close failures are
+            # just logged.
             return
 
     def _session_from_create_response(
