@@ -336,13 +336,18 @@ def _record_usage(session: dict[str, Any], payload: Mapping[str, Any]) -> None:
             totals[key] = totals.get(key, 0) + value
 
 
-async def _relay_upstream_chat(
+async def _open_upstream_chat(
     *,
     upstream: EvalProxyStubUpstream,
     session: dict[str, Any],
     body: Mapping[str, Any],
-) -> AsyncIterator[str]:
-    """Forward one chat request upstream and relay its SSE stream verbatim.
+) -> tuple[httpx.AsyncClient, httpx.Response]:
+    """Start the upstream request and settle its status before streaming begins.
+
+    The status check has to happen here, not inside the relay generator: once
+    ``StreamingResponse`` has sent 200 and its headers, an exception can only
+    truncate the body, which the client reports as a transport error instead of
+    the provider's actual message.
 
     ``include_usage`` is forced on so metering never depends on the client
     asking for it, matching the production requirement.
@@ -352,23 +357,49 @@ async def _relay_upstream_chat(
     forwarded["stream"] = True
     forwarded["stream_options"] = {"include_usage": True}
     headers = {"Authorization": f"Bearer {upstream.api_key}"}
-    async with httpx.AsyncClient(timeout=upstream.timeout_sec) as client:
-        async with client.stream(
+    client = httpx.AsyncClient(timeout=upstream.timeout_sec)
+    try:
+        request = client.build_request(
             "POST", upstream.chat_url(), json=forwarded, headers=headers
-        ) as response:
-            if response.status_code >= 400:
-                detail = (await response.aread()).decode(errors="replace")[:500]
-                raise HTTPException(
-                    status_code=502,
-                    detail=f"upstream provider returned {response.status_code}: {detail}",
-                )
-            async for line in response.aiter_lines():
-                if line.startswith("data: "):
-                    data = line[len("data: ") :].strip()
-                    if data and data != "[DONE]":
-                        with contextlib.suppress(json.JSONDecodeError, TypeError):
-                            _record_usage(session, json.loads(data))
-                yield f"{line}\n"
+        )
+        response = await client.send(request, stream=True)
+    except httpx.HTTPError as exc:
+        await client.aclose()
+        raise HTTPException(
+            status_code=502, detail=f"upstream provider is unreachable: {exc}"
+        ) from exc
+    except BaseException:
+        await client.aclose()
+        raise
+    if response.status_code >= 400:
+        detail = (await response.aread()).decode(errors="replace")[:500]
+        await response.aclose()
+        await client.aclose()
+        raise HTTPException(
+            status_code=502,
+            detail=f"upstream provider returned {response.status_code}: {detail}",
+        )
+    return client, response
+
+
+async def _relay_upstream_chat(
+    *,
+    client: httpx.AsyncClient,
+    response: httpx.Response,
+    session: dict[str, Any],
+) -> AsyncIterator[str]:
+    """Relay an already-accepted upstream SSE stream verbatim, metering usage."""
+    try:
+        async for line in response.aiter_lines():
+            if line.startswith("data: "):
+                data = line[len("data: ") :].strip()
+                if data and data != "[DONE]":
+                    with contextlib.suppress(json.JSONDecodeError, TypeError):
+                        _record_usage(session, json.loads(data))
+            yield f"{line}\n"
+    finally:
+        await response.aclose()
+        await client.aclose()
 
 
 def create_eval_proxy_stub_app(
@@ -466,8 +497,13 @@ def create_eval_proxy_stub_app(
             )
 
         if upstream is not None:
+            client, upstream_response = await _open_upstream_chat(
+                upstream=upstream, session=session, body=body
+            )
             return StreamingResponse(
-                _relay_upstream_chat(upstream=upstream, session=session, body=body),
+                _relay_upstream_chat(
+                    client=client, response=upstream_response, session=session
+                ),
                 media_type="text/event-stream",
             )
 
