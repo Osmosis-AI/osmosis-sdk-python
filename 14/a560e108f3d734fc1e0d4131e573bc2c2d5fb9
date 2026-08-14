@@ -1,0 +1,50 @@
+tests/unit/eval/local/conftest.py
+  s_26895092d338d1::t_411a1593026b5a 54-55
+osmosis_ai/eval/local/dataset.py
+  s_26895092d338d1::t_7177f3e23c3390 252-260
+tests/unit/eval/local/test_results.py
+  s_26895092d338d1::t_e90fa0f206e692 388-392,398-427
+  s_26895092d338d1::t_76aa898024619d 587-733
+tests/golden/eval_local/metrics/skipped_excluded_from_scored.json
+  s_26895092d338d1::t_f10d93df604c33 2,5-38,47,50-56
+tests/unit/eval/local/test_runner_units.py
+  s_26895092d338d1::t_e7a8bc732ba0e7 381-470
+osmosis_ai/rollout/http_driver.py
+  s_26895092d338d1::t_91b5e147c8dde3 57-60,70-75,85
+osmosis_ai/eval/local/runner.py
+  s_26895092d338d1::t_7a33ba7bf012ac 1267-1268
+  s_26895092d338d1::t_467f9d7da15ed0 547,549,611,615,630-653,719,785-788,791-792,811-813,987,1092,1299-1301,1313-1319,1326-1327,1335,1375
+  s_26895092d338d1::t_7fd43b7d9b9dfd 799-800,802-806,808-810,814,821-827,834
+  s_26895092d338d1::t_585cd31e1aac16 74,324-349
+  s_26895092d338d1::t_2524f133da9676 361-365,369,371-373,382-383
+  s_26895092d338d1::t_6d7f1f7d0580ab 82,100-101,546,1022-1028,1051-1053
+  s_26895092d338d1::t_0459dd0608488e 871,875-877,881-901
+  s_26895092d338d1::t_675b887eaa1822 924,933-936,939-949
+osmosis_ai/eval/local/results.py
+  s_26895092d338d1::t_79e3e9db5dd557 16,52,347-349,351-352,356-357,365
+  s_26895092d338d1::t_07f9afd94d2da2 18,117,132,362-363,422-446,467-469,477,506,508-514,520,543,545-546,550-556,560-563,566,570
+  s_26895092d338d1::t_b4476d7adcff7d 236-239,245,264-267,269,274-276,279-281,284-285
+osmosis_ai/platform/cli/eval_run.py
+  s_26895092d338d1::t_7a33ba7bf012ac 92-98,100-101,206-214,216,268,306-308,316
+tests/unit/rollout/test_http_driver.py
+  s_26895092d338d1::t_e90fa0f206e692 540-542
+tests/unit/eval/local/test_runner_e2e.py
+  s_26895092d338d1::t_411a1593026b5a 464-592
+  s_26895092d338d1::t_082dc0cd0a79e4 13
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "14a560e108f3d734fc1e0d4131e573bc2c2d5fb9",
+  "prompts": {},
+  "sessions": {
+    "s_26895092d338d1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "0877fe01-fd08-4a72-a80e-af1ad8944608",
+        "model": "claude-opus-5"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}
