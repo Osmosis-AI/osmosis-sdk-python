@@ -117,7 +117,7 @@ class ResumeRefusedError(LocalEvalError):
 
     def __init__(self, message: str, *, diffs: Sequence[InputDiff]) -> None:
         super().__init__(message)
-        self.diffs = list(diffs)
+        self.diffs: list[InputDiff] = list(diffs)
 
 
 # --------------------------------------------------------------------------- #
