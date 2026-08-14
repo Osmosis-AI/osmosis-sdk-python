@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -460,3 +461,132 @@ def test_the_e2e_rollout_project_is_isolated_from_the_repo_venv(
     # rollout project needs no virtualenv of its own.
     assert not (rollout_project / ".venv").exists()
     assert os.access(rollout_project / "main.py", os.R_OK)
+
+
+# --------------------------------------------------------------------------- #
+# Process-wide failures must not stamp the queue failed (§9.3)
+# --------------------------------------------------------------------------- #
+
+
+async def test_an_unreachable_proxy_halts_dispatch_and_leaves_work_pending(
+    harness: RunnerHarness,
+) -> None:
+    # The queue says nothing about a dead proxy. Stamping the remaining items
+    # `failed` would make a plain resume skip work that never executed.
+    runner = harness.runner()
+    runner._proxy_base_url = "http://127.0.0.1:1"  # nothing listens here
+    hooks = RecordingHooks()
+    runner._hooks = hooks
+
+    from osmosis_ai.eval.local.runner import LocalEvalError
+
+    with pytest.raises(LocalEvalError, match="preflight failed"):
+        await runner.run()
+    # Preflight fails before any dispatch, so nothing is journaled at all.
+    assert harness.journal_lines() == []
+
+    # With the proxy reachable again, every item is still pending.
+    summary = await harness.runner().run()
+    assert summary.dispatched == 4
+    assert summary.succeeded == 4
+
+
+async def test_a_proxy_failure_after_preflight_halts_rather_than_failing_rows(
+    harness: RunnerHarness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from osmosis_ai.rollout.controller import EvalProxyClient, EvalProxyError
+
+    calls = {"n": 0}
+    real_create = EvalProxyClient.create_session
+
+    async def flaky_create(self: Any, **kwargs: Any) -> Any:
+        calls["n"] += 1
+        # Let preflight and the first work item through, then break.
+        if calls["n"] > 2:
+            raise EvalProxyError("proxy exploded", status_code=503)
+        return await real_create(self, **kwargs)
+
+    monkeypatch.setattr(EvalProxyClient, "create_session", flaky_create)
+    hooks = RecordingHooks()
+    summary = await harness.runner(
+        hooks=hooks, options=LocalEvalOptions(name="run-1", yes=True, max_in_flight=1)
+    ).run()
+
+    assert summary.succeeded == 1
+    # The three items that never ran have no terminal record at all.
+    assert len(harness.journal_lines()) == 1
+    assert summary.failed == 0
+    assert summary.cancelled is True
+    assert any("stopping dispatch" in note for note in hooks.notes)
+
+    monkeypatch.undo()
+    resumed = await harness.runner().run()
+    assert resumed.dispatched == 3
+    assert resumed.succeeded == 4
+
+
+async def test_a_dead_rollout_server_halts_instead_of_waiting_out_deadlines(
+    harness: RunnerHarness,
+) -> None:
+    runner = harness.runner(
+        options=LocalEvalOptions(name="run-1", yes=True, max_in_flight=1)
+    )
+    original_run_item = runner._run_work_item
+    killed = {"done": False}
+
+    async def kill_after_first(item: Any, driver: Any) -> None:
+        if killed["done"]:
+            return await original_run_item(item, driver)
+        result = await original_run_item(item, driver)
+        killed["done"] = True
+        child = runner._child
+        assert child is not None
+        child.kill()
+        return result
+
+    runner._run_work_item = kill_after_first  # type: ignore[method-assign]
+    summary = await runner.run()
+
+    # One item completed; the rest are pending, not failed, and the run did not
+    # sit on a callback that can no longer arrive.
+    assert summary.succeeded == 1
+    assert summary.failed == 0
+    assert len(harness.journal_lines()) == 1
+    logs = (harness.run_dir() / "logs.txt").read_text()
+    assert "halting dispatch" in logs
+
+
+async def test_a_retried_item_is_not_marked_resumed(
+    harness: RunnerHarness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("OSMOSIS_TEST_GRADER_CRASH", "1")
+    selection = select_rows(harness.dataset.path, row_selector=(0,))
+    await harness.runner(selection=selection).run()
+    assert harness.index_rows()[0].get("resumed") is None
+
+    monkeypatch.delenv("OSMOSIS_TEST_GRADER_CRASH")
+    await harness.runner(
+        selection=selection,
+        options=LocalEvalOptions(name="run-1", yes=True, retry_failed=True),
+    ).run()
+    row = harness.index_rows()[0]
+    assert row["status"] == "success"
+    # `resumed` is the platform's carry-forward flag; this result was produced now.
+    assert "resumed" not in row
+
+
+async def test_secret_values_never_reach_logs_txt(
+    harness: RunnerHarness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    secret = "sk-live-supersecretvalue123"
+    monkeypatch.setenv("OSMOSIS_TEST_ECHO_SECRET", "1")
+    hooks = RecordingHooks(secrets={"MY_TOKEN": secret})
+    await harness.runner(
+        hooks=hooks, spec=harness.spec(secret_names=("MY_TOKEN",))
+    ).run()
+    run_dir = harness.run_dir()
+    logs = (run_dir / "logs.txt").read_text()
+    assert secret not in logs
+    assert "[REDACTED]" in logs
+    assert secret not in (run_dir / "manifest.json").read_text()
+    assert secret not in (run_dir / "events.jsonl").read_text()

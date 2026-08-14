@@ -537,7 +537,9 @@ async def test_explicit_cancel_malformed_response_still_returns_cancelled() -> N
         ("nan", 1.0),
         ("1e999", 1.0),
         ("junk", 1.0),
-        ("-5", 0.0),
+        # Negative and zero waits clamp to the floor so a 429 loop cannot spin.
+        ("-5", 0.05),
+        ("0", 0.05),
         ("2.5", 2.5),
     ],
 )

@@ -54,6 +54,10 @@ class _AdmissionProbe(StrEnum):
     INDETERMINATE = "indeterminate"
 
 
+#: Shortest wait the admission loop will honour between 429 retries.
+_RETRY_AFTER_FLOOR_SEC = 0.05
+
+
 class AdmissionUncertainError(RuntimeError):
     """Status recovery could not determine whether POST /rollout was admitted."""
 
@@ -63,7 +67,12 @@ class RolloutProtocolError(RuntimeError):
 
 
 def _retry_after_seconds(response: httpx.Response, default: float = 1.0) -> float:
-    """Parse Retry-After into a finite, non-negative wait; else the default."""
+    """Parse Retry-After into a finite, positive wait; else the default.
+
+    Clamped to a floor rather than honoured exactly at zero: a server that keeps
+    answering ``429`` with ``Retry-After: 0`` would otherwise turn the admission
+    loop into a busy spin against itself.
+    """
     raw = response.headers.get("Retry-After")
     if raw is None:
         return default
@@ -73,7 +82,7 @@ def _retry_after_seconds(response: httpx.Response, default: float = 1.0) -> floa
         return default
     if not math.isfinite(value):
         return default
-    return max(0.0, value)
+    return max(_RETRY_AFTER_FLOOR_SEC, value)
 
 
 def _optional_index(request: RolloutRunRequest, name: str) -> int | None:

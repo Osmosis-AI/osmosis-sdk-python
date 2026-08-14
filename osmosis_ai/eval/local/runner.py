@@ -71,15 +71,15 @@ from osmosis_ai.eval.local.state import (
     utc_now,
     validate_run_name,
 )
+from osmosis_ai.rollout.backend.harbor.diagnostics import REDACTED
 from osmosis_ai.rollout.controller import (
     CallbackListener,
     CallbackStore,
     EvalProxyClient,
-    EvalProxyError,
     TerminalCallbackResult,
 )
 from osmosis_ai.rollout.driver import RolloutOutcome, RolloutRunRequest
-from osmosis_ai.rollout.http_driver import HttpRolloutDriver
+from osmosis_ai.rollout.http_driver import HttpRolloutDriver, RolloutProtocolError
 from osmosis_ai.rollout.types.protocol import GraderStatus
 from osmosis_ai.rollout.types.sample import RolloutStatus
 from osmosis_ai.source_scan import reject_directory_symlinks, source_digest
@@ -97,6 +97,8 @@ _TRAJECTORY_POLL_INTERVAL_SEC = 0.2
 _USAGE_TIMEOUT_SEC = 5.0
 _SNAPSHOT_COALESCE_SEC = 1.0
 _CALLBACK_NETWORK_GRACE_SEC = 60.0
+# Floor for the per-item supervisor deadline when the config sets no timeouts.
+_DEFAULT_ITEM_DEADLINE_SEC = 3600.0
 
 #: Supervisor-owned subprocess variables a config must never set (§8).
 RESERVED_ENV_NAMES: frozenset[str] = frozenset(
@@ -319,6 +321,34 @@ def format_input_diff(diffs: Sequence[InputDiff]) -> str:
 # --------------------------------------------------------------------------- #
 
 
+class SecretRedactor:
+    """Replaces known secret values in text bound for the run log (§7.4).
+
+    Substring replacement rather than dropping the whole line: a redacted line
+    still carries its stack frame or status code, which is the reason the line
+    exists. Short values are ignored -- ``dummy`` and friends are placeholders,
+    and redacting them would blank unrelated text.
+    """
+
+    _MIN_LENGTH = 8
+
+    def __init__(self, values: Sequence[str] = ()) -> None:
+        self._values: list[str] = []
+        self.extend(values)
+
+    def extend(self, values: Sequence[str]) -> None:
+        for value in values:
+            if value and len(value) >= self._MIN_LENGTH and value not in self._values:
+                self._values.append(value)
+        # Longest first, so a value containing another is redacted whole.
+        self._values.sort(key=len, reverse=True)
+
+    def scrub(self, text: str) -> str:
+        for value in self._values:
+            text = text.replace(value, REDACTED)
+        return text
+
+
 class RunLog:
     """Appends download-format lines to the run's combined ``logs.txt`` (§2.4).
 
@@ -328,11 +358,19 @@ class RunLog:
     """
 
     def __init__(
-        self, path: Path, *, echo: Callable[[str], None] | None = None
+        self,
+        path: Path,
+        *,
+        echo: Callable[[str], None] | None = None,
+        redact: Callable[[str], str] | None = None,
     ) -> None:
         self._path = path
         self._echo = echo
+        self._redact = redact
         path.parent.mkdir(parents=True, exist_ok=True)
+        # The log carries rollout-server output, so it gets the same owner-only
+        # mode as the journal even though redaction should keep it clean.
+        path.touch(mode=0o600, exist_ok=True)
         self._handle = path.open("a", encoding="utf-8")
 
     def write(self, level: str, step: str, message: str, **details: Any) -> None:
@@ -341,6 +379,8 @@ class RunLog:
             from osmosis_ai.eval.local.state import canonical_json
 
             line = f"{line} {canonical_json(details)}"
+        if self._redact is not None:
+            line = self._redact(line)
         self._handle.write(line + "\n")
         self._handle.flush()
         if self._echo is not None:
@@ -503,8 +543,10 @@ class LocalEvalRunner:
         self._child: asyncio.subprocess.Process | None = None
         self._child_reader: asyncio.Task[None] | None = None
         self._cancelled = asyncio.Event()
-        self._breaker_reason: str | None = None
+        self._halt_reason: str | None = None
+        self._redactor = SecretRedactor()
         self._snapshot_dirty = asyncio.Event()
+        self._pending_projection: set[WorkKey] = set()
         self._snapshot_task: asyncio.Task[None] | None = None
         self._started_at = utc_now()
         self._started_monotonic = time.monotonic()
@@ -566,9 +608,11 @@ class LocalEvalRunner:
                 lock.clear_child()
 
         manifest = self._open_or_create_run(run_dir, inputs=inputs, run_name=run_name)
+        self._redactor.extend([self._proxy_auth_token])
         self._log = RunLog(
             run_dir / LOGS_FILENAME,
             echo=self._hooks.note if self._options.verbose else None,
+            redact=self._redactor.scrub,
         )
         self._local_run_id = manifest.local_run_id
         self._identity = RunIdentity(
@@ -582,31 +626,31 @@ class LocalEvalRunner:
         self._materializer = Materializer(run_dir)
 
         journal = TerminalJournal(run_dir / JOURNAL_FILENAME)
-        replay = journal.replay()
-        if replay.truncated_bytes:
-            self._write_log(
-                "warning",
-                "resume",
-                "discarded a partial trailing journal record",
-                bytes=replay.truncated_bytes,
-            )
-        journal.open_for_append(replay)
-        self._journal = journal
-        self._latest = replay.latest
-        self._resumed_keys = set(self._latest)
-
-        pending = self._pending_work_items()
-        self._refresh_snapshots()
-        if not pending:
-            self._write_log("info", "resume", "no pending work items; finalizing")
-            return self._finalize(cancelled=False)
-
-        self._hooks.confirm_dispatch(
-            pending=len(pending), model_path=self._spec.model_path
-        )
-        secrets = self._hooks.resolve_secrets(list(self._spec.secret_names))
-
         try:
+            replay = journal.replay()
+            if replay.truncated_bytes:
+                self._write_log(
+                    "warning",
+                    "resume",
+                    "discarded a partial trailing journal record",
+                    bytes=replay.truncated_bytes,
+                )
+            journal.open_for_append(replay)
+            self._journal = journal
+            self._latest = replay.latest
+            self._resumed_keys = set(self._latest)
+
+            pending = self._pending_work_items()
+            self._refresh_snapshots(project_all=True)
+            if not pending:
+                self._write_log("info", "resume", "no pending work items; finalizing")
+                return self._finalize(cancelled=False)
+
+            self._hooks.confirm_dispatch(
+                pending=len(pending), model_path=self._spec.model_path
+            )
+            secrets = self._hooks.resolve_secrets(list(self._spec.secret_names))
+            self._redactor.extend(list(secrets.values()))
             return await self._execute(pending, secrets=secrets, lock=lock)
         finally:
             journal.close()
@@ -672,6 +716,7 @@ class LocalEvalRunner:
     ) -> RunSummary:
         assert self._run_dir is not None
         controller_token = uuid.uuid4().hex
+        self._redactor.extend([controller_token])
         store = CallbackStore(on_terminal_commit=self._commit_terminal)
         self._store = store
         self._seed_store_from_journal(store)
@@ -737,52 +782,56 @@ class LocalEvalRunner:
             await self._proxy.create_session(
                 rollout_id=probe_id, model_path=self._spec.model_path
             )
-        except EvalProxyError as exc:
+        except Exception as exc:
+            # Transport failures reach here too: EvalProxyClient only wraps HTTP
+            # status and decode errors, and an unreachable proxy must still read
+            # as a preflight failure rather than a traceback.
             raise LocalEvalError(
                 f"eval-proxy preflight failed for model "
-                f"{self._spec.model_path!r}: {exc}. Pass --skip-llm-preflight to "
-                "dispatch anyway."
+                f"{self._spec.model_path!r}: {type(exc).__name__}: {exc}. Pass "
+                "--skip-llm-preflight to dispatch anyway."
             ) from exc
         finally:
             with contextlib.suppress(Exception):
                 await self._proxy.close_session(probe_id)
         self._write_log("info", "preflight", "eval-proxy session check passed")
 
-    def _trip_breaker(self, exc: EvalProxyError) -> bool:
-        """Stop new dispatch on a definitive eval-proxy error (§10).
+    def _halt_dispatch(self, reason: str, **details: Any) -> None:
+        """Stop new dispatch without stamping the remaining queue failed (§9.3).
 
-        Deliberately narrow: only auth, model-not-found, and budget are
-        definitive. Generic error clustering waits until real runs justify it.
-        Remaining work items are left pending rather than stamped failed, so a
-        later invocation resumes them once the cause is fixed.
+        A process-wide fault -- proxy auth, a dead rollout server, a network
+        outage -- says nothing about the work items that have not run. Leaving
+        them with no terminal record keeps them pending, so a later invocation
+        resumes them once the cause is fixed. Stamping them ``failed`` would
+        instead make a plain resume skip work that never executed.
         """
-        if exc.status_code not in (401, 402, 403, 404):
-            return False
-        if self._breaker_reason is None:
-            self._breaker_reason = str(exc)
-            self._write_log(
-                "error",
-                "breaker",
-                "pausing dispatch on a definitive eval-proxy error",
-                status_code=exc.status_code,
-            )
-            self._hooks.note(f"eval-proxy rejected the run, stopping dispatch: {exc}")
-        return True
+        if self._halt_reason is not None:
+            return
+        self._halt_reason = reason
+        self._write_log(
+            "error", "dispatch", "halting dispatch", reason=reason, **details
+        )
+        self._hooks.note(f"stopping dispatch: {reason}")
 
     def _seed_store_from_journal(self, store: CallbackStore) -> None:
         """Dedupe needs no callback table: seed finalized ids from replay (§9.3)."""
         for record in self._latest.values():
             store.seed_terminal(record.rollout_id, acknowledgment={"ok": True})
 
-    def _callback_deadline(self) -> float | None:
-        """Supervisor deadline = server timeout + callback/network grace (§10)."""
+    def _callback_deadline(self) -> float:
+        """Supervisor deadline = server timeout + callback/network grace (§10).
+
+        Timeouts are optional in the config, but an unbounded wait is not an
+        option: a lost callback would hang every worker forever with no output.
+        With nothing configured, fall back to a generous floor.
+        """
         server_budget = sum(
             value
             for value in (self._spec.agent_timeout_sec, self._spec.grader_timeout_sec)
             if value is not None
         )
         if server_budget <= 0:
-            return None
+            return _DEFAULT_ITEM_DEADLINE_SEC
         return server_budget + _CALLBACK_NETWORK_GRACE_SEC
 
     async def _resolve_concurrency(
@@ -819,13 +868,37 @@ class LocalEvalRunner:
             with contextlib.suppress(NotImplementedError, ValueError):
                 loop.add_signal_handler(sig, self._request_cancel, workers)
                 installed.append(sig)
+        watchdog = asyncio.create_task(self._watch_child(workers))
         try:
             await asyncio.gather(*workers, return_exceptions=True)
         finally:
+            watchdog.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await watchdog
             for sig in installed:
                 with contextlib.suppress(NotImplementedError, ValueError):
                     loop.remove_signal_handler(sig)
-        return self._cancelled.is_set()
+        return self._cancelled.is_set() or self._halt_reason is not None
+
+    async def _watch_child(self, workers: Sequence[asyncio.Task[None]]) -> None:
+        """Abort in-flight waits when the rollout server dies (§10 deadline).
+
+        Without this, every worker sits on a callback that can no longer arrive
+        until its deadline expires -- minutes of silence per item, and each one
+        then looks like a per-item timeout rather than one dead server.
+        """
+        child = self._child
+        if child is None:
+            return
+        returncode = await child.wait()
+        if self._cancelled.is_set() or self._halt_reason is not None:
+            return
+        self._halt_dispatch(
+            f"the rollout server exited with code {returncode}; see {LOGS_FILENAME}",
+            returncode=returncode,
+        )
+        for worker in workers:
+            worker.cancel()
 
     def _request_cancel(self, workers: Sequence[asyncio.Task[None]]) -> None:
         """First interrupt: stop dispatch and cancel in-flight work (§8).
@@ -848,7 +921,7 @@ class LocalEvalRunner:
     async def _worker(
         self, queue: asyncio.Queue[WorkItem], driver: HttpRolloutDriver
     ) -> None:
-        while not self._cancelled.is_set() and self._breaker_reason is None:
+        while not self._cancelled.is_set() and self._halt_reason is None:
             try:
                 item = queue.get_nowait()
             except asyncio.QueueEmpty:
@@ -857,14 +930,23 @@ class LocalEvalRunner:
                 await self._run_work_item(item, driver)
             except asyncio.CancelledError:
                 raise
-            except EvalProxyError as exc:
-                # A definitive proxy error stops dispatch and leaves the rest of
-                # the queue pending; anything else is this item's own failure.
-                if self._trip_breaker(exc):
-                    return
+            except RolloutProtocolError as exc:
+                # The rollout server actively refused *this* request with a
+                # non-202/429 status, so the failure is attributable to the work
+                # item and gets a terminal record.
                 await self._journal_supervisor_failure(item, exc)
             except Exception as exc:
-                await self._journal_supervisor_failure(item, exc)
+                # Everything else -- proxy errors, transport failures, an
+                # indeterminate admission, a supervisor bug -- is process-wide as
+                # far as this item is concerned. Halt dispatch and leave it
+                # pending rather than durably recording a failure that says
+                # nothing about the row (§9.3).
+                self._halt_dispatch(
+                    f"{type(exc).__name__}: {exc}",
+                    row_index=item.row.row_index,
+                    run_index=item.run_index,
+                )
+                return
 
     async def _run_work_item(self, item: WorkItem, driver: HttpRolloutDriver) -> None:
         rollout_id = uuid.uuid4().hex
@@ -902,7 +984,7 @@ class LocalEvalRunner:
             )
             return
         await self._await_trajectory(rollout_id)
-        self._mark_snapshot_dirty()
+        self._mark_snapshot_dirty(item.key)
         self._report_progress()
         self._forget(rollout_id)
         self._log_outcome(item, rollout_id, outcome)
@@ -937,10 +1019,14 @@ class LocalEvalRunner:
         """
         item = self._dispatch_context.get(result.rollout_id)
         if item is None:
-            logger.warning(
-                "terminal callback for unknown rollout %s", result.rollout_id
+            # Returning here would let the store ack a callback with nothing
+            # journaled, breaking "HTTP 200 on the grader callback means the
+            # result is durable". Raising makes the listener 500 and leaves the
+            # terminal slot open, so the work item simply stays pending.
+            raise LocalEvalError(
+                f"terminal callback for rollout {result.rollout_id} has no "
+                "dispatch context; refusing to acknowledge it"
             )
-            return None
         status, reward, error_type = _classify_terminal(result)
         tokens = await self._session_tokens(result.rollout_id)
         record = TerminalRecord(
@@ -962,6 +1048,9 @@ class LocalEvalRunner:
         assert self._journal is not None
         await self._journal.append(record)
         self._latest[record.key] = record
+        # This result was produced now, so it is no longer a carried-forward one:
+        # `resumed` is the platform's carry-forward flag, not "the run resumed".
+        self._resumed_keys.discard(record.key)
 
     async def _journal_supervisor_failure(
         self, item: WorkItem, exc: BaseException
@@ -1000,7 +1089,7 @@ class LocalEvalRunner:
             )
         )
         self._forget(rollout_id)
-        self._mark_snapshot_dirty()
+        self._mark_snapshot_dirty(item.key)
         self._report_progress()
 
     async def _session_tokens(self, rollout_id: str) -> int | None:
@@ -1175,6 +1264,8 @@ class LocalEvalRunner:
                 raise
             if not raw:
                 return
+            # RunLog redacts every line it writes, so a secret echoed by the
+            # workflow or an HTTP debug log never lands in logs.txt (§7.4).
             self._write_log(
                 "info", "rollout-server", raw.decode(errors="replace").rstrip()
             )
@@ -1205,7 +1296,9 @@ class LocalEvalRunner:
     # Snapshots and finalization
     # ------------------------------------------------------------------ #
 
-    def _mark_snapshot_dirty(self) -> None:
+    def _mark_snapshot_dirty(self, key: WorkKey | None = None) -> None:
+        if key is not None:
+            self._pending_projection.add(key)
         self._snapshot_dirty.set()
 
     async def _snapshot_loop(self) -> None:
@@ -1217,13 +1310,21 @@ class LocalEvalRunner:
                 self._refresh_snapshots()
             await asyncio.sleep(_SNAPSHOT_COALESCE_SEC)
 
-    def _refresh_snapshots(self) -> list[dict[str, Any]]:
+    def _refresh_snapshots(self, *, project_all: bool = False) -> list[dict[str, Any]]:
+        """Rewrite snapshots; copy file projections only for changed work items.
+
+        Snapshots are small and always rewritten whole so partial output stays
+        readable. File copies are not: projecting every attempt on every refresh
+        is quadratic in the row count.
+        """
         assert self._materializer is not None and self._identity is not None
         attempts = select_attempts(
             self._latest,
             trials_dir=self._materializer.trials_dir,
             resumed_keys=self._resumed_keys,
         )
+        project_keys = None if project_all else set(self._pending_projection)
+        self._pending_projection.clear()
         return self._materializer.refresh(
             attempts,
             identity=self._identity,
@@ -1231,6 +1332,7 @@ class LocalEvalRunner:
             sampled_rows=len(self._selection.rows),
             total_dataset_rows=self._selection.total_dataset_rows,
             total_runs=len(self._selection.rows) * max(1, self._spec.n),
+            project_keys=project_keys,
         )
 
     def _report_progress(self) -> None:
@@ -1270,7 +1372,7 @@ class LocalEvalRunner:
             duration_ms=duration_ms,
         )
         self._identity = identity
-        rows = self._refresh_snapshots()
+        rows = self._refresh_snapshots(project_all=True)
         statuses = [record.status for record in self._latest.values()]
         return RunSummary(
             run_dir=run_dir,
@@ -1365,13 +1467,6 @@ def _classify_terminal(
 
 
 def _error_type_for(exc: BaseException) -> str:
-    from osmosis_ai.rollout.http_driver import (
-        AdmissionUncertainError,
-        RolloutProtocolError,
-    )
-
-    if isinstance(exc, AdmissionUncertainError):
-        return "admission_uncertain"
     if isinstance(exc, RolloutProtocolError):
         return "rollout_protocol_error"
     return "supervisor_error"

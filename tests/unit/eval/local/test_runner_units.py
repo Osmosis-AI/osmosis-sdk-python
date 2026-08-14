@@ -378,3 +378,93 @@ def test_explicit_dataset_flows_into_the_fingerprint(tmp_path: Path) -> None:
         rollout_source_digest="b" * 64,
     )
     assert inputs["dataset"]["sha256"] == resolved.sha256
+
+
+# --------------------------------------------------------------------------- #
+# Supervisor deadline and secret redaction
+# --------------------------------------------------------------------------- #
+
+
+def _runner(spec: EvalRunSpec, tmp_path: Path) -> Any:
+    from osmosis_ai.eval.local.dataset import select_rows
+    from osmosis_ai.eval.local.runner import LocalEvalOptions, LocalEvalRunner
+
+    data = tmp_path / "d.jsonl"
+    data.write_text('{"user_prompt": "a", "ground_truth": "1"}\n')
+
+    class _Hooks:
+        def note(self, message: str) -> None: ...
+        def confirm_dispatch(self, *, pending: int, model_path: str) -> None: ...
+        def resolve_secrets(self, names: Any) -> dict[str, str]:
+            return {}
+
+        def progress(self, snapshot: Any) -> None: ...
+
+    return LocalEvalRunner(
+        spec=spec,
+        options=LocalEvalOptions(name="run-1", yes=True),
+        dataset=_dataset(),
+        selection=select_rows(data),
+        rollout_dir=tmp_path,
+        output_root=tmp_path / "evals",
+        proxy_base_url="http://127.0.0.1:1",
+        proxy_auth_token="platform-token-value",
+        hooks=_Hooks(),
+    )
+
+
+def test_configured_timeouts_set_the_supervisor_deadline(tmp_path: Path) -> None:
+    runner = _runner(_spec(agent_timeout_sec=450.0, grader_timeout_sec=150.0), tmp_path)
+    # Server budget plus the callback/network grace (§10).
+    assert runner._callback_deadline() == 450.0 + 150.0 + 60.0
+
+
+def test_an_unconfigured_timeout_still_yields_a_finite_deadline(tmp_path: Path) -> None:
+    # An unbounded wait would hang every worker forever on a lost callback.
+    runner = _runner(_spec(), tmp_path)
+    deadline = runner._callback_deadline()
+    assert deadline is not None
+    assert deadline > 0
+
+
+def test_the_redactor_replaces_secrets_and_keeps_context() -> None:
+    from osmosis_ai.eval.local.runner import SecretRedactor
+
+    redactor = SecretRedactor(["sk-super-secret-value"])
+    scrubbed = redactor.scrub("Traceback: auth failed with sk-super-secret-value here")
+    assert "sk-super-secret-value" not in scrubbed
+    assert "Traceback: auth failed with" in scrubbed
+    assert "[REDACTED]" in scrubbed
+
+
+def test_the_redactor_ignores_short_placeholder_values() -> None:
+    from osmosis_ai.eval.local.runner import SecretRedactor
+
+    # "dummy" and friends are placeholders; redacting them would blank
+    # unrelated text.
+    redactor = SecretRedactor(["dummy", ""])
+    assert redactor.scrub("using dummy credentials") == "using dummy credentials"
+
+
+def test_the_redactor_prefers_the_longest_overlapping_value() -> None:
+    from osmosis_ai.eval.local.runner import SecretRedactor
+
+    redactor = SecretRedactor(["token-abcdef", "token-abcdef-longer"])
+    scrubbed = redactor.scrub("value=token-abcdef-longer")
+    assert scrubbed == "value=[REDACTED]"
+
+
+def test_the_run_log_redacts_and_is_owner_only(tmp_path: Path) -> None:
+    from osmosis_ai.eval.local.runner import RunLog, SecretRedactor
+
+    redactor = SecretRedactor(["sk-live-abcdef123456"])
+    log = RunLog(tmp_path / "logs.txt", redact=redactor.scrub)
+    try:
+        log.write("info", "rollout-server", "boom sk-live-abcdef123456")
+        log.write("info", "dispatch", "detail", token="sk-live-abcdef123456")
+    finally:
+        log.close()
+    text = (tmp_path / "logs.txt").read_text()
+    assert "sk-live-abcdef123456" not in text
+    assert text.count("[REDACTED]") == 2
+    assert (tmp_path / "logs.txt").stat().st_mode & 0o077 == 0

@@ -89,9 +89,16 @@ def _missing_extra_error(exc: ModuleNotFoundError) -> CLIError:
 
 
 def _resolve_output_root(output: str | None, workspace_directory: Path) -> Path:
+    """Absolute output root.
+
+    Resolved, not merely expanded: the runner decides whether to exclude the
+    output tree from the rollout source digest by comparing the two paths, and a
+    relative path would silently fail that check and make the run change its own
+    digest on every invocation (§5).
+    """
     if output is None:
-        return workspace_directory.joinpath(*DEFAULT_OUTPUT_SUBPATH)
-    return parse_cli_path(output, expand_user=True).path
+        return workspace_directory.joinpath(*DEFAULT_OUTPUT_SUBPATH).resolve()
+    return parse_cli_path(output, expand_user=True).path.resolve()
 
 
 def _numeric(value: Any, *, field: str) -> float | None:
@@ -196,8 +203,17 @@ def run(
         commit_sha=config.experiment_commit_sha,
     )
 
+    advanced = config.advanced_config
+    if advanced:
+        # §5: recorded as provenance, one warning for the rest. Local execution
+        # consumes no [advanced] keys today.
+        console.print_warning(
+            "\\[advanced] keys are recorded but not consumed by `osmosis eval run`: "
+            + ", ".join(sorted(advanced))
+        )
+
     output_root = _resolve_output_root(output, workspace_directory)
-    rollout_dir = workspace_directory / "rollouts" / spec.rollout_name
+    rollout_dir = (workspace_directory / "rollouts" / spec.rollout_name).resolve()
 
     try:
         if dataset_file is not None:
@@ -249,7 +265,7 @@ def run(
         proxy_base_url=_resolve_proxy_base_url(eval_proxy_url),
         proxy_auth_token=_platform_bearer(context.credentials),
         hooks=_Hooks(yes=yes, secrets_file=secrets_file, model_path=spec.model_path),
-        provenance=_provenance(workspace_directory, spec),
+        provenance=_provenance(workspace_directory, spec, advanced=advanced),
         config_stem=resolved_config_path.stem,
     )
 
@@ -287,7 +303,9 @@ def _platform_bearer(credentials: Any) -> str:
     return str(token)
 
 
-def _provenance(workspace_directory: Path, spec: Any) -> dict[str, Any]:
+def _provenance(
+    workspace_directory: Path, spec: Any, *, advanced: dict[str, Any] | None = None
+) -> dict[str, Any]:
     """Record what actually executed. Never mutates the workspace (§5)."""
     from osmosis_ai.platform.cli.workspace_repo import summarize_local_git_state
 
@@ -295,6 +313,7 @@ def _provenance(workspace_directory: Path, spec: Any) -> dict[str, Any]:
     provenance: dict[str, Any] = {
         "config_branch": spec.branch,
         "config_commit_sha": spec.commit_sha,
+        "advanced": dict(advanced) if advanced else None,
     }
     if state is not None:
         provenance.update(

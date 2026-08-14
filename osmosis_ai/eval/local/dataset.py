@@ -249,6 +249,15 @@ def normalize_row(
     if user_prompt is not None:
         messages.append({"role": "user", "content": user_prompt})
 
+    if not messages and metadata is None:
+        # A CSV with a metadata header supplies every column for every row, so an
+        # empty cell would otherwise waive the prompt requirement and dispatch a
+        # rollout with no input at all.
+        raise DatasetResolutionError(
+            f"{where}: has no prompt and no metadata; a row needs at least a "
+            f"user_prompt or a non-empty {METADATA_COLUMN!r} object"
+        )
+
     return EvalDatasetRow(
         row_index=row_index,
         source_row_index=source_row_index,

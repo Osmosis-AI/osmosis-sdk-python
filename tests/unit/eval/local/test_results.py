@@ -9,7 +9,6 @@ from typing import Any
 import pytest
 
 from osmosis_ai.eval.local.results import (
-    ArtifactProjectionError,
     IndexContractError,
     Materializer,
     RunIdentity,
@@ -386,14 +385,46 @@ def test_artifact_enumeration_skips_the_reserved_manifest_name(tmp_path: Path) -
     assert found == {"out.txt", "logs/manifest.json"}
 
 
-def test_artifact_enumeration_refuses_symlinks(tmp_path: Path) -> None:
+def test_artifact_enumeration_skips_symlinks_without_failing_the_run(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    # Skipped, not fatal: every terminal result is already durable, so one stray
+    # symlink must not stop the run from finalizing.
     artifacts = tmp_path / "artifacts"
     artifacts.mkdir()
     secret = tmp_path / "id_rsa"
     secret.write_text("PRIVATE")
     (artifacts / "leak").symlink_to(secret)
-    with pytest.raises(ArtifactProjectionError, match="symlink"):
-        safe_artifact_relative_paths(artifacts)
+    (artifacts / "real.txt").write_text("kept")
+    with caplog.at_level("WARNING"):
+        found = safe_artifact_relative_paths(artifacts)
+    assert [str(path) for path in found] == ["real.txt"]
+    assert "symlink" in caplog.text
+
+
+def test_a_symlinked_artifact_is_never_copied_into_the_projection(
+    tmp_path: Path,
+) -> None:
+    trials = tmp_path / "rollout_trials"
+    _write_trajectory(trials, ROLLOUT_A, _atif(ROLLOUT_A))
+    artifacts = trials / ROLLOUT_A / "artifacts"
+    artifacts.mkdir(parents=True, exist_ok=True)
+    secret = tmp_path / "id_rsa"
+    secret.write_text("PRIVATE")
+    (artifacts / "leak").symlink_to(secret)
+
+    latest = {(0, 0): _record(0, 0, rollout_id=ROLLOUT_A)}
+    Materializer(tmp_path).refresh(
+        select_attempts(latest, trials_dir=trials),
+        identity=_identity(),
+        pass_threshold=1.0,
+        sampled_rows=1,
+        total_dataset_rows=1,
+        total_runs=1,
+    )
+    projected = tmp_path / "artifacts" / "row_0_run_0"
+    assert not (projected / "leak").exists()
+    assert "PRIVATE" not in (tmp_path / "index.jsonl").read_text()
 
 
 def test_a_missing_artifacts_dir_yields_nothing(tmp_path: Path) -> None:
@@ -553,3 +584,150 @@ def test_a_cancelled_attempt_is_never_projected_as_success(tmp_path: Path) -> No
     )
     assert rows == []
     assert (tmp_path / "index.jsonl").read_text() == ""
+
+
+# --------------------------------------------------------------------------- #
+# Review fixes: pass-rate denominator, projection pruning, token fallback
+# --------------------------------------------------------------------------- #
+
+
+def test_reward_less_failures_stay_in_the_pass_rate_denominator() -> None:
+    # Excluding them would report pass_rate 1.0 for a run where half the rows
+    # failed -- the metric would hide exactly what the user needs to see.
+    summary = aggregate_metrics(
+        [_row(0, 0, "success", 1.0), _row(1, 0, "failed", None)], pass_threshold=1.0
+    )
+    assert summary["graded"] == 1
+    assert summary["completed_samples"] == 2
+    assert summary["pass_rate"] == 0.5
+
+
+def test_skipped_rows_are_the_only_thing_excluded_from_scored() -> None:
+    summary = aggregate_metrics(
+        [
+            _row(0, 0, "success", 1.0),
+            _row(1, 0, "failed", None),
+            _row(2, 0, "skipped", None),
+        ],
+        pass_threshold=1.0,
+    )
+    assert summary["completed_samples"] == 2
+    assert summary["pass_rate"] == 0.5
+
+
+def test_pass_at_k_counts_a_reward_less_failure_as_a_non_pass() -> None:
+    rows = [
+        _row(0, 0, "success", 1.0),
+        _row(0, 1, "failed", None),
+        _row(1, 0, "failed", None),
+        _row(1, 1, "failed", None),
+    ]
+    summary = aggregate_metrics(rows, pass_threshold=1.0)
+    assert summary["pass_at_k"] == [{"k": 1, "value": 0.25}, {"k": 2, "value": 0.5}]
+
+
+def test_a_retry_without_a_trajectory_clears_the_superseded_projection(
+    tmp_path: Path,
+) -> None:
+    trials = tmp_path / "rollout_trials"
+    _write_trajectory(trials, ROLLOUT_A, _atif(ROLLOUT_A))
+    (trials / ROLLOUT_A / "artifacts").mkdir(parents=True)
+    (trials / ROLLOUT_A / "artifacts" / "out.txt").write_text("attempt A")
+    materializer = Materializer(tmp_path)
+    kwargs: dict[str, Any] = {
+        "identity": _identity(),
+        "pass_threshold": 1.0,
+        "sampled_rows": 1,
+        "total_dataset_rows": 1,
+        "total_runs": 1,
+    }
+    materializer.refresh(
+        select_attempts(
+            {(0, 0): _record(0, 0, rollout_id=ROLLOUT_A)}, trials_dir=trials
+        ),
+        **kwargs,
+    )
+    assert (tmp_path / "trajectories" / "row_0_run_0.json").is_file()
+    assert (tmp_path / "artifacts" / "row_0_run_0" / "out.txt").is_file()
+
+    # Attempt B times out: no trajectory, no artifacts. The stem is per work
+    # item, so A's files must not survive attributed to B's result.
+    retried = _record(0, 0, rollout_id=ROLLOUT_B, status="failed", reward=None)
+    rows = materializer.refresh(
+        select_attempts({(0, 0): retried}, trials_dir=trials), **kwargs
+    )
+    assert "trajectory_filename" not in rows[0]
+    assert not (tmp_path / "trajectories" / "row_0_run_0.json").exists()
+    assert not (tmp_path / "artifacts" / "row_0_run_0").exists()
+
+
+def test_refresh_projects_only_the_requested_work_items(tmp_path: Path) -> None:
+    trials = tmp_path / "rollout_trials"
+    _write_trajectory(trials, ROLLOUT_A, _atif(ROLLOUT_A))
+    _write_trajectory(trials, ROLLOUT_B, _atif(ROLLOUT_B))
+    latest = {
+        (0, 0): _record(0, 0, rollout_id=ROLLOUT_A),
+        (1, 0): _record(1, 0, rollout_id=ROLLOUT_B),
+    }
+    Materializer(tmp_path).refresh(
+        select_attempts(latest, trials_dir=trials),
+        identity=_identity(),
+        pass_threshold=1.0,
+        sampled_rows=2,
+        total_dataset_rows=2,
+        total_runs=2,
+        project_keys=[(1, 0)],
+    )
+    # Both rows reach index.jsonl; only the requested one is copied.
+    assert len((tmp_path / "index.jsonl").read_text().splitlines()) == 2
+    assert not (tmp_path / "trajectories" / "row_0_run_0.json").exists()
+    assert (tmp_path / "trajectories" / "row_1_run_0.json").is_file()
+
+
+def test_tokens_fall_back_to_the_trajectory_when_the_usage_api_gave_nothing(
+    tmp_path: Path,
+) -> None:
+    trials = tmp_path / "rollout_trials"
+    document = _atif(ROLLOUT_A)
+    document["final_metrics"] = {
+        "total_prompt_tokens": 100,
+        "total_completion_tokens": 23,
+    }
+    _write_trajectory(trials, ROLLOUT_A, document)
+    latest = {(0, 0): _record(0, 0, rollout_id=ROLLOUT_A, tokens=None)}
+    rows = Materializer(tmp_path).refresh(
+        select_attempts(latest, trials_dir=trials),
+        identity=_identity(),
+        pass_threshold=1.0,
+        sampled_rows=1,
+        total_dataset_rows=1,
+        total_runs=1,
+    )
+    assert rows[0]["tokens"] == 123
+
+
+def test_the_usage_api_wins_over_the_trajectory_fallback(tmp_path: Path) -> None:
+    trials = tmp_path / "rollout_trials"
+    document = _atif(ROLLOUT_A)
+    document["final_metrics"] = {"total_prompt_tokens": 999}
+    _write_trajectory(trials, ROLLOUT_A, document)
+    latest = {(0, 0): _record(0, 0, rollout_id=ROLLOUT_A, tokens=7)}
+    [attempt] = select_attempts(latest, trials_dir=trials)
+    assert attempt.tokens == 7
+
+
+def test_a_trajectory_without_final_metrics_leaves_tokens_absent(
+    tmp_path: Path,
+) -> None:
+    trials = tmp_path / "rollout_trials"
+    _write_trajectory(trials, ROLLOUT_A, _atif(ROLLOUT_A))
+    latest = {(0, 0): _record(0, 0, rollout_id=ROLLOUT_A, tokens=None)}
+    rows = Materializer(tmp_path).refresh(
+        select_attempts(latest, trials_dir=trials),
+        identity=_identity(),
+        pass_threshold=1.0,
+        sampled_rows=1,
+        total_dataset_rows=1,
+        total_runs=1,
+    )
+    assert "tokens" not in rows[0]

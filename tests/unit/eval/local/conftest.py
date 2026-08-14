@@ -51,6 +51,8 @@ class EchoWorkflow(AgentWorkflow):
     async def run(self, ctx: AgentWorkflowContext) -> AgentWorkflowOutput:
         import asyncio
 
+        if os.environ.get("OSMOSIS_TEST_ECHO_SECRET"):
+            print("workflow saw MY_TOKEN=" + os.environ.get("MY_TOKEN", ""), flush=True)
         delay = float(os.environ.get("OSMOSIS_TEST_WORKFLOW_SLEEP", "0") or 0)
         if delay:
             await asyncio.sleep(delay)
