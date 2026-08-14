@@ -545,7 +545,6 @@ api_key_secret = "OPENAI_API_KEY"
     "harness, destination_env",
     [
         ("cursor-cli", "CURSOR_API_KEY"),
-        ("mini-swe-agent", "MSWEA_API_KEY"),
     ],
 )
 def test_load_benchmark_submit_config_accepts_pinned_harness_secret_name(
@@ -579,7 +578,6 @@ api_key_secret = "OPENAI_API_KEY"
     "harness, destination_env",
     [
         ("cursor-cli", "CURSOR_API_KEY"),
-        ("mini-swe-agent", "MSWEA_API_KEY"),
     ],
 )
 def test_load_benchmark_submit_config_rejects_unpinned_harness_secret_name(
@@ -621,6 +619,11 @@ def test_load_benchmark_submit_config_rejects_harness_destination_env_collision(
     harness: str,
     destination_env: str,
 ) -> None:
+    secret_line = (
+        f'harness_api_key_secret = "{destination_env}"'
+        if harness == "cursor-cli"
+        else ""
+    )
     path = _write_config(
         tmp_path / "benchmark.toml",
         f"""
@@ -629,7 +632,7 @@ benchmark = "DeepSWE"
 
 [[agents]]
 harness = "{harness}"
-harness_api_key_secret = "{destination_env}"
+{secret_line}
 
 [agents.model]
 type = "hosted"
@@ -671,7 +674,7 @@ CURSOR_API_KEY = "literal-for-the-agent"
         load_benchmark_submit_config(path)
 
 
-def test_load_benchmark_submit_config_requires_known_harness_secret(
+def test_load_benchmark_submit_config_accepts_mini_swe_without_harness_secret(
     tmp_path: Path,
 ) -> None:
     path = _write_config(
@@ -690,7 +693,33 @@ lora_model_name = "deep-swe-agent"
 """,
     )
 
-    with pytest.raises(CLIError, match=r"requires harness_api_key_secret"):
+    config = load_benchmark_submit_config(path)
+
+    assert config.required_secrets == []
+    assert config.agents[0].harness_api_key_secret is None
+
+
+def test_load_benchmark_submit_config_rejects_mini_swe_harness_secret(
+    tmp_path: Path,
+) -> None:
+    path = _write_config(
+        tmp_path / "benchmark.toml",
+        """
+[experiment]
+benchmark = "DeepSWE"
+
+[[agents]]
+harness = "mini-swe-agent"
+harness_api_key_secret = "MSWEA_API_KEY"
+
+[agents.model]
+type = "provider"
+model = "openai/gpt-5"
+api_key_secret = "OPENAI_API_KEY"
+""",
+    )
+
+    with pytest.raises(CLIError, match=r"does not use harness_api_key_secret"):
         load_benchmark_submit_config(path)
 
 
