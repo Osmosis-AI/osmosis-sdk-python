@@ -20,8 +20,11 @@ from osmosis_ai.platform.cli.shared_config import (
 _BENCHMARK_CONFIG_LABEL = "benchmark"
 _HARNESS_API_KEY_ENV = {
     "cursor-cli": "CURSOR_API_KEY",
-    "mini-swe-agent": "MSWEA_API_KEY",
 }
+# mini-swe-agent takes no harness secret: the platform injects the agent's
+# model key as MSWEA_API_KEY for provider/endpoint models. Hosted models get no
+# injected model key, so they may set that env var explicitly.
+_MINI_SWE_AGENT_KEY_ENV = "MSWEA_API_KEY"
 _RESERVED_MODEL_API_KEY_SECRET_NAMES = frozenset(
     {
         "DAYTONA_API_KEY",
@@ -239,28 +242,47 @@ def _validate_secret_references(config: BenchmarkSubmitConfig, path: Path) -> No
                     f"of {path}. The platform injects the secret value under "
                     "that name; remove the env var or rename it."
                 )
-        harness_env_name = _HARNESS_API_KEY_ENV.get(agent.harness or "")
-        if harness_env_name and harness_env_name in effective_env:
-            source = _env_source_label(harness_env_name, index, agent.env)
+        required_env_name = _HARNESS_API_KEY_ENV.get(agent.harness or "")
+        if required_env_name and required_env_name in effective_env:
+            source = _env_source_label(required_env_name, index, agent.env)
             raise CLIError(
-                f"'{harness_env_name}' appears in {source} but is managed by "
-                f"agent {index}'s {agent.harness} harness API key secret in "
-                f"{path}. Remove the env var and set harness_api_key_secret "
-                "to a Platform secret record name."
+                f"'{required_env_name}' appears in {source} but is managed by "
+                f"agent {index}'s {agent.harness} harness in {path}. "
+                "Remove the env var."
             )
-        if harness_env_name and agent.harness_api_key_secret is None:
+        if required_env_name and agent.harness_api_key_secret is None:
             raise CLIError(
                 f"Agent {index}'s {agent.harness} harness requires "
                 f"harness_api_key_secret in {path}. Set it to the name of a "
-                f"Platform secret record containing {harness_env_name}."
+                f"Platform secret record containing {required_env_name}."
             )
-        if harness_env_name and agent.harness_api_key_secret != harness_env_name:
+        if required_env_name and agent.harness_api_key_secret != required_env_name:
             raise CLIError(
                 f"Agent {index}'s harness_api_key_secret "
                 f"'{agent.harness_api_key_secret}' in {path} does not match "
                 f"the variable the {agent.harness} harness reads. Store the "
                 f"credential in a Platform secret record named exactly "
-                f"{harness_env_name} and reference that name."
+                f"{required_env_name} and reference that name."
+            )
+        if not required_env_name and agent.harness_api_key_secret is not None:
+            subject = (
+                f"Agent {index}'s {agent.harness} harness"
+                if agent.harness
+                else f"Agent {index}'s official scaffold"
+            )
+            raise CLIError(
+                f"{subject} does not use harness_api_key_secret in {path}. Remove it."
+            )
+        if (
+            agent.harness == "mini-swe-agent"
+            and not isinstance(model, BenchmarkHostedModel)
+            and _MINI_SWE_AGENT_KEY_ENV in effective_env
+        ):
+            source = _env_source_label(_MINI_SWE_AGENT_KEY_ENV, index, agent.env)
+            raise CLIError(
+                f"'{_MINI_SWE_AGENT_KEY_ENV}' appears in {source} but the "
+                f"platform injects agent {index}'s model key under that name "
+                f"for the mini-swe-agent harness in {path}. Remove the env var."
             )
 
 

@@ -30,7 +30,6 @@ task_set = "parity"
 
 [[agents]]                          # required, 1-8 entries
 harness = "mini-swe-agent"
-harness_api_key_secret = "MSWEA_API_KEY"
 
 [agents.model]
 type = "provider"
@@ -59,7 +58,7 @@ LOG_LEVEL = "info"
 |---------|----------|----------------------|
 | `[experiment]` | yes | Only `benchmark`, the benchmark key (`BenchmarkExperimentSection`). |
 | `[tasks]` | no | `categories` and `task_names` are lists of non-blank strings; `task_set` accepts only `"parity"`. Omitting the section selects every task. |
-| `[[agents]]` | yes | An array of tables with 1-8 entries; each has `harness`, `harness_api_key_secret`, `model` (see [Agent models](#agent-models)), and `env` (`BenchmarkAgentSection`). |
+| `[[agents]]` | yes | An array of tables with 1-8 entries; each has `harness`, optional `harness_api_key_secret` (`cursor-cli` only), `model` (see [Agent models](#agent-models)), and `env` (`BenchmarkAgentSection`). |
 | `[execution]` | no | Structure only — known keys are `attempts_per_task`, `max_concurrent_attempts`, `timeout_multiplier`, `max_retries`, `pass_threshold`, `judge_model`, `judge_api_key_secret`; unknown keys rejected, **values forwarded unvalidated**. |
 | `[verifier]` | no | Only `required`, up to 16 secret record names the dataset's verifier reads. Forwarded to the platform as `execution.verifier_secrets`. |
 | `[secrets]` | no | Only `required`, up to 16 names — the only references that may be supplied per run. |
@@ -89,7 +88,7 @@ Three rules exist because the platform injects a referenced secret's value as an
 
 - **Env collisions are rejected.** A literal env var with the same name as a referenced secret would be silently overwritten, so submit errors instead. The check is scoped per agent against the effective env (`[env]` merged with that agent's `[agents.env]`), so one agent's secret name may still be another agent's literal env var.
 - **Some model secret names are reserved.** `api_key_secret` cannot be `DAYTONA_API_KEY`, `DAYTONA_API_URL`, `SKYPILOT_SERVICE_ACCOUNT_TOKEN`, or `SKYPILOT_API_SERVER_ENDPOINT` — the runner removes those before model-key aliasing.
-- **Harness credentials travel a separate channel.** `cursor-cli` reads `CURSOR_API_KEY` and `mini-swe-agent` reads `MSWEA_API_KEY`. A credentialed harness must set `harness_api_key_secret` to a record named *exactly* that variable, and cannot also set that name as a literal env var.
+- **Harness credentials travel a separate channel.** `cursor-cli` reads `CURSOR_API_KEY` and must set `harness_api_key_secret` to a record named *exactly* that variable. Mini SWE-agent rejects `harness_api_key_secret`: for provider and endpoint models, the platform injects the model's `api_key_secret` as `MSWEA_API_KEY`, so that name cannot also be a literal env var; hosted models receive no injected model key and may set `MSWEA_API_KEY` explicitly.
 
 ### SDK vs backend validation
 
