@@ -21,10 +21,10 @@ _BENCHMARK_CONFIG_LABEL = "benchmark"
 _HARNESS_API_KEY_ENV = {
     "cursor-cli": "CURSOR_API_KEY",
 }
-_HARNESS_INJECTED_ENV = {
-    "cursor-cli": "CURSOR_API_KEY",
-    "mini-swe-agent": "MSWEA_API_KEY",
-}
+# mini-swe-agent takes no harness secret: the platform injects the agent's
+# model key as MSWEA_API_KEY for provider/endpoint models. Hosted models get no
+# injected model key, so they may set that env var explicitly.
+_MINI_SWE_AGENT_KEY_ENV = "MSWEA_API_KEY"
 _RESERVED_MODEL_API_KEY_SECRET_NAMES = frozenset(
     {
         "DAYTONA_API_KEY",
@@ -242,12 +242,11 @@ def _validate_secret_references(config: BenchmarkSubmitConfig, path: Path) -> No
                     f"of {path}. The platform injects the secret value under "
                     "that name; remove the env var or rename it."
                 )
-        injected_env_name = _HARNESS_INJECTED_ENV.get(agent.harness or "")
         required_env_name = _HARNESS_API_KEY_ENV.get(agent.harness or "")
-        if injected_env_name and injected_env_name in effective_env:
-            source = _env_source_label(injected_env_name, index, agent.env)
+        if required_env_name and required_env_name in effective_env:
+            source = _env_source_label(required_env_name, index, agent.env)
             raise CLIError(
-                f"'{injected_env_name}' appears in {source} but is managed by "
+                f"'{required_env_name}' appears in {source} but is managed by "
                 f"agent {index}'s {agent.harness} harness in {path}. "
                 "Remove the env var."
             )
@@ -273,6 +272,17 @@ def _validate_secret_references(config: BenchmarkSubmitConfig, path: Path) -> No
             )
             raise CLIError(
                 f"{subject} does not use harness_api_key_secret in {path}. Remove it."
+            )
+        if (
+            agent.harness == "mini-swe-agent"
+            and not isinstance(model, BenchmarkHostedModel)
+            and _MINI_SWE_AGENT_KEY_ENV in effective_env
+        ):
+            source = _env_source_label(_MINI_SWE_AGENT_KEY_ENV, index, agent.env)
+            raise CLIError(
+                f"'{_MINI_SWE_AGENT_KEY_ENV}' appears in {source} but the "
+                f"platform injects agent {index}'s model key under that name "
+                f"for the mini-swe-agent harness in {path}. Remove the env var."
             )
 
 

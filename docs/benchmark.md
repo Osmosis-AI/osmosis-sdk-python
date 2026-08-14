@@ -88,7 +88,7 @@ Three rules exist because the platform injects a referenced secret's value as an
 
 - **Env collisions are rejected.** A literal env var with the same name as a referenced secret would be silently overwritten, so submit errors instead. The check is scoped per agent against the effective env (`[env]` merged with that agent's `[agents.env]`), so one agent's secret name may still be another agent's literal env var.
 - **Some model secret names are reserved.** `api_key_secret` cannot be `DAYTONA_API_KEY`, `DAYTONA_API_URL`, `SKYPILOT_SERVICE_ACCOUNT_TOKEN`, or `SKYPILOT_API_SERVER_ENDPOINT` — the runner removes those before model-key aliasing.
-- **Harness credentials travel a separate channel.** `cursor-cli` reads `CURSOR_API_KEY` and must set `harness_api_key_secret` to a record named *exactly* that variable. Mini SWE-agent reuses the model's `api_key_secret` and rejects `harness_api_key_secret`. Neither harness can also set its destination name as a literal env var.
+- **Harness credentials travel a separate channel.** `cursor-cli` reads `CURSOR_API_KEY` and must set `harness_api_key_secret` to a record named *exactly* that variable. Mini SWE-agent rejects `harness_api_key_secret`: for provider and endpoint models, the platform injects the model's `api_key_secret` as `MSWEA_API_KEY`, so that name cannot also be a literal env var; hosted models receive no injected model key and may set `MSWEA_API_KEY` explicitly.
 
 ### SDK vs backend validation
 
