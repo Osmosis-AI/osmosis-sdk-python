@@ -545,7 +545,6 @@ api_key_secret = "OPENAI_API_KEY"
     "harness, destination_env",
     [
         ("cursor-cli", "CURSOR_API_KEY"),
-        ("mini-swe-agent", "MSWEA_API_KEY"),
     ],
 )
 def test_load_benchmark_submit_config_accepts_pinned_harness_secret_name(
@@ -579,7 +578,6 @@ api_key_secret = "OPENAI_API_KEY"
     "harness, destination_env",
     [
         ("cursor-cli", "CURSOR_API_KEY"),
-        ("mini-swe-agent", "MSWEA_API_KEY"),
     ],
 )
 def test_load_benchmark_submit_config_rejects_unpinned_harness_secret_name(
@@ -613,7 +611,6 @@ api_key_secret = "OPENAI_API_KEY"
     "harness, destination_env",
     [
         ("cursor-cli", "CURSOR_API_KEY"),
-        ("mini-swe-agent", "MSWEA_API_KEY"),
     ],
 )
 def test_load_benchmark_submit_config_rejects_harness_destination_env_collision(
@@ -681,7 +678,7 @@ def test_load_benchmark_submit_config_requires_known_harness_secret(
 benchmark = "DeepSWE"
 
 [[agents]]
-harness = "mini-swe-agent"
+harness = "cursor-cli"
 
 [agents.model]
 type = "hosted"
@@ -692,6 +689,110 @@ lora_model_name = "deep-swe-agent"
 
     with pytest.raises(CLIError, match=r"requires harness_api_key_secret"):
         load_benchmark_submit_config(path)
+
+
+def test_load_benchmark_submit_config_mini_swe_agent_needs_no_harness_secret(
+    tmp_path: Path,
+) -> None:
+    """mini-swe-agent reuses the model key as MSWEA_API_KEY; no separate secret."""
+    path = _write_config(
+        tmp_path / "benchmark.toml",
+        """
+[experiment]
+benchmark = "DeepSWE"
+
+[[agents]]
+harness = "mini-swe-agent"
+
+[agents.model]
+type = "provider"
+model = "openai/gpt-5"
+api_key_secret = "OPENAI_API_KEY"
+""",
+    )
+
+    config = load_benchmark_submit_config(path)
+
+    assert config.required_secrets == ["OPENAI_API_KEY"]
+
+
+def test_load_benchmark_submit_config_rejects_mini_swe_agent_harness_secret(
+    tmp_path: Path,
+) -> None:
+    path = _write_config(
+        tmp_path / "benchmark.toml",
+        """
+[experiment]
+benchmark = "DeepSWE"
+
+[[agents]]
+harness = "mini-swe-agent"
+harness_api_key_secret = "MSWEA_API_KEY"
+
+[agents.model]
+type = "provider"
+model = "openai/gpt-5"
+api_key_secret = "OPENAI_API_KEY"
+""",
+    )
+
+    with pytest.raises(CLIError, match=r"not used by"):
+        load_benchmark_submit_config(path)
+
+
+def test_load_benchmark_submit_config_rejects_mini_swe_agent_key_env_collision(
+    tmp_path: Path,
+) -> None:
+    """Provider/endpoint models get the model key injected as MSWEA_API_KEY."""
+    path = _write_config(
+        tmp_path / "benchmark.toml",
+        """
+[experiment]
+benchmark = "DeepSWE"
+
+[[agents]]
+harness = "mini-swe-agent"
+
+[agents.model]
+type = "provider"
+model = "openai/gpt-5"
+api_key_secret = "OPENAI_API_KEY"
+
+[agents.env]
+MSWEA_API_KEY = "literal-for-the-agent"
+""",
+    )
+
+    with pytest.raises(CLIError, match=r"MSWEA_API_KEY"):
+        load_benchmark_submit_config(path)
+
+
+def test_load_benchmark_submit_config_allows_mini_swe_agent_key_env_for_hosted(
+    tmp_path: Path,
+) -> None:
+    """Hosted models get no injected key, so a literal MSWEA_API_KEY is allowed."""
+    path = _write_config(
+        tmp_path / "benchmark.toml",
+        """
+[experiment]
+benchmark = "DeepSWE"
+
+[[agents]]
+harness = "mini-swe-agent"
+
+[agents.model]
+type = "hosted"
+base_model = "Qwen/Qwen3-8B"
+lora_model_name = "deep-swe-agent"
+
+[agents.env]
+MSWEA_API_KEY = "literal-for-the-agent"
+""",
+    )
+
+    config = load_benchmark_submit_config(path)
+
+    assert config.agents[0].env["MSWEA_API_KEY"] == "literal-for-the-agent"
 
 
 @pytest.mark.parametrize(

@@ -20,8 +20,12 @@ from osmosis_ai.platform.cli.shared_config import (
 _BENCHMARK_CONFIG_LABEL = "benchmark"
 _HARNESS_API_KEY_ENV = {
     "cursor-cli": "CURSOR_API_KEY",
-    "mini-swe-agent": "MSWEA_API_KEY",
 }
+# mini-swe-agent takes no harness secret: the platform injects the agent's
+# model key as MSWEA_API_KEY for provider/endpoint models. A literal
+# MSWEA_API_KEY env var is only allowed on hosted models, where nothing is
+# injected.
+_MINI_SWE_AGENT_KEY_ENV = "MSWEA_API_KEY"
 _RESERVED_MODEL_API_KEY_SECRET_NAMES = frozenset(
     {
         "DAYTONA_API_KEY",
@@ -261,6 +265,27 @@ def _validate_secret_references(config: BenchmarkSubmitConfig, path: Path) -> No
                 f"the variable the {agent.harness} harness reads. Store the "
                 f"credential in a Platform secret record named exactly "
                 f"{harness_env_name} and reference that name."
+            )
+        if harness_env_name is None and agent.harness_api_key_secret is not None:
+            subject = (
+                f'the "{agent.harness}" harness'
+                if agent.harness
+                else "the official scaffold"
+            )
+            raise CLIError(
+                f"Agent {index}'s harness_api_key_secret in {path} is not "
+                f"used by {subject}; remove it."
+            )
+        if (
+            agent.harness == "mini-swe-agent"
+            and not isinstance(model, BenchmarkHostedModel)
+            and _MINI_SWE_AGENT_KEY_ENV in effective_env
+        ):
+            source = _env_source_label(_MINI_SWE_AGENT_KEY_ENV, index, agent.env)
+            raise CLIError(
+                f"'{_MINI_SWE_AGENT_KEY_ENV}' appears in {source} but the "
+                f"platform injects agent {index}'s model key under that name "
+                f"for the mini-swe-agent harness in {path}. Remove the env var."
             )
 
 
