@@ -1,6 +1,0 @@
-{
-  "status": "failure",
-  "rollout_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-  "err_message": "agent exploded",
-  "err_category": "agent_error"
-}

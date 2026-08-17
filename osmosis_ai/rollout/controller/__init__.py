@@ -17,10 +17,9 @@ if TYPE_CHECKING:
         CallbackListener,
         create_callback_app,
     )
-    from osmosis_ai.rollout.controller.proxy_client import (
-        EvalProxyClient,
-        EvalProxyError,
-        EvalProxySession,
+    from osmosis_ai.rollout.controller.llm_bridge import (
+        LiteLLMBridge,
+        create_bridge_router,
     )
     from osmosis_ai.rollout.controller.store import (
         CallbackStore,
@@ -39,17 +38,9 @@ _EXPORTS: dict[str, tuple[str, str]] = {
         "osmosis_ai.rollout.controller.store",
         "DuplicateRegistrationError",
     ),
-    "EvalProxyClient": (
-        "osmosis_ai.rollout.controller.proxy_client",
-        "EvalProxyClient",
-    ),
-    "EvalProxyError": (
-        "osmosis_ai.rollout.controller.proxy_client",
-        "EvalProxyError",
-    ),
-    "EvalProxySession": (
-        "osmosis_ai.rollout.controller.proxy_client",
-        "EvalProxySession",
+    "LiteLLMBridge": (
+        "osmosis_ai.rollout.controller.llm_bridge",
+        "LiteLLMBridge",
     ),
     "TerminalCallbackResult": (
         "osmosis_ai.rollout.controller.store",
@@ -58,6 +49,10 @@ _EXPORTS: dict[str, tuple[str, str]] = {
     "UnknownRolloutIdError": (
         "osmosis_ai.rollout.controller.store",
         "UnknownRolloutIdError",
+    ),
+    "create_bridge_router": (
+        "osmosis_ai.rollout.controller.llm_bridge",
+        "create_bridge_router",
     ),
     "create_callback_app": (
         "osmosis_ai.rollout.controller.listener",
@@ -90,10 +85,9 @@ __all__ = [
     "CallbackListener",
     "CallbackStore",
     "DuplicateRegistrationError",
-    "EvalProxyClient",
-    "EvalProxyError",
-    "EvalProxySession",
+    "LiteLLMBridge",
     "TerminalCallbackResult",
     "UnknownRolloutIdError",
+    "create_bridge_router",
     "create_callback_app",
 ]

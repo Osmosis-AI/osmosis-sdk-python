@@ -1,8 +1,0 @@
-{
-  "status": "success",
-  "rollout_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-  "sample": {
-    "reward": 1.0,
-    "remove_sample": false
-  }
-}

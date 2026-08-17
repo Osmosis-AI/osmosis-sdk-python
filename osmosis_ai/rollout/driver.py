@@ -36,11 +36,7 @@ class RolloutOutcome:
 
 @dataclass
 class RolloutRunRequest:
-    """Inputs for one ``RolloutDriver.run`` call.
-
-    Scheduler identity (row/run indices) belongs in ``extra_fields`` when a
-    caller needs it. This type stays reusable outside local eval.
-    """
+    """Inputs for one ``RolloutDriver.run`` call."""
 
     messages: list[MessageDict]
     label: str | None = None
