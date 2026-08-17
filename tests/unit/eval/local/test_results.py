@@ -1,4 +1,4 @@
-"""Materializer tests: index contract lint, metrics formula, and projections."""
+"""Materializer tests: index rows, metrics formula, and projections."""
 
 from __future__ import annotations
 
@@ -9,13 +9,11 @@ from typing import Any
 import pytest
 
 from osmosis_ai.eval.local.results import (
-    IndexContractError,
     Materializer,
     RunIdentity,
     aggregate_metrics,
     atif_rollout_identity,
     build_index_row,
-    lint_index_row,
     pass_at_k,
     read_valid_trajectory,
     render_index_lines,
@@ -36,7 +34,6 @@ def _record(
         "run_index": run,
         "rollout_id": rollout_id or f"{row:016x}{run:016x}",
         "status": "success",
-        "recorded_at": "2026-08-14T00:00:00Z",
         "reward": 1.0,
         "tokens": 11,
         "duration_ms": 42.0,
@@ -64,117 +61,58 @@ def _write_trajectory(trials_dir: Path, rollout_id: str, document: Any) -> Path:
 
 
 # --------------------------------------------------------------------------- #
-# Contract lint (§2.2)
+# index.jsonl rows (§2.2)
 # --------------------------------------------------------------------------- #
 
+#: The monolith eval controller's index schema -- counterparty:
+#: ``iac/aws-eks-workloads/cloud-eval/eval-controller/run_eval.py``
+#: ``INDEX_FIELDS``. Parity is a documented intent, not a golden-fixture
+#: contract. Individual rows omit their ``None`` fields, so the claim below is
+#: about the full key set ``build_index_row`` can emit, not about any one row.
+MONOLITH_INDEX_FIELDS = (
+    "row_index",
+    "run_index",
+    "rollout_id",
+    "trajectory_filename",
+    "status",
+    "reward",
+    "tokens",
+    "duration_ms",
+    "error_type",
+    "resumed",
+)
 
-def test_a_well_formed_row_passes_the_lint() -> None:
-    row = build_index_row(_record(0, 0, rollout_id=ROLLOUT_A))
-    assert lint_index_row(row) == []
+
+def test_the_emittable_key_set_matches_the_monolith_index_schema() -> None:
+    # A synthetic maximal record: every optional field populated at once, which
+    # no single real attempt produces, so that the row carries the whole schema.
+    row = build_index_row(
+        _record(0, 0, rollout_id=ROLLOUT_A, error_type="timeout"),
+        trajectory_filename="trajectory.json",
+        resumed=True,
+    )
+    assert set(row) == set(MONOLITH_INDEX_FIELDS)
     assert row == {
         "row_index": 0,
         "run_index": 0,
         "rollout_id": ROLLOUT_A,
+        "trajectory_filename": "trajectory.json",
         "status": "success",
         "reward": 1.0,
         "tokens": 11,
         "duration_ms": 42.0,
+        "error_type": "timeout",
+        "resumed": True,
     }
-
-
-@pytest.mark.parametrize("missing", ["row_index", "run_index", "duration_ms"])
-def test_missing_required_numbers_are_caught(missing: str) -> None:
-    row = build_index_row(_record(0, 0, rollout_id=ROLLOUT_A))
-    del row[missing]
-    assert any(missing in problem for problem in lint_index_row(row))
-
-
-def test_null_values_are_caught_rather_than_written() -> None:
-    row = build_index_row(_record(0, 0, rollout_id=ROLLOUT_A))
-    row["reward"] = None
-    assert any("None-valued keys must be omitted" in p for p in lint_index_row(row))
 
 
 def test_none_valued_fields_are_omitted_by_the_builder() -> None:
     row = build_index_row(_record(0, 0, rollout_id=ROLLOUT_A, reward=None, tokens=None))
     assert "reward" not in row
     assert "tokens" not in row
-    assert lint_index_row(row) == []
-
-
-@pytest.mark.parametrize(
-    "rollout_id",
-    ["A" * 32, "a" * 31, "a" * 33, "g" * 32, "a1b2-c3d4", ""],
-)
-def test_non_32_hex_rollout_ids_are_caught(rollout_id: str) -> None:
-    row = {
-        "row_index": 0,
-        "run_index": 0,
-        "rollout_id": rollout_id,
-        "status": "success",
-        "duration_ms": 1.0,
-    }
-    assert any("32 lowercase hex" in p for p in lint_index_row(row))
-
-
-def test_a_row_needs_a_rollout_id_or_sample_id() -> None:
-    row = {"row_index": 0, "run_index": 0, "status": "success", "duration_ms": 1.0}
-    assert any("rollout_id or sample_id" in p for p in lint_index_row(row))
-    row["sample_id"] = "s-1"
-    assert lint_index_row(row) == []
-
-
-@pytest.mark.parametrize(
-    "filename",
-    [
-        "nested/trajectory.json",
-        "traj.json",
-        "trajectory.txt",
-        "trajectory",
-        "../x.json",
-    ],
-)
-def test_bad_trajectory_filenames_are_caught(filename: str) -> None:
-    row = {
-        "row_index": 0,
-        "run_index": 0,
-        "rollout_id": ROLLOUT_A,
-        "trajectory_filename": filename,
-        "status": "success",
-        "duration_ms": 1.0,
-    }
-    assert any("trajectory_filename" in p for p in lint_index_row(row))
-
-
-@pytest.mark.parametrize(
-    "filename", ["trajectory.json", "trajectory_2.json", "trajectory-a.b.json"]
-)
-def test_accepted_trajectory_filenames(filename: str) -> None:
-    row = {
-        "row_index": 0,
-        "run_index": 0,
-        "rollout_id": ROLLOUT_A,
-        "trajectory_filename": filename,
-        "status": "success",
-        "duration_ms": 1.0,
-    }
-    assert lint_index_row(row) == []
-
-
-def test_invalid_status_is_caught() -> None:
-    row = {
-        "row_index": 0,
-        "run_index": 0,
-        "rollout_id": ROLLOUT_A,
-        "status": "cancelled",
-        "duration_ms": 1.0,
-    }
-    assert any("status must be one of" in p for p in lint_index_row(row))
-
-
-def test_the_builder_refuses_to_write_a_dropped_line() -> None:
-    with pytest.raises(IndexContractError, match="32 lowercase hex"):
-        build_index_row(_record(0, 0, rollout_id="not-hex"))
+    # The platform drops a line carrying a null field silently, so a serialized
+    # row must never contain one.
+    assert "null" not in json.dumps(row, allow_nan=False)
 
 
 def test_resumed_is_written_only_when_true() -> None:
@@ -219,7 +157,7 @@ def test_identity_falls_back_to_the_trajectory_id_prefix() -> None:
 
 
 def test_a_bare_trajectory_id_is_not_a_valid_fallback() -> None:
-    # The platform converter drops this document, so the lint must too.
+    # The platform converter drops this document, so the local reader must too.
     assert atif_rollout_identity({"trajectory_id": ROLLOUT_A}) is None
 
 

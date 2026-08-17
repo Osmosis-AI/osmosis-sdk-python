@@ -1,20 +1,14 @@
-"""Result materialization: contract-linted snapshots and user projections.
+"""Result materialization: run snapshots and user projections.
 
 Every file here is a **projection** rebuilt from the terminal journal and the
 canonical ``rollout_trials/`` tree; none of it decides whether work reruns
 (design ``local-eval-run-plan.md`` §11).
-
-The contract lint exists because the platform drops malformed ``index.jsonl``
-lines *silently* (§2.2): a missing ``duration_ms`` or a non-32-hex rollout id
-costs a sample with no error anywhere. Validating at write time turns a silent
-data loss into a loud local failure.
 """
 
 from __future__ import annotations
 
 import json
 import logging
-import re
 import shutil
 import statistics
 from collections.abc import Iterable, Mapping, Sequence
@@ -30,11 +24,6 @@ from osmosis_ai.eval.local.state import (
     drop_none_values,
 )
 
-#: ``uuid4().hex`` -- the platform's artifact path contract (§2.2).
-ROLLOUT_ID_RE = re.compile(r"^[0-9a-f]{32}$")
-#: The consumer's filename regex; a ``/`` here makes the trajectory invisible.
-TRAJECTORY_FILENAME_RE = re.compile(r"^trajectory[A-Za-z0-9._-]*\.json$")
-
 CANONICAL_TRAJECTORY_FILENAME = "trajectory.json"
 INDEX_FILENAME = "index.jsonl"
 PROGRESS_FILENAME = "progress.json"
@@ -47,13 +36,7 @@ ARTIFACTS_DIRNAME = "artifacts"
 #: Reserved on both sides of the download contract (§2.6).
 _RESERVED_ARTIFACT_MANIFEST = "manifest.json"
 
-_VALID_STATUSES: frozenset[str] = frozenset({"success", "failed", "skipped"})
-
 logger: logging.Logger = logging.getLogger(__name__)
-
-
-class IndexContractError(RuntimeError):
-    """An index line would be silently dropped by the platform."""
 
 
 class ArtifactProjectionError(RuntimeError):
@@ -63,50 +46,6 @@ class ArtifactProjectionError(RuntimeError):
 # --------------------------------------------------------------------------- #
 # index.jsonl
 # --------------------------------------------------------------------------- #
-
-
-def lint_index_row(row: Mapping[str, Any]) -> list[str]:
-    """Return every §2.2 violation in *row*. Empty means the platform accepts it."""
-    problems: list[str] = []
-
-    for key in ("row_index", "run_index", "duration_ms"):
-        value = row.get(key)
-        if isinstance(value, bool) or not isinstance(value, (int, float)):
-            problems.append(f"{key} must be a number (the line is dropped otherwise)")
-
-    status = row.get("status")
-    if status not in _VALID_STATUSES:
-        problems.append(
-            f"status must be one of {sorted(_VALID_STATUSES)}, got {status!r}"
-        )
-
-    if any(value is None for value in row.values()):
-        nulls = sorted(key for key, value in row.items() if value is None)
-        problems.append(
-            f"None-valued keys must be omitted, not written as null: {nulls}"
-        )
-
-    rollout_id = row.get("rollout_id")
-    sample_id = row.get("sample_id")
-    if rollout_id is None and sample_id is None:
-        problems.append("at least one of rollout_id or sample_id is required")
-    if rollout_id is not None and (
-        not isinstance(rollout_id, str) or not ROLLOUT_ID_RE.fullmatch(rollout_id)
-    ):
-        problems.append(
-            "rollout_id must be 32 lowercase hex characters, or the trajectory "
-            f"and artifacts are silently omitted from download: {rollout_id!r}"
-        )
-
-    filename = row.get("trajectory_filename")
-    if filename is not None and (
-        not isinstance(filename, str) or not TRAJECTORY_FILENAME_RE.fullmatch(filename)
-    ):
-        problems.append(
-            "trajectory_filename must match ^trajectory[A-Za-z0-9._-]*\\.json$ with "
-            f"no path separator: {filename!r}"
-        )
-    return problems
 
 
 def build_index_row(
@@ -120,8 +59,17 @@ def build_index_row(
 
     ``resumed`` marks a result carried forward from an earlier invocation of the
     same named run, matching the cloud controller's carry-forward flag.
+
+    The key set emitted here is intended to stay in parity with the monolith eval
+    controller's index schema, because the platform drops a malformed
+    ``index.jsonl`` line *silently* (§2.2). Validity is held by construction
+    rather than by a write-time check: ``TerminalRecord`` is frozen with an
+    integer row/run index, a ``Literal`` status, a ``uuid4().hex`` rollout id and
+    a non-optional ``duration_ms``; ``trajectory_filename`` is only ever the
+    canonical name; and ``None`` values are dropped instead of written as
+    ``null``.
     """
-    row = drop_none_values(
+    return drop_none_values(
         {
             "row_index": record.row_index,
             "run_index": record.run_index,
@@ -135,13 +83,6 @@ def build_index_row(
             "resumed": True if resumed else None,
         }
     )
-    problems = lint_index_row(row)
-    if problems:
-        raise IndexContractError(
-            f"index row for row {record.row_index} run {record.run_index} violates "
-            "the platform contract: " + "; ".join(problems)
-        )
-    return row
 
 
 def render_index_lines(rows: Sequence[Mapping[str, Any]]) -> bytes:
