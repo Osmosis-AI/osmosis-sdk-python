@@ -353,6 +353,32 @@ def test_the_missing_extra_hint_names_the_install_command() -> None:
     assert error.details == {"missing_module": "fastapi", "extra": "eval-run"}
 
 
+def _with_pass_threshold(workspace: Path, value: str) -> None:
+    (workspace / "configs" / "eval" / "echo.toml").write_text(
+        EVAL_CONFIG.replace("pass_threshold = 0.5", f"pass_threshold = {value}"),
+        encoding="utf-8",
+    )
+
+
+def test_a_zero_pass_threshold_survives_the_default(
+    workspace: Path, captured_runner: type[_CapturedRunner], console_capture: StringIO
+) -> None:
+    # 0.0 means "every graded row passes"; falling back to 1.0 would silently
+    # apply the strictest threshold instead.
+    _with_pass_threshold(workspace, "0.0")
+    _run(workspace)
+    assert captured_runner.calls[0]["spec"].pass_threshold == 0.0
+
+
+@pytest.mark.parametrize("value", ["nan", "inf"])
+def test_a_non_finite_pass_threshold_is_a_cli_error(
+    workspace: Path, console_capture: StringIO, value: str
+) -> None:
+    _with_pass_threshold(workspace, value)
+    with pytest.raises(CLIError, match=r"evaluation\.pass_threshold must be finite"):
+        _run(workspace)
+
+
 @pytest.mark.parametrize(
     ("field", "value", "match"),
     [

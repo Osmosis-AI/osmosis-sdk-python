@@ -94,11 +94,14 @@ _PORT_ATTEMPTS = 5
 _SERVER_TERM_GRACE_SEC = 5.0
 _TRAJECTORY_GRACE_SEC = 30.0
 _TRAJECTORY_POLL_INTERVAL_SEC = 0.2
-_USAGE_TIMEOUT_SEC = 5.0
 _SNAPSHOT_COALESCE_SEC = 1.0
 _CALLBACK_NETWORK_GRACE_SEC = 60.0
 # Floor for the per-item supervisor deadline when the config sets no timeouts.
 _DEFAULT_ITEM_DEADLINE_SEC = 3600.0
+# Sanity bound on a recorded reward: rewards near the float ceiling overflow
+# ``statistics.fmean`` when the metrics are aggregated, and because the record is
+# durable that leaves the run unresumable until --fresh.
+_MAX_ABS_REWARD = 1e300
 
 #: Supervisor-owned subprocess variables a config must never set (§8).
 RESERVED_ENV_NAMES: frozenset[str] = frozenset(
@@ -156,12 +159,9 @@ class LocalEvalOptions:
     """Runtime-only knobs. All CLI flags -- never a config section (§5)."""
 
     name: str | None = None
-    output: Path | None = None
-    rows: str | None = None
     fresh: bool = False
     retry_failed: bool = False
     max_in_flight: int | None = None
-    yes: bool = False
     rollout_port: int | None = None
     skip_llm_preflight: bool = False
     verbose: bool = False
@@ -585,6 +585,12 @@ class LocalEvalRunner:
     def _source_digest(self) -> str:
         cached = getattr(self, "_source_digest_value", None)
         if cached is None:
+            if self._output_root == self._rollout_dir:
+                raise LocalEvalError(
+                    f"--output must not be the rollout source directory "
+                    f"{self._rollout_dir}: excluding the output tree would then "
+                    "exclude the whole project, freezing the resume fingerprint."
+                )
             exclude = (
                 self._output_root
                 if self._output_root.is_relative_to(self._rollout_dir)
@@ -823,13 +829,15 @@ class LocalEvalRunner:
 
         Timeouts are optional in the config, but an unbounded wait is not an
         option: a lost callback would hang every worker forever with no output.
-        With nothing configured, fall back to a generous floor.
+        A ``None`` phase means "run unbounded", so summing only the phases that
+        are bounded would stamp still-running work ``callback_timeout``. With
+        anything unbounded, fall back to a generous floor.
         """
-        server_budget = sum(
-            value
-            for value in (self._spec.agent_timeout_sec, self._spec.grader_timeout_sec)
-            if value is not None
-        )
+        agent = self._spec.agent_timeout_sec
+        grader = self._spec.grader_timeout_sec
+        if agent is None or grader is None:
+            return _DEFAULT_ITEM_DEADLINE_SEC
+        server_budget = agent + grader
         if server_budget <= 0:
             return _DEFAULT_ITEM_DEADLINE_SEC
         return server_budget + _CALLBACK_NETWORK_GRACE_SEC
@@ -870,7 +878,7 @@ class LocalEvalRunner:
                 installed.append(sig)
         watchdog = asyncio.create_task(self._watch_child(workers))
         try:
-            await asyncio.gather(*workers, return_exceptions=True)
+            results = await asyncio.gather(*workers, return_exceptions=True)
         finally:
             watchdog.cancel()
             with contextlib.suppress(asyncio.CancelledError):
@@ -878,6 +886,17 @@ class LocalEvalRunner:
             for sig in installed:
                 with contextlib.suppress(NotImplementedError, ValueError):
                     loop.remove_signal_handler(sig)
+        for result in results:
+            # Cancellation is how the supervisor stops in-flight work, so only an
+            # unexpected exception means a worker died with items still queued.
+            # Halting records it and marks the run incomplete, instead of
+            # returning a short run that reads as a clean one.
+            if isinstance(result, BaseException) and not isinstance(
+                result, asyncio.CancelledError
+            ):
+                self._halt_dispatch(
+                    f"a worker failed: {type(result).__name__}: {result}"
+                )
         return self._cancelled.is_set() or self._halt_reason is not None
 
     async def _watch_child(self, workers: Sequence[asyncio.Task[None]]) -> None:
@@ -930,17 +949,22 @@ class LocalEvalRunner:
                 await self._run_work_item(item, driver)
             except asyncio.CancelledError:
                 raise
-            except RolloutProtocolError as exc:
-                # The rollout server actively refused *this* request with a
-                # non-202/429 status, so the failure is attributable to the work
-                # item and gets a terminal record.
-                await self._journal_supervisor_failure(item, exc)
             except Exception as exc:
-                # Everything else -- proxy errors, transport failures, an
-                # indeterminate admission, a supervisor bug -- is process-wide as
-                # far as this item is concerned. Halt dispatch and leave it
-                # pending rather than durably recording a failure that says
-                # nothing about the row (§9.3).
+                if (
+                    isinstance(exc, RolloutProtocolError)
+                    and 400 <= exc.status_code < 500
+                ):
+                    # The rollout server actively refused *this* request, so the
+                    # failure is attributable to the work item and gets a
+                    # terminal record.
+                    await self._journal_supervisor_failure(item, exc)
+                    continue
+                # Everything else -- a 5xx from a restarting server, proxy
+                # errors, transport failures, an indeterminate admission, a
+                # supervisor bug -- is process-wide as far as this item is
+                # concerned. Halt dispatch and leave it pending rather than
+                # durably recording a failure that says nothing about the row
+                # (§9.3).
                 self._halt_dispatch(
                     f"{type(exc).__name__}: {exc}",
                     row_index=item.row.row_index,
@@ -1028,7 +1052,6 @@ class LocalEvalRunner:
                 "dispatch context; refusing to acknowledge it"
             )
         status, reward, error_type = _classify_terminal(result)
-        tokens = await self._session_tokens(result.rollout_id)
         record = TerminalRecord(
             row_index=item.row.row_index,
             run_index=item.run_index,
@@ -1037,7 +1060,6 @@ class LocalEvalRunner:
             recorded_at=utc_now(),
             source_row_index=item.row.source_row_index,
             reward=reward,
-            tokens=tokens,
             duration_ms=self._elapsed_ms(result.rollout_id),
             error_type=error_type,
         )
@@ -1064,7 +1086,10 @@ class LocalEvalRunner:
             ),
             uuid.uuid4().hex,
         )
-        if self._latest.get(item.key) is not None:
+        existing = self._latest.get(item.key)
+        # Only *this* attempt's own terminal record makes the failure redundant.
+        # A record from an earlier attempt is what --retry-failed is replacing.
+        if existing is not None and existing.rollout_id == rollout_id:
             self._forget(rollout_id)
             return
         self._write_log(
@@ -1091,30 +1116,6 @@ class LocalEvalRunner:
         self._forget(rollout_id)
         self._mark_snapshot_dirty(item.key)
         self._report_progress()
-
-    async def _session_tokens(self, rollout_id: str) -> int | None:
-        """Token count from the proxy session's usage API (§7.2).
-
-        Best-effort and bounded: this sits on the callback acknowledgement path,
-        so a slow or failing proxy costs the token field, never durability.
-        """
-        if self._proxy is None:
-            return None
-        try:
-            usage = await asyncio.wait_for(
-                self._proxy.get_usage(rollout_id), timeout=_USAGE_TIMEOUT_SEC
-            )
-        except Exception as exc:
-            logger.debug("usage lookup failed for %s: %s", rollout_id, exc)
-            return None
-        total = usage.get("total_tokens")
-        if isinstance(total, int) and not isinstance(total, bool):
-            return total
-        prompt = usage.get("prompt_tokens")
-        completion = usage.get("completion_tokens")
-        if isinstance(prompt, int) and isinstance(completion, int):
-            return prompt + completion
-        return None
 
     def _elapsed_ms(self, rollout_id: str) -> float:
         started = self._dispatch_started.get(rollout_id)
@@ -1454,12 +1455,16 @@ def _classify_terminal(
     if grader is None:
         return "failed", None, "missing_grader_callback"
     sample = grader.sample
+    reward = sample.reward if sample is not None else None
+    if reward is not None and abs(reward) > _MAX_ABS_REWARD:
+        return "failed", None, "reward_out_of_range"
+    # A crashed grader is a failure even when it asked to drop the sample:
+    # "skipped" would leave the row out of the scored denominator entirely.
+    if grader.status is not GraderStatus.SUCCESS:
+        return "failed", reward, grader.err_category or "grader_failed"
     if sample is not None and sample.remove_sample:
         # ``remove_sample`` is the workflow saying "do not score this row".
         return "skipped", None, None
-    reward = sample.reward if sample is not None else None
-    if grader.status is not GraderStatus.SUCCESS:
-        return "failed", reward, grader.err_category or "grader_failed"
     completion = result.completion
     if completion is not None and completion.status is not RolloutStatus.SUCCESS:
         return "failed", reward, completion.err_category or "workflow_failed"

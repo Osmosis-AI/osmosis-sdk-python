@@ -72,15 +72,6 @@ async def test_the_stub_completion_is_graded_and_rewarded(
     assert rewards == {1.0}
 
 
-async def test_tokens_come_from_the_proxy_usage_api(harness: RunnerHarness) -> None:
-    await harness.runner().run()
-    # The stub meters 2 tokens per session.
-    assert {row["tokens"] for row in harness.index_rows()} == {2}
-    assert harness.run_dir().joinpath("metrics.json").is_file()
-    metrics = json.loads((harness.run_dir() / "metrics.json").read_text())
-    assert metrics["summary"]["tokens_used"] == 8
-
-
 async def test_trajectories_and_projections_are_written(harness: RunnerHarness) -> None:
     await harness.runner().run()
     run_dir = harness.run_dir()
@@ -184,7 +175,7 @@ async def test_a_partial_journal_reruns_only_the_missing_items(
     hooks = RecordingHooks()
     summary = await harness.runner(
         hooks=hooks,
-        options=LocalEvalOptions(name="run-1", yes=True),
+        options=LocalEvalOptions(name="run-1"),
         selection=select_rows(harness.dataset.path, row_selector=(0, 1)),
     ).run()
     assert summary.dispatched == 0
@@ -220,7 +211,7 @@ async def test_fresh_archives_the_previous_results_under_the_same_name(
     summary = await harness.runner(
         hooks=hooks,
         spec=harness.spec(model_path="openai/gpt-4o"),
-        options=LocalEvalOptions(name="run-1", yes=True, fresh=True),
+        options=LocalEvalOptions(name="run-1", fresh=True),
     ).run()
 
     assert summary.dispatched == 4
@@ -245,7 +236,7 @@ async def test_retry_failed_reruns_failures_with_a_fresh_rollout_id(
     monkeypatch.delenv("OSMOSIS_TEST_GRADER_CRASH")
     second = await harness.runner(
         selection=selection,
-        options=LocalEvalOptions(name="run-1", yes=True, retry_failed=True),
+        options=LocalEvalOptions(name="run-1", retry_failed=True),
     ).run()
     assert second.succeeded == 1
     row = harness.index_rows()[0]
@@ -359,7 +350,7 @@ async def test_batch_size_bounds_in_flight_work(harness: RunnerHarness) -> None:
 async def test_max_in_flight_overrides_batch_size(harness: RunnerHarness) -> None:
     summary = await harness.runner(
         spec=harness.spec(batch_size=1),
-        options=LocalEvalOptions(name="run-1", yes=True, max_in_flight=4),
+        options=LocalEvalOptions(name="run-1", max_in_flight=4),
     ).run()
     assert summary.dispatched == 4
 
@@ -430,7 +421,7 @@ async def test_the_rollout_server_child_does_not_outlive_the_run(
 async def test_an_unnamed_run_gets_a_generated_directory(
     harness: RunnerHarness,
 ) -> None:
-    summary = await harness.runner(options=LocalEvalOptions(yes=True)).run()
+    summary = await harness.runner(options=LocalEvalOptions()).run()
     assert summary.run_name.startswith("echo-eval-")
     assert summary.run_dir.name == summary.run_name
     assert (summary.run_dir / "index.jsonl").is_file()
@@ -509,7 +500,7 @@ async def test_a_proxy_failure_after_preflight_halts_rather_than_failing_rows(
     monkeypatch.setattr(EvalProxyClient, "create_session", flaky_create)
     hooks = RecordingHooks()
     summary = await harness.runner(
-        hooks=hooks, options=LocalEvalOptions(name="run-1", yes=True, max_in_flight=1)
+        hooks=hooks, options=LocalEvalOptions(name="run-1", max_in_flight=1)
     ).run()
 
     assert summary.succeeded == 1
@@ -528,9 +519,7 @@ async def test_a_proxy_failure_after_preflight_halts_rather_than_failing_rows(
 async def test_a_dead_rollout_server_halts_instead_of_waiting_out_deadlines(
     harness: RunnerHarness,
 ) -> None:
-    runner = harness.runner(
-        options=LocalEvalOptions(name="run-1", yes=True, max_in_flight=1)
-    )
+    runner = harness.runner(options=LocalEvalOptions(name="run-1", max_in_flight=1))
     original_run_item = runner._run_work_item
     killed = {"done": False}
 
@@ -556,6 +545,71 @@ async def test_a_dead_rollout_server_halts_instead_of_waiting_out_deadlines(
     assert "halting dispatch" in logs
 
 
+def _refuse_admission(monkeypatch: pytest.MonkeyPatch, status_code: int) -> None:
+    """Refuse every admission the way a POST /rollout *status_code* would."""
+    from osmosis_ai.rollout.http_driver import HttpRolloutDriver, RolloutProtocolError
+
+    async def refused(self: Any, init: Any) -> None:
+        raise RolloutProtocolError(
+            f"POST /rollout returned {status_code}; only 202 and 429 are accepted",
+            status_code=status_code,
+        )
+
+    monkeypatch.setattr(HttpRolloutDriver, "_admit", refused)
+
+
+async def test_a_5xx_admission_halts_instead_of_failing_the_rows(
+    harness: RunnerHarness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A misbehaving or restarting server says nothing about the rows it refused,
+    # so they must stay pending rather than earn a durable failed record.
+    _refuse_admission(monkeypatch, 503)
+    hooks = RecordingHooks()
+    summary = await harness.runner(hooks=hooks).run()
+
+    assert summary.failed == 0
+    assert harness.journal_lines() == []
+    assert summary.cancelled is True
+    assert any("stopping dispatch" in note for note in hooks.notes)
+
+    monkeypatch.undo()
+    resumed = await harness.runner().run()
+    assert resumed.succeeded == 4
+
+
+async def test_a_4xx_admission_is_a_terminal_row_failure(
+    harness: RunnerHarness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The server refused *these* requests, so each one is attributable.
+    _refuse_admission(monkeypatch, 422)
+    summary = await harness.runner().run()
+
+    assert summary.failed == 4
+    assert summary.cancelled is False
+    assert {row["error_type"] for row in harness.index_rows()} == {
+        "rollout_protocol_error"
+    }
+
+
+async def test_a_crashed_worker_is_surfaced_instead_of_a_silent_short_run(
+    harness: RunnerHarness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from osmosis_ai.eval.local.runner import LocalEvalRunner
+
+    async def exploding_journal(self: Any, item: Any, exc: BaseException) -> None:
+        raise OSError("journal write failed")
+
+    _refuse_admission(monkeypatch, 422)
+    monkeypatch.setattr(
+        LocalEvalRunner, "_journal_supervisor_failure", exploding_journal
+    )
+    summary = await harness.runner().run()
+
+    assert harness.journal_lines() == []
+    assert summary.cancelled is True
+    assert "a worker failed: OSError" in (harness.run_dir() / "logs.txt").read_text()
+
+
 async def test_a_retried_item_is_not_marked_resumed(
     harness: RunnerHarness, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -567,7 +621,7 @@ async def test_a_retried_item_is_not_marked_resumed(
     monkeypatch.delenv("OSMOSIS_TEST_GRADER_CRASH")
     await harness.runner(
         selection=selection,
-        options=LocalEvalOptions(name="run-1", yes=True, retry_failed=True),
+        options=LocalEvalOptions(name="run-1", retry_failed=True),
     ).run()
     row = harness.index_rows()[0]
     assert row["status"] == "success"

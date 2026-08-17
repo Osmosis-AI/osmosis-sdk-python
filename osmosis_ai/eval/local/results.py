@@ -427,11 +427,10 @@ class SelectedAttempt:
 
 
 def atif_total_tokens(document: Mapping[str, Any]) -> int | None:
-    """Token total from an ATIF document's ``final_metrics`` (§7.2 fallback).
+    """Token total from an ATIF document's ``final_metrics`` (§7.2).
 
-    Used when the eval-proxy usage API gave nothing: its path is explicitly not
-    frozen, and a run whose tokens all read zero is worse than one that reads
-    them out of the trajectory the platform already trusts.
+    The trajectory is where a local run reads its tokens: totals the platform
+    already trusts, out of a file that is written anyway.
     """
     metrics = document.get("final_metrics")
     if not isinstance(metrics, Mapping):

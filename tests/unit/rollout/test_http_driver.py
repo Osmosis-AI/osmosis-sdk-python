@@ -386,9 +386,12 @@ async def test_post_200_is_protocol_error_without_looping() -> None:
         raise AssertionError(request.url.path)
 
     driver, _proxy = _driver(store, handler)
-    with pytest.raises(RolloutProtocolError, match="200"):
+    with pytest.raises(RolloutProtocolError, match="200") as excinfo:
         await driver.run(_request())
     assert posts == 1
+    # The supervisor needs the status to tell a refusal of this request apart
+    # from a server that is simply broken.
+    assert excinfo.value.status_code == 200
 
 
 async def test_status_url_encodes_rollout_id() -> None:

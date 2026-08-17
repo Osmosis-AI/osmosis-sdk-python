@@ -63,7 +63,15 @@ class AdmissionUncertainError(RuntimeError):
 
 
 class RolloutProtocolError(RuntimeError):
-    """The rollout server returned a response outside the v0.3 admission contract."""
+    """The rollout server returned a response outside the v0.3 admission contract.
+
+    ``status_code`` is part of the contract: a caller has to tell a refusal of
+    *this* request apart from a server that is simply broken.
+    """
+
+    def __init__(self, message: str, *, status_code: int) -> None:
+        super().__init__(message)
+        self.status_code: int = status_code
 
 
 def _retry_after_seconds(response: httpx.Response, default: float = 1.0) -> float:
@@ -237,7 +245,8 @@ class HttpRolloutDriver(RolloutDriver):
                 continue
             raise RolloutProtocolError(
                 f"POST /rollout returned {response.status_code}; "
-                "only 202 and 429 are accepted"
+                "only 202 and 429 are accepted",
+                status_code=response.status_code,
             )
 
     async def _cancel_remotely_if_cancelled_locally(self, rollout_id: str) -> None:

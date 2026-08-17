@@ -71,7 +71,7 @@ async def main() -> int:
             grader_timeout_sec=30.0,
             batch_size=1,
         ),
-        options=LocalEvalOptions(name="run-1", yes=True, max_in_flight=1),
+        options=LocalEvalOptions(name="run-1", max_in_flight=1),
         dataset=resolve_explicit_dataset_file(dataset_file),
         selection=select_rows(dataset_file),
         rollout_dir=Path(rollout_dir),

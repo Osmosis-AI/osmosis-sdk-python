@@ -684,7 +684,7 @@ def test_refresh_projects_only_the_requested_work_items(tmp_path: Path) -> None:
     assert (tmp_path / "trajectories" / "row_1_run_0.json").is_file()
 
 
-def test_tokens_fall_back_to_the_trajectory_when_the_usage_api_gave_nothing(
+def test_tokens_come_from_the_trajectorys_final_metrics(
     tmp_path: Path,
 ) -> None:
     trials = tmp_path / "rollout_trials"
@@ -704,16 +704,6 @@ def test_tokens_fall_back_to_the_trajectory_when_the_usage_api_gave_nothing(
         total_runs=1,
     )
     assert rows[0]["tokens"] == 123
-
-
-def test_the_usage_api_wins_over_the_trajectory_fallback(tmp_path: Path) -> None:
-    trials = tmp_path / "rollout_trials"
-    document = _atif(ROLLOUT_A)
-    document["final_metrics"] = {"total_prompt_tokens": 999}
-    _write_trajectory(trials, ROLLOUT_A, document)
-    latest = {(0, 0): _record(0, 0, rollout_id=ROLLOUT_A, tokens=7)}
-    [attempt] = select_attempts(latest, trials_dir=trials)
-    assert attempt.tokens == 7
 
 
 def test_a_trajectory_without_final_metrics_leaves_tokens_absent(

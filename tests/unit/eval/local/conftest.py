@@ -185,7 +185,7 @@ class RunnerHarness:
     ) -> LocalEvalRunner:
         return LocalEvalRunner(
             spec=spec or self.spec(),
-            options=options or LocalEvalOptions(name="run-1", yes=True),
+            options=options or LocalEvalOptions(name="run-1"),
             dataset=self.dataset,
             selection=selection or self.selection,
             rollout_dir=self.rollout_dir,

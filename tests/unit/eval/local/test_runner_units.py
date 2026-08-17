@@ -18,6 +18,7 @@ from osmosis_ai.eval.local.runner import (
     RESERVED_ENV_NAMES,
     EvalRunSpec,
     LocalEvalError,
+    _classify_terminal,
     build_run_inputs,
     build_subprocess_env,
     compute_source_digest,
@@ -32,6 +33,8 @@ from osmosis_ai.eval.local.state import (
     diff_inputs,
     digest_of,
 )
+from osmosis_ai.rollout.controller import TerminalCallbackResult
+from osmosis_ai.rollout.types import GraderCompleteRequest, GraderStatus, RolloutSample
 
 
 def _spec(**overrides: Any) -> EvalRunSpec:
@@ -385,7 +388,9 @@ def test_explicit_dataset_flows_into_the_fingerprint(tmp_path: Path) -> None:
 # --------------------------------------------------------------------------- #
 
 
-def _runner(spec: EvalRunSpec, tmp_path: Path) -> Any:
+def _runner(
+    spec: EvalRunSpec, tmp_path: Path, *, output_root: Path | None = None
+) -> Any:
     from osmosis_ai.eval.local.dataset import select_rows
     from osmosis_ai.eval.local.runner import LocalEvalOptions, LocalEvalRunner
 
@@ -402,11 +407,11 @@ def _runner(spec: EvalRunSpec, tmp_path: Path) -> Any:
 
     return LocalEvalRunner(
         spec=spec,
-        options=LocalEvalOptions(name="run-1", yes=True),
+        options=LocalEvalOptions(name="run-1"),
         dataset=_dataset(),
         selection=select_rows(data),
         rollout_dir=tmp_path,
-        output_root=tmp_path / "evals",
+        output_root=output_root or tmp_path / "evals",
         proxy_base_url="http://127.0.0.1:1",
         proxy_auth_token="platform-token-value",
         hooks=_Hooks(),
@@ -425,6 +430,32 @@ def test_an_unconfigured_timeout_still_yields_a_finite_deadline(tmp_path: Path) 
     deadline = runner._callback_deadline()
     assert deadline is not None
     assert deadline > 0
+
+
+@pytest.mark.parametrize(
+    ("agent", "grader"),
+    [(None, 30.0), (30.0, None)],
+)
+def test_an_unbounded_phase_keeps_the_default_deadline(
+    tmp_path: Path, agent: float | None, grader: float | None
+) -> None:
+    # ``None`` means "run unbounded", so bounding the item to the phase that is
+    # configured would stamp still-running work `callback_timeout` -- a durable
+    # failed record that a plain resume then skips.
+    from osmosis_ai.eval.local.runner import _DEFAULT_ITEM_DEADLINE_SEC
+
+    runner = _runner(
+        _spec(agent_timeout_sec=agent, grader_timeout_sec=grader), tmp_path
+    )
+    assert runner._callback_deadline() == _DEFAULT_ITEM_DEADLINE_SEC
+
+
+def test_an_output_root_equal_to_the_rollout_dir_is_refused(tmp_path: Path) -> None:
+    # Excluding the output tree would exclude the whole project, freezing the
+    # digest that resume compares against.
+    runner = _runner(_spec(), tmp_path, output_root=tmp_path)
+    with pytest.raises(LocalEvalError, match="rollout source directory"):
+        runner._source_digest()
 
 
 def test_the_redactor_replaces_secrets_and_keeps_context() -> None:
@@ -452,6 +483,84 @@ def test_the_redactor_prefers_the_longest_overlapping_value() -> None:
     redactor = SecretRedactor(["token-abcdef", "token-abcdef-longer"])
     scrubbed = redactor.scrub("value=token-abcdef-longer")
     assert scrubbed == "value=[REDACTED]"
+
+
+# --------------------------------------------------------------------------- #
+# Terminal classification and per-item journalling
+# --------------------------------------------------------------------------- #
+
+
+def _terminal(
+    *,
+    status: GraderStatus = GraderStatus.SUCCESS,
+    reward: float | None = 1.0,
+    remove_sample: bool = False,
+) -> TerminalCallbackResult:
+    return TerminalCallbackResult(
+        rollout_id="f" * 32,
+        source="grader",
+        grader=GraderCompleteRequest(
+            status=status,
+            rollout_id="f" * 32,
+            sample=RolloutSample(
+                messages=[{"role": "assistant", "content": "ok"}],
+                reward=reward,
+                remove_sample=remove_sample,
+            ),
+        ),
+    )
+
+
+def test_a_crashed_grader_that_removed_the_sample_is_a_failure() -> None:
+    # "skipped" would drop the row from the scored denominator, so a run whose
+    # graders all crashed would report a clean pass rate and exit 0.
+    assert _classify_terminal(
+        _terminal(status=GraderStatus.FAILURE, reward=None, remove_sample=True)
+    ) == ("failed", None, "grader_failed")
+
+
+def test_remove_sample_from_a_successful_grader_is_still_skipped() -> None:
+    assert _classify_terminal(_terminal(remove_sample=True)) == ("skipped", None, None)
+
+
+def test_an_out_of_range_reward_fails_the_row_rather_than_being_recorded() -> None:
+    # Recording it would overflow the mean on every later snapshot refresh, and
+    # the record is durable -- the run would stay unresumable until --fresh.
+    assert _classify_terminal(_terminal(reward=1e308)) == (
+        "failed",
+        None,
+        "reward_out_of_range",
+    )
+
+
+async def test_a_retried_failure_writes_its_own_terminal_record(tmp_path: Path) -> None:
+    from osmosis_ai.eval.local.runner import WorkItem
+    from osmosis_ai.eval.local.state import TerminalJournal, TerminalRecord, utc_now
+
+    runner = _runner(_spec(), tmp_path)
+    journal = TerminalJournal(tmp_path / "events.jsonl")
+    journal.open_for_append(journal.replay())
+    runner._journal = journal
+    item = WorkItem(row=runner._selection.rows[0], run_index=0)
+    runner._latest[item.key] = TerminalRecord(
+        row_index=item.row.row_index,
+        run_index=0,
+        rollout_id="a" * 32,
+        status="failed",
+        recorded_at=utc_now(),
+        error_type="stale",
+    )
+    runner._dispatch_context["b" * 32] = item
+    try:
+        await runner._journal_supervisor_failure(item, RuntimeError("boom"))
+    finally:
+        journal.close()
+
+    # Keeping the earlier attempt's record would leave --retry-failed reporting
+    # a stale error with nothing in the journal about the attempt that just ran.
+    record = runner._latest[item.key]
+    assert record.rollout_id == "b" * 32
+    assert (record.status, record.error_type) == ("failed", "supervisor_error")
 
 
 def test_the_run_log_redacts_and_is_owner_only(tmp_path: Path) -> None:

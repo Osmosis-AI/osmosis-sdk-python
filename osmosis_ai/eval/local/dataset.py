@@ -505,9 +505,9 @@ def resolve_platform_dataset(
 ) -> ResolvedDataset:
     """Resolve a platform dataset name through the cache, downloading on a miss.
 
-    A verified cache entry is also the offline fallback: when the platform is
-    unreachable we would rather run against bytes we can prove are the ones we
-    cached than fail a resumable run.
+    The cache only ever serves bytes the platform has just confirmed the version
+    of: there is no offline mode, so an unreachable platform is an error rather
+    than a run pinned to whatever happened to be on disk.
     """
 
     def _note(message: str) -> None:
@@ -519,17 +519,10 @@ def resolve_platform_dataset(
     except DatasetResolutionError:
         raise
     except Exception as exc:
-        stale = _any_cached_entry(cache, dataset_name)
-        if stale is None:
-            raise DatasetResolutionError(
-                f"could not resolve dataset {dataset_name!r} from the platform "
-                f"({exc}); pass --dataset-file to run against a local file"
-            ) from exc
-        _note(
-            f"platform unreachable ({exc}); using the verified cached copy of "
-            f"{dataset_name!r}"
-        )
-        return _resolved_from_cache(stale)
+        raise DatasetResolutionError(
+            f"could not resolve dataset {dataset_name!r} from the platform "
+            f"({exc}); pass --dataset-file to run against a local file"
+        ) from exc
 
     cached = cache.lookup(description.dataset_id, expected_version=description.version)
     if cached is not None:
@@ -554,22 +547,6 @@ def resolve_platform_dataset(
     finally:
         staging.unlink(missing_ok=True)
     return _resolved_from_cache(stored, source="download")
-
-
-def _any_cached_entry(cache: DatasetCache, dataset_name: str) -> CachedDataset | None:
-    """Find a verified cache entry when the platform cannot confirm a version."""
-    for dataset_id in _cached_dataset_ids(cache):
-        entry = cache.lookup(dataset_id, expected_version=None)
-        if entry is not None and dataset_name in (entry.dataset_name, entry.dataset_id):
-            return entry
-    return None
-
-
-def _cached_dataset_ids(cache: DatasetCache) -> list[str]:
-    directory = cache.directory_for("probe").parent
-    if not directory.is_dir():
-        return []
-    return sorted(child.name for child in directory.iterdir() if child.is_dir())
 
 
 def _resolved_from_cache(

@@ -8,6 +8,7 @@ display, and the result envelope. Scheduling and durable state live in
 
 from __future__ import annotations
 
+import math
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -106,6 +107,8 @@ def _numeric(value: Any, *, field: str) -> float | None:
         return None
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise CLIError(f"evaluation.{field} must be a number, got {value!r}")
+    if not math.isfinite(value):
+        raise CLIError(f"evaluation.{field} must be finite, got {value!r}")
     return float(value)
 
 
@@ -180,6 +183,9 @@ def run(
         console.print_warning(warning)
 
     evaluation = config.evaluation_config
+    # ``or 1.0`` would turn a configured 0.0 -- "every graded row passes" -- into
+    # the default, so the fallback has to test for absence, not falsiness.
+    pass_threshold = _numeric(evaluation.get("pass_threshold"), field="pass_threshold")
     spec = EvalRunSpec(
         rollout_name=config.experiment_rollout,
         entrypoint=config.experiment_entrypoint,
@@ -187,10 +193,7 @@ def run(
         dataset_name=config.experiment_dataset,
         n=_integer(evaluation.get("n"), field="n") or 1,
         batch_size=_integer(evaluation.get("batch_size"), field="batch_size"),
-        pass_threshold=_numeric(
-            evaluation.get("pass_threshold"), field="pass_threshold"
-        )
-        or 1.0,
+        pass_threshold=1.0 if pass_threshold is None else pass_threshold,
         agent_timeout_sec=_numeric(
             evaluation.get("agent_workflow_timeout_s"), field="agent_workflow_timeout_s"
         ),
@@ -248,12 +251,9 @@ def run(
         spec=spec,
         options=LocalEvalOptions(
             name=name,
-            output=output_root,
-            rows=rows,
             fresh=fresh,
             retry_failed=retry_failed,
             max_in_flight=max_in_flight,
-            yes=yes,
             rollout_port=rollout_port,
             skip_llm_preflight=skip_llm_preflight,
             verbose=verbose,

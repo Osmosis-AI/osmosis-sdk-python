@@ -366,18 +366,16 @@ def test_a_corrupted_cache_entry_is_not_a_hit(tmp_path: Path) -> None:
     assert sha256_of_file(again.path) == again.sha256
 
 
-def test_an_unreachable_platform_falls_back_to_a_verified_cache(tmp_path: Path) -> None:
+def test_an_unreachable_platform_never_serves_the_cache(tmp_path: Path) -> None:
+    # There is no offline mode: a cached copy the platform cannot confirm the
+    # version of would pin the manifest to bytes a resume can never re-verify.
     cache = DatasetCache(tmp_path / "cache", git_identity="github.com/acme/repo")
     fetcher = FakeFetcher(rows=PROMPT_ROWS)
-    first = resolve_platform_dataset("multiply", cache=cache, fetcher=fetcher)
+    resolve_platform_dataset("multiply", cache=cache, fetcher=fetcher)
 
     fetcher.describe_error = RuntimeError("connection refused")
-    notes: list[str] = []
-    fallback = resolve_platform_dataset(
-        "multiply", cache=cache, fetcher=fetcher, on_event=notes.append
-    )
-    assert fallback.sha256 == first.sha256
-    assert any("platform unreachable" in note for note in notes)
+    with pytest.raises(DatasetResolutionError, match="--dataset-file"):
+        resolve_platform_dataset("multiply", cache=cache, fetcher=fetcher)
 
 
 def test_an_unreachable_platform_with_no_cache_asks_for_dataset_file(
