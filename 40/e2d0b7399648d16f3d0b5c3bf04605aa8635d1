@@ -1,0 +1,44 @@
+osmosis_ai/rollout/controller/llm_bridge.py
+  s_00c3865caf2bbb::t_c2aa3b6a4a76d3 321
+  s_00c3865caf2bbb::t_a5268fd3603a62 1,3-13,18,20,22,24,27-37,41,43-46,49-63,65,68-78,80-107,109-111,113,115-121,123-125,127-153,155-164,166-281,283-287,289-320,322-339,341-367
+  s_00c3865caf2bbb::t_f000cd9d22b3c8 288,340
+osmosis_ai/rollout/controller/__init__.py
+  s_00c3865caf2bbb::t_335a548da2e75f 20-22
+  s_00c3865caf2bbb::t_a530e5a84a3146 53-56
+  s_00c3865caf2bbb::t_772be421bbe87c 88,91
+  s_00c3865caf2bbb::t_01e45de1111d3f 41-43
+osmosis_ai/rollout/driver.py
+  s_00c3865caf2bbb::t_bfc74cd5e2add9 39
+osmosis_ai/rollout/controller/listener.py
+  s_00c3865caf2bbb::t_30bdf6123b5738 3-10,34-37,66,84,146-155,223-224,227-232,246-253
+tests/unit/rollout/test_http_driver.py
+  s_00c3865caf2bbb::t_a56de97dc05dcc 12,14,24-25,27-29,31-33,66-67,72,81-82,90,101,113-115,131-133,137-138,143-144,149,153,177,187-188,195,198-199,204-205,215-216,222,235,246,255,285,300
+tests/unit/rollout/controller/test_listener.py
+  s_00c3865caf2bbb::t_08e3e2e4d16ddb 235-238
+  s_00c3865caf2bbb::t_bd896d1b9aecaf 198
+  s_00c3865caf2bbb::t_f4cec9cc2bed05 183-192
+  s_00c3865caf2bbb::t_93ff81dc1acfbb 22-26
+  s_00c3865caf2bbb::t_32b0473150f705 55,75,94,107,155,196,214,224,250,279,300
+tests/unit/rollout/controller/test_llm_bridge.py
+  s_00c3865caf2bbb::t_f000cd9d22b3c8 268,277,286,294
+  s_00c3865caf2bbb::t_dc32b08314a317 210-211,213
+  s_00c3865caf2bbb::t_6f166afd0dca51 1,9,12-15,18-19,22-23,26-27,30-31,34-52,55-81,84-85,88,90-94,97-98,101-102,105-106,109-117,120-179,182-190,193-201,204-209,212,214-217,220-228,230-267,269-276,278-280,283-285,287-289,291-293,295-300
+osmosis_ai/rollout/http_driver.py
+  s_00c3865caf2bbb::t_5dd326f7614048 3-8,65-66,75-76,100,102,114-116,126-129
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "40e2d0b7399648d16f3d0b5c3bf04605aa8635d1",
+  "prompts": {},
+  "sessions": {
+    "s_00c3865caf2bbb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "00de36f5-6bb1-45b7-828d-f57951616464",
+        "model": "claude-fable-5"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}
