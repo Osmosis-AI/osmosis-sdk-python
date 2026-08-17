@@ -1,0 +1,300 @@
+"""Tests for the in-process LiteLLM bridge."""
+
+from __future__ import annotations
+
+from typing import Any
+
+import httpx
+import pytest
+from fastapi import FastAPI
+from httpx import ASGITransport
+
+from osmosis_ai.rollout.controller import llm_bridge
+from osmosis_ai.rollout.controller.llm_bridge import (
+    LiteLLMBridge,
+    create_bridge_router,
+)
+
+ROLLOUT_ID = "a" * 32
+BRIDGE_TOKEN = "bridge-secret"
+
+
+class AuthenticationError(Exception):
+    pass
+
+
+class RateLimitError(Exception):
+    pass
+
+
+class InternalServerError(Exception):
+    pass
+
+
+def _response(
+    content: str = "hello",
+    *,
+    total_tokens: int = 5,
+    tool_calls: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    message: dict[str, Any] = {"role": "assistant", "content": content}
+    if tool_calls is not None:
+        message["tool_calls"] = tool_calls
+    return {
+        "id": "chatcmpl-test",
+        "created": 1700000000,
+        "choices": [{"index": 0, "message": message, "finish_reason": "stop"}],
+        "usage": {
+            "prompt_tokens": 3,
+            "completion_tokens": 2,
+            "total_tokens": total_tokens,
+        },
+    }
+
+
+class _FakeLiteLLM:
+    """Duck-typed litellm module: records calls, returns or raises."""
+
+    def __init__(
+        self,
+        *,
+        response: dict[str, Any] | None = None,
+        completion_error: Exception | None = None,
+        provider_error: Exception | None = None,
+    ) -> None:
+        self.suppress_debug_info = False
+        self._response = response if response is not None else _response()
+        self._completion_error = completion_error
+        self._provider_error = provider_error
+        self.completion_kwargs: list[dict[str, Any]] = []
+        self.provider_calls: list[dict[str, Any]] = []
+
+    def get_llm_provider(self, *, model: str, api_base: str | None = None) -> None:
+        self.provider_calls.append({"model": model, "api_base": api_base})
+        if self._provider_error is not None:
+            raise self._provider_error
+
+    async def acompletion(self, **kwargs: Any) -> dict[str, Any]:
+        self.completion_kwargs.append(kwargs)
+        if self._completion_error is not None:
+            raise self._completion_error
+        return self._response
+
+
+def _install(monkeypatch: pytest.MonkeyPatch, fake: _FakeLiteLLM) -> None:
+    monkeypatch.setattr(llm_bridge, "_get_litellm", lambda: fake)
+
+
+def _client(bridge: LiteLLMBridge) -> httpx.AsyncClient:
+    app = FastAPI()
+    app.include_router(create_bridge_router(bridge, auth_token=BRIDGE_TOKEN))
+    return httpx.AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://127.0.0.1",
+    )
+
+
+def _url(rollout_id: str = ROLLOUT_ID) -> str:
+    return f"/v1/rollouts/{rollout_id}/chat/completions"
+
+
+def _auth(token: str = BRIDGE_TOKEN) -> dict[str, str]:
+    return {"Authorization": f"Bearer {token}"}
+
+
+def _body(**extra: Any) -> dict[str, Any]:
+    return {"messages": [{"role": "user", "content": "hi"}], **extra}
+
+
+async def test_missing_or_wrong_bearer_is_rejected(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install(monkeypatch, _FakeLiteLLM())
+    async with _client(LiteLLMBridge(model="openai/gpt-test")) as client:
+        assert (await client.post(_url(), json=_body())).status_code == 401
+        assert (
+            await client.post(_url(), json=_body(), headers=_auth("wrong"))
+        ).status_code == 401
+
+
+async def test_non_stream_returns_openai_payload_and_accounts_tokens(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = _FakeLiteLLM()
+    _install(monkeypatch, fake)
+    bridge = LiteLLMBridge(model="openai/gpt-test")
+    async with _client(bridge) as client:
+        resp = await client.post(_url(), json=_body(), headers=_auth())
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["object"] == "chat.completion"
+    assert payload["choices"][0]["message"]["content"] == "hello"
+    assert payload["choices"][0]["finish_reason"] == "stop"
+    assert payload["usage"]["total_tokens"] == 5
+    assert bridge.collect_tokens(ROLLOUT_ID) == 5
+    # collect_tokens pops: a second read reports "never served".
+    assert bridge.collect_tokens(ROLLOUT_ID) is None
+
+
+async def test_tokens_accumulate_across_calls_per_rollout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = _FakeLiteLLM()
+    _install(monkeypatch, fake)
+    bridge = LiteLLMBridge(model="openai/gpt-test")
+    async with _client(bridge) as client:
+        await client.post(_url(), json=_body(), headers=_auth())
+        await client.post(_url(), json=_body(), headers=_auth())
+    assert bridge.collect_tokens(ROLLOUT_ID) == 10
+    assert bridge.collect_tokens("b" * 32) is None
+
+
+async def test_stream_serves_single_chunk_sse(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install(monkeypatch, _FakeLiteLLM())
+    bridge = LiteLLMBridge(model="openai/gpt-test")
+    async with _client(bridge) as client:
+        resp = await client.post(_url(), json=_body(stream=True), headers=_auth())
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("text/event-stream")
+    text = resp.text
+    assert ": ping" in text
+    assert '"object":"chat.completion.chunk"' in text
+    assert '"content":"hello"' in text
+    assert '"finish_reason":"stop"' in text
+    assert '"total_tokens":5' in text
+    assert text.rstrip().endswith("data: [DONE]")
+
+
+async def test_stream_error_emits_error_event_then_done(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install(monkeypatch, _FakeLiteLLM(completion_error=InternalServerError("boom")))
+    bridge = LiteLLMBridge(model="openai/gpt-test")
+    async with _client(bridge) as client:
+        resp = await client.post(_url(), json=_body(stream=True), headers=_auth())
+    assert resp.status_code == 200
+    assert "event: error" in resp.text
+    assert resp.text.rstrip().endswith("data: [DONE]")
+
+
+async def test_non_stream_error_returns_502(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install(monkeypatch, _FakeLiteLLM(completion_error=InternalServerError("boom")))
+    bridge = LiteLLMBridge(model="openai/gpt-test")
+    async with _client(bridge) as client:
+        resp = await client.post(_url(), json=_body(), headers=_auth())
+    assert resp.status_code == 502
+    assert bridge.collect_tokens(ROLLOUT_ID) is None
+
+
+async def test_empty_choices_fail_loudly(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install(monkeypatch, _FakeLiteLLM(response={"id": "x", "choices": []}))
+    bridge = LiteLLMBridge(model="openai/gpt-test")
+    async with _client(bridge) as client:
+        resp = await client.post(_url(), json=_body(), headers=_auth())
+    assert resp.status_code == 502
+    assert "no choices" in resp.json()["detail"]
+
+
+async def test_invalid_rollout_id_and_body_are_rejected(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install(monkeypatch, _FakeLiteLLM())
+    bridge = LiteLLMBridge(model="openai/gpt-test")
+    async with _client(bridge) as client:
+        # %5C decodes to a backslash: it routes as one segment but is not a
+        # portable single path component, so the handler rejects it.
+        nested = await client.post(
+            "/v1/rollouts/a%5Cb/chat/completions", json=_body(), headers=_auth()
+        )
+        assert nested.status_code == 422
+        bad_body = await client.post(_url(), json=["not", "a", "dict"], headers=_auth())
+        assert bad_body.status_code == 400
+
+
+async def test_request_fields_are_filtered_and_credentials_injected(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = _FakeLiteLLM()
+    _install(monkeypatch, fake)
+    bridge = LiteLLMBridge(
+        model="anthropic/claude-test",
+        api_key="provider-key",
+        api_base="http://127.0.0.1:9/v1",
+    )
+    async with _client(bridge) as client:
+        await client.post(
+            _url(),
+            json=_body(
+                model="whatever-the-client-said",
+                temperature=0.5,
+                max_tokens=32,
+                stream_options={"include_usage": True},
+                unknown_field="dropped",
+            ),
+            headers=_auth(),
+        )
+    (kwargs,) = fake.completion_kwargs
+    assert kwargs["model"] == "anthropic/claude-test"
+    assert kwargs["api_key"] == "provider-key"
+    assert kwargs["base_url"] == "http://127.0.0.1:9/v1"
+    assert kwargs["temperature"] == 0.5
+    assert kwargs["max_tokens"] == 32
+    assert kwargs["drop_params"] is True
+    assert "stream_options" not in kwargs
+    assert "unknown_field" not in kwargs
+    assert "stream" not in kwargs
+
+
+async def test_tool_calls_survive_both_shapes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tool_calls = [
+        {
+            "id": "call_1",
+            "type": "function",
+            "function": {"name": "f", "arguments": "{}"},
+        }
+    ]
+    _install(monkeypatch, _FakeLiteLLM(response=_response(tool_calls=tool_calls)))
+    bridge = LiteLLMBridge(model="openai/gpt-test")
+    async with _client(bridge) as client:
+        plain = await client.post(_url(), json=_body(), headers=_auth())
+        streamed = await client.post(_url(), json=_body(stream=True), headers=_auth())
+    assert plain.json()["choices"][0]["message"]["tool_calls"] == tool_calls
+    # The stream delta shape adds the per-item index OpenAI clients expect.
+    assert '"tool_calls":[{"index":0,' in streamed.text
+
+
+async def test_preflight_rejects_unknown_model_format(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install(monkeypatch, _FakeLiteLLM(provider_error=ValueError("unknown provider")))
+    bridge = LiteLLMBridge(model="not-a-provider-model")
+    with pytest.raises(RuntimeError, match="Invalid LiteLLM model format"):
+        await bridge.preflight_check()
+
+
+async def test_preflight_raises_on_fatal_and_tolerates_rate_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install(monkeypatch, _FakeLiteLLM(completion_error=AuthenticationError("bad key")))
+    bridge = LiteLLMBridge(model="openai/gpt-test")
+    with pytest.raises(AuthenticationError):
+        await bridge.preflight_check()
+
+    _install(monkeypatch, _FakeLiteLLM(completion_error=RateLimitError("slow down")))
+    await bridge.preflight_check()
+
+    _install(monkeypatch, _FakeLiteLLM(completion_error=InternalServerError("flaky")))
+    await bridge.preflight_check()
+
+
+async def test_bridge_router_requires_non_empty_token() -> None:
+    with pytest.raises(ValueError, match="non-empty"):
+        create_bridge_router(LiteLLMBridge(model="openai/gpt-test"), auth_token="  ")

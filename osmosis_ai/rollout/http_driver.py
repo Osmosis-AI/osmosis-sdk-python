@@ -1,9 +1,11 @@
 """Concrete ``RolloutDriver`` over the v0.3 HTTP + callback protocol.
 
-Owns admission (202 / 429 / status recovery), the callback rendezvous, and
-the best-effort ``/rollout/cancel`` teardown that follows a callback timeout
-or task cancellation. Persistent dispatch/running state and user-requested
-cancellation terminal semantics belong to a supervisor, not this driver.
+Owns admission (202 / 429), the callback rendezvous, and the best-effort
+``/rollout/cancel`` teardown that follows a callback timeout or task
+cancellation. A transport error on ``POST /rollout`` fails the item; the
+supervisor retries it on its next invocation. Persistent dispatch/running
+state and user-requested cancellation terminal semantics belong to a
+supervisor, not this driver.
 """
 
 from __future__ import annotations
@@ -13,16 +15,9 @@ import logging
 import math
 from collections.abc import Callable
 from contextlib import suppress
-from enum import StrEnum
-from urllib.parse import quote
 
 import httpx
-from pydantic import ValidationError
 
-from osmosis_ai.rollout.controller.proxy_client import (
-    EvalProxyClient,
-    EvalProxySession,
-)
 from osmosis_ai.rollout.controller.store import CallbackStore, TerminalCallbackResult
 from osmosis_ai.rollout.driver import RolloutDriver, RolloutOutcome, RolloutRunRequest
 from osmosis_ai.rollout.types import (
@@ -30,7 +25,6 @@ from osmosis_ai.rollout.types import (
     GraderStatus,
     RolloutInitRequest,
     RolloutStatus,
-    RolloutStatusResponse,
 )
 
 logger: logging.Logger = logging.getLogger(__name__)
@@ -41,16 +35,6 @@ logger: logging.Logger = logging.getLogger(__name__)
 # backpressure wait is uninterruptible.
 _RETRY_AFTER_FLOOR_SEC = 0.05
 _MAX_RETRY_AFTER_SEC = 60.0
-
-
-class _AdmissionProbe(StrEnum):
-    ADMITTED = "admitted"
-    UNKNOWN = "unknown"
-    INDETERMINATE = "indeterminate"
-
-
-class AdmissionUncertainError(RuntimeError):
-    """Status recovery could not determine whether POST /rollout was admitted."""
 
 
 class RolloutProtocolError(RuntimeError):
@@ -79,19 +63,6 @@ def _retry_after_seconds(response: httpx.Response, default: float = 1.0) -> floa
     return min(max(_RETRY_AFTER_FLOOR_SEC, value), _MAX_RETRY_AFTER_SEC)
 
 
-def _optional_index(request: RolloutRunRequest, name: str) -> int | None:
-    if not request.extra_fields:
-        return None
-    value = request.extra_fields.get(name)
-    if isinstance(value, int) and not isinstance(value, bool):
-        return value
-    return None
-
-
-def _status_path(rollout_id: str) -> str:
-    return f"/rollout/{quote(rollout_id, safe='')}/status"
-
-
 class HttpRolloutDriver(RolloutDriver):
     """POST /rollout driver with in-memory callback rendezvous."""
 
@@ -102,26 +73,22 @@ class HttpRolloutDriver(RolloutDriver):
         callback_store: CallbackStore,
         completion_url_for: Callable[[str], str],
         grader_url_for: Callable[[str], str],
-        proxy_client: EvalProxyClient,
+        chat_completions_url_for: Callable[[str], str],
+        chat_api_key: str | None,
         controller_api_key: str,
-        model_path: str,
         http_client: httpx.AsyncClient | None = None,
         callback_timeout_sec: float | None = None,
-        status_poll_attempts: int = 5,
-        status_poll_interval_sec: float = 0.05,
     ) -> None:
         self._rollout_base_url = rollout_base_url.rstrip("/")
         self._store = callback_store
         self._completion_url_for = completion_url_for
         self._grader_url_for = grader_url_for
-        self._proxy_client = proxy_client
+        self._chat_completions_url_for = chat_completions_url_for
+        self._chat_api_key = chat_api_key
         self._controller_api_key = controller_api_key
-        self._model_path = model_path
         self._owns_http = http_client is None
         self._http = http_client or httpx.AsyncClient()
         self._callback_timeout_sec = callback_timeout_sec
-        self._status_poll_attempts = status_poll_attempts
-        self._status_poll_interval_sec = status_poll_interval_sec
 
     async def aclose(self) -> None:
         if self._owns_http:
@@ -132,25 +99,18 @@ class HttpRolloutDriver(RolloutDriver):
         if not rollout_id:
             raise ValueError("RolloutRunRequest.rollout_id is required")
 
-        proxy_session: EvalProxySession | None = None
         registered = False
         try:
             await self._store.register(rollout_id)
             registered = True
-            proxy_session = await self._proxy_client.create_session(
-                rollout_id=rollout_id,
-                model_path=self._model_path,
-                row_index=_optional_index(request, "row_index"),
-                run_index=_optional_index(request, "run_index"),
-            )
             init = RolloutInitRequest(
                 initial_messages=request.messages,
                 label=request.label,
                 metadata=request.metadata,
                 rollout_id=rollout_id,
-                chat_completions_url=proxy_session.api_base_url,
+                chat_completions_url=self._chat_completions_url_for(rollout_id),
                 controller_api_key=self._controller_api_key,
-                llm_api_key=proxy_session.token,
+                llm_api_key=self._chat_api_key,
                 completion_callback_url=self._completion_url_for(rollout_id),
                 grader_callback_url=self._grader_url_for(rollout_id),
                 agent_timeout_sec=request.agent_timeout_sec,
@@ -162,41 +122,22 @@ class HttpRolloutDriver(RolloutDriver):
             return _outcome_from_terminal(terminal)
         except asyncio.CancelledError:
             if registered:
-                await self._store.acknowledge_without_commit(rollout_id)
+                # A failed acknowledgment must not mask the cancellation.
+                with suppress(Exception):
+                    await self._store.acknowledge_without_commit(rollout_id)
             await self._cancel_rollout(rollout_id)
             raise
         finally:
             if registered:
                 await self._store.discard(rollout_id)
-            if proxy_session is not None:
-                await self._close_proxy_session(proxy_session)
 
     async def _admit(self, init: RolloutInitRequest) -> None:
-        rollout_id = init.rollout_id
-        if rollout_id is None:
-            raise ValueError("rollout_id is required for admission")
         payload = init.model_dump(mode="json")
         while True:
-            try:
-                response = await self._http.post(
-                    f"{self._rollout_base_url}/rollout",
-                    json=payload,
-                )
-            except httpx.RequestError:
-                probe = await self._recover_after_ambiguous_post(rollout_id)
-                if probe is _AdmissionProbe.ADMITTED:
-                    return
-                if probe is _AdmissionProbe.UNKNOWN:
-                    continue
-                # The POST may have been admitted even though recovery stayed
-                # indeterminate; best-effort remote cancel so an unobserved
-                # rollout cannot keep running. _cancel_rollout swallows its
-                # own failures, so the admission error below always wins.
-                await self._cancel_rollout(rollout_id)
-                raise AdmissionUncertainError(
-                    f"admission uncertain for rollout {rollout_id}: "
-                    "status recovery stayed indeterminate"
-                ) from None
+            response = await self._http.post(
+                f"{self._rollout_base_url}/rollout",
+                json=payload,
+            )
             if response.status_code == 202:
                 return
             if response.status_code == 429:
@@ -207,40 +148,6 @@ class HttpRolloutDriver(RolloutDriver):
                 "only 202 and 429 are accepted",
                 status_code=response.status_code,
             )
-
-    async def _recover_after_ambiguous_post(self, rollout_id: str) -> _AdmissionProbe:
-        last = _AdmissionProbe.INDETERMINATE
-        attempts = max(1, self._status_poll_attempts)
-        for attempt in range(attempts):
-            last = await self._probe_status(rollout_id)
-            if last is _AdmissionProbe.ADMITTED:
-                return last
-            if last is _AdmissionProbe.UNKNOWN:
-                return last
-            if attempt + 1 < attempts:
-                await asyncio.sleep(self._status_poll_interval_sec)
-        return last
-
-    async def _probe_status(self, rollout_id: str) -> _AdmissionProbe:
-        try:
-            response = await self._http.get(
-                f"{self._rollout_base_url}{_status_path(rollout_id)}"
-            )
-        except httpx.RequestError:
-            return _AdmissionProbe.INDETERMINATE
-        if response.status_code != 200:
-            return _AdmissionProbe.INDETERMINATE
-        try:
-            body = RolloutStatusResponse.model_validate_json(response.content)
-        except ValidationError:
-            return _AdmissionProbe.INDETERMINATE
-        if body.rollout_id != rollout_id:
-            # An answer about a different rollout must never trigger a
-            # re-POST; treat it as indeterminate.
-            return _AdmissionProbe.INDETERMINATE
-        if body.status is RolloutStatus.UNKNOWN:
-            return _AdmissionProbe.UNKNOWN
-        return _AdmissionProbe.ADMITTED
 
     async def _wait_for_terminal(self, rollout_id: str) -> TerminalCallbackResult:
         timeout = self._callback_timeout_sec
@@ -308,16 +215,6 @@ class HttpRolloutDriver(RolloutDriver):
             return {}
         return dispositions
 
-    async def _close_proxy_session(self, session: EvalProxySession) -> None:
-        try:
-            await self._proxy_client.close_session(session.rollout_id)
-        except Exception:
-            logger.warning(
-                "eval-proxy session close failed for %s",
-                session.rollout_id,
-                exc_info=True,
-            )
-
 
 def _outcome_from_terminal(terminal: TerminalCallbackResult) -> RolloutOutcome:
     if terminal.source == "timeout":
@@ -353,7 +250,6 @@ def _outcome_from_terminal(terminal: TerminalCallbackResult) -> RolloutOutcome:
 
 
 __all__ = [
-    "AdmissionUncertainError",
     "HttpRolloutDriver",
     "RolloutProtocolError",
 ]

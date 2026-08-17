@@ -19,6 +19,11 @@ ROLLOUT_ID = "b" * 32
 TOKEN = "callback-secret"
 
 
+async def _passthrough_commit(result: TerminalCallbackResult) -> None:
+    """Trivial durable commit: accept the result and keep its own ack."""
+    return None
+
+
 def _auth(token: str = TOKEN) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
@@ -47,7 +52,7 @@ async def _client(store: CallbackStore) -> httpx.AsyncClient:
 
 
 async def test_completion_and_grader_routes_require_bearer_auth() -> None:
-    store = CallbackStore()
+    store = CallbackStore(on_terminal_commit=_passthrough_commit)
     await store.register(ROLLOUT_ID)
     async with await _client(store) as client:
         completion_path = f"/v1/rollouts/{ROLLOUT_ID}/completion"
@@ -67,7 +72,7 @@ async def test_completion_and_grader_routes_require_bearer_auth() -> None:
 
 
 async def test_valid_bearer_auth_accepts_callbacks() -> None:
-    store = CallbackStore()
+    store = CallbackStore(on_terminal_commit=_passthrough_commit)
     await store.register(ROLLOUT_ID)
     async with await _client(store) as client:
         completion = await client.post(
@@ -86,7 +91,7 @@ async def test_valid_bearer_auth_accepts_callbacks() -> None:
 
 
 async def test_body_rollout_id_must_match_path() -> None:
-    store = CallbackStore()
+    store = CallbackStore(on_terminal_commit=_passthrough_commit)
     await store.register(ROLLOUT_ID)
     async with await _client(store) as client:
         response = await client.post(
@@ -99,7 +104,7 @@ async def test_body_rollout_id_must_match_path() -> None:
 
 @pytest.mark.parametrize("bad_id", [".", "..", "has/slash", "has\\slash"])
 async def test_malicious_or_invalid_rollout_ids_are_rejected(bad_id: str) -> None:
-    store = CallbackStore()
+    store = CallbackStore(on_terminal_commit=_passthrough_commit)
     async with await _client(store) as client:
         response = await client.post(
             f"/v1/rollouts/{bad_id}/grader",
@@ -147,7 +152,7 @@ async def test_grader_response_waits_for_commit_hook() -> None:
 
 @pytest.mark.parametrize("status", ["queued", "running", "grading", "unknown"])
 async def test_completion_rejects_non_terminal_statuses(status: str) -> None:
-    store = CallbackStore()
+    store = CallbackStore(on_terminal_commit=_passthrough_commit)
     await store.register(ROLLOUT_ID)
     async with await _client(store) as client:
         response = await client.post(
@@ -175,15 +180,22 @@ async def test_grader_rejects_pending_status() -> None:
             json={"status": "pending", "rollout_id": ROLLOUT_ID, "sample": None},
             headers=_auth(),
         )
-    assert response.status_code == 422
-    assert store.terminal_for(ROLLOUT_ID) is None
-    assert commits == 0
+        assert response.status_code == 422
+        assert commits == 0
+        # The rejected body left the session live, so a terminal one still wins.
+        accepted = await client.post(
+            f"/v1/rollouts/{ROLLOUT_ID}/grader",
+            json=_grader_body(),
+            headers=_auth(),
+        )
+    assert accepted.status_code == 200
+    assert commits == 1
 
 
 async def test_listener_binds_reserved_localhost_socket() -> None:
-    store = CallbackStore()
+    store = CallbackStore(on_terminal_commit=_passthrough_commit)
     await store.register(ROLLOUT_ID)
-    listener = CallbackListener(store, auth_token=TOKEN, host="127.0.0.1", port=0)
+    listener = CallbackListener(store, auth_token=TOKEN)
     async with listener:
         assert listener.base_url.startswith("http://127.0.0.1:")
         async with httpx.AsyncClient() as http:
@@ -199,41 +211,17 @@ async def test_listener_binds_reserved_localhost_socket() -> None:
 
 
 def test_empty_auth_token_is_rejected() -> None:
-    store = CallbackStore()
+    store = CallbackStore(on_terminal_commit=_passthrough_commit)
     with pytest.raises(ValueError, match="auth_token"):
         create_callback_app(store, auth_token="")
     with pytest.raises(ValueError, match="auth_token"):
         CallbackListener(store, auth_token="   ")
 
 
-def test_non_loopback_bind_host_is_rejected() -> None:
-    store = CallbackStore()
-    with pytest.raises(ValueError, match="loopback"):
-        CallbackListener(store, auth_token=TOKEN, host="0.0.0.0")
-    with pytest.raises(ValueError, match="loopback"):
-        CallbackListener(store, auth_token=TOKEN, host="192.168.1.1")
-
-
-@pytest.mark.parametrize("host", ["::1", "[::1]", "::ffff:127.0.0.1"])
-def test_ipv6_hosts_are_rejected_at_construction(host: str) -> None:
-    # The listener binds an AF_INET socket; claiming ::1 support would fail
-    # later with an opaque bind error, so IPv6 is rejected explicitly.
-    store = CallbackStore()
-    with pytest.raises(ValueError, match="loopback"):
-        CallbackListener(store, auth_token=TOKEN, host=host)
-
-
-async def test_localhost_normalizes_to_ipv4_loopback() -> None:
-    store = CallbackStore()
-    listener = CallbackListener(store, auth_token=TOKEN, host="localhost")
-    async with listener:
-        assert listener.base_url.startswith("http://127.0.0.1:")
-
-
 async def test_callback_urls_encode_rollout_ids() -> None:
     from urllib.parse import quote
 
-    store = CallbackStore()
+    store = CallbackStore(on_terminal_commit=_passthrough_commit)
     listener = CallbackListener(store, auth_token=TOKEN)
     async with listener:
         special_id = "rid:1"
@@ -243,6 +231,10 @@ async def test_callback_urls_encode_rollout_ids() -> None:
         )
         assert listener.grader_url(special_id).endswith(
             f"/v1/rollouts/{encoded}/grader"
+        )
+        # Clients append "/chat/completions", so the api_base stops at the id.
+        assert listener.chat_completions_url(special_id).endswith(
+            f"/v1/rollouts/{encoded}"
         )
 
 
@@ -255,7 +247,7 @@ async def _serve_until_exit(self, sockets=None):
 async def test_failed_start_resets_and_is_retryable(monkeypatch) -> None:
     import uvicorn
 
-    store = CallbackStore()
+    store = CallbackStore(on_terminal_commit=_passthrough_commit)
     listener = CallbackListener(store, auth_token=TOKEN)
 
     async def boom(self, sockets=None):
@@ -284,7 +276,7 @@ async def test_start_timeout_resets_and_is_retryable(monkeypatch) -> None:
     monkeypatch.setattr(listener_module, "_START_POLL_ATTEMPTS", 2)
     monkeypatch.setattr(listener_module, "_START_POLL_INTERVAL_SEC", 0)
 
-    store = CallbackStore()
+    store = CallbackStore(on_terminal_commit=_passthrough_commit)
     listener = CallbackListener(store, auth_token=TOKEN)
 
     async def hang(self, sockets=None):
@@ -305,7 +297,7 @@ async def test_start_timeout_resets_and_is_retryable(monkeypatch) -> None:
 
 
 async def test_stop_failure_still_resets_and_is_retryable() -> None:
-    store = CallbackStore()
+    store = CallbackStore(on_terminal_commit=_passthrough_commit)
     listener = CallbackListener(store, auth_token=TOKEN)
     await listener.start()
     real_task = listener._server._task

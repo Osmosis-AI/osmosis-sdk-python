@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 
 import pytest
@@ -47,13 +48,34 @@ def _grader(**overrides: object) -> GraderCompleteRequest:
     return GraderCompleteRequest.model_validate(payload)
 
 
+async def _passthrough_commit(result: TerminalCallbackResult) -> None:
+    """Trivial durable commit: accept the result and keep its own ack."""
+    return None
+
+
 def _live_completion(store: CallbackStore) -> RolloutCompleteRequest | None:
     """Completion payload the live session keeps for duplicate detection."""
     return store._sessions[ROLLOUT_ID].completion
 
 
+async def _terminal_or_none(store: CallbackStore) -> TerminalCallbackResult | None:
+    """Terminal result if one is already accepted, without blocking on it.
+
+    ``wait_terminal`` shields the session future, so cancelling this probe
+    leaves a still-running commit untouched.
+    """
+    waiter = asyncio.ensure_future(store.wait_terminal(ROLLOUT_ID))
+    await asyncio.sleep(0)
+    if waiter.done():
+        return waiter.result()
+    waiter.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await waiter
+    return None
+
+
 async def test_register_then_discard_forgets_live_rendezvous() -> None:
-    store = CallbackStore()
+    store = CallbackStore(on_terminal_commit=_passthrough_commit)
     await store.register(ROLLOUT_ID)
     ack = await store.handle_completion(ROLLOUT_ID, _completion())
     assert ack == {"ok": True}
@@ -65,16 +87,16 @@ async def test_register_then_discard_forgets_live_rendezvous() -> None:
 
 
 async def test_completion_is_not_terminal() -> None:
-    store = CallbackStore()
+    store = CallbackStore(on_terminal_commit=_passthrough_commit)
     await store.register(ROLLOUT_ID)
     await store.handle_completion(ROLLOUT_ID, _completion())
 
     assert _live_completion(store) is not None
-    assert store.terminal_for(ROLLOUT_ID) is None
+    assert await _terminal_or_none(store) is None
 
 
 async def test_identical_duplicate_completion_keeps_one_payload() -> None:
-    store = CallbackStore()
+    store = CallbackStore(on_terminal_commit=_passthrough_commit)
     await store.register(ROLLOUT_ID)
     first = _completion()
     first_ack = await store.handle_completion(ROLLOUT_ID, first)
@@ -86,7 +108,7 @@ async def test_identical_duplicate_completion_keeps_one_payload() -> None:
 async def test_conflicting_duplicate_completion_keeps_first_and_logs(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    store = CallbackStore()
+    store = CallbackStore(on_terminal_commit=_passthrough_commit)
     await store.register(ROLLOUT_ID)
     first = _completion()
     await store.handle_completion(ROLLOUT_ID, first)
@@ -105,7 +127,7 @@ async def test_conflicting_duplicate_completion_keeps_first_and_logs(
 
 
 async def test_discard_cancels_the_unresolved_terminal_future() -> None:
-    store = CallbackStore()
+    store = CallbackStore(on_terminal_commit=_passthrough_commit)
     await store.register(ROLLOUT_ID)
     terminal_waiter = asyncio.create_task(store.wait_terminal(ROLLOUT_ID))
     await asyncio.sleep(0)
@@ -114,18 +136,16 @@ async def test_discard_cancels_the_unresolved_terminal_future() -> None:
         await terminal_waiter
 
 
-async def test_seeded_terminal_retains_completion_for_duplicates() -> None:
-    store = CallbackStore()
-    stored = _completion()
-    store.seed_terminal(
-        ROLLOUT_ID,
-        acknowledgment={"ok": True, "seeded": True},
-        grader=_grader(),
-        completion=stored,
-    )
-    terminal = store.terminal_for(ROLLOUT_ID)
-    assert terminal is not None and terminal.completion == stored
-    ack = await store.handle_completion(ROLLOUT_ID, stored)
+async def test_seeded_terminal_acks_late_completion() -> None:
+    store = CallbackStore(on_terminal_commit=_passthrough_commit)
+    store.seed_terminal(ROLLOUT_ID, acknowledgment={"ok": True, "seeded": True})
+
+    terminal = await store.wait_terminal(ROLLOUT_ID)
+    assert terminal.source == "seeded"
+    # A seeded row carries the durable ack only; it stores no payloads, so a
+    # late completion is acknowledged without a duplicate comparison.
+    assert terminal.completion is None
+    ack = await store.handle_completion(ROLLOUT_ID, _completion())
     assert ack == {"ok": True, "seeded": True}
 
 
@@ -145,7 +165,7 @@ async def test_grader_commit_hook_runs_before_acknowledgment() -> None:
 
     assert ack == {"ok": True, "durable": True}
     assert order == ["commit-start", "commit-end", "acked"]
-    assert store.terminal_for(ROLLOUT_ID) is not None
+    assert await _terminal_or_none(store) is not None
 
 
 async def test_identical_duplicate_grader_returns_stored_ack_without_recommit(
@@ -222,7 +242,7 @@ async def test_first_terminal_result_wins_timeout_then_late_grader() -> None:
 
 
 async def test_wait_terminal_returns_grader_result() -> None:
-    store = CallbackStore()
+    store = CallbackStore(on_terminal_commit=_passthrough_commit)
     await store.register(ROLLOUT_ID)
     waiter = asyncio.create_task(store.wait_terminal(ROLLOUT_ID))
     await asyncio.sleep(0)
@@ -244,11 +264,7 @@ async def test_seed_terminal_replays_without_commit(
         return {"ok": True}
 
     store = CallbackStore(on_terminal_commit=commit)
-    store.seed_terminal(
-        ROLLOUT_ID,
-        acknowledgment={"ok": True, "seeded": True},
-        grader=_grader(),
-    )
+    store.seed_terminal(ROLLOUT_ID, acknowledgment={"ok": True, "seeded": True})
     with caplog.at_level(logging.ERROR):
         ack = await store.handle_grader(ROLLOUT_ID, _grader())
     assert ack == {"ok": True, "seeded": True}
@@ -257,7 +273,7 @@ async def test_seed_terminal_replays_without_commit(
 
 
 async def test_register_rejects_live_and_finalized_ids() -> None:
-    store = CallbackStore()
+    store = CallbackStore(on_terminal_commit=_passthrough_commit)
     await store.register(ROLLOUT_ID)
     with pytest.raises(DuplicateRegistrationError):
         await store.register(ROLLOUT_ID)
@@ -289,74 +305,37 @@ async def test_finalized_id_cannot_be_registered_and_committed_again() -> None:
     assert commits == 1
 
 
-async def test_seed_terminal_does_not_overwrite_live_or_finalized(
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    store = CallbackStore()
+async def test_seed_terminal_does_not_overwrite_live_or_finalized() -> None:
+    async def commit(result: TerminalCallbackResult) -> dict[str, object]:
+        return {"ok": True, "committed": True}
+
+    store = CallbackStore(on_terminal_commit=commit)
     await store.register(ROLLOUT_ID)
-    with caplog.at_level(logging.ERROR):
-        store.seed_terminal(
-            ROLLOUT_ID,
-            acknowledgment={"ok": True, "seeded": True},
-            grader=_grader(),
-        )
-    assert store.terminal_for(ROLLOUT_ID) is None
-    assert any("live session" in record.message.lower() for record in caplog.records)
 
-    await store.handle_grader(ROLLOUT_ID, _grader())
+    # A live session outranks a replayed row: the seed is dropped and the
+    # rollout still reaches its terminal result through the commit hook.
+    store.seed_terminal(ROLLOUT_ID, acknowledgment={"ok": True, "seeded": True})
+    assert await _terminal_or_none(store) is None
+    assert await store.handle_grader(ROLLOUT_ID, _grader()) == {
+        "ok": True,
+        "committed": True,
+    }
+
     await store.discard(ROLLOUT_ID)
-    stored = store.terminal_for(ROLLOUT_ID)
-    assert stored is not None
-    caplog.clear()
-    with caplog.at_level(logging.ERROR):
-        store.seed_terminal(
-            ROLLOUT_ID,
-            acknowledgment={"ok": True, "seeded": True},
-            grader=_grader(status=GraderStatus.FAILURE, sample=None),
-        )
-    kept = store.terminal_for(ROLLOUT_ID)
-    assert kept is stored
-    assert any(
-        "conflicting seed_terminal" in record.message.lower()
-        for record in caplog.records
-        if record.levelno >= logging.ERROR
-    )
-
-
-async def test_identical_repeated_seed_is_noop() -> None:
-    store = CallbackStore()
-    grader = _grader()
-    store.seed_terminal(
-        ROLLOUT_ID,
-        acknowledgment={"ok": True, "seeded": True},
-        grader=grader,
-    )
-    first = store.terminal_for(ROLLOUT_ID)
-    store.seed_terminal(
-        ROLLOUT_ID,
-        acknowledgment={"ok": True, "seeded": True},
-        grader=_grader(),
-    )
-    assert store.terminal_for(ROLLOUT_ID) is first
+    store.seed_terminal(ROLLOUT_ID, acknowledgment={"ok": True, "seeded": True})
+    kept = await store.wait_terminal(ROLLOUT_ID)
+    assert kept.source == "grader"
+    assert kept.acknowledgment == {"ok": True, "committed": True}
 
 
 async def test_unknown_rollout_is_rejected() -> None:
-    store = CallbackStore()
+    store = CallbackStore(on_terminal_commit=_passthrough_commit)
     with pytest.raises(UnknownRolloutIdError):
         await store.handle_grader(ROLLOUT_ID, _grader())
 
 
-async def test_timeout_acknowledgment_survives_default_commit_hook() -> None:
-    store = CallbackStore()
-    await store.register(ROLLOUT_ID)
-    result = await store.finalize_timeout(
-        ROLLOUT_ID, acknowledgment={"ok": True, "source": "timeout"}
-    )
-    assert result.acknowledgment == {"ok": True, "source": "timeout"}
-
-
 async def test_late_completion_after_timeout_returns_stored_ack() -> None:
-    store = CallbackStore()
+    store = CallbackStore(on_terminal_commit=_passthrough_commit)
     await store.register(ROLLOUT_ID)
     timeout = await store.finalize_timeout(
         ROLLOUT_ID, acknowledgment={"ok": True, "error_type": "callback_timeout"}
@@ -370,7 +349,7 @@ async def test_late_completion_after_timeout_returns_stored_ack() -> None:
 async def test_late_callbacks_after_timeout_do_not_log_conflict_errors(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    store = CallbackStore()
+    store = CallbackStore(on_terminal_commit=_passthrough_commit)
     await store.register(ROLLOUT_ID)
     timeout = await store.finalize_timeout(
         ROLLOUT_ID, acknowledgment={"ok": True, "error_type": "callback_timeout"}
@@ -389,7 +368,7 @@ async def test_late_callbacks_after_timeout_do_not_log_conflict_errors(
 async def test_late_callbacks_after_cancel_do_not_log_conflict_errors(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    store = CallbackStore()
+    store = CallbackStore(on_terminal_commit=_passthrough_commit)
     await store.register(ROLLOUT_ID)
     tombstone = await store.acknowledge_without_commit(ROLLOUT_ID)
     await store.discard(ROLLOUT_ID)
@@ -406,7 +385,7 @@ async def test_late_callbacks_after_cancel_do_not_log_conflict_errors(
 async def test_stored_real_payload_conflicts_still_log_errors(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    store = CallbackStore()
+    store = CallbackStore(on_terminal_commit=_passthrough_commit)
     await store.register(ROLLOUT_ID)
     await store.handle_completion(ROLLOUT_ID, _completion())
     await store.handle_grader(ROLLOUT_ID, _grader())
@@ -453,7 +432,7 @@ async def test_cancel_tombstone_acks_callbacks_without_commit() -> None:
 
 
 async def test_acknowledge_without_commit_rejects_unknown_rollout_id() -> None:
-    store = CallbackStore()
+    store = CallbackStore(on_terminal_commit=_passthrough_commit)
     with pytest.raises(UnknownRolloutIdError):
         await store.acknowledge_without_commit(ROLLOUT_ID)
 
@@ -495,7 +474,7 @@ async def test_cancelled_grader_handler_does_not_rerun_commit_hook() -> None:
 
     assert (commit.starts, commit.completions) == (1, 1)
     assert retry_ack == {"ok": True, "durable": True}
-    stored = store.terminal_for(ROLLOUT_ID)
+    stored = await _terminal_or_none(store)
     assert stored is not None
     assert stored.source == "grader"
 
@@ -558,7 +537,7 @@ async def test_failed_commit_hook_is_retryable() -> None:
     await store.register(ROLLOUT_ID)
     with pytest.raises(RuntimeError, match="journal io error"):
         await store.handle_grader(ROLLOUT_ID, _grader())
-    assert store.terminal_for(ROLLOUT_ID) is None
+    assert await _terminal_or_none(store) is None
 
     ack = await store.handle_grader(ROLLOUT_ID, _grader())
     assert ack == {"ok": True, "n": 2}
@@ -580,72 +559,49 @@ async def test_discard_does_not_cancel_in_flight_commit() -> None:
 
     assert ack == {"ok": True, "durable": True}
     assert (commit.starts, commit.completions) == (1, 1)
-    stored = store.terminal_for(ROLLOUT_ID)
+    stored = await _terminal_or_none(store)
     assert stored is not None
     assert stored.source == "grader"
 
 
-class _FailFirstBlockingCommit:
-    """Blocks the first commit, then fails it; later commits succeed."""
+async def test_observed_commit_failure_propagates_and_stays_retryable() -> None:
+    """A single arbitration pass: the observer re-raises, it does not re-commit."""
+    started = asyncio.Event()
+    release = asyncio.Event()
+    attempts = 0
 
-    def __init__(self) -> None:
-        self.started = asyncio.Event()
-        self.release = asyncio.Event()
-        self.attempts = 0
-
-    async def __call__(self, result: TerminalCallbackResult) -> dict[str, object]:
-        self.attempts += 1
-        if self.attempts == 1:
-            self.started.set()
-            await self.release.wait()
+    async def commit(result: TerminalCallbackResult) -> dict[str, object]:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            started.set()
+            await release.wait()
             raise RuntimeError("journal io error")
-        return {"ok": True, "attempt": self.attempts, "source": result.source}
+        return {"ok": True, "attempt": attempts, "source": result.source}
 
-
-async def test_cancel_waiting_on_failed_commit_installs_tombstone() -> None:
-    commit = _FailFirstBlockingCommit()
     store = CallbackStore(on_terminal_commit=commit)
     await store.register(ROLLOUT_ID)
 
     grader_task = asyncio.create_task(store.handle_grader(ROLLOUT_ID, _grader()))
-    await commit.started.wait()
-    cancel_task = asyncio.create_task(store.acknowledge_without_commit(ROLLOUT_ID))
-    await asyncio.sleep(0)
-    commit.release.set()
-
-    with pytest.raises(RuntimeError, match="journal io error"):
-        await grader_task
-    tombstone = await cancel_task
-
-    assert tombstone.source == "cancelled"
-    assert commit.attempts == 1  # cancellation never runs the hook
-    stored = store.terminal_for(ROLLOUT_ID)
-    assert stored is not None
-    assert stored.source == "cancelled"
-
-
-async def test_timeout_waiting_on_failed_commit_claims_timeout_result() -> None:
-    commit = _FailFirstBlockingCommit()
-    store = CallbackStore(on_terminal_commit=commit)
-    await store.register(ROLLOUT_ID)
-
-    grader_task = asyncio.create_task(store.handle_grader(ROLLOUT_ID, _grader()))
-    await commit.started.wait()
+    await started.wait()
     timeout_task = asyncio.create_task(
         store.finalize_timeout(
             ROLLOUT_ID, acknowledgment={"ok": True, "error_type": "callback_timeout"}
         )
     )
     await asyncio.sleep(0)
-    commit.release.set()
+    release.set()
 
     with pytest.raises(RuntimeError, match="journal io error"):
         await grader_task
-    result = await timeout_task
+    with pytest.raises(RuntimeError, match="journal io error"):
+        await timeout_task
+    assert attempts == 1
+    assert await _terminal_or_none(store) is None
 
-    assert result.source == "timeout"
-    assert result.acknowledgment == {"ok": True, "attempt": 2, "source": "timeout"}
-    assert commit.attempts == 2
+    # The item stays pending, so a retried callback still commits it.
+    ack = await store.handle_grader(ROLLOUT_ID, _grader())
+    assert ack == {"ok": True, "attempt": 2, "source": "grader"}
 
 
 async def test_waiter_cancellation_propagates_and_leaves_commit_running() -> None:

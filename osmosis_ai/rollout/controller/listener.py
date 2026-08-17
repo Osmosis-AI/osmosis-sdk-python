@@ -1,16 +1,18 @@
 """Localhost-only callback listener around :class:`CallbackStore`.
 
-No LLM code lives here. The listener authenticates bearer tokens, checks that
-the URL-scoped rollout id matches the body, accepts only terminal callback
-statuses, and returns the store's acknowledgment only after a terminal commit
-hook has finished. Binding is IPv4 loopback only (``localhost`` normalizes to
-``127.0.0.1``); IPv6 is rejected explicitly rather than failing at bind time.
+The listener authenticates bearer tokens, checks that the URL-scoped rollout
+id matches the body, accepts only terminal callback statuses, and returns the
+store's acknowledgment only after a terminal commit hook has finished. It
+binds ``127.0.0.1`` on an ephemeral port; the bind is not configurable.
+
+When local eval provides a :class:`~osmosis_ai.rollout.controller.llm_bridge.LiteLLMBridge`,
+its chat-completions routes mount on the same app under their own bearer —
+one process, one port, two credentials, mirroring the hosted eval controller.
 """
 
 from __future__ import annotations
 
 import asyncio
-import ipaddress
 import secrets
 import socket
 from contextlib import suppress
@@ -29,6 +31,10 @@ except ModuleNotFoundError as _exc:
         feature="Local evaluation",
     )
 
+from osmosis_ai.rollout.controller.llm_bridge import (
+    LiteLLMBridge,
+    create_bridge_router,
+)
 from osmosis_ai.rollout.controller.store import CallbackStore, UnknownRolloutIdError
 from osmosis_ai.rollout.types import (
     GraderCompleteRequest,
@@ -38,7 +44,6 @@ from osmosis_ai.rollout.types import (
 )
 from osmosis_ai.rollout.utils.identifiers import is_single_path_segment
 
-_BIND_RETRY_DELAY_SEC = 0.05
 _START_POLL_ATTEMPTS = 500
 _START_POLL_INTERVAL_SEC = 0.01
 
@@ -55,42 +60,11 @@ def _assert_non_empty_auth_token(auth_token: str) -> None:
         raise ValueError("callback auth_token must be a non-empty string")
 
 
-def _normalize_loopback_host(host: str) -> str:
-    """Return the IPv4 loopback bind address, rejecting everything else.
-
-    The server binds an AF_INET socket, so IPv6 loopback would fail later
-    with an opaque bind error; reject it here instead.
-    """
-    candidate = host.strip().lower()
-    if candidate == "localhost":
-        return "127.0.0.1"
-    try:
-        parsed = ipaddress.ip_address(candidate)
-    except ValueError:
-        parsed = None
-    if isinstance(parsed, ipaddress.IPv4Address) and parsed.is_loopback:
-        return candidate
-    raise ValueError(
-        "callback listener host must be IPv4 loopback "
-        f"(127.0.0.1 or localhost), got {host!r}"
-    )
-
-
 class LocalhostUvicornServer:
     """Bind a socket first, then serve. Never pick-free-close-bind."""
 
-    def __init__(
-        self,
-        app: Any,
-        *,
-        host: str = "127.0.0.1",
-        port: int = 0,
-        bind_retries: int = 5,
-    ) -> None:
+    def __init__(self, app: Any) -> None:
         self._app = app
-        self._host = _normalize_loopback_host(host)
-        self._port = port
-        self._bind_retries = bind_retries
         self._socket: socket.socket | None = None
         self._server: uvicorn.Server | None = None
         self._task: asyncio.Task[None] | None = None
@@ -107,7 +81,7 @@ class LocalhostUvicornServer:
             return self.base_url
         sock: socket.socket | None = None
         try:
-            sock = await self._reserve_socket()
+            sock = self._reserve_socket()
             self._socket = sock
             host, port = sock.getsockname()[:2]
             self._base_url = f"http://{host}:{port}"
@@ -169,24 +143,16 @@ class LocalhostUvicornServer:
             with suppress(OSError):
                 to_close.close()
 
-    async def _reserve_socket(self) -> socket.socket:
-        attempts = 1 if self._port == 0 else max(1, self._bind_retries)
-        last_error: OSError | None = None
-        for attempt in range(attempts):
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            try:
-                sock.bind((self._host, self._port))
-                return sock
-            except OSError as exc:
-                last_error = exc
-                sock.close()
-                if attempt + 1 < attempts:
-                    await asyncio.sleep(_BIND_RETRY_DELAY_SEC)
-        raise OSError(
-            f"failed to bind localhost server on {self._host}:{self._port}: "
-            f"{last_error}"
-        ) from last_error
+    @staticmethod
+    def _reserve_socket() -> socket.socket:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            sock.bind(("127.0.0.1", 0))
+        except OSError:
+            sock.close()
+            raise
+        return sock
 
 
 def create_callback_app(store: CallbackStore, *, auth_token: str) -> FastAPI:
@@ -254,17 +220,16 @@ class CallbackListener:
         store: CallbackStore,
         *,
         auth_token: str,
-        host: str = "127.0.0.1",
-        port: int = 0,
-        bind_retries: int = 5,
+        bridge: LiteLLMBridge | None = None,
+        bridge_token: str | None = None,
     ) -> None:
         _assert_non_empty_auth_token(auth_token)
-        self._server = LocalhostUvicornServer(
-            create_callback_app(store, auth_token=auth_token),
-            host=host,
-            port=port,
-            bind_retries=bind_retries,
-        )
+        app = create_callback_app(store, auth_token=auth_token)
+        if bridge is not None:
+            if bridge_token is None:
+                raise ValueError("bridge_token is required when a bridge is provided")
+            app.include_router(create_bridge_router(bridge, auth_token=bridge_token))
+        self._server = LocalhostUvicornServer(app)
 
     @property
     def base_url(self) -> str:
@@ -277,6 +242,15 @@ class CallbackListener:
     def grader_url(self, rollout_id: str) -> str:
         encoded = quote(rollout_id, safe="")
         return f"{self.base_url}/v1/rollouts/{encoded}/grader"
+
+    def chat_completions_url(self, rollout_id: str) -> str:
+        """Per-rollout OpenAI-compatible api_base served by the mounted bridge.
+
+        Clients append ``/chat/completions``; the URL itself must not include
+        that suffix.
+        """
+        encoded = quote(rollout_id, safe="")
+        return f"{self.base_url}/v1/rollouts/{encoded}"
 
     async def start(self) -> str:
         return await self._server.start()

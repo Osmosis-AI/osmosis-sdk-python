@@ -217,10 +217,30 @@ def test_extra_modules_table_matches_pyproject_extras() -> None:
     from osmosis_ai._imports import EXTRA_MODULES
 
     pyproject = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text())
+    project_name = str(canonicalize_name(pyproject["project"]["name"]))
     declared_extras: dict[str, list[str]] = pyproject["project"][
         "optional-dependencies"
     ]
     distributions_by_module = packages_distributions()
+
+    def declared_distributions(extra: str, seen: frozenset[str]) -> set[str]:
+        """Third-party distributions an extra installs, self-references expanded.
+
+        An extra may pull another extra in as ``osmosis-ai[other]`` (``eval-run``
+        does this for ``server``), so those requirements resolve to the packages
+        of the referenced extra instead of counting as a dependency themselves.
+        """
+        names: set[str] = set()
+        for raw in declared_extras[extra]:
+            requirement = Requirement(raw)
+            name = str(canonicalize_name(requirement.name))
+            if name != project_name:
+                names.add(name)
+                continue
+            for referenced in requirement.extras:
+                if referenced not in seen:
+                    names |= declared_distributions(referenced, seen | {extra})
+        return names
 
     checkable = {
         extra: requirements
@@ -230,10 +250,8 @@ def test_extra_modules_table_matches_pyproject_extras() -> None:
     executable_only = {"harbor": {"uv"}}
     assert set(EXTRA_MODULES) == set(checkable)
 
-    for extra, requirements in checkable.items():
-        declared = {
-            str(canonicalize_name(Requirement(raw).name)) for raw in requirements
-        }
+    for extra in checkable:
+        declared = declared_distributions(extra, frozenset())
         covered: set[str] = set()
         for module in EXTRA_MODULES[extra]:
             providers = {
@@ -336,6 +354,18 @@ def test_extra_modules_table_matches_pyproject_extras() -> None:
             "fastapi",
             "eval-run",
         ),
+        (
+            "osmosis_ai.rollout.controller",
+            "LiteLLMBridge",
+            "fastapi",
+            "eval-run",
+        ),
+        (
+            "osmosis_ai.rollout.controller",
+            "create_bridge_router",
+            "fastapi",
+            "eval-run",
+        ),
     ],
 )
 def test_missing_optional_dependency_names_the_install_extra(
@@ -395,13 +425,14 @@ def test_agent_integration_classes_use_canonical_module_paths() -> None:
 
 
 def test_driver_core_imports_without_eval_run_extra() -> None:
-    """Only the localhost callback listener needs `[eval-run]`.
+    """The localhost callback listener and the LiteLLM bridge need `[eval-run]`.
 
-    The store, the eval-proxy client, and the HTTP driver speak httpx and are
-    part of the base install, so a bare environment must reach all of them.
+    The store and the HTTP driver speak httpx and are part of the base install,
+    so a bare environment must reach both of them.
     """
     result = _run_python(
         """
+        import asyncio
         import builtins
         import sys
 
@@ -415,13 +446,12 @@ def test_driver_core_imports_without_eval_run_extra() -> None:
             return real_import(name, globals, locals, fromlist, level)
 
         builtins.__import__ = guarded_import
-        from osmosis_ai.rollout.controller import CallbackStore, EvalProxyClient
+        from osmosis_ai.rollout.controller import CallbackStore
         from osmosis_ai.rollout.driver import RolloutRunRequest
         from osmosis_ai.rollout.http_driver import HttpRolloutDriver
 
-        CallbackStore()
+        CallbackStore(on_terminal_commit=lambda result: asyncio.sleep(0))
         RolloutRunRequest(messages=[])
-        assert EvalProxyClient is not None
         assert HttpRolloutDriver is not None
         loaded_roots = {name.partition(".")[0] for name in sys.modules}
         assert not (blocked & loaded_roots)

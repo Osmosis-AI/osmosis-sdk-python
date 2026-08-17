@@ -1,8 +1,7 @@
 """In-memory callback rendezvous for one process.
 
-The store is eval-agnostic: callers supply an async terminal-commit hook
-(local eval journals here; other tooling can no-op or persist elsewhere).
-Callers register before dispatch, ``wait_terminal``, and discard in
+Callers supply the async terminal-commit hook (local eval journals through
+it), register before dispatch, ``wait_terminal``, and discard in
 ``finally``. A completion callback is recorded on the live session for
 duplicate detection but is not a rendezvous of its own. Accepted terminal
 acknowledgments stay until the process exits so duplicate callbacks can be
@@ -14,7 +13,9 @@ creates one commit task per session and every contender (including
 cancellation) awaits that same task through ``asyncio.shield``, so
 cancelling a callback handler or timeout waiter never cancels persistence
 and never lets a second contender rerun the hook. A hook that raises is
-treated as not-durable: the failed task is cleared so a retry can commit.
+treated as not-durable: the failed task is cleared so a RETRIED CALLBACK
+can commit again; the contender that observed the failure propagates it
+and its item stays pending for the next run.
 """
 
 from __future__ import annotations
@@ -65,20 +66,6 @@ def duplicate_callback_payload(left: BaseModel | None, right: BaseModel | None) 
     return left.model_dump(mode="json") == right.model_dump(mode="json")
 
 
-def _terminal_payloads_match(
-    left: TerminalCallbackResult, right: TerminalCallbackResult
-) -> bool:
-    return (
-        duplicate_callback_payload(left.grader, right.grader)
-        and duplicate_callback_payload(left.completion, right.completion)
-        and dict(left.acknowledgment) == dict(right.acknowledgment)
-    )
-
-
-async def _default_commit(_result: TerminalCallbackResult) -> None:
-    return None
-
-
 @dataclass
 class _LiveSession:
     completion: RolloutCompleteRequest | None = None
@@ -98,9 +85,9 @@ class CallbackStore:
     def __init__(
         self,
         *,
-        on_terminal_commit: TerminalCommitHook | None = None,
+        on_terminal_commit: TerminalCommitHook,
     ) -> None:
-        self._on_terminal_commit = on_terminal_commit or _default_commit
+        self._on_terminal_commit = on_terminal_commit
         self._sessions: dict[str, _LiveSession] = {}
         self._finalized: dict[str, TerminalCallbackResult] = {}
 
@@ -116,37 +103,18 @@ class CallbackStore:
         rollout_id: str,
         *,
         acknowledgment: Mapping[str, Any],
-        grader: GraderCompleteRequest | None = None,
-        completion: RolloutCompleteRequest | None = None,
     ) -> None:
         """Record an already-durable terminal result for duplicate detection.
 
-        First-wins: live sessions and existing finalized rows are not
-        overwritten. An identical repeated seed is a no-op; a conflicting
-        seed keeps the stored result and logs ERROR.
+        First-wins: live sessions and existing finalized rows are kept.
         """
-        incoming = TerminalCallbackResult(
+        if rollout_id in self._sessions or rollout_id in self._finalized:
+            return
+        self._finalized[rollout_id] = TerminalCallbackResult(
             rollout_id=rollout_id,
             source="seeded",
-            completion=completion,
-            grader=grader,
             acknowledgment=dict(acknowledgment),
         )
-        if rollout_id in self._sessions:
-            logger.error(
-                "seed_terminal ignored; live session exists for rollout %s",
-                rollout_id,
-            )
-            return
-        existing = self._finalized.get(rollout_id)
-        if existing is not None:
-            if not _terminal_payloads_match(existing, incoming):
-                logger.error(
-                    "Conflicting seed_terminal for rollout %s; keeping first result",
-                    rollout_id,
-                )
-            return
-        self._finalized[rollout_id] = incoming
 
     async def discard(self, rollout_id: str) -> None:
         session = self._sessions.get(rollout_id)
@@ -156,12 +124,6 @@ class CallbackStore:
             self._sessions.pop(rollout_id, None)
             if not session.terminal_future.done():
                 session.terminal_future.cancel()
-
-    def terminal_for(self, rollout_id: str) -> TerminalCallbackResult | None:
-        session = self._sessions.get(rollout_id)
-        if session is not None and session.terminal is not None:
-            return session.terminal
-        return self._finalized.get(rollout_id)
 
     async def handle_completion(
         self, rollout_id: str, request: RolloutCompleteRequest
@@ -216,40 +178,29 @@ class CallbackStore:
     ) -> TerminalCallbackResult:
         """Win or observe the terminal race with a timeout result.
 
-        When an observed in-flight commit fails without producing a durable
-        result, the timeout re-arbitrates and may claim the terminal slot
-        with its own commit. A failure of the timeout's own commit
-        propagates. Task cancellation always propagates.
+        A commit-hook failure — observed or the timeout's own — propagates;
+        the item stays pending for the next run. Task cancellation always
+        propagates.
         """
         session, finalized = self._session_or_finalized(rollout_id)
         if finalized is not None:
             return finalized
 
         assert session is not None
-        while True:
-            created = False
-            async with session.lock:
-                if session.terminal is not None:
-                    return session.terminal
-                task = session.commit_task
-                if task is None:
-                    result = TerminalCallbackResult(
-                        rollout_id=rollout_id,
-                        source="timeout",
-                        completion=session.completion,
-                        grader=None,
-                        acknowledgment=dict(acknowledgment or {"ok": True}),
-                    )
-                    task = self._start_commit(session, result)
-                    created = True
-            try:
-                return await asyncio.shield(task)
-            except Exception:
-                if created:
-                    raise
-                # An observed commit failed without a durable result;
-                # re-arbitrate so the timeout can claim the terminal slot.
-                continue
+        async with session.lock:
+            if session.terminal is not None:
+                return session.terminal
+            task = session.commit_task
+            if task is None:
+                result = TerminalCallbackResult(
+                    rollout_id=rollout_id,
+                    source="timeout",
+                    completion=session.completion,
+                    grader=None,
+                    acknowledgment=dict(acknowledgment or {"ok": True}),
+                )
+                task = self._start_commit(session, result)
+        return await asyncio.shield(task)
 
     async def acknowledge_without_commit(
         self,
@@ -262,11 +213,10 @@ class CallbackStore:
 
         Subsequent completion/grader callbacks receive the stored
         acknowledgment. First accepted terminal still wins: an in-flight
-        commit is observed, not replaced — but if that commit fails without
-        a durable result, cancellation re-arbitrates and installs its
-        non-durable tombstone. Task cancellation always propagates. An
-        unknown rollout id raises ``UnknownRolloutIdError`` instead of
-        creating a tombstone that would poison a future registration.
+        commit is observed, not replaced, and its failure propagates to the
+        caller. Task cancellation always propagates. An unknown rollout id
+        raises ``UnknownRolloutIdError`` instead of creating a tombstone
+        that would poison a future registration.
         """
         finalized = self._finalized.get(rollout_id)
         if finalized is not None:
@@ -276,29 +226,23 @@ class CallbackStore:
         if session is None:
             raise UnknownRolloutIdError(rollout_id)
 
-        while True:
-            async with session.lock:
-                if session.terminal is not None:
-                    return session.terminal
-                task = session.commit_task
-                if task is None:
-                    result = TerminalCallbackResult(
-                        rollout_id=rollout_id,
-                        source=source,
-                        completion=session.completion,
-                        acknowledgment=dict(acknowledgment or {"ok": True}),
-                    )
-                    session.terminal = result
-                    self._finalized[rollout_id] = result
-                    if not session.terminal_future.done():
-                        session.terminal_future.set_result(result)
-                    return result
-            try:
-                return await asyncio.shield(task)
-            except Exception:
-                # The in-flight commit failed without a durable result;
-                # re-arbitrate so cancellation can install its tombstone.
-                continue
+        async with session.lock:
+            if session.terminal is not None:
+                return session.terminal
+            task = session.commit_task
+            if task is None:
+                result = TerminalCallbackResult(
+                    rollout_id=rollout_id,
+                    source=source,
+                    completion=session.completion,
+                    acknowledgment=dict(acknowledgment or {"ok": True}),
+                )
+                session.terminal = result
+                self._finalized[rollout_id] = result
+                if not session.terminal_future.done():
+                    session.terminal_future.set_result(result)
+                return result
+        return await asyncio.shield(task)
 
     async def wait_terminal(self, rollout_id: str) -> TerminalCallbackResult:
         session, finalized = self._session_or_finalized(rollout_id)
