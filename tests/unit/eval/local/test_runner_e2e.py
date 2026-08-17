@@ -459,13 +459,15 @@ def test_the_e2e_rollout_project_is_isolated_from_the_repo_venv(
 # --------------------------------------------------------------------------- #
 
 
-async def test_an_unreachable_proxy_halts_dispatch_and_leaves_work_pending(
+async def test_a_rejected_model_key_halts_dispatch_and_leaves_work_pending(
     harness: RunnerHarness,
 ) -> None:
-    # The queue says nothing about a dead proxy. Stamping the remaining items
-    # `failed` would make a plain resume skip work that never executed.
+    # The queue says nothing about a bad provider key. Stamping the remaining
+    # items `failed` would make a plain resume skip work that never executed.
+    from tests.unit.rollout.openai_stub import FORCE_AUTH_ERROR_KEY
+
     runner = harness.runner()
-    runner._proxy_base_url = "http://127.0.0.1:1"  # nothing listens here
+    runner._llm_api_key = FORCE_AUTH_ERROR_KEY
     hooks = RecordingHooks()
     runner._hooks = hooks
 
@@ -476,44 +478,10 @@ async def test_an_unreachable_proxy_halts_dispatch_and_leaves_work_pending(
     # Preflight fails before any dispatch, so nothing is journaled at all.
     assert harness.journal_lines() == []
 
-    # With the proxy reachable again, every item is still pending.
+    # With a working key again, every item is still pending.
     summary = await harness.runner().run()
     assert summary.dispatched == 4
     assert summary.succeeded == 4
-
-
-async def test_a_proxy_failure_after_preflight_halts_rather_than_failing_rows(
-    harness: RunnerHarness, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    from osmosis_ai.rollout.controller import EvalProxyClient, EvalProxyError
-
-    calls = {"n": 0}
-    real_create = EvalProxyClient.create_session
-
-    async def flaky_create(self: Any, **kwargs: Any) -> Any:
-        calls["n"] += 1
-        # Let preflight and the first work item through, then break.
-        if calls["n"] > 2:
-            raise EvalProxyError("proxy exploded", status_code=503)
-        return await real_create(self, **kwargs)
-
-    monkeypatch.setattr(EvalProxyClient, "create_session", flaky_create)
-    hooks = RecordingHooks()
-    summary = await harness.runner(
-        hooks=hooks, options=LocalEvalOptions(name="run-1", max_in_flight=1)
-    ).run()
-
-    assert summary.succeeded == 1
-    # The three items that never ran have no terminal record at all.
-    assert len(harness.journal_lines()) == 1
-    assert summary.failed == 0
-    assert summary.cancelled is True
-    assert any("stopping dispatch" in note for note in hooks.notes)
-
-    monkeypatch.undo()
-    resumed = await harness.runner().run()
-    assert resumed.dispatched == 3
-    assert resumed.succeeded == 4
 
 
 async def test_a_dead_rollout_server_halts_instead_of_waiting_out_deadlines(

@@ -25,8 +25,9 @@ from osmosis_ai.eval.local.runner import (
 )
 
 # A self-contained rollout project. The workflow makes one real chat call
-# through the eval-proxy session so the whole LLM path is exercised, and the
-# grader rewards an exact match against the row's label.
+# through the controller's LiteLLM bridge so the whole LLM path is exercised
+# (bridge -> litellm -> OpenAI-compatible upstream stub), and the grader
+# rewards an exact match against the row's label.
 ROLLOUT_MAIN = """\
 import json
 import os
@@ -62,7 +63,7 @@ class EchoWorkflow(AgentWorkflow):
         if rollout is not None and rollout.chat_completions_url:
             headers = {"Authorization": f"Bearer {rollout.api_key}"}
             body = {
-                "model": "osmosis-rollout",
+                "model": "local-eval",
                 "messages": list(ctx.prompt),
                 "stream": True,
             }
@@ -157,8 +158,8 @@ class RunnerHarness:
     output_root: Path
     dataset: ResolvedDataset
     selection: RowSelection
-    proxy_base_url: str
-    proxy_token: str
+    llm_api_base: str
+    llm_api_key: str
     hooks: RecordingHooks
 
     def spec(self, **overrides: Any) -> EvalRunSpec:
@@ -190,8 +191,8 @@ class RunnerHarness:
             selection=selection or self.selection,
             rollout_dir=self.rollout_dir,
             output_root=self.output_root,
-            proxy_base_url=self.proxy_base_url,
-            proxy_auth_token=self.proxy_token,
+            llm_api_base=self.llm_api_base,
+            llm_api_key=self.llm_api_key,
             hooks=hooks or self.hooks,
             config_stem="echo-eval",
         )
@@ -231,15 +232,13 @@ def dataset_file(tmp_path: Path) -> Path:
 
 
 @pytest.fixture
-async def proxy_stub() -> AsyncIterator[tuple[str, str]]:
-    """A running eval-proxy contract stub. Yields ``(base_url, platform_token)``."""
+async def openai_stub() -> AsyncIterator[str]:
+    """A running OpenAI-compatible upstream. Yields its base URL."""
     from osmosis_ai.rollout.controller.listener import LocalhostUvicornServer
-    from tests.unit.rollout.eval_proxy_stub import create_eval_proxy_stub_app
+    from tests.unit.rollout.openai_stub import create_openai_stub_app
 
-    token = "stub-platform-token"
-    app = create_eval_proxy_stub_app(platform_token=token)
-    async with LocalhostUvicornServer(app) as server:
-        yield server.base_url, token
+    async with LocalhostUvicornServer(create_openai_stub_app()) as server:
+        yield server.base_url
 
 
 @pytest.fixture
@@ -247,17 +246,16 @@ async def harness(
     tmp_path: Path,
     rollout_project: Path,
     dataset_file: Path,
-    proxy_stub: tuple[str, str],
+    openai_stub: str,
 ) -> RunnerHarness:
     from osmosis_ai.eval.local.dataset import resolve_explicit_dataset_file
 
-    base_url, token = proxy_stub
     return RunnerHarness(
         rollout_dir=rollout_project,
         output_root=tmp_path / "evals",
         dataset=resolve_explicit_dataset_file(dataset_file),
         selection=select_rows(dataset_file),
-        proxy_base_url=base_url,
-        proxy_token=token,
+        llm_api_base=openai_stub,
+        llm_api_key="stub-llm-key",
         hooks=RecordingHooks(),
     )

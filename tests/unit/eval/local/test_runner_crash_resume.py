@@ -57,7 +57,7 @@ class Hooks:
 
 
 async def main() -> int:
-    rollout_dir, output_root, dataset_path, proxy_url, proxy_token = sys.argv[1:6]
+    rollout_dir, output_root, dataset_path, llm_api_base, llm_api_key = sys.argv[1:6]
     dataset_file = Path(dataset_path)
     runner = LocalEvalRunner(
         spec=EvalRunSpec(
@@ -76,8 +76,8 @@ async def main() -> int:
         selection=select_rows(dataset_file),
         rollout_dir=Path(rollout_dir),
         output_root=Path(output_root),
-        proxy_base_url=proxy_url,
-        proxy_auth_token=proxy_token,
+        llm_api_base=llm_api_base,
+        llm_api_key=llm_api_key,
         hooks=Hooks(),
         config_stem="echo-eval",
     )
@@ -116,8 +116,8 @@ def _spawn_supervisor(
             str(harness.rollout_dir),
             str(harness.output_root),
             str(harness.dataset.path),
-            harness.proxy_base_url,
-            harness.proxy_token,
+            harness.llm_api_base,
+            harness.llm_api_key,
         ],
         cwd=str(Path(__file__).resolve().parents[4]),
         env=env,

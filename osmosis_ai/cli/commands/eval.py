@@ -174,22 +174,10 @@ def eval_run(
         help="Fixed rollout-server port (default: an ephemeral port).",
         rich_help_panel="Advanced",
     ),
-    skip_llm_preflight: bool = typer.Option(
-        False,
-        "--skip-llm-preflight",
-        help="Skip the eval-proxy session and model check before dispatch.",
-        rich_help_panel="Advanced",
-    ),
     verbose: bool = typer.Option(
         False,
         "--verbose",
         help="Stream supervisor and rollout-server log lines to the terminal.",
-        rich_help_panel="Advanced",
-    ),
-    eval_proxy_url: str | None = typer.Option(
-        None,
-        "--eval-proxy-url",
-        help="Override the eval-proxy base URL (development only).",
         rich_help_panel="Advanced",
     ),
 ) -> CommandResult:
@@ -208,9 +196,7 @@ def eval_run(
         max_in_flight=max_in_flight,
         yes=yes,
         rollout_port=rollout_port,
-        skip_llm_preflight=skip_llm_preflight,
         verbose=verbose,
-        eval_proxy_url=eval_proxy_url,
     )
 
 

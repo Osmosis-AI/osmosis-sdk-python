@@ -2,8 +2,10 @@
 
 Owns run state and resume, the rollout-server subprocess, bounded row x run
 scheduling, cancellation, and result materialization (design
-``local-eval-run-plan.md`` §3.1). It hosts no LLM code: chat traffic goes to the
-hosted eval-proxy, and only a localhost callback listener stays local.
+``local-eval-run-plan.md`` §3.1). Model calls stay on this machine: the
+callback listener also mounts an in-process LiteLLM bridge, mirroring the
+hosted eval controller, and litellm resolves provider credentials from the
+environment (a ``--secrets-file`` entry reaches it the same way).
 
 The one ordering invariant everything else serves: a terminal callback is
 acknowledged **only after** its journal record is fully written and ``fsync``-ed,
@@ -75,7 +77,7 @@ from osmosis_ai.rollout.backend.harbor.diagnostics import REDACTED
 from osmosis_ai.rollout.controller import (
     CallbackListener,
     CallbackStore,
-    EvalProxyClient,
+    LiteLLMBridge,
     TerminalCallbackResult,
 )
 from osmosis_ai.rollout.driver import RolloutOutcome, RolloutRunRequest
@@ -163,7 +165,6 @@ class LocalEvalOptions:
     retry_failed: bool = False
     max_in_flight: int | None = None
     rollout_port: int | None = None
-    skip_llm_preflight: bool = False
     verbose: bool = False
 
 
@@ -511,9 +512,9 @@ class LocalEvalRunner:
         selection: RowSelection,
         rollout_dir: Path,
         output_root: Path,
-        proxy_base_url: str,
-        proxy_auth_token: str,
         hooks: RunnerHooks,
+        llm_api_key: str | None = None,
+        llm_api_base: str | None = None,
         provenance: Mapping[str, Any] | None = None,
         config_stem: str = "eval",
     ) -> None:
@@ -523,8 +524,8 @@ class LocalEvalRunner:
         self._selection = selection
         self._rollout_dir = rollout_dir
         self._output_root = output_root
-        self._proxy_base_url = proxy_base_url
-        self._proxy_auth_token = proxy_auth_token
+        self._llm_api_key = llm_api_key
+        self._llm_api_base = llm_api_base
         self._hooks = hooks
         self._provenance = dict(provenance or {})
         self._config_stem = config_stem
@@ -536,7 +537,7 @@ class LocalEvalRunner:
         self._resumed_keys: set[WorkKey] = set()
         self._dispatch_context: dict[str, WorkItem] = {}
         self._dispatch_started: dict[str, float] = {}
-        self._proxy: EvalProxyClient | None = None
+        self._bridge: LiteLLMBridge | None = None
         self._store: CallbackStore | None = None
         self._materializer: Materializer | None = None
         self._identity: RunIdentity | None = None
@@ -614,7 +615,8 @@ class LocalEvalRunner:
                 lock.clear_child()
 
         manifest = self._open_or_create_run(run_dir, inputs=inputs, run_name=run_name)
-        self._redactor.extend([self._proxy_auth_token])
+        if self._llm_api_key:
+            self._redactor.extend([self._llm_api_key])
         self._log = RunLog(
             run_dir / LOGS_FILENAME,
             echo=self._hooks.note if self._options.verbose else None,
@@ -722,22 +724,35 @@ class LocalEvalRunner:
     ) -> RunSummary:
         assert self._run_dir is not None
         controller_token = uuid.uuid4().hex
-        self._redactor.extend([controller_token])
+        bridge_token = uuid.uuid4().hex
+        self._redactor.extend([controller_token, bridge_token])
         store = CallbackStore(on_terminal_commit=self._commit_terminal)
         self._store = store
         self._seed_store_from_journal(store)
 
-        proxy = EvalProxyClient(
-            base_url=self._proxy_base_url, auth_token=self._proxy_auth_token
+        # litellm resolves provider credentials from the environment; a secret
+        # supplied through --secrets-file must reach it the same way.
+        for name, value in secrets.items():
+            os.environ.setdefault(name, value)
+
+        bridge = LiteLLMBridge(
+            model=self._spec.model_path,
+            api_key=self._llm_api_key,
+            api_base=self._llm_api_base,
         )
-        self._proxy = proxy
-        listener = CallbackListener(store, auth_token=controller_token)
+        self._bridge = bridge
+        listener = CallbackListener(
+            store,
+            auth_token=controller_token,
+            bridge=bridge,
+            bridge_token=bridge_token,
+        )
         self._snapshot_task = asyncio.create_task(self._snapshot_loop())
         cancelled = False
         try:
             await listener.start()
             self._write_log("info", "listener", "callback listener started")
-            await self._proxy_preflight()
+            await self._model_preflight(bridge)
             async with httpx.AsyncClient() as client:
                 base_url = await self._start_rollout_server(
                     secrets=secrets, lock=lock, client=client
@@ -747,9 +762,9 @@ class LocalEvalRunner:
                     callback_store=store,
                     completion_url_for=listener.completion_url,
                     grader_url_for=listener.grader_url,
-                    proxy_client=proxy,
+                    chat_completions_url_for=listener.chat_completions_url,
+                    chat_api_key=bridge_token,
                     controller_api_key=controller_token,
-                    model_path=self._spec.model_path,
                     http_client=client,
                     callback_timeout_sec=self._callback_deadline(),
                 )
@@ -766,8 +781,6 @@ class LocalEvalRunner:
             await self._stop_rollout_server(lock)
             with contextlib.suppress(Exception):
                 await listener.stop()
-            with contextlib.suppress(Exception):
-                await proxy.aclose()
             if self._snapshot_task is not None:
                 self._snapshot_task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
@@ -775,32 +788,17 @@ class LocalEvalRunner:
                 self._snapshot_task = None
         return self._finalize(cancelled=cancelled)
 
-    async def _proxy_preflight(self) -> None:
-        """Open and close a throwaway proxy session to catch config errors early.
-
-        Doing this before any dispatch means an unusable model or an expired
-        login fails once, loudly, instead of failing every work item.
-        """
-        if self._options.skip_llm_preflight or self._proxy is None:
-            return
-        probe_id = uuid.uuid4().hex
+    async def _model_preflight(self, bridge: LiteLLMBridge) -> None:
+        """One-shot completion so a bad model or key fails once, loudly,
+        before any dispatch instead of failing every work item."""
         try:
-            await self._proxy.create_session(
-                rollout_id=probe_id, model_path=self._spec.model_path
-            )
+            await bridge.preflight_check()
         except Exception as exc:
-            # Transport failures reach here too: EvalProxyClient only wraps HTTP
-            # status and decode errors, and an unreachable proxy must still read
-            # as a preflight failure rather than a traceback.
             raise LocalEvalError(
-                f"eval-proxy preflight failed for model "
-                f"{self._spec.model_path!r}: {type(exc).__name__}: {exc}. Pass "
-                "--skip-llm-preflight to dispatch anyway."
+                f"model preflight failed for {self._spec.model_path!r}: "
+                f"{type(exc).__name__}: {exc}"
             ) from exc
-        finally:
-            with contextlib.suppress(Exception):
-                await self._proxy.close_session(probe_id)
-        self._write_log("info", "preflight", "eval-proxy session check passed")
+        self._write_log("info", "preflight", "model preflight passed")
 
     def _halt_dispatch(self, reason: str, **details: Any) -> None:
         """Stop new dispatch without stamping the remaining queue failed (§9.3).
@@ -1060,6 +1058,7 @@ class LocalEvalRunner:
             recorded_at=utc_now(),
             source_row_index=item.row.source_row_index,
             reward=reward,
+            tokens=self._collect_tokens(result.rollout_id),
             duration_ms=self._elapsed_ms(result.rollout_id),
             error_type=error_type,
         )
@@ -1109,6 +1108,7 @@ class LocalEvalRunner:
                 status="failed",
                 recorded_at=utc_now(),
                 source_row_index=item.row.source_row_index,
+                tokens=self._collect_tokens(rollout_id),
                 duration_ms=self._elapsed_ms(rollout_id),
                 error_type=_error_type_for(exc),
             )
@@ -1123,9 +1123,16 @@ class LocalEvalRunner:
             return 0.0
         return (time.monotonic() - started) * 1000.0
 
+    def _collect_tokens(self, rollout_id: str) -> int | None:
+        if self._bridge is None:
+            return None
+        return self._bridge.collect_tokens(rollout_id)
+
     def _forget(self, rollout_id: str) -> None:
         self._dispatch_context.pop(rollout_id, None)
         self._dispatch_started.pop(rollout_id, None)
+        if self._bridge is not None:
+            self._bridge.discard(rollout_id)
 
     async def _await_trajectory(self, rollout_id: str) -> None:
         """Poll for a parseable ``trajectory.json`` after the durable result (§11.3).

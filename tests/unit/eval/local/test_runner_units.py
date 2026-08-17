@@ -412,8 +412,8 @@ def _runner(
         selection=select_rows(data),
         rollout_dir=tmp_path,
         output_root=output_root or tmp_path / "evals",
-        proxy_base_url="http://127.0.0.1:1",
-        proxy_auth_token="platform-token-value",
+        llm_api_base="http://127.0.0.1:1",
+        llm_api_key="unit-test-llm-key",
         hooks=_Hooks(),
     )
 

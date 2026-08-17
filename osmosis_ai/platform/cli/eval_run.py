@@ -37,9 +37,6 @@ COMMAND_LABEL = "`osmosis eval run`"
 EVAL_CONFIG_DIR = "configs/eval"
 DEFAULT_OUTPUT_SUBPATH = (".osmosis", "evals")
 
-#: Advanced flag default: the platform-hosted eval-proxy (D6).
-DEFAULT_EVAL_PROXY_PATH = "/api/eval-proxy"
-
 
 @dataclass(frozen=True)
 class _Hooks:
@@ -62,9 +59,9 @@ class _Hooks:
     def resolve_secrets(self, names: Sequence[str]) -> dict[str, str]:
         if not names:
             return {}
-        # Workflow secrets must resolve locally: a name existing in the platform
-        # store does not satisfy them here (§7.3). Provider keys are the
-        # opposite -- the eval-proxy injects those server-side.
+        # Every secret must resolve locally: a name existing in the platform
+        # store does not satisfy it here (§7.3). Provider keys included — the
+        # in-process LiteLLM bridge reads them from the environment.
         return resolve_run_secrets(
             names=list(names),
             secrets_file=self.secrets_file,
@@ -133,9 +130,7 @@ def run(
     max_in_flight: int | None = None,
     yes: bool = False,
     rollout_port: int | None = None,
-    skip_llm_preflight: bool = False,
     verbose: bool = False,
-    eval_proxy_url: str | None = None,
 ) -> CommandResult:
     """Run an evaluation locally against the workspace's rollout server."""
     import asyncio
@@ -255,15 +250,12 @@ def run(
             retry_failed=retry_failed,
             max_in_flight=max_in_flight,
             rollout_port=rollout_port,
-            skip_llm_preflight=skip_llm_preflight,
             verbose=verbose,
         ),
         dataset=dataset,
         selection=selection,
         rollout_dir=rollout_dir,
         output_root=output_root,
-        proxy_base_url=_resolve_proxy_base_url(eval_proxy_url),
-        proxy_auth_token=_platform_bearer(context.credentials),
         hooks=_Hooks(yes=yes, secrets_file=secrets_file, model_path=spec.model_path),
         provenance=_provenance(workspace_directory, spec, advanced=advanced),
         config_stem=resolved_config_path.stem,
@@ -281,26 +273,6 @@ def run(
 
     _print_failures(summary)
     return _result(summary, context=context, dataset_source=dataset.source)
-
-
-def _resolve_proxy_base_url(override: str | None) -> str:
-    """Advanced flag or the platform-derived hosted eval-proxy base (D6)."""
-    if override:
-        return override.rstrip("/")
-    from osmosis_ai.platform.auth.config import get_platform_url
-
-    return f"{get_platform_url().rstrip('/')}{DEFAULT_EVAL_PROXY_PATH}"
-
-
-def _platform_bearer(credentials: Any) -> str:
-    token = getattr(credentials, "access_token", None)
-    if not token:
-        raise CLIError(
-            "Local evaluation requires an Osmosis login: the eval-proxy session "
-            "is org-authenticated. Run `osmosis auth login`.",
-            code=CLIErrorCode.AUTH_REQUIRED,
-        )
-    return str(token)
 
 
 def _provenance(

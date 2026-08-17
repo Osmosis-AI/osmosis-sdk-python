@@ -210,7 +210,6 @@ def test_runtime_flags_reach_the_options_object(
         retry_failed=True,
         max_in_flight=7,
         rollout_port=8123,
-        skip_llm_preflight=True,
         verbose=True,
     )
     options = captured_runner.calls[0]["options"]
@@ -219,7 +218,6 @@ def test_runtime_flags_reach_the_options_object(
     assert options.retry_failed is True
     assert options.max_in_flight == 7
     assert options.rollout_port == 8123
-    assert options.skip_llm_preflight is True
     assert options.verbose is True
 
 
@@ -252,51 +250,6 @@ def test_the_config_stem_seeds_a_generated_run_name(
 ) -> None:
     _run(workspace)
     assert captured_runner.calls[0]["config_stem"] == "echo"
-
-
-# --------------------------------------------------------------------------- #
-# Eval-proxy wiring (D6)
-# --------------------------------------------------------------------------- #
-
-
-def test_the_proxy_base_defaults_to_the_platform_url(
-    workspace: Path,
-    captured_runner: type[_CapturedRunner],
-    console_capture: StringIO,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("OSMOSIS_PLATFORM_URL", "https://platform.example.com")
-    _run(workspace)
-    assert captured_runner.calls[0]["proxy_base_url"] == (
-        "https://platform.example.com/api/eval-proxy"
-    )
-
-
-def test_the_proxy_base_can_be_overridden_for_development(
-    workspace: Path, captured_runner: type[_CapturedRunner], console_capture: StringIO
-) -> None:
-    _run(workspace, eval_proxy_url="http://127.0.0.1:9999/")
-    assert captured_runner.calls[0]["proxy_base_url"] == "http://127.0.0.1:9999"
-
-
-def test_the_platform_bearer_is_passed_but_never_printed(
-    workspace: Path, captured_runner: type[_CapturedRunner], console_capture: StringIO
-) -> None:
-    _run(workspace)
-    assert captured_runner.calls[0]["proxy_auth_token"] == "platform-token"
-    assert "platform-token" not in console_capture.getvalue()
-
-
-def test_a_missing_login_is_an_auth_error(
-    workspace: Path,
-    captured_runner: type[_CapturedRunner],
-    console_capture: StringIO,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    context = eval_run_module.require_git_workspace_directory_context()
-    monkeypatch.setattr(context.credentials, "access_token", "", raising=False)
-    with pytest.raises(CLIError, match="requires an Osmosis login"):
-        _run(workspace)
 
 
 # --------------------------------------------------------------------------- #
