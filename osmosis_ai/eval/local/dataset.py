@@ -170,9 +170,9 @@ def _iter_parquet_rows(path: Path) -> Iterator[Mapping[str, Any]]:
         raise DatasetResolutionError(
             'Reading Parquet datasets requires: pip install "osmosis-ai[parquet]"'
         ) from exc
-    parquet_file = pq.ParquetFile(path)
-    for batch in parquet_file.iter_batches():
-        yield from batch.to_pylist()
+    with pq.ParquetFile(path) as parquet_file:
+        for batch in parquet_file.iter_batches():
+            yield from batch.to_pylist()
 
 
 # --------------------------------------------------------------------------- #
@@ -194,7 +194,9 @@ def _parse_metadata(value: Any, *, where: str) -> dict[str, Any] | None:
     if value is None:
         return None
     if isinstance(value, Mapping):
-        return dict(value)
+        # An empty object is treated as absent so normalize_row()'s "no prompt and
+        # no metadata" guard fires instead of waiving the prompt requirement.
+        return dict(value) or None
     if isinstance(value, str):
         text = value.strip()
         if not text:
@@ -207,7 +209,7 @@ def _parse_metadata(value: Any, *, where: str) -> dict[str, Any] | None:
             ) from exc
         if not isinstance(decoded, dict):
             raise DatasetResolutionError(f"{where}: metadata must be a JSON object")
-        return decoded
+        return decoded or None
     raise DatasetResolutionError(f"{where}: metadata must be a JSON object")
 
 
@@ -543,6 +545,14 @@ def resolve_platform_dataset(
     _note(f"downloading dataset {dataset_name!r}")
     try:
         fetcher.download_to(dataset_name, staging)
+        staged_size = staging.stat().st_size
+        # Truthiness, not ``is not None``: the platform record defaults file_size
+        # to 0 when the API omits it, and there is nothing to compare against.
+        if description.file_size and staged_size != description.file_size:
+            raise DatasetResolutionError(
+                f"dataset {dataset_name!r} downloaded {staged_size} bytes but the "
+                f"platform records {description.file_size}; re-run to retry"
+            )
         stored = cache.store(
             dataset_id=description.dataset_id,
             dataset_name=description.dataset_name,
@@ -552,6 +562,13 @@ def resolve_platform_dataset(
             row_count=description.row_count,
             organization_id=description.organization_id,
         )
+    except DatasetResolutionError:
+        raise
+    except Exception as exc:
+        raise DatasetResolutionError(
+            f"could not download dataset {dataset_name!r} ({exc}); "
+            f"pass --dataset-file to run against a local file"
+        ) from exc
     finally:
         staging.unlink(missing_ok=True)
     return _resolved_from_cache(stored, source="download")

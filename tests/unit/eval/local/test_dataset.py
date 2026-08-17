@@ -140,6 +140,25 @@ def test_metadata_with_broken_json_is_reported_with_the_row() -> None:
         normalize_row({"metadata": "{oops"}, row_index=0, source_row_index=4)
 
 
+@pytest.mark.parametrize("value", [{}, "{}", "  {}  "])
+def test_empty_metadata_does_not_waive_the_prompt_requirement(value: Any) -> None:
+    # A CSV metadata header supplies the column for every row, so an empty object
+    # must read as absent rather than as metadata-mode consent to an empty rollout.
+    with pytest.raises(DatasetResolutionError, match="row 2: has no prompt"):
+        normalize_row({"metadata": value}, row_index=0, source_row_index=2)
+
+
+@pytest.mark.parametrize("value", [{}, "{}"])
+def test_empty_metadata_with_a_prompt_still_normalizes(value: Any) -> None:
+    row = normalize_row(
+        {"metadata": value, "user_prompt": "hi"}, row_index=0, source_row_index=0
+    )
+    assert row.initial_messages == [{"role": "user", "content": "hi"}]
+    assert row.metadata is None
+    # Still metadata mode, so the missing label is not an error.
+    assert row.label is None
+
+
 def test_columns_outside_the_contract_are_ignored() -> None:
     raw = {"user_prompt": "hi", "ground_truth": "6", "notes": "ignore me"}
     row = normalize_row(raw, row_index=0, source_row_index=0)
@@ -289,12 +308,20 @@ def test_dataset_fingerprint_ignores_the_path(tmp_path: Path) -> None:
 class FakeFetcher:
     """Records platform calls so cache hits can be asserted as zero downloads."""
 
-    def __init__(self, *, rows: list[dict[str, Any]], version: str = "v1") -> None:
+    def __init__(
+        self,
+        *,
+        rows: list[dict[str, Any]],
+        version: str = "v1",
+        file_size: int | None = None,
+    ) -> None:
         self.rows = rows
         self.version = version
+        self.file_size = file_size
         self.describe_calls = 0
         self.download_calls = 0
         self.describe_error: Exception | None = None
+        self.download_error: Exception | None = None
 
     def describe(self, dataset_name: str) -> DatasetDescription:
         self.describe_calls += 1
@@ -307,10 +334,13 @@ class FakeFetcher:
             version=self.version,
             row_count=len(self.rows),
             organization_id="org-1",
+            file_size=self.file_size,
         )
 
     def download_to(self, dataset_name: str, destination: Path) -> None:
         self.download_calls += 1
+        if self.download_error is not None:
+            raise self.download_error
         _write_jsonl(destination, self.rows)
 
 
@@ -413,3 +443,47 @@ def test_a_dataset_resolution_error_from_describe_is_not_masked(tmp_path: Path) 
     fetcher.describe_error = DatasetResolutionError("still processing")
     with pytest.raises(DatasetResolutionError, match="still processing"):
         resolve_platform_dataset("multiply", cache=cache, fetcher=fetcher)
+
+
+def test_a_short_download_is_rejected_and_caches_nothing(tmp_path: Path) -> None:
+    # A truncated download would otherwise be hashed, stored, and pinned into the
+    # manifest as if it were the dataset the platform described.
+    cache = DatasetCache(tmp_path / "cache")
+    fetcher = FakeFetcher(rows=PROMPT_ROWS, file_size=1_000_000)
+    with pytest.raises(DatasetResolutionError, match="platform records 1000000"):
+        resolve_platform_dataset("multiply", cache=cache, fetcher=fetcher)
+    assert list(cache.directory_for("ds-1").iterdir()) == []
+
+
+@pytest.mark.parametrize("file_size", [None, 0])
+def test_an_unrecorded_file_size_does_not_block_resolution(
+    tmp_path: Path, file_size: int | None
+) -> None:
+    # The platform record defaults file_size to 0 when the API omits it, so the
+    # check must skip those datasets instead of rejecting every one of them.
+    cache = DatasetCache(tmp_path / "cache")
+    fetcher = FakeFetcher(rows=PROMPT_ROWS, file_size=file_size)
+    resolved = resolve_platform_dataset("multiply", cache=cache, fetcher=fetcher)
+    assert resolved.source == "download"
+    assert select_rows(resolved.path).total_dataset_rows == 4
+
+
+def test_a_matching_file_size_resolves(tmp_path: Path) -> None:
+    expected = len(
+        "".join(json.dumps(row) + "\n" for row in PROMPT_ROWS).encode("utf-8")
+    )
+    cache = DatasetCache(tmp_path / "cache")
+    fetcher = FakeFetcher(rows=PROMPT_ROWS, file_size=expected)
+    resolved = resolve_platform_dataset("multiply", cache=cache, fetcher=fetcher)
+    assert resolved.source == "download"
+
+
+def test_a_failed_download_asks_for_dataset_file(tmp_path: Path) -> None:
+    cache = DatasetCache(tmp_path / "cache")
+    fetcher = FakeFetcher(rows=PROMPT_ROWS)
+    fetcher.download_error = RuntimeError("connection reset")
+    with pytest.raises(
+        DatasetResolutionError, match=r"connection reset.*--dataset-file"
+    ):
+        resolve_platform_dataset("multiply", cache=cache, fetcher=fetcher)
+    assert list(cache.directory_for("ds-1").iterdir()) == []
