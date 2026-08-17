@@ -219,9 +219,7 @@ def run(
                 parse_cli_path(dataset_file, expand_user=True).path
             )
         else:
-            cache = DatasetCache(
-                default_dataset_cache_root(), git_identity=context.git_identity
-            )
+            cache = DatasetCache(default_dataset_cache_root())
             fetcher = PlatformDatasetFetcher(
                 credentials=context.credentials, git_identity=context.git_identity
             )

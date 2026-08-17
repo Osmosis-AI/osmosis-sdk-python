@@ -315,7 +315,7 @@ class FakeFetcher:
 
 
 def test_platform_dataset_downloads_then_caches(tmp_path: Path) -> None:
-    cache = DatasetCache(tmp_path / "cache", git_identity="github.com/acme/repo")
+    cache = DatasetCache(tmp_path / "cache")
     fetcher = FakeFetcher(rows=PROMPT_ROWS)
 
     first = resolve_platform_dataset("multiply", cache=cache, fetcher=fetcher)
@@ -330,19 +330,20 @@ def test_platform_dataset_downloads_then_caches(tmp_path: Path) -> None:
 
 
 def test_cache_is_content_addressed(tmp_path: Path) -> None:
-    cache = DatasetCache(tmp_path / "cache", git_identity="github.com/acme/repo")
+    cache = DatasetCache(tmp_path / "cache")
     resolved = resolve_platform_dataset(
         "multiply", cache=cache, fetcher=FakeFetcher(rows=PROMPT_ROWS)
     )
     assert resolved.path.name == f"{resolved.sha256}.jsonl"
     metadata = json.loads((resolved.path.parent / "metadata.json").read_text())
     assert metadata["sha256"] == resolved.sha256
+    assert metadata["file_size"] == resolved.path.stat().st_size
     assert metadata["row_count"] == 4
     assert metadata["organization_id"] == "org-1"
 
 
 def test_a_new_platform_version_invalidates_the_cache(tmp_path: Path) -> None:
-    cache = DatasetCache(tmp_path / "cache", git_identity="github.com/acme/repo")
+    cache = DatasetCache(tmp_path / "cache")
     fetcher = FakeFetcher(rows=PROMPT_ROWS)
     resolve_platform_dataset("multiply", cache=cache, fetcher=fetcher)
 
@@ -354,22 +355,40 @@ def test_a_new_platform_version_invalidates_the_cache(tmp_path: Path) -> None:
     assert select_rows(refreshed.path).total_dataset_rows == 3
 
 
-def test_a_corrupted_cache_entry_is_not_a_hit(tmp_path: Path) -> None:
-    cache = DatasetCache(tmp_path / "cache", git_identity="github.com/acme/repo")
+def test_a_size_mismatched_cache_entry_is_not_a_hit(tmp_path: Path) -> None:
+    # The digest could not catch this on its own: store() hashes whatever bytes
+    # arrived, so a short file re-hashes to exactly the digest it is named after.
+    cache = DatasetCache(tmp_path / "cache")
     fetcher = FakeFetcher(rows=PROMPT_ROWS)
     resolved = resolve_platform_dataset("multiply", cache=cache, fetcher=fetcher)
-    resolved.path.write_text("truncated")
+    resolved.path.write_text("truncated", encoding="utf-8")
 
     again = resolve_platform_dataset("multiply", cache=cache, fetcher=fetcher)
     assert again.source == "download"
     assert fetcher.download_calls == 2
-    assert sha256_of_file(again.path) == again.sha256
+    assert select_rows(again.path).total_dataset_rows == 4
+
+
+def test_a_cache_entry_with_no_recorded_size_is_still_a_hit(tmp_path: Path) -> None:
+    # Metadata written before file_size existed must stay usable: forcing a miss
+    # would re-download every cached dataset once, for no integrity gain.
+    cache = DatasetCache(tmp_path / "cache")
+    fetcher = FakeFetcher(rows=PROMPT_ROWS)
+    resolved = resolve_platform_dataset("multiply", cache=cache, fetcher=fetcher)
+    metadata_path = resolved.path.parent / "metadata.json"
+    payload = json.loads(metadata_path.read_text())
+    del payload["file_size"]
+    metadata_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    again = resolve_platform_dataset("multiply", cache=cache, fetcher=fetcher)
+    assert again.source == "cache"
+    assert fetcher.download_calls == 1
 
 
 def test_an_unreachable_platform_never_serves_the_cache(tmp_path: Path) -> None:
     # There is no offline mode: a cached copy the platform cannot confirm the
     # version of would pin the manifest to bytes a resume can never re-verify.
-    cache = DatasetCache(tmp_path / "cache", git_identity="github.com/acme/repo")
+    cache = DatasetCache(tmp_path / "cache")
     fetcher = FakeFetcher(rows=PROMPT_ROWS)
     resolve_platform_dataset("multiply", cache=cache, fetcher=fetcher)
 
@@ -381,22 +400,15 @@ def test_an_unreachable_platform_never_serves_the_cache(tmp_path: Path) -> None:
 def test_an_unreachable_platform_with_no_cache_asks_for_dataset_file(
     tmp_path: Path,
 ) -> None:
-    cache = DatasetCache(tmp_path / "cache", git_identity="github.com/acme/repo")
+    cache = DatasetCache(tmp_path / "cache")
     fetcher = FakeFetcher(rows=PROMPT_ROWS)
     fetcher.describe_error = RuntimeError("connection refused")
     with pytest.raises(DatasetResolutionError, match="--dataset-file"):
         resolve_platform_dataset("multiply", cache=cache, fetcher=fetcher)
 
 
-def test_caches_are_scoped_per_workspace(tmp_path: Path) -> None:
-    root = tmp_path / "cache"
-    first = DatasetCache(root, git_identity="github.com/acme/one")
-    second = DatasetCache(root, git_identity="github.com/acme/two")
-    assert first.directory_for("ds-1") != second.directory_for("ds-1")
-
-
 def test_a_dataset_resolution_error_from_describe_is_not_masked(tmp_path: Path) -> None:
-    cache = DatasetCache(tmp_path / "cache", git_identity="github.com/acme/repo")
+    cache = DatasetCache(tmp_path / "cache")
     fetcher = FakeFetcher(rows=PROMPT_ROWS)
     fetcher.describe_error = DatasetResolutionError("still processing")
     with pytest.raises(DatasetResolutionError, match="still processing"):

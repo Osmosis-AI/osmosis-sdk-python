@@ -326,14 +326,6 @@ def default_dataset_cache_root() -> Path:
     return Path.home() / ".cache" / "osmosis" / "datasets"
 
 
-def _workspace_cache_key(git_identity: str) -> str:
-    """A readable but collision-free directory name for a workspace identity."""
-    safe = (
-        re.sub(r"[^A-Za-z0-9_.-]", "_", git_identity)[:48].strip("._-") or "workspace"
-    )
-    return f"{safe}-{hashlib.sha256(git_identity.encode()).hexdigest()[:8]}"
-
-
 @dataclass(frozen=True)
 class CachedDataset:
     """A verified cache entry: the bytes plus the metadata that describes them."""
@@ -349,15 +341,19 @@ class CachedDataset:
 
 
 class DatasetCache:
-    """Content-addressed dataset cache under ``<root>/<workspace>/<dataset-id>/``.
+    """Content-addressed dataset cache under ``<root>/<dataset-id>/``.
 
     A hit requires the recorded ``version`` to match the platform's and the
-    stored bytes to hash to their recorded digest, so a truncated or swapped
-    file can never masquerade as the dataset a manifest pinned.
+    stored file to still be its recorded length, so a truncated file cannot
+    masquerade as the dataset a manifest pinned.
+
+    The cache is *not* partitioned per workspace: a dataset id is unique across
+    the platform, so partitioning would only force one redundant re-download per
+    checkout of the same repository.
     """
 
-    def __init__(self, root: Path, *, git_identity: str) -> None:
-        self._root = root / _workspace_cache_key(git_identity)
+    def __init__(self, root: Path) -> None:
+        self._root = root
 
     def directory_for(self, dataset_id: str) -> Path:
         safe_id = re.sub(r"[^A-Za-z0-9_.-]", "_", dataset_id)
@@ -383,8 +379,19 @@ class DatasetCache:
         if expected_version is not None and payload.get("version") != expected_version:
             return None
         data_path = self.directory_for(dataset_id) / f"{digest}.{extension}"
-        if not data_path.is_file() or sha256_of_file(data_path) != digest:
+        if not data_path.is_file():
             return None
+        # Re-hashing the whole file here bought less than it cost: store() hashes
+        # whatever bytes arrived and names the file after *that* digest, so a
+        # truncated download re-hashes to its own recorded digest and passes. The
+        # digest only ever caught damage after store(), which changes the file's
+        # length -- so compare the recorded length instead, for one stat().
+        recorded_size = payload.get("file_size")
+        if isinstance(recorded_size, int) and data_path.stat().st_size != recorded_size:
+            return None
+        # Entries written before file_size was recorded have nothing to compare;
+        # they stay usable (still version-gated) rather than forcing one
+        # redundant re-download of every cached dataset on upgrade.
         return CachedDataset(
             path=data_path,
             sha256=digest,
@@ -422,6 +429,7 @@ class DatasetCache:
                 "version": version,
                 "sha256": digest,
                 "extension": extension,
+                "file_size": data_path.stat().st_size,
                 "row_count": row_count,
                 "cached_at": datetime.now(UTC).isoformat(timespec="seconds"),
             },
