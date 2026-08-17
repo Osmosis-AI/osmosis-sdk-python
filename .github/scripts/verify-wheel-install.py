@@ -69,7 +69,9 @@ EXTRA_REQUIREMENTS: dict[str, set[str]] = {
     },
     "rubric": {"aiohttp", "click", "litellm", "orjson", "tqdm"},
     "parquet": {"pyarrow"},
-    "eval-run": {"click", "fastapi", "uvicorn"},
+    # eval-run = osmosis-ai[server] self-reference + the in-process LiteLLM
+    # bridge dependency.
+    "eval-run": {"litellm", "osmosis-ai"},
     "full": {"osmosis-ai"},
 }
 
@@ -196,7 +198,6 @@ BARE_IMPORTABLE_MODULES = (
     "osmosis_ai.rollout.utils.errors",
     "osmosis_ai.rollout.utils.ttl_cache",
     "osmosis_ai.rollout.controller.store",
-    "osmosis_ai.rollout.controller.proxy_client",
     "osmosis_ai.rollout.http_driver",
 )
 
@@ -211,6 +212,7 @@ EXTRA_ONLY_MODULES = (
     "osmosis_ai.rollout.integrations.agents.strands",
     "osmosis_ai.rollout.server.app",
     "osmosis_ai.rollout.controller.listener",
+    "osmosis_ai.rollout.controller.llm_bridge",
 )
 
 
@@ -223,7 +225,10 @@ def _assert_extra_only_modules_absent() -> None:
         except ModuleNotFoundError as error:
             if module_name == "osmosis_ai.packaging":
                 assert 'pip install "osmosis-ai[harbor]"' in str(error), str(error)
-            elif module_name == "osmosis_ai.rollout.controller.listener":
+            elif module_name in (
+                "osmosis_ai.rollout.controller.listener",
+                "osmosis_ai.rollout.controller.llm_bridge",
+            ):
                 assert 'pip install "osmosis-ai[eval-run]"' in str(error), str(error)
             continue
         raise AssertionError(f"{module_name} imported without its extra")
@@ -332,7 +337,7 @@ def _smoke_parquet() -> None:
 def _smoke_eval_run() -> None:
     _assert_public_exports(
         "osmosis_ai.rollout.controller",
-        ("CallbackStore", "CallbackListener", "EvalProxyClient"),
+        ("CallbackStore", "CallbackListener", "LiteLLMBridge"),
     )
     _assert_public_exports(
         "osmosis_ai.rollout.http_driver",
@@ -359,7 +364,7 @@ SCENARIO_PRESENT: dict[str, set[str]] = {
     "harbor": {"dockerfile-parse", "harbor", "platformdirs", "toml", "uv"},
     "rubric": {"litellm", "orjson", "tqdm"},
     "parquet": {"pyarrow"},
-    "eval-run": {"fastapi", "uvicorn"},
+    "eval-run": {"fastapi", "litellm", "uvicorn"},
     "full": {
         "fastapi",
         "dockerfile-parse",
@@ -457,7 +462,6 @@ SCENARIO_ABSENT: dict[str, set[str]] = {
     "eval-run": {
         "dockerfile-parse",
         "harbor",
-        "litellm",
         "openai-agents",
         "orjson",
         "platformdirs",
