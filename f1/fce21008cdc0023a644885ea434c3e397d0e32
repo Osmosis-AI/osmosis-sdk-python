@@ -1,0 +1,26 @@
+docs/eval-run-local.md
+  s_00c3865caf2bbb::t_82744e6bbe887a 125
+  s_00c3865caf2bbb::t_f953f36baaace9 129-130
+  s_00c3865caf2bbb::t_6831374f7bc0d7 16
+  s_00c3865caf2bbb::t_dbded479ed1bd5 48
+  s_00c3865caf2bbb::t_401504726f4746 99
+  s_00c3865caf2bbb::t_c6790670f2aabe 107
+osmosis_ai/rollout/types/protocol.py
+  s_00c3865caf2bbb::t_580c1e42dd9988 28-29
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "f1fce21008cdc0023a644885ea434c3e397d0e32",
+  "prompts": {},
+  "sessions": {
+    "s_00c3865caf2bbb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "00de36f5-6bb1-45b7-828d-f57951616464",
+        "model": "claude-fable-5"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}
