@@ -207,7 +207,7 @@ backend = LocalBackend(
 app = create_rollout_server(backend=backend)  # FastAPI: POST /rollout, GET /health
 ```
 
-- `create_rollout_server` ([server/app.py](../osmosis_ai/rollout/server/app.py)) is provided by the `server` extra. It wires the protocol: it schedules the backend execution task before the 202 response is sent (so a dropped response cannot lose the rollout) and posts the completion + grader callbacks. Admission is idempotent per `rollout_id`: an identical duplicate request returns 202 without scheduling again (409 on a conflicting body), with completed-rollout digests retained for a bounded 15-minute window. It has no Harbor dependency.
+- `create_rollout_server` ([server/app.py](../osmosis_ai/rollout/server/app.py)) is provided by the `server` extra. It wires the protocol: it schedules the backend execution task before the 202 response is sent (so a dropped response cannot lose the rollout), posts the completion + grader callbacks, and drains in-flight rollouts on shutdown. Admission does not deduplicate `rollout_id`s — dispatchers mint a fresh id per attempt and own their retries. It has no Harbor dependency.
 - `ControllerAuth` ([server/auth.py](../osmosis_ai/rollout/server/auth.py)) supplies the bearer headers for callbacks.
 - `ExecutionBackend` ([backend/base.py](../osmosis_ai/rollout/backend/base.py)) is the ABC; pick one:
   - `LocalBackend` ([backend/local/](../osmosis_ai/rollout/backend/local/)) — runs workflow + grader in-process. Re-exported from `osmosis_ai.rollout`. Used by the scaffold and eval.

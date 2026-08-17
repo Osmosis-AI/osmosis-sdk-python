@@ -317,3 +317,20 @@ def json_body(request: httpx.Request) -> dict[str, Any]:
     import json
 
     return json.loads(request.content)
+
+
+def test_an_empty_controller_api_key_is_rejected_at_construction() -> None:
+    # An empty key would admit rollouts whose callbacks the listener then
+    # rejects as unauthenticated — a hang, not an error.
+    with pytest.raises(ValueError, match="controller_api_key"):
+        HttpRolloutDriver(
+            rollout_base_url="http://127.0.0.1:1",
+            callback_store=_store(),
+            completion_url_for=lambda rid: f"http://127.0.0.1:1/c/{rid}",
+            grader_url_for=lambda rid: f"http://127.0.0.1:1/g/{rid}",
+            chat_completions_url_for=lambda rid: (
+                f"http://127.0.0.1:1/v1/rollouts/{rid}"
+            ),
+            chat_api_key=None,
+            controller_api_key="  ",
+        )
