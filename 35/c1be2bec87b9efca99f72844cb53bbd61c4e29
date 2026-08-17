@@ -1,0 +1,27 @@
+.github/scripts/verify-wheel-install.py
+  s_00c3865caf2bbb::t_dee5f754ff5ff0 72-74,215,228-231,340,367
+tests/unit/test_public_api_imports.py
+  s_00c3865caf2bbb::t_dee5f754ff5ff0 220,226-244,253-254,357-368,428,430-431,435,449,453
+uv.lock
+  ai_agent 1665,1757,1770
+pyproject.toml
+  s_00c3865caf2bbb::t_dee5f754ff5ff0 129-131,133-134
+osmosis_ai/_imports.py
+  s_00c3865caf2bbb::t_dee5f754ff5ff0 36
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "35c1be2bec87b9efca99f72844cb53bbd61c4e29",
+  "prompts": {},
+  "sessions": {
+    "s_00c3865caf2bbb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "00de36f5-6bb1-45b7-828d-f57951616464",
+        "model": "claude-fable-5"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}
