@@ -152,7 +152,11 @@ def test_replay_refuses_a_malformed_committed_record(tmp_path: Path) -> None:
     [
         ({"row_index": "0"}, "row_index must be an integer"),
         ({"status": "cancelled"}, "status must be one of"),
-        ({"rollout_id": ""}, "rollout_id must not be empty"),
+        ({"rollout_id": ""}, "rollout_id must be a single path segment"),
+        # The id names a directory under rollout_trials/, so a traversal in a
+        # replayed record would read and project files outside the run.
+        ({"rollout_id": "../../etc"}, "rollout_id must be a single path segment"),
+        ({"rollout_id": "nested/id"}, "rollout_id must be a single path segment"),
         ({"rollout_id": 7}, "rollout_id must be a string"),
         ({"tokens": "many"}, "tokens must be an integer"),
         # A required field written as JSON null is as unusable as an absent one.

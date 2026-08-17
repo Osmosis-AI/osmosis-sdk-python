@@ -375,6 +375,102 @@ async def test_a_foreign_rollout_server_on_a_pinned_port_is_refused(
 
 
 # --------------------------------------------------------------------------- #
+# Concurrency resolution (§10)
+# --------------------------------------------------------------------------- #
+
+
+async def _resolved_concurrency(
+    runner: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    health: dict[str, Any] | None,
+) -> int:
+    from osmosis_ai.eval.local import runner as runner_module
+
+    async def fake_probe(*_args: Any, **_kwargs: Any) -> dict[str, Any] | None:
+        return health
+
+    monkeypatch.setattr(runner_module, "probe_health", fake_probe)
+    async with httpx.AsyncClient() as client:
+        return await runner._resolve_concurrency(client, "http://127.0.0.1:1")
+
+
+@pytest.mark.parametrize(
+    ("health", "expected"),
+    [
+        # Harbor advertises its queue depth at top level...
+        ({"max_queue_depth": 3}, 3),
+        # ...LocalBackend reports the limiter snapshot it actually enforces.
+        ({"concurrency": {"max_concurrent": 4}}, 4),
+    ],
+    ids=["harbor-queue-depth", "local-backend-limiter"],
+)
+async def test_health_capacity_caps_an_unset_concurrency(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    health: dict[str, Any],
+    expected: int,
+) -> None:
+    runner = _runner(_spec(), tmp_path)
+    assert await _resolved_concurrency(runner, monkeypatch, health) == expected
+
+
+@pytest.mark.parametrize(
+    "health",
+    [
+        None,
+        {},
+        {"max_queue_depth": 0},
+        {"max_queue_depth": "many"},
+        {"max_queue_depth": True},
+        {"concurrency": {"max_concurrent": None}},
+        {"concurrency": {"max_concurrent": 0}},
+        {"concurrency": "unbounded"},
+    ],
+    ids=[
+        "unreachable",
+        "empty",
+        "zero-depth",
+        "garbage-depth",
+        "bool-depth",
+        "unbounded-limiter",
+        "zero-limiter",
+        "garbage-limiter",
+    ],
+)
+async def test_absent_or_garbage_capacity_falls_back(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, health: dict[str, Any] | None
+) -> None:
+    # No advertised cap means one worker, not an unbounded fan-out.
+    runner = _runner(_spec(), tmp_path)
+    assert await _resolved_concurrency(runner, monkeypatch, health) == 1
+
+
+async def test_health_capacity_bounds_a_configured_concurrency(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Over-queueing a backend that reported its own limit creates work it cannot
+    # service, so the advertised capacity is a hard cap on the request.
+    runner = _runner(
+        _spec(batch_size=16),
+        tmp_path,
+        options=LocalEvalOptions(name="run-1", max_in_flight=8),
+    )
+    health = {"concurrency": {"max_concurrent": 2}}
+    assert await _resolved_concurrency(runner, monkeypatch, health) == 2
+
+
+async def test_max_in_flight_takes_precedence_over_batch_size(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runner = _runner(
+        _spec(batch_size=1),
+        tmp_path,
+        options=LocalEvalOptions(name="run-1", max_in_flight=3),
+    )
+    assert await _resolved_concurrency(runner, monkeypatch, {}) == 3
+
+
+# --------------------------------------------------------------------------- #
 # Dataset plumbing sanity
 # --------------------------------------------------------------------------- #
 

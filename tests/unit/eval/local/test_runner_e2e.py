@@ -344,12 +344,21 @@ async def test_a_missing_entrypoint_fails_before_dispatch(
 # --------------------------------------------------------------------------- #
 
 
-async def test_batch_size_bounds_in_flight_work(harness: RunnerHarness) -> None:
+# Smoke coverage only: these prove the knobs are accepted end to end and every
+# work item still lands. The bound itself is unit-tested against
+# ``_resolve_concurrency`` in test_runner_units.py.
+
+
+async def test_batch_size_is_accepted_and_the_run_completes(
+    harness: RunnerHarness,
+) -> None:
     summary = await harness.runner(spec=harness.spec(batch_size=2)).run()
     assert summary.dispatched == 4
 
 
-async def test_max_in_flight_overrides_batch_size(harness: RunnerHarness) -> None:
+async def test_max_in_flight_and_batch_size_together_complete_the_run(
+    harness: RunnerHarness,
+) -> None:
     summary = await harness.runner(
         spec=harness.spec(batch_size=1),
         options=LocalEvalOptions(name="run-1", max_in_flight=4),

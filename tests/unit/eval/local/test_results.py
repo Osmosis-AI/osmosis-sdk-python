@@ -365,6 +365,22 @@ def test_a_symlinked_artifact_is_never_copied_into_the_projection(
     assert "PRIVATE" not in (tmp_path / "index.jsonl").read_text()
 
 
+def test_a_symlinked_artifact_root_projects_nothing(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    # The per-entry checks resolve against the root itself, so a symlinked root
+    # would let every file under the link's target pass as "inside".
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    (elsewhere / "id_rsa").write_text("PRIVATE")
+    artifacts = tmp_path / "artifacts"
+    artifacts.symlink_to(elsewhere, target_is_directory=True)
+    with caplog.at_level("WARNING"):
+        found = safe_artifact_relative_paths(artifacts)
+    assert found == []
+    assert "symlinked artifact root" in caplog.text
+
+
 def test_a_missing_artifacts_dir_yields_nothing(tmp_path: Path) -> None:
     assert safe_artifact_relative_paths(tmp_path / "absent") == []
 

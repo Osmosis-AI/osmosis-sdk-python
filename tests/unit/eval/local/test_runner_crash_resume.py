@@ -155,9 +155,17 @@ async def _wait_for_journal(
             break
         await asyncio.sleep(0.05)
     output = ""
-    if process is not None and process.stdout is not None:
+    if process is not None:
+        # The supervisor's rollout-server child inherited the pipe's write end,
+        # so a plain read() would block on the orphan even once the supervisor
+        # itself is gone. Kill the group first, then bound the drain.
         with contextlib.suppress(Exception):
-            output = process.stdout.read() or ""
+            _kill_group(process, signal.SIGKILL)
+        with contextlib.suppress(Exception):
+            drained, _ = await asyncio.to_thread(
+                lambda: process.communicate(timeout=10)
+            )
+            output = drained or ""
     raise AssertionError(
         f"journal never reached {count} records "
         f"(got {len(_journal_records(harness))}); supervisor output:\n{output}"

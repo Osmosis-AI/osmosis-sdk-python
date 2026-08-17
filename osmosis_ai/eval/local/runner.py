@@ -454,6 +454,24 @@ async def probe_health(
     return payload if isinstance(payload, dict) else None
 
 
+def health_capacity(health: Mapping[str, Any]) -> int | None:
+    """Backend-advertised in-flight capacity from ``/health``, if any.
+
+    Two shapes, because both backends answer this endpoint: Harbor reports
+    ``max_queue_depth`` at top level, LocalBackend reports its limiter snapshot
+    under ``concurrency``. Anything absent, non-integer, boolean, or
+    non-positive means "unbounded" and yields no cap.
+    """
+    nested = health.get("concurrency")
+    for value in (
+        health.get("max_queue_depth"),
+        nested.get("max_concurrent") if isinstance(nested, Mapping) else None,
+    ):
+        if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+            return value
+    return None
+
+
 # --------------------------------------------------------------------------- #
 # Supervisor
 # --------------------------------------------------------------------------- #
@@ -785,8 +803,7 @@ class LocalEvalRunner:
     ) -> int:
         """``--max-in-flight`` -> ``batch_size`` -> ``/health`` capacity -> 1 (§10)."""
         health = await probe_health(client, base_url) or {}
-        capacity = health.get("max_queue_depth")
-        hard_cap = capacity if isinstance(capacity, int) and capacity > 0 else None
+        hard_cap = health_capacity(health)
         for candidate in (self._options.max_in_flight, self._spec.batch_size):
             if isinstance(candidate, int) and candidate > 0:
                 return min(candidate, hard_cap) if hard_cap else candidate

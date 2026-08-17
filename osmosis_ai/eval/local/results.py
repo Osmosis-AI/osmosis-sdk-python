@@ -279,6 +279,12 @@ def safe_artifact_relative_paths(artifacts_dir: Path) -> list[Path]:
     wholesale, so a symlink or traversal here would exfiltrate host files into a
     user-visible projection and, later, into an upload.
     """
+    # A symlinked root would make every entry below it "inside" a resolved root
+    # that is not the rollout's own directory, so the per-entry checks would
+    # pass and project someone else's tree wholesale.
+    if artifacts_dir.is_symlink():
+        logger.warning("skipping symlinked artifact root %s", artifacts_dir)
+        return []
     if not artifacts_dir.is_dir():
         return []
     resolved_root = artifacts_dir.resolve()

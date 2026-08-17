@@ -269,8 +269,14 @@ class TerminalRecord:
             if isinstance(value, bool) or not isinstance(value, kinds):
                 raise JournalCorruptionError(f"{where}: {name} must be {label}")
             values[name] = value
-        if not values["rollout_id"]:
-            raise JournalCorruptionError(f"{where}: rollout_id must not be empty")
+        # The id names a directory under rollout_trials/ and a projection file,
+        # so a traversal or separator in a replayed record would resolve reads
+        # and copies outside the run directory. Also covers the empty id.
+        if not is_single_path_segment(values["rollout_id"]):
+            raise JournalCorruptionError(
+                f"{where}: rollout_id must be a single path segment (no "
+                "separators, and not '.' or '..')"
+            )
         if values["status"] not in _TERMINAL_STATUSES:
             raise JournalCorruptionError(
                 f"{where}: status must be one of {sorted(_TERMINAL_STATUSES)}"
