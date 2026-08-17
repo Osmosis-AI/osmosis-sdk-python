@@ -459,6 +459,8 @@ SCENARIO_ABSENT: dict[str, set[str]] = {
         "uv",
         "uvicorn",
     },
+    # litellm transitively installs tqdm, so it cannot prove tqdm was
+    # unselected here (same as every other litellm-carrying scenario).
     "eval-run": {
         "dockerfile-parse",
         "harbor",
@@ -468,7 +470,6 @@ SCENARIO_ABSENT: dict[str, set[str]] = {
         "pyarrow",
         "strands-agents",
         "toml",
-        "tqdm",
         "uv",
     },
     "full": set(),
