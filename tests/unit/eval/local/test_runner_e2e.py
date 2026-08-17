@@ -118,7 +118,12 @@ async def test_row_index_is_the_position_in_the_selected_set(
     rows = harness.index_rows()
     assert [row["row_index"] for row in rows] == [0, 1]
     # The dataset offset survives in the journal, for local UX and provenance.
-    assert [line["source_row_index"] for line in harness.journal_lines()] == [2, 3]
+    # The journal is appended in completion order, which concurrent dispatch
+    # makes nondeterministic; only the set of offsets is the contract.
+    assert sorted(line["source_row_index"] for line in harness.journal_lines()) == [
+        2,
+        3,
+    ]
 
 
 async def test_multiple_attempts_per_row(harness: RunnerHarness) -> None:
