@@ -1,0 +1,82 @@
+tests/unit/test_public_api_imports.py
+  s_c80b3fb770a70f::t_15897a8e7969cc 397-402,409,418,420,424-425
+osmosis_ai/_imports.py
+  s_c80b3fb770a70f::t_42936511729040 36
+osmosis_ai/rollout/driver.py
+  s_c80b3fb770a70f::t_cb8b3589b31d1d 41-42
+osmosis_ai/rollout/controller/__init__.py
+  s_c80b3fb770a70f::t_33a80a656a10d7 3
+osmosis_ai/rollout/http_driver.py
+  s_c80b3fb770a70f::t_ee84c8e1caf1d0 3-5
+  s_c80b3fb770a70f::t_066f2b4a6a75eb 22-24,26
+  s_c80b3fb770a70f::t_57346b66902e0c 38-41
+  s_c80b3fb770a70f::t_d9d89b9e2838f3 72-76
+  s_c80b3fb770a70f::t_356756d5359393 58
+  s_c80b3fb770a70f::t_4e35cd1d6590de 68
+osmosis_ai/rollout/server/app.py
+  s_c80b3fb770a70f::t_efd974f347f556 90-117
+  s_c80b3fb770a70f::t_e57da40488a6de 8-9
+  s_c80b3fb770a70f::t_994a58d33c4b52 52-56
+CHANGELOG.md
+  s_c80b3fb770a70f::t_a47924c7339198 7-10
+osmosis_ai/rollout/controller/proxy_client.py
+  s_c80b3fb770a70f::t_220488e464f09e 136,144-149
+  s_c80b3fb770a70f::t_a869f6c46c468c 101,103,108
+  s_c80b3fb770a70f::t_24c6ffdb6d7fee 221,241-245,247-251,253-263
+  s_c80b3fb770a70f::t_14fdf1db844f08 1,17-19,31,44-45
+tests/unit/rollout/controller/test_proxy_client.py
+  s_c80b3fb770a70f::t_3adaec594f5a8c 21-23,29
+  s_c80b3fb770a70f::t_329626c80990ee 371-407
+  s_c80b3fb770a70f::t_5a8dbbca8624c8 158
+  s_c80b3fb770a70f::t_d9209bdea9536b 218-219
+  s_c80b3fb770a70f::t_01bf876210227b 494,505,515,525
+tests/unit/rollout/controller/test_store.py
+  s_c80b3fb770a70f::t_100e2f6f5ba278 72,76,83
+  s_c80b3fb770a70f::t_d69437bf26df2a 99,107,117,126-127
+  s_c80b3fb770a70f::t_1c64b3d6bb5580 50-54
+tests/unit/rollout/eval_proxy_stub.py
+  s_c80b3fb770a70f::t_cc95ef16904500 1-173
+tests/unit/rollout/controller/test_listener.py
+  s_c80b3fb770a70f::t_66af271cf9184d 159
+tests/unit/rollout/integrations/test_eval_proxy_contract.py
+  s_c80b3fb770a70f::t_7f34b63ef57f63 22-24,36-38
+osmosis_ai/rollout/controller/store.py
+  s_c80b3fb770a70f::t_f1436e54f2e5f9 5-10
+tests/unit/rollout/test_server_admission.py
+  s_c80b3fb770a70f::t_f50a45132d1d6b 407-431,433-467
+  s_c80b3fb770a70f::t_fdd9df6cabbdd3 7-8,13
+  s_c80b3fb770a70f::t_10c0fa94903f14 432
+docs/architecture.md
+  s_c80b3fb770a70f::t_adfb1e051e3dde 113
+  s_c80b3fb770a70f::t_063a00844bd4ba 24-25
+  s_c80b3fb770a70f::t_347daabff77d33 70
+.github/scripts/verify-wheel-install.py
+  s_c80b3fb770a70f::t_c05102b5f72a00 199-200
+  s_c80b3fb770a70f::t_d789977a14004b 226
+  s_c80b3fb770a70f::t_d759fb463ece09 362
+  s_c80b3fb770a70f::t_37dae08359b4d7 72
+tests/unit/rollout/test_http_driver.py
+  s_c80b3fb770a70f::t_78e6f9ee8abd58 107
+  s_c80b3fb770a70f::t_20a1289d79e3d8 162
+  s_c80b3fb770a70f::t_e6e6a15b9f9b2f 89,93
+  s_c80b3fb770a70f::t_e2716669e95449 176-199
+  s_c80b3fb770a70f::t_b820a33476f95d 489-490,493
+docs/rollout-sdk.md
+  s_c80b3fb770a70f::t_925f712bb4ac15 29
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "fedb90a112888e75cab07950e8f2bdeac393a7e9",
+  "prompts": {},
+  "sessions": {
+    "s_c80b3fb770a70f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "bacf190c-93e0-4d73-b25f-4ed0f5ef4be5",
+        "model": "claude-fable-5"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}
