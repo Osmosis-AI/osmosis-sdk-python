@@ -69,7 +69,7 @@ EXTRA_REQUIREMENTS: dict[str, set[str]] = {
     },
     "rubric": {"aiohttp", "click", "litellm", "orjson", "tqdm"},
     "parquet": {"pyarrow"},
-    "eval-run": {"aiohttp", "click", "fastapi", "uvicorn"},
+    "eval-run": {"click", "fastapi", "uvicorn"},
     "full": {"osmosis-ai"},
 }
 
@@ -196,6 +196,8 @@ BARE_IMPORTABLE_MODULES = (
     "osmosis_ai.rollout.utils.errors",
     "osmosis_ai.rollout.utils.ttl_cache",
     "osmosis_ai.rollout.controller.store",
+    "osmosis_ai.rollout.controller.proxy_client",
+    "osmosis_ai.rollout.http_driver",
 )
 
 # Leaf modules that must stay unimportable until their extra is installed.
@@ -209,8 +211,6 @@ EXTRA_ONLY_MODULES = (
     "osmosis_ai.rollout.integrations.agents.strands",
     "osmosis_ai.rollout.server.app",
     "osmosis_ai.rollout.controller.listener",
-    "osmosis_ai.rollout.controller.proxy_client",
-    "osmosis_ai.rollout.http_driver",
 )
 
 
@@ -223,11 +223,7 @@ def _assert_extra_only_modules_absent() -> None:
         except ModuleNotFoundError as error:
             if module_name == "osmosis_ai.packaging":
                 assert 'pip install "osmosis-ai[harbor]"' in str(error), str(error)
-            elif module_name in {
-                "osmosis_ai.rollout.controller.listener",
-                "osmosis_ai.rollout.controller.proxy_client",
-                "osmosis_ai.rollout.http_driver",
-            }:
+            elif module_name == "osmosis_ai.rollout.controller.listener":
                 assert 'pip install "osmosis-ai[eval-run]"' in str(error), str(error)
             continue
         raise AssertionError(f"{module_name} imported without its extra")
@@ -363,7 +359,7 @@ SCENARIO_PRESENT: dict[str, set[str]] = {
     "harbor": {"dockerfile-parse", "harbor", "platformdirs", "toml", "uv"},
     "rubric": {"litellm", "orjson", "tqdm"},
     "parquet": {"pyarrow"},
-    "eval-run": {"aiohttp", "fastapi", "uvicorn"},
+    "eval-run": {"fastapi", "uvicorn"},
     "full": {
         "fastapi",
         "dockerfile-parse",

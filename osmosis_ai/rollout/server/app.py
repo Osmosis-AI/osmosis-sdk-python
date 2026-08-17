@@ -5,6 +5,8 @@ import logging
 import os
 import traceback
 import uuid
+from collections.abc import AsyncIterator
+from contextlib import AsyncExitStack, asynccontextmanager
 from functools import partial
 from typing import Any
 
@@ -47,6 +49,11 @@ _IDEMPOTENCY_EXCLUDED_FIELDS = {"controller_api_key", "llm_api_key"}
 # backend's STATUS_RETENTION_SEC). Active entries never expire.
 _COMPLETED_DIGEST_TTL_SEC = 900.0
 
+# Graceful shutdown waits this long for in-flight rollouts before cancelling
+# them. Uvicorn closes its listeners before lifespan shutdown, so nothing new
+# is admitted while draining.
+_SHUTDOWN_DRAIN_SEC = 10.0
+
 
 def _canonical_request_digest(request: RolloutInitRequest) -> str:
     """Stable digest of one init body, excluding callback/LLM secrets."""
@@ -80,7 +87,34 @@ def create_rollout_server(
     """
     if configure_logging:
         _configure_default_logging()
-    app = FastAPI(lifespan=lifespan)
+    # Strong references so eagerly scheduled rollout tasks are never GC'd.
+    scheduled_tasks: set[asyncio.Task[bool]] = set()
+
+    async def _drain_scheduled_tasks() -> None:
+        if not scheduled_tasks:
+            return
+        logger.info("Draining %d in-flight rollout(s)", len(scheduled_tasks))
+        _done, pending = await asyncio.wait(
+            set(scheduled_tasks), timeout=_SHUTDOWN_DRAIN_SEC
+        )
+        for task in pending:
+            task.cancel()
+        if pending:
+            await asyncio.gather(*pending, return_exceptions=True)
+
+    @asynccontextmanager
+    async def _lifespan_with_drain(app: FastAPI) -> AsyncIterator[None]:
+        # The drain runs inside the caller's lifespan: in-flight rollouts may
+        # still use resources that lifespan owns.
+        async with AsyncExitStack() as stack:
+            if lifespan is not None:
+                await stack.enter_async_context(lifespan(app))
+            try:
+                yield
+            finally:
+                await _drain_scheduled_tasks()
+
+    app = FastAPI(lifespan=_lifespan_with_drain)
     # Idempotency: rollout_id -> canonical request digest. Active entries
     # cover scheduled/running executions and never expire; when execution
     # finishes, only id + digest move into bounded recent retention. Digests
@@ -88,8 +122,6 @@ def create_rollout_server(
     # backend-authoritative.
     active_digests: dict[str, str] = {}
     completed_digests: TtlCache[str, str] = TtlCache(_COMPLETED_DIGEST_TTL_SEC)
-    # Strong references so eagerly scheduled rollout tasks are never GC'd.
-    scheduled_tasks: set[asyncio.Task[bool]] = set()
     # The instance id env var is immutable for the process lifetime.
     instance_id = os.environ.get("_OSMOSIS_ROLLOUT_INSTANCE_ID")
 

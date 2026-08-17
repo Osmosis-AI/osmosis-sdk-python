@@ -1,6 +1,6 @@
 """Generic rollout callback controller primitives.
 
-Optional FastAPI/aiohttp symbols load on first access and require the
+Optional FastAPI/uvicorn symbols load on first access and require the
 ``eval-run`` extra. ``CallbackStore`` is in-process only and has no extra.
 """
 
@@ -21,7 +21,6 @@ if TYPE_CHECKING:
         EvalProxyClient,
         EvalProxyError,
         EvalProxySession,
-        create_eval_proxy_stub_app,
     )
     from osmosis_ai.rollout.controller.store import (
         CallbackStore,
@@ -64,10 +63,6 @@ _EXPORTS: dict[str, tuple[str, str]] = {
         "osmosis_ai.rollout.controller.listener",
         "create_callback_app",
     ),
-    "create_eval_proxy_stub_app": (
-        "osmosis_ai.rollout.controller.proxy_client",
-        "create_eval_proxy_stub_app",
-    ),
 }
 
 
@@ -101,5 +96,4 @@ __all__ = [
     "TerminalCallbackResult",
     "UnknownRolloutIdError",
     "create_callback_app",
-    "create_eval_proxy_stub_app",
 ]

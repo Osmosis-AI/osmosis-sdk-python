@@ -156,7 +156,7 @@ async def test_completion_rejects_non_terminal_statuses(status: str) -> None:
             headers=_auth(),
         )
     assert response.status_code == 422
-    assert store.completion_for(ROLLOUT_ID) is None
+    assert store._sessions[ROLLOUT_ID].completion is None
 
 
 async def test_grader_rejects_pending_status() -> None:

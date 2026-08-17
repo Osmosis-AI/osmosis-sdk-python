@@ -1660,7 +1660,6 @@ dependencies = [
 
 [package.optional-dependencies]
 eval-run = [
-    { name = "aiohttp" },
     { name = "click" },
     { name = "fastapi" },
     { name = "uvicorn" },
@@ -1739,7 +1738,6 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "aiohttp", marker = "extra == 'eval-run'", specifier = ">=3.14.3" },
     { name = "aiohttp", marker = "extra == 'harbor'", specifier = ">=3.14.3" },
     { name = "aiohttp", marker = "extra == 'openai-agents'", specifier = ">=3.14.3" },
     { name = "aiohttp", marker = "extra == 'rubric'", specifier = ">=3.14.3" },

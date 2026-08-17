@@ -18,12 +18,15 @@ from osmosis_ai.rollout.controller.proxy_client import (
     EvalProxyClient,
     EvalProxyError,
     EvalProxySession,
+)
+from tests.unit.rollout.eval_proxy_stub import (
+    DEFAULT_STUB_PLATFORM_TOKEN,
     create_eval_proxy_stub_app,
 )
 
 ROLLOUT_ID = "d" * 32
 MODEL_PATH = "openai/gpt-4.1-mini"
-PLATFORM_TOKEN = "platform-token"
+PLATFORM_TOKEN = DEFAULT_STUB_PLATFORM_TOKEN
 
 
 def _platform() -> dict[str, str]:
@@ -152,7 +155,7 @@ async def test_client_create_session_posts_frozen_fields_only() -> None:
     app = create_eval_proxy_stub_app()
     async with LocalhostUvicornServer(app) as server:
         origin = server.base_url
-        client = EvalProxyClient(base_url=origin, auth_token="platform-token")
+        client = EvalProxyClient(base_url=origin, auth_token=PLATFORM_TOKEN)
         try:
             session = await client.create_session(
                 rollout_id=ROLLOUT_ID,
@@ -194,29 +197,6 @@ async def test_client_create_session_surfaces_http_errors() -> None:
     assert excinfo.value.status_code == 401
 
 
-async def test_error_contract_holds_for_raise_for_status_sessions() -> None:
-    # A caller-supplied session with raise_for_status=True must not replace
-    # the client's EvalProxyError contract with aiohttp.ClientResponseError.
-    import aiohttp
-
-    app = create_eval_proxy_stub_app()
-    async with LocalhostUvicornServer(app) as server:
-        session = aiohttp.ClientSession(raise_for_status=True)
-        try:
-            client = EvalProxyClient(
-                base_url=server.base_url,
-                auth_token="wrong-token",
-                session=session,
-            )
-            with pytest.raises(EvalProxyError) as excinfo:
-                await client.create_session(
-                    rollout_id=ROLLOUT_ID, model_path=MODEL_PATH
-                )
-        finally:
-            await session.close()
-    assert excinfo.value.status_code == 401
-
-
 @pytest.mark.parametrize("bad_id", ["..", ".", "a/b", "a\\b", "", "a\x00b"])
 async def test_session_methods_reject_non_single_segment_ids(bad_id: str) -> None:
     # quote() leaves dots intact and HTTP stacks normalize dot segments, so
@@ -228,8 +208,6 @@ async def test_session_methods_reject_non_single_segment_ids(bad_id: str) -> Non
             await client.create_session(rollout_id=bad_id, model_path=MODEL_PATH)
         with pytest.raises(EvalProxyError, match="single path segment"):
             await client.close_session(bad_id)
-        with pytest.raises(EvalProxyError, match="single path segment"):
-            await client.get_usage(bad_id)
     finally:
         await client.aclose()
 
@@ -237,8 +215,8 @@ async def test_session_methods_reject_non_single_segment_ids(bad_id: str) -> Non
 @pytest.mark.parametrize(
     "content,media_type",
     [
-        ("not-json", "text/plain"),  # aiohttp.ContentTypeError
-        ("{truncated", "application/json"),  # json.JSONDecodeError
+        ("not-json", "text/plain"),
+        ("{truncated", "application/json"),
     ],
 )
 async def test_malformed_2xx_body_raises_eval_proxy_error(
@@ -390,6 +368,43 @@ async def test_malformed_create_response_triggers_best_effort_close() -> None:
     assert closed == [ROLLOUT_ID]
 
 
+def _rejecting_app(status_code: int) -> tuple[Any, set[str]]:
+    """Create is rejected; the id already names a session owned elsewhere."""
+    from fastapi import FastAPI, HTTPException
+
+    live_sessions = {ROLLOUT_ID}
+    app = FastAPI()
+
+    @app.post("/v1/eval-sessions")
+    async def create() -> dict:
+        raise HTTPException(status_code=status_code, detail="rejected")
+
+    @app.delete("/v1/eval-sessions/{rollout_id}")
+    async def close(rollout_id: str) -> dict:
+        live_sessions.discard(rollout_id)
+        return {"ok": True}
+
+    return app, live_sessions
+
+
+@pytest.mark.parametrize("status_code", [401, 409])
+async def test_definitive_4xx_create_rejection_skips_cleanup(status_code: int) -> None:
+    # A 4xx create never took effect, so there is nothing to close; on a 409
+    # the DELETE would close another run's live session.
+    app, live_sessions = _rejecting_app(status_code)
+    async with LocalhostUvicornServer(app) as server:
+        client = EvalProxyClient(base_url=server.base_url, auth_token=PLATFORM_TOKEN)
+        try:
+            with pytest.raises(EvalProxyError) as excinfo:
+                await client.create_session(
+                    rollout_id=ROLLOUT_ID, model_path=MODEL_PATH
+                )
+        finally:
+            await client.aclose()
+    assert excinfo.value.status_code == status_code
+    assert live_sessions == {ROLLOUT_ID}
+
+
 async def test_cancelled_create_attempts_cleanup_without_masking_cancellation() -> None:
     from fastapi import FastAPI
 
@@ -476,7 +491,7 @@ async def test_failed_create_cleanup_wait_is_bounded(monkeypatch) -> None:
             await client.aclose()
 
 
-async def test_management_routes_use_platform_token_not_session_token() -> None:
+async def test_close_route_uses_platform_token_not_session_token() -> None:
     app = create_eval_proxy_stub_app()
     async with await _asgi_client(app) as client:
         created = await client.post(
@@ -485,31 +500,19 @@ async def test_management_routes_use_platform_token_not_session_token() -> None:
             headers=_platform(),
         )
         session_token = created.json()["token"]
-        session_headers = {"Authorization": f"Bearer {session_token}"}
-        usage_session = await client.get(
-            f"/v1/eval-sessions/{ROLLOUT_ID}/usage",
-            headers=session_headers,
-        )
         close_session = await client.delete(
             f"/v1/eval-sessions/{ROLLOUT_ID}",
-            headers=session_headers,
-        )
-        usage_platform = await client.get(
-            f"/v1/eval-sessions/{ROLLOUT_ID}/usage",
-            headers=_platform(),
+            headers={"Authorization": f"Bearer {session_token}"},
         )
         close_platform = await client.delete(
             f"/v1/eval-sessions/{ROLLOUT_ID}",
             headers=_platform(),
         )
-    assert usage_session.status_code == 401
     assert close_session.status_code == 401
-    assert usage_platform.status_code == 200
-    assert usage_platform.json()["total_tokens"] == 2
     assert close_platform.status_code == 200
 
 
-async def test_public_get_usage_and_close_session() -> None:
+async def test_public_close_session_is_idempotent_only_once() -> None:
     app = create_eval_proxy_stub_app()
     async with LocalhostUvicornServer(app) as server:
         client = EvalProxyClient(base_url=server.base_url, auth_token=PLATFORM_TOKEN)
@@ -517,48 +520,9 @@ async def test_public_get_usage_and_close_session() -> None:
             session = await client.create_session(
                 rollout_id=ROLLOUT_ID, model_path=MODEL_PATH
             )
-            usage = await client.get_usage(session.rollout_id)
-            assert usage["total_tokens"] == 2
             await client.close_session(session.rollout_id)
             with pytest.raises(EvalProxyError) as exc:
-                await client.get_usage(session.rollout_id)
+                await client.close_session(session.rollout_id)
             assert exc.value.status_code == 404
         finally:
             await client.aclose()
-
-
-async def test_terminal_commit_hook_can_fetch_usage_before_ack() -> None:
-    from osmosis_ai.rollout.controller.store import CallbackStore
-    from osmosis_ai.rollout.types import (
-        GraderCompleteRequest,
-        GraderStatus,
-        RolloutSample,
-    )
-
-    app = create_eval_proxy_stub_app()
-    async with LocalhostUvicornServer(app) as server:
-        proxy = EvalProxyClient(base_url=server.base_url, auth_token=PLATFORM_TOKEN)
-        try:
-            await proxy.create_session(rollout_id=ROLLOUT_ID, model_path=MODEL_PATH)
-
-            async def commit(result):
-                usage = await proxy.get_usage(result.rollout_id)
-                return {"ok": True, "usage": usage}
-
-            store = CallbackStore(on_terminal_commit=commit)
-            await store.register(ROLLOUT_ID)
-            ack = await store.handle_grader(
-                ROLLOUT_ID,
-                GraderCompleteRequest(
-                    status=GraderStatus.SUCCESS,
-                    rollout_id=ROLLOUT_ID,
-                    sample=RolloutSample(
-                        messages=[{"role": "assistant", "content": "ok"}],
-                        reward=1.0,
-                    ),
-                ),
-            )
-            assert ack["ok"] is True
-            assert ack["usage"]["total_tokens"] == 2
-        finally:
-            await proxy.aclose()

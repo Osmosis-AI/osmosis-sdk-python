@@ -4,6 +4,10 @@ This file records changes to `osmosis-ai`. For earlier versions, see [GitHub Rel
 
 ## Unreleased
 
+### Breaking Changes
+
+- `RolloutDriver.run` now takes a single `RolloutRunRequest` argument; update custom drivers and callers to pass the request object ([#307](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/307)).
+
 ### Changed
 
 - Standardized the CLI machine contract: `--json` errors now contain `{code, message, details}` without `request_id`, command paths come from the live command registry, authentication/subscription/billing failures use dedicated codes, and non-finite values can no longer produce invalid JSON ([#304](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/304)).
