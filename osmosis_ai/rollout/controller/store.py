@@ -2,12 +2,12 @@
 
 The store is eval-agnostic: callers supply an async terminal-commit hook
 (local eval journals here; other tooling can no-op or persist elsewhere).
-Each live session has separate completion and terminal futures. Callers
-register before dispatch, may ``wait_completion`` then ``wait_terminal``,
-and discard both in ``finally``. Accepted terminal acknowledgments stay
-until the process exits so duplicate callbacks can be acknowledged after
-cleanup. Journal replay is a small ``seed_terminal`` API; this module
-does not read a journal.
+Callers register before dispatch, ``wait_terminal``, and discard in
+``finally``. A completion callback is recorded on the live session for
+duplicate detection but is not a rendezvous of its own. Accepted terminal
+acknowledgments stay until the process exits so duplicate callbacks can be
+acknowledged after cleanup. Journal replay is a small ``seed_terminal``
+API; this module does not read a journal.
 
 The terminal commit is single-flight: the first grader/timeout contender
 creates one commit task per session and every contender (including
@@ -83,9 +83,6 @@ async def _default_commit(_result: TerminalCallbackResult) -> None:
 class _LiveSession:
     completion: RolloutCompleteRequest | None = None
     completion_ack: dict[str, Any] = field(default_factory=lambda: {"ok": True})
-    completion_future: asyncio.Future[RolloutCompleteRequest] = field(
-        default_factory=lambda: asyncio.get_running_loop().create_future()
-    )
     terminal: TerminalCallbackResult | None = None
     terminal_future: asyncio.Future[TerminalCallbackResult] = field(
         default_factory=lambda: asyncio.get_running_loop().create_future()
@@ -157,17 +154,8 @@ class CallbackStore:
             return
         async with session.lock:
             self._sessions.pop(rollout_id, None)
-            if not session.completion_future.done():
-                session.completion_future.cancel()
             if not session.terminal_future.done():
                 session.terminal_future.cancel()
-
-    def completion_for(self, rollout_id: str) -> RolloutCompleteRequest | None:
-        session = self._sessions.get(rollout_id)
-        if session is not None:
-            return session.completion
-        finalized = self._finalized.get(rollout_id)
-        return None if finalized is None else finalized.completion
 
     def terminal_for(self, rollout_id: str) -> TerminalCallbackResult | None:
         session = self._sessions.get(rollout_id)
@@ -186,8 +174,6 @@ class CallbackStore:
         async with session.lock:
             if session.completion is None:
                 session.completion = request
-                if not session.completion_future.done():
-                    session.completion_future.set_result(request)
             elif not duplicate_callback_payload(session.completion, request):
                 logger.error(
                     "Conflicting duplicate completion callback for rollout %s",
@@ -313,20 +299,6 @@ class CallbackStore:
                 # The in-flight commit failed without a durable result;
                 # re-arbitrate so cancellation can install its tombstone.
                 continue
-
-    async def wait_completion(self, rollout_id: str) -> RolloutCompleteRequest:
-        """Return the first accepted completion callback for this rollout.
-
-        Training/dev consumers can wait here before waiting for the terminal
-        grader result, preserving the two-stage remote-rollout lifecycle.
-        """
-        session, finalized = self._session_or_finalized(rollout_id)
-        if finalized is not None:
-            if finalized.completion is None:
-                raise UnknownRolloutIdError(rollout_id)
-            return finalized.completion
-        assert session is not None
-        return await asyncio.shield(session.completion_future)
 
     async def wait_terminal(self, rollout_id: str) -> TerminalCallbackResult:
         session, finalized = self._session_or_finalized(rollout_id)

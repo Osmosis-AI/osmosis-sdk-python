@@ -1,7 +1,8 @@
 """Concrete ``RolloutDriver`` over the v0.3 HTTP + callback protocol.
 
-Owns admission (202 / 429 / status recovery), callback rendezvous, and
-``/rollout/cancel``. Persistent dispatch/running state and user-requested
+Owns admission (202 / 429 / status recovery), the callback rendezvous, and
+the best-effort ``/rollout/cancel`` teardown that follows a callback timeout
+or task cancellation. Persistent dispatch/running state and user-requested
 cancellation terminal semantics belong to a supervisor, not this driver.
 """
 
@@ -18,12 +19,11 @@ from urllib.parse import quote
 import httpx
 from pydantic import ValidationError
 
-from osmosis_ai._imports import raise_optional_dependency_error
-from osmosis_ai.rollout.controller.store import (
-    CallbackStore,
-    TerminalCallbackResult,
-    UnknownRolloutIdError,
+from osmosis_ai.rollout.controller.proxy_client import (
+    EvalProxyClient,
+    EvalProxySession,
 )
+from osmosis_ai.rollout.controller.store import CallbackStore, TerminalCallbackResult
 from osmosis_ai.rollout.driver import RolloutDriver, RolloutOutcome, RolloutRunRequest
 from osmosis_ai.rollout.types import (
     CancelRolloutsRequest,
@@ -33,29 +33,20 @@ from osmosis_ai.rollout.types import (
     RolloutStatusResponse,
 )
 
-try:
-    from osmosis_ai.rollout.controller.proxy_client import (
-        EvalProxyClient,
-        EvalProxySession,
-    )
-except ModuleNotFoundError as _exc:
-    raise_optional_dependency_error(
-        _exc,
-        extra="eval-run",
-        feature="Local evaluation",
-    )
-
 logger: logging.Logger = logging.getLogger(__name__)
+
+# Bounds on a server-dictated Retry-After. The floor keeps a server that
+# answers 429 with "0" from turning the admission loop into a busy spin; the
+# ceiling keeps an outsized header from parking a rollout for hours, since the
+# backpressure wait is uninterruptible.
+_RETRY_AFTER_FLOOR_SEC = 0.05
+_MAX_RETRY_AFTER_SEC = 60.0
 
 
 class _AdmissionProbe(StrEnum):
     ADMITTED = "admitted"
     UNKNOWN = "unknown"
     INDETERMINATE = "indeterminate"
-
-
-#: Shortest wait the admission loop will honour between 429 retries.
-_RETRY_AFTER_FLOOR_SEC = 0.05
 
 
 class AdmissionUncertainError(RuntimeError):
@@ -75,12 +66,7 @@ class RolloutProtocolError(RuntimeError):
 
 
 def _retry_after_seconds(response: httpx.Response, default: float = 1.0) -> float:
-    """Parse Retry-After into a finite, positive wait; else the default.
-
-    Clamped to a floor rather than honoured exactly at zero: a server that keeps
-    answering ``429`` with ``Retry-After: 0`` would otherwise turn the admission
-    loop into a busy spin against itself.
-    """
+    """Parse Retry-After into a finite, positive, bounded wait; else the default."""
     raw = response.headers.get("Retry-After")
     if raw is None:
         return default
@@ -90,16 +76,15 @@ def _retry_after_seconds(response: httpx.Response, default: float = 1.0) -> floa
         return default
     if not math.isfinite(value):
         return default
-    return max(_RETRY_AFTER_FLOOR_SEC, value)
+    return min(max(_RETRY_AFTER_FLOOR_SEC, value), _MAX_RETRY_AFTER_SEC)
 
 
 def _optional_index(request: RolloutRunRequest, name: str) -> int | None:
-    for source in (request.extra_fields, request.metadata):
-        if not source:
-            continue
-        value = source.get(name)
-        if isinstance(value, int) and not isinstance(value, bool):
-            return value
+    if not request.extra_fields:
+        return None
+    value = request.extra_fields.get(name)
+    if isinstance(value, int) and not isinstance(value, bool):
+        return value
     return None
 
 
@@ -186,36 +171,12 @@ class HttpRolloutDriver(RolloutDriver):
             if proxy_session is not None:
                 await self._close_proxy_session(proxy_session)
 
-    async def cancel(self, rollout_id: str) -> dict[str, str]:
-        """Tombstone a known active run and forward the remote cancel.
-
-        Unknown ids never mutate the callback store (a tombstone would poison
-        a later registration); the remote cancel is still forwarded because
-        the server may know the rollout.
-        """
-        try:
-            await self._store.acknowledge_without_commit(rollout_id)
-        except UnknownRolloutIdError:
-            logger.warning(
-                "Cancel for unknown rollout %s; forwarding remote cancel only",
-                rollout_id,
-            )
-        return await self._cancel_rollout(rollout_id)
-
-    def _is_cancelled_locally(self, rollout_id: str) -> bool:
-        terminal = self._store.terminal_for(rollout_id)
-        return terminal is not None and terminal.source == "cancelled"
-
     async def _admit(self, init: RolloutInitRequest) -> None:
         rollout_id = init.rollout_id
         if rollout_id is None:
             raise ValueError("rollout_id is required for admission")
         payload = init.model_dump(mode="json")
         while True:
-            # cancel() may land while we wait through 429 backpressure or
-            # status recovery; never POST work that is already cancelled.
-            if self._is_cancelled_locally(rollout_id):
-                return
             try:
                 response = await self._http.post(
                     f"{self._rollout_base_url}/rollout",
@@ -224,7 +185,6 @@ class HttpRolloutDriver(RolloutDriver):
             except httpx.RequestError:
                 probe = await self._recover_after_ambiguous_post(rollout_id)
                 if probe is _AdmissionProbe.ADMITTED:
-                    await self._cancel_remotely_if_cancelled_locally(rollout_id)
                     return
                 if probe is _AdmissionProbe.UNKNOWN:
                     continue
@@ -238,7 +198,6 @@ class HttpRolloutDriver(RolloutDriver):
                     "status recovery stayed indeterminate"
                 ) from None
             if response.status_code == 202:
-                await self._cancel_remotely_if_cancelled_locally(rollout_id)
                 return
             if response.status_code == 429:
                 await asyncio.sleep(_retry_after_seconds(response))
@@ -248,11 +207,6 @@ class HttpRolloutDriver(RolloutDriver):
                 "only 202 and 429 are accepted",
                 status_code=response.status_code,
             )
-
-    async def _cancel_remotely_if_cancelled_locally(self, rollout_id: str) -> None:
-        """Re-issue the remote cancel when cancel() raced a successful POST."""
-        if self._is_cancelled_locally(rollout_id):
-            await self._cancel_rollout(rollout_id)
 
     async def _recover_after_ambiguous_post(self, rollout_id: str) -> _AdmissionProbe:
         last = _AdmissionProbe.INDETERMINATE

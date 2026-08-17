@@ -1,4 +1,4 @@
-"""Eval-proxy session client and local OpenAI-compatible contract stub.
+"""Eval-proxy session client.
 
 Frozen production contract:
 - integration model ``openai/osmosis-rollout``
@@ -14,46 +14,21 @@ Frozen production contract:
 - SSE: content chunk, ``finish_reason="stop"`` chunk, ``choices=[]``
   usage-only chunk, then ``[DONE]``
 
-Close and usage HTTP paths are **not** frozen. ``close_session`` and
-``get_usage`` are public logical methods; path construction stays private.
-Management-plane create/usage/close uses the platform bearer token. Chat
-uses the session bearer token.
+The close HTTP path is **not** frozen: ``close_session`` is a public logical
+method and path construction stays private. Management-plane create/close
+uses the platform bearer token. Chat uses the session bearer token.
 """
 
 from __future__ import annotations
 
 import asyncio
-import contextlib
-import json
 import logging
 import secrets
-from collections.abc import AsyncIterator, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import quote
 
 import httpx
-
-from osmosis_ai._imports import raise_optional_dependency_error
-
-try:
-    import aiohttp
-except ModuleNotFoundError as _exc:
-    raise_optional_dependency_error(
-        _exc,
-        extra="eval-run",
-        feature="Local evaluation",
-    )
-
-try:
-    from fastapi import FastAPI, Header, HTTPException, Request
-    from fastapi.responses import StreamingResponse
-except ModuleNotFoundError as _exc:
-    raise_optional_dependency_error(
-        _exc,
-        extra="eval-run",
-        feature="Local evaluation",
-    )
 
 from osmosis_ai.rollout.utils.identifiers import is_single_path_segment
 
@@ -62,18 +37,12 @@ logger: logging.Logger = logging.getLogger(__name__)
 EVAL_PROXY_INTEGRATION_MODEL = "openai/osmosis-rollout"
 EVAL_PROXY_WIRE_MODEL = "osmosis-rollout"
 
-_CREATE_FORBIDDEN_FIELDS = frozenset(
-    {"model", "integration_model", "wire_model", "synthetic_model"}
-)
-_DEFAULT_STUB_PLATFORM_TOKEN = "platform-token"
-
 # Bounded wait for the best-effort close after a failed create; the close
 # keeps running in the background if it outlives this window.
 _FAILED_CREATE_CLOSE_TIMEOUT_SEC = 10.0
 
-# Total timeout for management calls on the client-owned session: small JSON
-# round-trips must fail fast instead of inheriting aiohttp's 300s default.
-# A caller-supplied session keeps whatever timeout the caller configured.
+# Total timeout for management calls: these are small JSON round-trips, so
+# they must not hang a rollout, but the bound still tolerates a cold proxy.
 _MANAGEMENT_REQUEST_TIMEOUT_SEC = 30.0
 
 
@@ -129,21 +98,14 @@ def _consume_best_effort_close(task: asyncio.Task[None]) -> None:
 
 
 class EvalProxyClient:
-    """HTTP client for eval-proxy session create (and provisional close/usage)."""
+    """HTTP client for eval-proxy session create (and provisional close)."""
 
-    def __init__(
-        self,
-        *,
-        base_url: str,
-        auth_token: str,
-        session: aiohttp.ClientSession | None = None,
-    ) -> None:
+    def __init__(self, *, base_url: str, auth_token: str) -> None:
         if not auth_token or not auth_token.strip():
             raise ValueError("auth_token (platform management token) must be non-empty")
         self._base_url = base_url.rstrip("/")
         self._auth_token = auth_token
-        self._session = session
-        self._owns_session = session is None
+        self._http = httpx.AsyncClient(timeout=_MANAGEMENT_REQUEST_TIMEOUT_SEC)
 
     async def create_session(
         self,
@@ -171,7 +133,7 @@ class EvalProxyClient:
                 row_index=row_index,
                 run_index=run_index,
             )
-        except (Exception, asyncio.CancelledError):
+        except (Exception, asyncio.CancelledError) as exc:
             # The create may have reached the server even when the response
             # is invalid or this coroutine is cancelled; close by requested
             # id so a half-created session is not leaked. The original
@@ -179,8 +141,12 @@ class EvalProxyClient:
             # (KeyboardInterrupt, SystemExit, GeneratorExit) skip the network
             # cleanup: awaiting here would delay shutdown, and awaiting during
             # GeneratorExit is illegal; the eval-proxy session TTL reaps the
-            # leftover.
-            await self._close_after_failed_create(rollout_id)
+            # leftover. A definitive 4xx is the one rejection we must not
+            # clean up after: nothing was created, and on a 409 the id belongs
+            # to another run whose live session the DELETE would destroy.
+            status = exc.status_code if isinstance(exc, EvalProxyError) else None
+            if status is None or not 400 <= status < 500:
+                await self._close_after_failed_create(rollout_id)
             raise
 
     async def _close_after_failed_create(self, rollout_id: str) -> None:
@@ -252,9 +218,7 @@ class EvalProxyClient:
         )
 
     async def aclose(self) -> None:
-        if self._owns_session and self._session is not None:
-            await self._session.close()
-            self._session = None
+        await self._http.aclose()
 
     async def close_session(self, rollout_id: str) -> None:
         """Close a proxy session.
@@ -264,27 +228,8 @@ class EvalProxyClient:
         """
         await self._request_json("DELETE", self._close_path(rollout_id))
 
-    async def get_usage(self, rollout_id: str) -> dict[str, Any]:
-        """Fetch session usage.
-
-        Path is provisional: production usage is not a frozen contract.
-        Uses the platform bearer token, not the session token.
-        """
-        return await self._request_json("GET", self._usage_path(rollout_id))
-
     def _close_path(self, rollout_id: str) -> str:
         return _session_api_base(rollout_id)
-
-    def _usage_path(self, rollout_id: str) -> str:
-        return f"{_session_api_base(rollout_id)}/usage"
-
-    async def _ensure_session(self) -> aiohttp.ClientSession:
-        if self._session is None or self._session.closed:
-            self._session = aiohttp.ClientSession(
-                timeout=aiohttp.ClientTimeout(total=_MANAGEMENT_REQUEST_TIMEOUT_SEC)
-            )
-            self._owns_session = True
-        return self._session
 
     async def _request_json(
         self,
@@ -293,307 +238,26 @@ class EvalProxyClient:
         *,
         json: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        session = await self._ensure_session()
-        headers = {"Authorization": f"Bearer {self._auth_token}"}
-        url = f"{self._base_url}{path}"
-        # A caller-supplied session may enable raise_for_status; the error
-        # contract here is EvalProxyError, so keep status handling local.
-        async with session.request(
-            method, url, json=json, headers=headers, raise_for_status=False
-        ) as response:
-            if not 200 <= response.status < 300:
-                detail = await response.text()
-                raise EvalProxyError(
-                    f"eval-proxy {method} {path} failed: {response.status} {detail}",
-                    status_code=response.status,
-                )
-            if response.status == 204:
-                return {}
-            try:
-                payload = await response.json()
-            except (aiohttp.ContentTypeError, ValueError) as exc:
-                raise EvalProxyError(
-                    f"eval-proxy {method} {path} returned invalid JSON"
-                ) from exc
-            if not isinstance(payload, dict):
-                raise EvalProxyError("eval-proxy returned a non-object JSON body")
-            return payload
-
-
-@dataclass(frozen=True)
-class EvalProxyStubUpstream:
-    """A real OpenAI-compatible provider behind the contract stub.
-
-    The stub answers with a canned completion by default, which is enough to
-    exercise the wire contract but scores zero against any real grader. Pointing
-    it at a provider lets a local end-to-end run produce genuine rewards while
-    the hosted eval-proxy service is still being built -- the frozen request and
-    SSE contract is unchanged, only the response body becomes real.
-
-    ``api_key`` is held in memory and never logged or persisted.
-    """
-
-    base_url: str
-    api_key: str = field(repr=False)
-    timeout_sec: float = 600.0
-
-    def chat_url(self) -> str:
-        return f"{self.base_url.rstrip('/')}/chat/completions"
-
-
-def _upstream_model(model_path: str) -> str:
-    """Strip the LiteLLM provider prefix: ``openai/gpt-5-mini`` -> ``gpt-5-mini``."""
-    _, separator, remainder = model_path.partition("/")
-    return remainder if separator and remainder else model_path
-
-
-def _record_usage(session: dict[str, Any], payload: Mapping[str, Any]) -> None:
-    usage = payload.get("usage")
-    if not isinstance(usage, Mapping):
-        return
-    totals = session["usage"]
-    for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
-        value = usage.get(key)
-        if isinstance(value, int) and not isinstance(value, bool):
-            totals[key] = totals.get(key, 0) + value
-
-
-async def _open_upstream_chat(
-    *,
-    upstream: EvalProxyStubUpstream,
-    session: dict[str, Any],
-    body: Mapping[str, Any],
-) -> tuple[httpx.AsyncClient, httpx.Response]:
-    """Start the upstream request and settle its status before streaming begins.
-
-    The status check has to happen here, not inside the relay generator: once
-    ``StreamingResponse`` has sent 200 and its headers, an exception can only
-    truncate the body, which the client reports as a transport error instead of
-    the provider's actual message.
-
-    ``include_usage`` is forced on so metering never depends on the client
-    asking for it, matching the production requirement.
-    """
-    forwarded = dict(body)
-    forwarded["model"] = _upstream_model(session["model_path"])
-    forwarded["stream"] = True
-    forwarded["stream_options"] = {"include_usage": True}
-    headers = {"Authorization": f"Bearer {upstream.api_key}"}
-    client = httpx.AsyncClient(timeout=upstream.timeout_sec)
-    try:
-        request = client.build_request(
-            "POST", upstream.chat_url(), json=forwarded, headers=headers
+        response = await self._http.request(
+            method,
+            f"{self._base_url}{path}",
+            json=json,
+            headers={"Authorization": f"Bearer {self._auth_token}"},
         )
-        response = await client.send(request, stream=True)
-    except httpx.HTTPError as exc:
-        await client.aclose()
-        raise HTTPException(
-            status_code=502, detail=f"upstream provider is unreachable: {exc}"
-        ) from exc
-    except BaseException:
-        await client.aclose()
-        raise
-    if response.status_code >= 400:
-        detail = (await response.aread()).decode(errors="replace")[:500]
-        await response.aclose()
-        await client.aclose()
-        raise HTTPException(
-            status_code=502,
-            detail=f"upstream provider returned {response.status_code}: {detail}",
-        )
-    return client, response
-
-
-async def _relay_upstream_chat(
-    *,
-    client: httpx.AsyncClient,
-    response: httpx.Response,
-    session: dict[str, Any],
-) -> AsyncIterator[str]:
-    """Relay an already-accepted upstream SSE stream verbatim, metering usage."""
-    try:
-        async for line in response.aiter_lines():
-            if line.startswith("data: "):
-                data = line[len("data: ") :].strip()
-                if data and data != "[DONE]":
-                    with contextlib.suppress(json.JSONDecodeError, TypeError):
-                        _record_usage(session, json.loads(data))
-            yield f"{line}\n"
-    finally:
-        await response.aclose()
-        await client.aclose()
-
-
-def create_eval_proxy_stub_app(
-    *,
-    platform_token: str = _DEFAULT_STUB_PLATFORM_TOKEN,
-    upstream: EvalProxyStubUpstream | None = None,
-) -> FastAPI:
-    """Local contract stub for SDK tests. Not a production eval-proxy."""
-    app = FastAPI()
-    app.state.sessions = {}
-    app.state.create_requests = []
-    app.state.chat_requests = []
-    app.state.platform_token = platform_token
-
-    def _require_platform(authorization: str | None) -> None:
-        expected = f"Bearer {platform_token}"
-        if authorization != expected:
-            raise HTTPException(status_code=401, detail="Unauthorized")
-
-    def _require_session(rollout_id: str, authorization: str | None) -> dict[str, Any]:
-        session = app.state.sessions.get(rollout_id)
-        if session is None:
-            raise HTTPException(status_code=404, detail="unknown session")
-        expected = f"Bearer {session['token']}"
-        if authorization != expected:
-            raise HTTPException(status_code=401, detail="Unauthorized")
-        return session
-
-    @app.post("/v1/eval-sessions")
-    async def create_session(
-        request: Request,
-        authorization: str | None = Header(default=None),
-    ) -> dict[str, Any]:
-        _require_platform(authorization)
-        body = await request.json()
-        if not isinstance(body, dict):
-            raise HTTPException(status_code=400, detail="expected a JSON object")
-        forbidden = _CREATE_FORBIDDEN_FIELDS & body.keys()
-        if forbidden:
-            raise HTTPException(
-                status_code=400,
-                detail="clients may not select the synthetic model",
+        if not 200 <= response.status_code < 300:
+            raise EvalProxyError(
+                f"eval-proxy {method} {path} failed: "
+                f"{response.status_code} {response.text}",
+                status_code=response.status_code,
             )
-        rollout_id = body.get("rollout_id")
-        model_path = body.get("model_path")
-        if not isinstance(rollout_id, str) or not is_single_path_segment(rollout_id):
-            raise HTTPException(status_code=400, detail="invalid rollout_id")
-        if not isinstance(model_path, str) or not model_path:
-            raise HTTPException(status_code=400, detail="model_path is required")
-        token = secrets.token_urlsafe(16)
-        app.state.create_requests.append(dict(body))
-        app.state.sessions[rollout_id] = {
-            "token": token,
-            "model_path": model_path,
-            "usage": (
-                {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
-                if upstream is not None
-                else {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}
-            ),
-        }
-        return {
-            "rollout_id": rollout_id,
-            "api_base": _session_api_base(rollout_id),
-            "token": token,
-            "integration_model": EVAL_PROXY_INTEGRATION_MODEL,
-            "wire_model": EVAL_PROXY_WIRE_MODEL,
-        }
-
-    @app.post("/v1/eval-sessions/{rollout_id}/chat/completions")
-    async def chat_completions(
-        rollout_id: str,
-        request: Request,
-        authorization: str | None = Header(default=None),
-    ) -> StreamingResponse:
-        session = _require_session(rollout_id, authorization)
-        body = await request.json()
-        if not isinstance(body, dict):
-            raise HTTPException(status_code=400, detail="expected a JSON object")
-        app.state.chat_requests.append(
-            {"path": str(request.url.path), "body": dict(body)}
-        )
-        if body.get("stream") is not True:
-            raise HTTPException(status_code=400, detail="stream=true is required")
-        if body.get("model") != EVAL_PROXY_WIRE_MODEL:
-            raise HTTPException(status_code=400, detail="model must be osmosis-rollout")
-        stream_options = body.get("stream_options")
-        if (
-            isinstance(stream_options, dict)
-            and "include_usage" in stream_options
-            and stream_options.get("include_usage") is not True
-        ):
-            raise HTTPException(
-                status_code=400,
-                detail="include_usage must be true when present",
-            )
-
-        if upstream is not None:
-            client, upstream_response = await _open_upstream_chat(
-                upstream=upstream, session=session, body=body
-            )
-            return StreamingResponse(
-                _relay_upstream_chat(
-                    client=client, response=upstream_response, session=session
-                ),
-                media_type="text/event-stream",
-            )
-
-        async def events() -> AsyncIterator[str]:
-            completion_id = "chatcmpl-stub"
-            chunks = [
-                {
-                    "id": completion_id,
-                    "object": "chat.completion.chunk",
-                    "choices": [
-                        {
-                            "index": 0,
-                            "delta": {"role": "assistant", "content": "ok"},
-                            "finish_reason": None,
-                        }
-                    ],
-                },
-                {
-                    "id": completion_id,
-                    "object": "chat.completion.chunk",
-                    "choices": [
-                        {
-                            "index": 0,
-                            "delta": {},
-                            "finish_reason": "stop",
-                        }
-                    ],
-                },
-                {
-                    "id": completion_id,
-                    "object": "chat.completion.chunk",
-                    "choices": [],
-                    "usage": {
-                        "prompt_tokens": 1,
-                        "completion_tokens": 1,
-                        "total_tokens": 2,
-                    },
-                },
-            ]
-            for chunk in chunks:
-                yield f"data: {json.dumps(chunk)}\n\n"
-            yield "data: [DONE]\n\n"
-
-        return StreamingResponse(events(), media_type="text/event-stream")
-
-    @app.delete("/v1/eval-sessions/{rollout_id}")
-    async def close_session_provisional(
-        rollout_id: str,
-        authorization: str | None = Header(default=None),
-    ) -> dict[str, Any]:
-        # Provisional path. Not part of the frozen chat/session-create contract.
-        _require_platform(authorization)
-        session = app.state.sessions.get(rollout_id)
-        if session is None:
-            raise HTTPException(status_code=404, detail="unknown session")
-        app.state.sessions.pop(rollout_id, None)
-        return {"ok": True}
-
-    @app.get("/v1/eval-sessions/{rollout_id}/usage")
-    async def usage_provisional(
-        rollout_id: str,
-        authorization: str | None = Header(default=None),
-    ) -> dict[str, Any]:
-        # Provisional path. Not part of the frozen chat/session-create contract.
-        _require_platform(authorization)
-        session = app.state.sessions.get(rollout_id)
-        if session is None:
-            raise HTTPException(status_code=404, detail="unknown session")
-        return dict(session["usage"])
-
-    return app
+        if response.status_code == 204:
+            return {}
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise EvalProxyError(
+                f"eval-proxy {method} {path} returned invalid JSON"
+            ) from exc
+        if not isinstance(payload, dict):
+            raise EvalProxyError("eval-proxy returned a non-object JSON body")
+        return payload

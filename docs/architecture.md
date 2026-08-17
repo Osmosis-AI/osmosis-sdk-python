@@ -21,8 +21,8 @@ osmosis_ai/
 │   ├── grader.py          # Grader ABC
 │   ├── context.py         # RolloutContext / AgentWorkflowContext / GraderContext
 │   ├── driver.py          # RolloutDriver / RolloutRunRequest — eval-facing execution contract
-│   ├── http_driver.py     # optional concrete HTTP driver (`[eval-run]`)
-│   ├── controller/        # callback store (core); listener + eval-proxy client (`[eval-run]`)
+│   ├── http_driver.py     # concrete HTTP driver over the callback protocol
+│   ├── controller/        # callback store + eval-proxy client (core); localhost listener (`[eval-run]`)
 │   ├── server/            # optional generic FastAPI server (`[server]`) + ControllerAuth
 │   ├── backend/           # ExecutionBackend ABC + Local / optional Harbor backend
 │   ├── container/         # in-container agent + grader runner and its file contract
@@ -67,7 +67,7 @@ from osmosis_ai.rollout.controller import (
 from osmosis_ai.rollout.http_driver import HttpRolloutDriver
 ```
 
-`osmosis_ai.rollout` is **not** re-exported at the package top level — import it directly. Its public surface is framework-neutral core only; it does not export the server or Strands integration. `server`, `harbor`, `strands`, `openai-agents`, and `eval-run` each require their matching installation extra. The generic server has no Harbor dependency. `CallbackStore` is in-process and does not require `[eval-run]`; the localhost listener, eval-proxy client, and `HttpRolloutDriver` do.
+`osmosis_ai.rollout` is **not** re-exported at the package top level — import it directly. Its public surface is framework-neutral core only; it does not export the server or Strands integration. `server`, `harbor`, `strands`, `openai-agents`, and `eval-run` each require their matching installation extra. The generic server has no Harbor dependency. `CallbackStore`, `EvalProxyClient`, and `HttpRolloutDriver` only need the base install; `[eval-run]` covers the localhost callback listener that a local eval run must run to receive callbacks.
 
 ## Lazy loading
 
@@ -110,7 +110,7 @@ The controller delivers results asynchronously via the two callback URLs, so it 
 
 ### Eval path
 
-The eval-facing contract is `RolloutDriver` / `RolloutRunRequest` / `RolloutOutcome` in [../osmosis_ai/rollout/driver.py](../osmosis_ai/rollout/driver.py). The optional HTTP implementation is [../osmosis_ai/rollout/http_driver.py](../osmosis_ai/rollout/http_driver.py), with a generic callback store and localhost listener under [../osmosis_ai/rollout/controller/](../osmosis_ai/rollout/controller/). The store exposes separate `wait_completion` and `wait_terminal` rendezvous so callers can await workflow completion separately from the terminal grader result. Eval supplies data + an LLM endpoint and consumes trace + reward, without caring whether execution was in-process or over HTTP.
+The eval-facing contract is `RolloutDriver` / `RolloutRunRequest` / `RolloutOutcome` in [../osmosis_ai/rollout/driver.py](../osmosis_ai/rollout/driver.py). The optional HTTP implementation is [../osmosis_ai/rollout/http_driver.py](../osmosis_ai/rollout/http_driver.py), with a generic callback store and localhost listener under [../osmosis_ai/rollout/controller/](../osmosis_ai/rollout/controller/). The store exposes a single `wait_terminal` rendezvous; a completion callback is recorded on the live session for duplicate detection but is not awaited separately. Eval supplies data + an LLM endpoint and consumes trace + reward, without caring whether execution was in-process or over HTTP.
 
 ## Backend validation
 

@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import json
-from collections.abc import Sequence
+from collections.abc import AsyncIterator, Sequence
+from contextlib import asynccontextmanager
 from typing import Any
 
 import httpx
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from httpx import ASGITransport
 
@@ -400,6 +402,67 @@ async def test_retry_after_scheduled_task_crash_reexecutes(monkeypatch) -> None:
         assert (await client.post("/rollout", json=init_body())).status_code == 202
         await _settle()
     assert calls == ["r1", "r1"]
+
+
+class DrainStubBackend(StubBackend):
+    """Backend whose execution outlives the shutdown signal."""
+
+    def __init__(self, work_sec: float, events: list[str]) -> None:
+        super().__init__()
+        self.work_sec = work_sec
+        self.events = events
+
+    async def execute(
+        self,
+        request: ExecutionRequest,
+        on_workflow_complete: ResultCallback,
+        on_grader_complete: ResultCallback | None = None,
+    ) -> None:
+        self.executed = True
+        self.execute_count += 1
+        try:
+            await asyncio.sleep(self.work_sec)
+        except asyncio.CancelledError:
+            self.events.append("rollout-cancelled")
+            raise
+        self.events.append("rollout-finished")
+        await on_workflow_complete(ExecutionResult(status=RolloutStatus.SUCCESS))
+
+
+async def test_lifespan_exit_drains_rollouts_before_caller_lifespan_closes() -> None:
+    events: list[str] = []
+
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+        yield
+        events.append("lifespan-closed")
+
+    backend = DrainStubBackend(0.05, events)
+    app = create_rollout_server(backend=backend, lifespan=lifespan)
+    async with httpx.AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://rollout"
+    ) as client:
+        async with app.router.lifespan_context(app):
+            assert (await client.post("/rollout", json=init_body())).status_code == 202
+            await _settle()
+            assert events == []  # still running when shutdown begins
+    assert events == ["rollout-finished", "lifespan-closed"]
+
+
+async def test_lifespan_exit_cancels_rollouts_that_outlast_the_drain(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(server_app_module, "_SHUTDOWN_DRAIN_SEC", 0.01)
+    events: list[str] = []
+    backend = DrainStubBackend(30.0, events)
+    app = create_rollout_server(backend=backend)
+    async with httpx.AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://rollout"
+    ) as client:
+        async with app.router.lifespan_context(app):
+            assert (await client.post("/rollout", json=init_body())).status_code == 202
+            await _settle()
+    assert events == ["rollout-cancelled"]
 
 
 def test_health_instance_id_is_captured_at_construction(monkeypatch) -> None:

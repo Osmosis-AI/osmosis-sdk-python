@@ -234,7 +234,7 @@ def dataset_file(tmp_path: Path) -> Path:
 async def proxy_stub() -> AsyncIterator[tuple[str, str]]:
     """A running eval-proxy contract stub. Yields ``(base_url, platform_token)``."""
     from osmosis_ai.rollout.controller.listener import LocalhostUvicornServer
-    from osmosis_ai.rollout.controller.proxy_client import create_eval_proxy_stub_app
+    from tests.unit.rollout.eval_proxy_stub import create_eval_proxy_stub_app
 
     token = "stub-platform-token"
     app = create_eval_proxy_stub_app(platform_token=token)

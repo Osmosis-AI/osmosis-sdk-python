@@ -19,6 +19,9 @@ from osmosis_ai.rollout.controller.proxy_client import (
     EVAL_PROXY_INTEGRATION_MODEL,
     EVAL_PROXY_WIRE_MODEL,
     EvalProxyClient,
+)
+from tests.unit.rollout.eval_proxy_stub import (
+    DEFAULT_STUB_PLATFORM_TOKEN,
     create_eval_proxy_stub_app,
 )
 
@@ -30,7 +33,9 @@ MODEL_PATH = "openai/gpt-4.1-mini"
 async def eval_proxy_stub():
     app = create_eval_proxy_stub_app()
     async with LocalhostUvicornServer(app) as server:
-        client = EvalProxyClient(base_url=server.base_url, auth_token="platform-token")
+        client = EvalProxyClient(
+            base_url=server.base_url, auth_token=DEFAULT_STUB_PLATFORM_TOKEN
+        )
         session = await client.create_session(
             rollout_id=ROLLOUT_ID,
             model_path=MODEL_PATH,

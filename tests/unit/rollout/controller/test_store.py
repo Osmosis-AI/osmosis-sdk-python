@@ -47,6 +47,11 @@ def _grader(**overrides: object) -> GraderCompleteRequest:
     return GraderCompleteRequest.model_validate(payload)
 
 
+def _live_completion(store: CallbackStore) -> RolloutCompleteRequest | None:
+    """Completion payload the live session keeps for duplicate detection."""
+    return store._sessions[ROLLOUT_ID].completion
+
+
 async def test_register_then_discard_forgets_live_rendezvous() -> None:
     store = CallbackStore()
     await store.register(ROLLOUT_ID)
@@ -64,33 +69,18 @@ async def test_completion_is_not_terminal() -> None:
     await store.register(ROLLOUT_ID)
     await store.handle_completion(ROLLOUT_ID, _completion())
 
-    assert store.completion_for(ROLLOUT_ID) is not None
+    assert _live_completion(store) is not None
     assert store.terminal_for(ROLLOUT_ID) is None
 
 
-async def test_wait_completion_returns_accepted_payload() -> None:
-    store = CallbackStore()
-    await store.register(ROLLOUT_ID)
-    waiter = asyncio.create_task(store.wait_completion(ROLLOUT_ID))
-    await asyncio.sleep(0)
-    first = _completion()
-    await store.handle_completion(ROLLOUT_ID, first)
-    accepted = await waiter
-    assert accepted == first
-    assert await store.wait_completion(ROLLOUT_ID) == first
-    await store.handle_grader(ROLLOUT_ID, _grader())
-    await store.discard(ROLLOUT_ID)
-    assert await store.wait_completion(ROLLOUT_ID) == first
-
-
-async def test_identical_duplicate_completion_does_not_resolve_twice() -> None:
+async def test_identical_duplicate_completion_keeps_one_payload() -> None:
     store = CallbackStore()
     await store.register(ROLLOUT_ID)
     first = _completion()
     first_ack = await store.handle_completion(ROLLOUT_ID, first)
     second_ack = await store.handle_completion(ROLLOUT_ID, _completion())
     assert second_ack == first_ack
-    assert await store.wait_completion(ROLLOUT_ID) == first
+    assert _live_completion(store) == first
 
 
 async def test_conflicting_duplicate_completion_keeps_first_and_logs(
@@ -106,7 +96,7 @@ async def test_conflicting_duplicate_completion_keeps_first_and_logs(
             _completion(status=RolloutStatus.FAILURE, err_message="agent exploded"),
         )
     assert ack == {"ok": True}
-    assert await store.wait_completion(ROLLOUT_ID) == first
+    assert _live_completion(store) == first
     assert any(
         "conflicting duplicate" in record.message.lower()
         for record in caplog.records
@@ -114,20 +104,17 @@ async def test_conflicting_duplicate_completion_keeps_first_and_logs(
     )
 
 
-async def test_discard_cancels_unresolved_completion_and_terminal_futures() -> None:
+async def test_discard_cancels_the_unresolved_terminal_future() -> None:
     store = CallbackStore()
     await store.register(ROLLOUT_ID)
-    completion_waiter = asyncio.create_task(store.wait_completion(ROLLOUT_ID))
     terminal_waiter = asyncio.create_task(store.wait_terminal(ROLLOUT_ID))
     await asyncio.sleep(0)
     await store.discard(ROLLOUT_ID)
     with pytest.raises(asyncio.CancelledError):
-        await completion_waiter
-    with pytest.raises(asyncio.CancelledError):
         await terminal_waiter
 
 
-async def test_seeded_terminal_retains_completion_for_wait_and_duplicates() -> None:
+async def test_seeded_terminal_retains_completion_for_duplicates() -> None:
     store = CallbackStore()
     stored = _completion()
     store.seed_terminal(
@@ -136,7 +123,8 @@ async def test_seeded_terminal_retains_completion_for_wait_and_duplicates() -> N
         grader=_grader(),
         completion=stored,
     )
-    assert await store.wait_completion(ROLLOUT_ID) == stored
+    terminal = store.terminal_for(ROLLOUT_ID)
+    assert terminal is not None and terminal.completion == stored
     ack = await store.handle_completion(ROLLOUT_ID, stored)
     assert ack == {"ok": True, "seeded": True}
 

@@ -336,18 +336,6 @@ def test_extra_modules_table_matches_pyproject_extras() -> None:
             "fastapi",
             "eval-run",
         ),
-        (
-            "osmosis_ai.rollout.controller",
-            "EvalProxyClient",
-            "aiohttp",
-            "eval-run",
-        ),
-        (
-            "osmosis_ai.rollout.http_driver",
-            "HttpRolloutDriver",
-            "aiohttp",
-            "eval-run",
-        ),
     ],
 )
 def test_missing_optional_dependency_names_the_install_extra(
@@ -406,14 +394,19 @@ def test_agent_integration_classes_use_canonical_module_paths() -> None:
     )
 
 
-def test_callback_store_imports_without_eval_run_extra() -> None:
+def test_driver_core_imports_without_eval_run_extra() -> None:
+    """Only the localhost callback listener needs `[eval-run]`.
+
+    The store, the eval-proxy client, and the HTTP driver speak httpx and are
+    part of the base install, so a bare environment must reach all of them.
+    """
     result = _run_python(
         """
         import builtins
         import sys
 
         real_import = builtins.__import__
-        blocked = {"aiohttp", "fastapi", "uvicorn"}
+        blocked = {"fastapi", "uvicorn"}
 
         def guarded_import(name, globals=None, locals=None, fromlist=(), level=0):
             root = name.partition(".")[0]
@@ -422,11 +415,14 @@ def test_callback_store_imports_without_eval_run_extra() -> None:
             return real_import(name, globals, locals, fromlist, level)
 
         builtins.__import__ = guarded_import
-        from osmosis_ai.rollout.controller import CallbackStore
+        from osmosis_ai.rollout.controller import CallbackStore, EvalProxyClient
         from osmosis_ai.rollout.driver import RolloutRunRequest
+        from osmosis_ai.rollout.http_driver import HttpRolloutDriver
 
         CallbackStore()
         RolloutRunRequest(messages=[])
+        assert EvalProxyClient is not None
+        assert HttpRolloutDriver is not None
         loaded_roots = {name.partition(".")[0] for name in sys.modules}
         assert not (blocked & loaded_roots)
         """

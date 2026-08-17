@@ -86,11 +86,11 @@ def _request(**overrides: Any) -> RolloutRunRequest:
     payload: dict[str, Any] = {
         "messages": [{"role": "user", "content": "hi"}],
         "label": "yes",
-        "metadata": {"row_index": 4},
+        "metadata": {"split": "train"},
         "rollout_id": ROLLOUT_ID,
         "agent_timeout_sec": 30.0,
         "grader_timeout_sec": 10.0,
-        "extra_fields": {"run_index": 1, "custom": "x"},
+        "extra_fields": {"row_index": 4, "run_index": 1, "custom": "x"},
     }
     payload.update(overrides)
     return RolloutRunRequest(**payload)
@@ -101,11 +101,10 @@ def _driver(
     handler: Any,
     *,
     callback_timeout_sec: float | None = 5.0,
-    proxy: FakeProxyClient | None = None,
     status_poll_attempts: int = 5,
     status_poll_interval_sec: float = 0.0,
 ) -> tuple[HttpRolloutDriver, FakeProxyClient]:
-    proxy = proxy or FakeProxyClient(store)
+    proxy = FakeProxyClient(store)
     http = httpx.AsyncClient(
         transport=httpx.MockTransport(handler),
         base_url="http://rollout",
@@ -160,7 +159,7 @@ async def test_202_admission_posts_init_and_returns_grader_outcome() -> None:
     assert body["controller_api_key"] == "controller-key"
     assert body["llm_api_key"] == "session-token"
     assert body["controller_api_key"] != body["llm_api_key"]
-    assert body["metadata"] == {"row_index": 4}
+    assert body["metadata"] == {"split": "train"}
     assert body["agent_timeout_sec"] == 30.0
     assert body["grader_timeout_sec"] == 10.0
     assert body["extra_fields"]["custom"] == "x"
@@ -172,6 +171,30 @@ async def test_202_admission_posts_init_and_returns_grader_outcome() -> None:
         RolloutCompleteRequest(status=RolloutStatus.SUCCESS),
     )
     assert late_completion == {"ok": True}
+
+
+async def test_row_and_run_indices_are_read_from_extra_fields_only() -> None:
+    store = CallbackStore()
+    admitted = asyncio.Event()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/rollout" and request.method == "POST":
+            admitted.set()
+            return httpx.Response(202, json={})
+        raise AssertionError(f"unexpected {request.method} {request.url}")
+
+    driver, proxy = _driver(store, handler)
+    run_task = asyncio.create_task(
+        driver.run(
+            _request(metadata={"row_index": 7, "run_index": 8}, extra_fields=None)
+        )
+    )
+    await admitted.wait()
+    await store.handle_grader(ROLLOUT_ID, _grader())
+    await run_task
+
+    assert proxy.created[0]["row_index"] is None
+    assert proxy.created[0]["run_index"] is None
 
 
 async def test_429_retries_after_header_without_reregistering() -> None:
@@ -456,82 +479,6 @@ async def test_timeout_plus_failed_cancel_keeps_timeout_result() -> None:
     assert outcome.error == "callback_timeout"
 
 
-async def test_explicit_cancel_wakes_run_as_cancelled() -> None:
-    store = CallbackStore()
-    cancelled: list[dict[str, Any]] = []
-    admitted = asyncio.Event()
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        if request.url.path == "/rollout" and request.method == "POST":
-            admitted.set()
-            return httpx.Response(202, json={})
-        if request.url.path == "/rollout/cancel":
-            cancelled.append(json_body(request))
-            return httpx.Response(
-                200, json={"dispositions": {ROLLOUT_ID: "cancelled_running"}}
-            )
-        raise AssertionError(request.url.path)
-
-    driver, proxy = _driver(store, handler)
-    run_task = asyncio.create_task(driver.run(_request()))
-    await admitted.wait()
-    dispositions = await driver.cancel(ROLLOUT_ID)
-    outcome = await run_task
-    assert outcome.status == RolloutStatus.CANCELLED
-    assert dispositions == {ROLLOUT_ID: "cancelled_running"}
-    assert cancelled and cancelled[0]["ids"] == [ROLLOUT_ID]
-    assert proxy.closed == [ROLLOUT_ID]
-    late_completion = await store.handle_completion(
-        ROLLOUT_ID,
-        RolloutCompleteRequest(status=RolloutStatus.SUCCESS),
-    )
-    late_grader = await store.handle_grader(ROLLOUT_ID, _grader())
-    assert late_completion == {"ok": True}
-    assert late_grader == late_completion
-
-
-async def test_explicit_cancel_503_still_returns_cancelled() -> None:
-    store = CallbackStore()
-    admitted = asyncio.Event()
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        if request.url.path == "/rollout" and request.method == "POST":
-            admitted.set()
-            return httpx.Response(202, json={})
-        if request.url.path == "/rollout/cancel":
-            return httpx.Response(503, json={"detail": "unavailable"})
-        raise AssertionError(request.url.path)
-
-    driver, _proxy = _driver(store, handler)
-    run_task = asyncio.create_task(driver.run(_request()))
-    await admitted.wait()
-    dispositions = await driver.cancel(ROLLOUT_ID)
-    outcome = await run_task
-    assert dispositions == {}
-    assert outcome.status == RolloutStatus.CANCELLED
-
-
-async def test_explicit_cancel_malformed_response_still_returns_cancelled() -> None:
-    store = CallbackStore()
-    admitted = asyncio.Event()
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        if request.url.path == "/rollout" and request.method == "POST":
-            admitted.set()
-            return httpx.Response(202, json={})
-        if request.url.path == "/rollout/cancel":
-            return httpx.Response(200, text="not-json")
-        raise AssertionError(request.url.path)
-
-    driver, _proxy = _driver(store, handler)
-    run_task = asyncio.create_task(driver.run(_request()))
-    await admitted.wait()
-    dispositions = await driver.cancel(ROLLOUT_ID)
-    outcome = await run_task
-    assert dispositions == {}
-    assert outcome.status == RolloutStatus.CANCELLED
-
-
 @pytest.mark.parametrize(
     ("raw", "expected"),
     [
@@ -544,133 +491,17 @@ async def test_explicit_cancel_malformed_response_still_returns_cancelled() -> N
         ("-5", 0.05),
         ("0", 0.05),
         ("2.5", 2.5),
+        ("60", 60.0),
+        ("86400", 60.0),
     ],
 )
-def test_retry_after_seconds_is_finite_and_non_negative(
+def test_retry_after_seconds_is_finite_non_negative_and_capped(
     raw: str, expected: float
 ) -> None:
     from osmosis_ai.rollout.http_driver import _retry_after_seconds
 
     response = httpx.Response(429, headers={"Retry-After": raw})
     assert _retry_after_seconds(response) == expected
-
-
-class BlockingProxyClient(FakeProxyClient):
-    """Proxy client whose create blocks so tests can race cancel against it."""
-
-    def __init__(self, store: CallbackStore) -> None:
-        super().__init__(store)
-        self.entered = asyncio.Event()
-        self.release = asyncio.Event()
-
-    async def create_session(self, **kwargs: Any) -> EvalProxySession:
-        self.entered.set()
-        await self.release.wait()
-        return await super().create_session(**kwargs)
-
-
-async def test_cancel_during_proxy_create_prevents_rollout_post() -> None:
-    store = CallbackStore()
-    rollout_posts = 0
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        nonlocal rollout_posts
-        if request.url.path == "/rollout" and request.method == "POST":
-            rollout_posts += 1
-            return httpx.Response(202, json={})
-        if request.url.path == "/rollout/cancel":
-            return httpx.Response(200, json={"dispositions": {}})
-        raise AssertionError(request.url.path)
-
-    proxy = BlockingProxyClient(store)
-    driver, _ = _driver(store, handler, proxy=proxy)
-    run_task = asyncio.create_task(driver.run(_request()))
-    await proxy.entered.wait()
-    await driver.cancel(ROLLOUT_ID)
-    proxy.release.set()
-    outcome = await run_task
-
-    assert outcome.status == RolloutStatus.CANCELLED
-    assert rollout_posts == 0
-    assert proxy.closed == [ROLLOUT_ID]
-
-
-async def test_cancel_racing_successful_post_reissues_remote_cancel() -> None:
-    store = CallbackStore()
-    rollout_posts = 0
-    cancel_posts: list[dict[str, Any]] = []
-
-    async def handler(request: httpx.Request) -> httpx.Response:
-        nonlocal rollout_posts
-        if request.url.path == "/rollout" and request.method == "POST":
-            rollout_posts += 1
-            # Cancel lands while the POST is in flight, after the server
-            # has already committed to admitting the rollout.
-            await store.acknowledge_without_commit(ROLLOUT_ID)
-            return httpx.Response(202, json={})
-        if request.url.path == "/rollout/cancel":
-            cancel_posts.append(json_body(request))
-            return httpx.Response(
-                200, json={"dispositions": {ROLLOUT_ID: "cancelled_running"}}
-            )
-        raise AssertionError(request.url.path)
-
-    driver, _proxy = _driver(store, handler)
-    outcome = await driver.run(_request())
-
-    assert outcome.status == RolloutStatus.CANCELLED
-    assert rollout_posts == 1
-    assert cancel_posts and cancel_posts[0]["ids"] == [ROLLOUT_ID]
-
-
-async def test_cancel_during_429_wait_exits_without_second_post() -> None:
-    store = CallbackStore()
-    rollout_posts = 0
-    first_posted = asyncio.Event()
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        nonlocal rollout_posts
-        if request.url.path == "/rollout" and request.method == "POST":
-            rollout_posts += 1
-            first_posted.set()
-            return httpx.Response(
-                429, json={"detail": "full"}, headers={"Retry-After": "0.05"}
-            )
-        if request.url.path == "/rollout/cancel":
-            return httpx.Response(200, json={"dispositions": {}})
-        raise AssertionError(request.url.path)
-
-    driver, _proxy = _driver(store, handler)
-    run_task = asyncio.create_task(driver.run(_request()))
-    await first_posted.wait()
-    await driver.cancel(ROLLOUT_ID)
-    outcome = await asyncio.wait_for(run_task, timeout=2.0)
-
-    assert outcome.status == RolloutStatus.CANCELLED
-    assert rollout_posts == 1
-
-
-async def test_cancel_unknown_id_leaves_store_clean_for_future_run() -> None:
-    store = CallbackStore()
-    admitted = asyncio.Event()
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        if request.url.path == "/rollout" and request.method == "POST":
-            admitted.set()
-            return httpx.Response(202, json={})
-        if request.url.path == "/rollout/cancel":
-            return httpx.Response(200, json={"dispositions": {}})
-        raise AssertionError(request.url.path)
-
-    driver, _proxy = _driver(store, handler)
-    dispositions = await driver.cancel(ROLLOUT_ID)
-    assert dispositions == {}
-
-    run_task = asyncio.create_task(driver.run(_request()))
-    await asyncio.wait_for(admitted.wait(), timeout=2.0)
-    await store.handle_grader(ROLLOUT_ID, _grader())
-    outcome = await run_task
-    assert outcome.status == RolloutStatus.SUCCESS
 
 
 async def test_status_rollout_id_mismatch_never_causes_second_post() -> None:

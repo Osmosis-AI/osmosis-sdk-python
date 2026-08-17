@@ -38,9 +38,8 @@ class RolloutOutcome:
 class RolloutRunRequest:
     """Inputs for one ``RolloutDriver.run`` call.
 
-    Scheduler identity (row/run indices) belongs in ``extra_fields`` or
-    ``metadata`` when a caller needs it. This type stays reusable outside
-    local eval.
+    Scheduler identity (row/run indices) belongs in ``extra_fields`` when a
+    caller needs it. This type stays reusable outside local eval.
     """
 
     messages: list[MessageDict]

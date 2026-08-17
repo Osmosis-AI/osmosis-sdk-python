@@ -16,12 +16,13 @@ from typing import Any
 import httpx
 import pytest
 
-from osmosis_ai.rollout.controller.proxy_client import (
+from tests.unit.rollout.eval_proxy_stub import (
+    DEFAULT_STUB_PLATFORM_TOKEN,
     EvalProxyStubUpstream,
     create_eval_proxy_stub_app,
 )
 
-PLATFORM_TOKEN = "platform-token"
+PLATFORM_TOKEN = DEFAULT_STUB_PLATFORM_TOKEN
 ROLLOUT_ID = "a" * 32
 
 _SSE_BODY = (
@@ -68,9 +69,7 @@ def upstream_client(monkeypatch: pytest.MonkeyPatch) -> _Upstream:
         kwargs.setdefault("transport", httpx.MockTransport(fake.handler))
         return real_client(*args, **kwargs)
 
-    monkeypatch.setattr(
-        "osmosis_ai.rollout.controller.proxy_client.httpx.AsyncClient", patched
-    )
+    monkeypatch.setattr("tests.unit.rollout.eval_proxy_stub.httpx.AsyncClient", patched)
     return fake
 
 
@@ -117,7 +116,8 @@ async def test_the_wire_model_is_mapped_to_the_session_model_path(
     # The provider prefix is stripped, exactly as the locked LiteLLM path does.
     assert forwarded["model"] == "gpt-4o-mini"
     assert forwarded["stream"] is True
-    # Metering must never depend on the client asking for usage.
+    # The relayed stream must still end with the contract's usage-only chunk,
+    # whether or not the client asked for one.
     assert forwarded["stream_options"] == {"include_usage": True}
 
 
@@ -138,31 +138,6 @@ async def test_the_upstream_stream_is_relayed_verbatim(
         assert response.status_code == 200
         assert "42" in response.text
         assert response.text.rstrip().endswith("data: [DONE]")
-
-
-async def test_relayed_usage_is_metered_on_the_session(
-    upstream_client: _Upstream,
-) -> None:
-    app = _app()
-    async with _session_client(app) as (client, token):
-        await client.post(
-            f"/v1/eval-sessions/{ROLLOUT_ID}/chat/completions",
-            json={
-                "model": "osmosis-rollout",
-                "messages": [{"role": "user", "content": "2*21"}],
-                "stream": True,
-            },
-            headers={"Authorization": f"Bearer {token}"},
-        )
-        usage = await client.get(
-            f"/v1/eval-sessions/{ROLLOUT_ID}/usage",
-            headers={"Authorization": f"Bearer {PLATFORM_TOKEN}"},
-        )
-    assert usage.json() == {
-        "prompt_tokens": 11,
-        "completion_tokens": 7,
-        "total_tokens": 18,
-    }
 
 
 async def test_an_upstream_error_surfaces_as_a_status_not_a_truncated_stream(
@@ -214,22 +189,6 @@ async def test_the_frozen_request_contract_still_applies_with_a_passthrough(
     assert upstream_client.requests == []
 
 
-async def test_usage_starts_at_zero_when_a_passthrough_is_configured() -> None:
-    # Without a passthrough the stub reports its canned 2 tokens; with one, real
-    # usage is the only source, so a session with no calls must report zero.
-    app = _app()
-    async with _session_client(app) as (client, _token):
-        usage = await client.get(
-            f"/v1/eval-sessions/{ROLLOUT_ID}/usage",
-            headers={"Authorization": f"Bearer {PLATFORM_TOKEN}"},
-        )
-    assert usage.json() == {
-        "prompt_tokens": 0,
-        "completion_tokens": 0,
-        "total_tokens": 0,
-    }
-
-
 async def test_the_canned_stub_is_unchanged_without_a_passthrough() -> None:
     app = create_eval_proxy_stub_app(platform_token=PLATFORM_TOKEN)
     async with _session_client(app) as (client, token):
@@ -238,9 +197,4 @@ async def test_the_canned_stub_is_unchanged_without_a_passthrough() -> None:
             json={"model": "osmosis-rollout", "messages": [], "stream": True},
             headers={"Authorization": f"Bearer {token}"},
         )
-        usage = await client.get(
-            f"/v1/eval-sessions/{ROLLOUT_ID}/usage",
-            headers={"Authorization": f"Bearer {PLATFORM_TOKEN}"},
-        )
     assert "chatcmpl-stub" in response.text
-    assert usage.json()["total_tokens"] == 2
