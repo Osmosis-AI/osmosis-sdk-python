@@ -79,6 +79,10 @@ class HttpRolloutDriver(RolloutDriver):
         http_client: httpx.AsyncClient | None = None,
         callback_timeout_sec: float | None = None,
     ) -> None:
+        # An empty key would admit rollouts whose callbacks the listener then
+        # rejects as unauthenticated — a hang, not an error. Refuse it here.
+        if not controller_api_key or not controller_api_key.strip():
+            raise ValueError("controller_api_key must be a non-empty string")
         self._rollout_base_url = rollout_base_url.rstrip("/")
         self._store = callback_store
         self._completion_url_for = completion_url_for
