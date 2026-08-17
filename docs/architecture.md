@@ -22,7 +22,7 @@ osmosis_ai/
 │   ├── context.py         # RolloutContext / AgentWorkflowContext / GraderContext
 │   ├── driver.py          # RolloutDriver / RolloutRunRequest — eval-facing execution contract
 │   ├── http_driver.py     # concrete HTTP driver over the callback protocol
-│   ├── controller/        # callback store + eval-proxy client (core); localhost listener (`[eval-run]`)
+│   ├── controller/        # callback store (core); localhost listener + LiteLLM bridge (`[eval-run]`)
 │   ├── server/            # optional generic FastAPI server (`[server]`) + ControllerAuth
 │   ├── backend/           # ExecutionBackend ABC + Local / optional Harbor backend
 │   ├── container/         # in-container agent + grader runner and its file contract
@@ -62,12 +62,12 @@ from osmosis_ai.rollout.integrations.agents.openai_agents import OsmosisAgent
 from osmosis_ai.rollout.controller import (
     CallbackStore,
     CallbackListener,
-    EvalProxyClient,
+    LiteLLMBridge,
 )
 from osmosis_ai.rollout.http_driver import HttpRolloutDriver
 ```
 
-`osmosis_ai.rollout` is **not** re-exported at the package top level — import it directly. Its public surface is framework-neutral core only; it does not export the server or Strands integration. `server`, `harbor`, `strands`, `openai-agents`, and `eval-run` each require their matching installation extra. The generic server has no Harbor dependency. `CallbackStore`, `EvalProxyClient`, and `HttpRolloutDriver` only need the base install; `[eval-run]` covers the localhost callback listener that a local eval run must run to receive callbacks.
+`osmosis_ai.rollout` is **not** re-exported at the package top level — import it directly. Its public surface is framework-neutral core only; it does not export the server or Strands integration. `server`, `harbor`, `strands`, `openai-agents`, and `eval-run` each require their matching installation extra. The generic server has no Harbor dependency. `CallbackStore` and `HttpRolloutDriver` only need the base install; `[eval-run]` covers the localhost callback listener and the in-process LiteLLM bridge that serve a local eval run (callbacks in, model calls out).
 
 ## Lazy loading
 
