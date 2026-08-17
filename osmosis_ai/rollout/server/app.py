@@ -1,6 +1,4 @@
 import asyncio
-import hashlib
-import json
 import logging
 import os
 import traceback
@@ -35,33 +33,13 @@ from osmosis_ai.rollout.types import (
     RolloutStatusResponse,
 )
 from osmosis_ai.rollout.utils.http import post_json_with_retry
-from osmosis_ai.rollout.utils.ttl_cache import TtlCache
 
 logger: logging.Logger = logging.getLogger(__name__)
-
-# Credentials never enter the idempotency digest.
-_IDEMPOTENCY_EXCLUDED_FIELDS = {"controller_api_key", "llm_api_key"}
-
-# Completed idempotency digests are retained for this window so a duplicate
-# retry of a finished rollout dedupes instead of re-executing. 15 minutes
-# comfortably covers the driver's retry/status-recovery horizon while keeping
-# memory bounded on long-lived training servers (same window as the Harbor
-# backend's STATUS_RETENTION_SEC). Active entries never expire.
-_COMPLETED_DIGEST_TTL_SEC = 900.0
 
 # Graceful shutdown waits this long for in-flight rollouts before cancelling
 # them. Uvicorn closes its listeners before lifespan shutdown, so nothing new
 # is admitted while draining.
 _SHUTDOWN_DRAIN_SEC = 10.0
-
-
-def _canonical_request_digest(request: RolloutInitRequest) -> str:
-    """Stable digest of one init body, excluding callback/LLM secrets."""
-    payload = request.model_dump(mode="json", exclude=_IDEMPOTENCY_EXCLUDED_FIELDS)
-    encoded = json.dumps(
-        payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True
-    )
-    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
 def _configure_default_logging() -> None:
@@ -88,7 +66,7 @@ def create_rollout_server(
     if configure_logging:
         _configure_default_logging()
     # Strong references so eagerly scheduled rollout tasks are never GC'd.
-    scheduled_tasks: set[asyncio.Task[bool]] = set()
+    scheduled_tasks: set[asyncio.Task[None]] = set()
 
     async def _drain_scheduled_tasks() -> None:
         if not scheduled_tasks:
@@ -115,13 +93,6 @@ def create_rollout_server(
                 await _drain_scheduled_tasks()
 
     app = FastAPI(lifespan=_lifespan_with_drain)
-    # Idempotency: rollout_id -> canonical request digest. Active entries
-    # cover scheduled/running executions and never expire; when execution
-    # finishes, only id + digest move into bounded recent retention. Digests
-    # only; raw payloads and credentials are not retained. /status stays
-    # backend-authoritative.
-    active_digests: dict[str, str] = {}
-    completed_digests: TtlCache[str, str] = TtlCache(_COMPLETED_DIGEST_TTL_SEC)
     # The instance id env var is immutable for the process lifetime.
     instance_id = os.environ.get("_OSMOSIS_ROLLOUT_INSTANCE_ID")
 
@@ -132,42 +103,17 @@ def create_rollout_server(
             payload["instance_id"] = instance_id
         return payload
 
-    def _finish_rollout_task(rollout_id: str | None, task: asyncio.Task[bool]) -> None:
+    def _finish_rollout_task(rollout_id: str | None, task: asyncio.Task[None]) -> None:
         scheduled_tasks.discard(task)
         exc = None if task.cancelled() else task.exception()
         if exc is not None:
             logger.error("Rollout task for %s crashed", rollout_id, exc_info=exc)
-        if rollout_id is None:
-            return
-        digest = active_digests.pop(rollout_id, None)
-        # Retain the digest only when every required terminal callback was
-        # delivered. A crashed, cancelled, or delivery-failed task left the
-        # controller without its terminal callback; a duplicate retry deduped
-        # against it would get a 202 and wait forever for a callback that is
-        # never coming. Dropping the digest lets the retry re-execute.
-        delivered = not task.cancelled() and exc is None and task.result()
-        if digest is not None and delivered:
-            completed_digests.set(rollout_id, digest)
 
     # 202: the rollout is scheduled before this response is sent, so a
-    # failed/disconnected response cannot record a digest for an execution
-    # that never ran (the retry would dedupe against it and hang forever).
+    # failed/disconnected response still leaves the execution running.
     @app.post("/rollout", status_code=202)
     async def rollout(request: RolloutInitRequest) -> RolloutInitResponse:
         rollout_id = request.rollout_id or None
-        digest: str | None = None
-        if rollout_id is not None:
-            digest = _canonical_request_digest(request)
-            existing = active_digests.get(rollout_id)
-            if existing is None:
-                existing = completed_digests.get(rollout_id)
-            if existing is not None:
-                if existing == digest:
-                    return RolloutInitResponse()
-                raise HTTPException(
-                    status_code=409,
-                    detail="conflicting duplicate rollout_id",
-                )
         if not backend.has_capacity():
             raise HTTPException(
                 status_code=429,
@@ -180,8 +126,6 @@ def create_rollout_server(
             logger.error(traceback.format_exc())
             raise HTTPException(status_code=500, detail=str(e)) from e
         scheduled_tasks.add(task)
-        if rollout_id is not None and digest is not None:
-            active_digests[rollout_id] = digest
         task.add_done_callback(partial(_finish_rollout_task, rollout_id))
         return RolloutInitResponse()
 
@@ -219,11 +163,8 @@ def create_rollout_server(
 
 async def _handle_rollout(
     backend: ExecutionBackend, request: RolloutInitRequest
-) -> bool:
-    """Execute one rollout; return whether every required terminal callback
-    was delivered (the completion callback, plus the grader callback when
-    ``grader_callback_url`` is set). The admission layer retains the
-    idempotency digest only for delivered rollouts."""
+) -> None:
+    """Execute one rollout and deliver its terminal callbacks."""
     # Routing identity is in the URLs; ``rollout_id`` in the body is debug
     # metadata. We prefer the caller's id (so logs/cache rows correlate
     # across systems) and synthesize one only if the caller omits it.
@@ -426,4 +367,3 @@ async def _handle_rollout(
                 report=report,
                 diagnostics=last_diagnostics,
             )
-    return completion_posted and (not request.grader_callback_url or grader_posted)
