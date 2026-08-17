@@ -1,0 +1,21 @@
+tests/unit/rollout/test_server_app_metadata.py
+  s_00c3865caf2bbb::t_dee5f754ff5ff0 1-5,12,21-22,28-47
+tests/unit/rollout/test_driver.py
+  s_00c3865caf2bbb::t_dee5f754ff5ff0 3
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "bd65c592ea0a081c47c9ca1be2f5ab689145f15b",
+  "prompts": {},
+  "sessions": {
+    "s_00c3865caf2bbb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "00de36f5-6bb1-45b7-828d-f57951616464",
+        "model": "claude-fable-5"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}
