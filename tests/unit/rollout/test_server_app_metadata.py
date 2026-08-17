@@ -1,11 +1,15 @@
-"""Tests that _handle_rollout threads metadata into ExecutionRequest."""
+"""Tests that _handle_rollout threads metadata into ExecutionRequest.
+
+Also pins the required-field sets of the rollout/grader wire models, which the
+hosted platform controller already depends on.
+"""
 
 from __future__ import annotations
 
 from typing import Any
 
 import pytest
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
 from osmosis_ai.rollout.backend.base import ExecutionBackend, ResultCallback
 from osmosis_ai.rollout.context import get_rollout_context
@@ -14,9 +18,33 @@ from osmosis_ai.rollout.server.app import _handle_rollout
 from osmosis_ai.rollout.types import (
     ExecutionRequest,
     ExecutionResult,
+    GraderCompleteRequest,
+    RolloutCompleteRequest,
     RolloutInitRequest,
     RolloutStatus,
 )
+
+
+def test_wire_required_fields_stay_pinned() -> None:
+    """Pin what the hosted platform controller sends to ``POST /rollout``.
+
+    These frozensets encode the payload the hosted controller already posts to
+    the pre-existing rollout server: promoting a new field to required would
+    make every hosted rollout 422. ``llm_api_key`` stays optional so the
+    ``controller_api_key`` fallback keeps working.
+    """
+
+    def required(model: type[BaseModel]) -> frozenset[str]:
+        return frozenset(
+            name for name, field in model.model_fields.items() if field.is_required()
+        )
+
+    assert required(RolloutInitRequest) == frozenset(
+        {"initial_messages", "chat_completions_url", "completion_callback_url"}
+    )
+    assert required(RolloutCompleteRequest) == frozenset({"status"})
+    assert required(GraderCompleteRequest) == frozenset({"status"})
+    assert not RolloutInitRequest.model_fields["llm_api_key"].is_required()
 
 
 class CapturingBackend(ExecutionBackend):
