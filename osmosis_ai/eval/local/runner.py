@@ -55,10 +55,6 @@ from osmosis_ai.eval.local.state import (
     LOCKS_DIRNAME,
     MANIFEST_FILENAME,
     ROLLOUT_PROTOCOL_VERSION,
-    ChildProcessRecord,
-    InputDiff,
-    LocalEvalStateError,
-    OrphanChildError,
     RunLock,
     RunManifest,
     TerminalJournal,
@@ -66,9 +62,7 @@ from osmosis_ai.eval.local.state import (
     TerminalStatus,
     WorkKey,
     archive_run_directory,
-    diff_inputs,
     digest_of,
-    process_is_alive,
     terminate_process_group,
     utc_now,
     validate_run_name,
@@ -92,18 +86,15 @@ LOGS_FILENAME = "logs.txt"
 
 _HEALTH_TIMEOUT_SEC = 90.0
 _HEALTH_POLL_INTERVAL_SEC = 0.2
-_PORT_ATTEMPTS = 5
+# One retry covers a lost bind race on an ephemeral port; more would only make a
+# hung server cost another full health timeout before the run gives up.
+_PORT_ATTEMPTS = 2
 _SERVER_TERM_GRACE_SEC = 5.0
 _TRAJECTORY_GRACE_SEC = 30.0
 _TRAJECTORY_POLL_INTERVAL_SEC = 0.2
-_SNAPSHOT_COALESCE_SEC = 1.0
 _CALLBACK_NETWORK_GRACE_SEC = 60.0
 # Floor for the per-item supervisor deadline when the config sets no timeouts.
 _DEFAULT_ITEM_DEADLINE_SEC = 3600.0
-# Sanity bound on a recorded reward: rewards near the float ceiling overflow
-# ``statistics.fmean`` when the metrics are aggregated, and because the record is
-# durable that leaves the run unresumable until --fresh.
-_MAX_ABS_REWARD = 1e300
 
 #: Supervisor-owned subprocess variables a config must never set (§8).
 RESERVED_ENV_NAMES: frozenset[str] = frozenset(
@@ -121,10 +112,6 @@ class LocalEvalError(RuntimeError):
 
 class ResumeRefusedError(LocalEvalError):
     """A named run's resolved inputs changed, so resuming would mix versions."""
-
-    def __init__(self, message: str, *, diffs: Sequence[InputDiff]) -> None:
-        super().__init__(message)
-        self.diffs: list[InputDiff] = list(diffs)
 
 
 # --------------------------------------------------------------------------- #
@@ -311,9 +298,16 @@ def generated_run_name(
     return validate_run_name(f"{safe_stem}-{stamp}-{inputs_digest[:8]}")
 
 
-def format_input_diff(diffs: Sequence[InputDiff]) -> str:
-    return "\n".join(
-        f"  - {diff.field}: {diff.previous!r} -> {diff.current!r}" for diff in diffs
+def changed_input_keys(
+    previous: Mapping[str, Any], current: Mapping[str, Any]
+) -> list[str]:
+    """Top-level ``inputs`` keys that differ, added or removed included (§9.5).
+
+    Naming the key is what makes a refusal actionable; the values themselves are
+    digests and selectors that nobody reads out of an error message.
+    """
+    return sorted(
+        key for key in {*previous, *current} if previous.get(key) != current.get(key)
     )
 
 
@@ -460,41 +454,6 @@ async def probe_health(
     return payload if isinstance(payload, dict) else None
 
 
-async def reap_verified_orphan(
-    record: ChildProcessRecord, *, client: httpx.AsyncClient, log: Callable[..., None]
-) -> None:
-    """Kill a rollout-server child left behind by a ``kill -9``ed supervisor (§8).
-
-    Ownership must be *verified* through the health instance id: a bare pid can
-    have been reused by an unrelated process, and killing that would be far
-    worse than leaking one server. When the pid is live but unverifiable, refuse
-    with a cleanup instruction instead of guessing.
-    """
-    if not process_is_alive(record.child_pid):
-        log("info", "orphan", "clearing a stale rollout-server record")
-        return
-    health = await probe_health(client, f"http://127.0.0.1:{record.port}")
-    if health is not None and health.get("instance_id") == record.instance_id:
-        log(
-            "warning",
-            "orphan",
-            "terminating a verified orphan rollout server",
-            pid=record.child_pid,
-            port=record.port,
-        )
-        await asyncio.to_thread(
-            terminate_process_group, record.child_pgid, grace_sec=_SERVER_TERM_GRACE_SEC
-        )
-        return
-    raise OrphanChildError(
-        f"a process with pid {record.child_pid} from a previous run of this eval "
-        f"is still alive, but its identity could not be verified on port "
-        f"{record.port}. It may be an unrelated process that reused the pid. "
-        f"Check it and stop it yourself (for example `ps -p {record.child_pid}`), "
-        "then re-run."
-    )
-
-
 # --------------------------------------------------------------------------- #
 # Supervisor
 # --------------------------------------------------------------------------- #
@@ -546,9 +505,6 @@ class LocalEvalRunner:
         self._cancelled = asyncio.Event()
         self._halt_reason: str | None = None
         self._redactor = SecretRedactor()
-        self._snapshot_dirty = asyncio.Event()
-        self._pending_projection: set[WorkKey] = set()
-        self._snapshot_task: asyncio.Task[None] | None = None
         self._started_at = utc_now()
         self._started_monotonic = time.monotonic()
         self._dispatched = 0
@@ -565,8 +521,8 @@ class LocalEvalRunner:
         )
         validate_run_name(run_name)
         lock_path = self._output_root / LOCKS_DIRNAME / f"{run_name}.lock"
-        with RunLock(lock_path) as lock:
-            return await self._run_locked(run_name=run_name, lock=lock)
+        with RunLock(lock_path):
+            return await self._run_locked(run_name=run_name)
 
     # ------------------------------------------------------------------ #
     # Startup
@@ -601,19 +557,10 @@ class LocalEvalRunner:
             self._source_digest_value = cached
         return cached
 
-    async def _run_locked(self, *, run_name: str, lock: RunLock) -> RunSummary:
+    async def _run_locked(self, *, run_name: str) -> RunSummary:
         run_dir = self._output_root / run_name
         self._run_dir = run_dir
         inputs = self._build_inputs()
-
-        async with httpx.AsyncClient() as probe_client:
-            recorded_child = lock.read_child()
-            if recorded_child is not None:
-                await reap_verified_orphan(
-                    recorded_child, client=probe_client, log=self._write_log_deferred
-                )
-                lock.clear_child()
-
         manifest = self._open_or_create_run(run_dir, inputs=inputs, run_name=run_name)
         if self._llm_api_key:
             self._redactor.extend([self._llm_api_key])
@@ -649,7 +596,7 @@ class LocalEvalRunner:
             self._resumed_keys = set(self._latest)
 
             pending = self._pending_work_items()
-            self._refresh_snapshots(project_all=True)
+            self._refresh_snapshots()
             if not pending:
                 self._write_log("info", "resume", "no pending work items; finalizing")
                 return self._finalize(cancelled=False)
@@ -659,7 +606,7 @@ class LocalEvalRunner:
             )
             secrets = self._hooks.resolve_secrets(list(self._spec.secret_names))
             self._redactor.extend(list(secrets.values()))
-            return await self._execute(pending, secrets=secrets, lock=lock)
+            return await self._execute(pending, secrets=secrets)
         finally:
             journal.close()
             if self._log is not None:
@@ -675,15 +622,14 @@ class LocalEvalRunner:
             self._hooks.note(f"archived previous results to {archived}")
         elif manifest_path.is_file():
             existing = RunManifest.read(manifest_path)
-            diffs = diff_inputs(existing.inputs, inputs)
-            if diffs:
+            changed = changed_input_keys(existing.inputs, inputs)
+            if changed:
                 raise ResumeRefusedError(
                     f"run {run_name!r} was created with different resolved inputs, "
-                    "so resuming it would mix versions inside one set of metrics:\n"
-                    f"{format_input_diff(diffs)}\n"
-                    f"Restart under the same name with --fresh (the previous "
-                    "results are archived, never deleted).",
-                    diffs=diffs,
+                    "so resuming it would mix versions inside one set of metrics. "
+                    f"Changed: {', '.join(changed)}. Restart under the same name "
+                    "with --fresh (the previous results are archived, never "
+                    "deleted)."
                 )
             return existing
 
@@ -720,7 +666,7 @@ class LocalEvalRunner:
     # ------------------------------------------------------------------ #
 
     async def _execute(
-        self, pending: Sequence[WorkItem], *, secrets: Mapping[str, str], lock: RunLock
+        self, pending: Sequence[WorkItem], *, secrets: Mapping[str, str]
     ) -> RunSummary:
         assert self._run_dir is not None
         controller_token = uuid.uuid4().hex
@@ -747,7 +693,6 @@ class LocalEvalRunner:
             bridge=bridge,
             bridge_token=bridge_token,
         )
-        self._snapshot_task = asyncio.create_task(self._snapshot_loop())
         cancelled = False
         try:
             await listener.start()
@@ -755,7 +700,7 @@ class LocalEvalRunner:
             await self._model_preflight(bridge)
             async with httpx.AsyncClient() as client:
                 base_url = await self._start_rollout_server(
-                    secrets=secrets, lock=lock, client=client
+                    secrets=secrets, client=client
                 )
                 driver = HttpRolloutDriver(
                     rollout_base_url=base_url,
@@ -778,14 +723,9 @@ class LocalEvalRunner:
                 )
                 cancelled = await self._schedule(pending, driver, concurrency)
         finally:
-            await self._stop_rollout_server(lock)
+            await self._stop_rollout_server()
             with contextlib.suppress(Exception):
                 await listener.stop()
-            if self._snapshot_task is not None:
-                self._snapshot_task.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
-                    await self._snapshot_task
-                self._snapshot_task = None
         return self._finalize(cancelled=cancelled)
 
     async def _model_preflight(self, bridge: LiteLLMBridge) -> None:
@@ -1006,7 +946,8 @@ class LocalEvalRunner:
             )
             return
         await self._await_trajectory(rollout_id)
-        self._mark_snapshot_dirty(item.key)
+        with contextlib.suppress(Exception):
+            self._refresh_snapshots(project_keys={item.key})
         self._report_progress()
         self._forget(rollout_id)
         self._log_outcome(item, rollout_id, outcome)
@@ -1055,7 +996,6 @@ class LocalEvalRunner:
             run_index=item.run_index,
             rollout_id=result.rollout_id,
             status=status,
-            recorded_at=utc_now(),
             source_row_index=item.row.source_row_index,
             reward=reward,
             tokens=self._collect_tokens(result.rollout_id),
@@ -1106,7 +1046,6 @@ class LocalEvalRunner:
                 run_index=item.run_index,
                 rollout_id=rollout_id,
                 status="failed",
-                recorded_at=utc_now(),
                 source_row_index=item.row.source_row_index,
                 tokens=self._collect_tokens(rollout_id),
                 duration_ms=self._elapsed_ms(rollout_id),
@@ -1114,7 +1053,8 @@ class LocalEvalRunner:
             )
         )
         self._forget(rollout_id)
-        self._mark_snapshot_dirty(item.key)
+        with contextlib.suppress(Exception):
+            self._refresh_snapshots(project_keys={item.key})
         self._report_progress()
 
     def _elapsed_ms(self, rollout_id: str) -> float:
@@ -1164,7 +1104,7 @@ class LocalEvalRunner:
     # ------------------------------------------------------------------ #
 
     async def _start_rollout_server(
-        self, *, secrets: Mapping[str, str], lock: RunLock, client: httpx.AsyncClient
+        self, *, secrets: Mapping[str, str], client: httpx.AsyncClient
     ) -> str:
         assert self._run_dir is not None
         entrypoint = self._rollout_dir / self._spec.entrypoint
@@ -1200,15 +1140,6 @@ class LocalEvalRunner:
             )
             self._child = child
             self._child_reader = asyncio.create_task(self._tee_child_output(child))
-            lock.write_child(
-                ChildProcessRecord(
-                    supervisor_pid=os.getpid(),
-                    child_pid=child.pid,
-                    child_pgid=_process_group_of(child.pid),
-                    port=port,
-                    instance_id=instance_id,
-                )
-            )
             base_url = f"http://127.0.0.1:{port}"
             try:
                 await self._wait_for_health(
@@ -1216,7 +1147,7 @@ class LocalEvalRunner:
                 )
             except LocalEvalError as exc:
                 last_error = exc
-                await self._stop_rollout_server(lock)
+                await self._stop_rollout_server()
                 if self._options.rollout_port is not None or attempt == _PORT_ATTEMPTS:
                     raise
                 self._write_log(
@@ -1247,11 +1178,17 @@ class LocalEvalRunner:
                 )
             health = await probe_health(client, base_url)
             if health is not None:
+                # The supervisor always sets _OSMOSIS_ROLLOUT_INSTANCE_ID for its
+                # own child, so a /health that does not echo this run's id back --
+                # a different id, or none at all -- belongs to some other process.
+                # Driving it would send this run's work to a server the supervisor
+                # neither started nor can stop.
                 reported = health.get("instance_id")
-                if reported not in (None, instance_id):
+                if reported != instance_id:
                     raise LocalEvalError(
-                        f"another rollout server is already listening on "
-                        f"{base_url}; choose a different --rollout-port"
+                        f"another process is already listening on {base_url} and "
+                        f"its /health reports instance_id={reported!r} instead of "
+                        f"this run's; stop it, or choose a different --rollout-port"
                     )
                 return
             await asyncio.sleep(_HEALTH_POLL_INTERVAL_SEC)
@@ -1278,7 +1215,7 @@ class LocalEvalRunner:
                 "info", "rollout-server", raw.decode(errors="replace").rstrip()
             )
 
-    async def _stop_rollout_server(self, lock: RunLock) -> None:
+    async def _stop_rollout_server(self) -> None:
         child = self._child
         if child is None:
             return
@@ -1297,33 +1234,20 @@ class LocalEvalRunner:
             with contextlib.suppress(asyncio.CancelledError, Exception):
                 await self._child_reader
             self._child_reader = None
-        with contextlib.suppress(LocalEvalStateError, OSError):
-            lock.clear_child()
 
     # ------------------------------------------------------------------ #
     # Snapshots and finalization
     # ------------------------------------------------------------------ #
 
-    def _mark_snapshot_dirty(self, key: WorkKey | None = None) -> None:
-        if key is not None:
-            self._pending_projection.add(key)
-        self._snapshot_dirty.set()
-
-    async def _snapshot_loop(self) -> None:
-        """Coalesce snapshot refreshes: durability is the journal's job, not this."""
-        while True:
-            await self._snapshot_dirty.wait()
-            self._snapshot_dirty.clear()
-            with contextlib.suppress(Exception):
-                self._refresh_snapshots()
-            await asyncio.sleep(_SNAPSHOT_COALESCE_SEC)
-
-    def _refresh_snapshots(self, *, project_all: bool = False) -> list[dict[str, Any]]:
+    def _refresh_snapshots(
+        self, *, project_keys: set[WorkKey] | None = None
+    ) -> list[dict[str, Any]]:
         """Rewrite snapshots; copy file projections only for changed work items.
 
         Snapshots are small and always rewritten whole so partial output stays
         readable. File copies are not: projecting every attempt on every refresh
-        is quadratic in the row count.
+        is quadratic in the row count, so *project_keys* narrows them to the work
+        item that just finished. ``None`` projects everything.
         """
         assert self._materializer is not None and self._identity is not None
         attempts = select_attempts(
@@ -1331,8 +1255,6 @@ class LocalEvalRunner:
             trials_dir=self._materializer.trials_dir,
             resumed_keys=self._resumed_keys,
         )
-        project_keys = None if project_all else set(self._pending_projection)
-        self._pending_projection.clear()
         return self._materializer.refresh(
             attempts,
             identity=self._identity,
@@ -1380,7 +1302,7 @@ class LocalEvalRunner:
             duration_ms=duration_ms,
         )
         self._identity = identity
-        rows = self._refresh_snapshots(project_all=True)
+        rows = self._refresh_snapshots()
         statuses = [record.status for record in self._latest.values()]
         return RunSummary(
             run_dir=run_dir,
@@ -1430,12 +1352,6 @@ class LocalEvalRunner:
         elif level in ("warning", "error"):
             self._hooks.note(message)
 
-    def _write_log_deferred(
-        self, level: str, step: str, message: str, **details: Any
-    ) -> None:
-        # Orphan reaping happens before the run directory (and its log) exist.
-        self._write_log(level, step, message, **details)
-
 
 def _process_group_of(pid: int) -> int:
     try:
@@ -1463,8 +1379,6 @@ def _classify_terminal(
         return "failed", None, "missing_grader_callback"
     sample = grader.sample
     reward = sample.reward if sample is not None else None
-    if reward is not None and abs(reward) > _MAX_ABS_REWARD:
-        return "failed", None, "reward_out_of_range"
     # A crashed grader is a failure even when it asked to drop the sample:
     # "skipped" would leave the row out of the scored denominator entirely.
     if grader.status is not GraderStatus.SUCCESS:

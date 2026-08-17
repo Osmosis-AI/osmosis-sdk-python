@@ -3,8 +3,8 @@
 Three concepts, and deliberately no more (design ``local-eval-run-plan.md`` §9):
 
 * ``manifest.json`` -- immutable resolved-input lock plus provenance. Written
-  once at run creation and compared structurally on resume, so a semantic
-  change refuses with a field-level diff instead of silently mixing versions.
+  once at run creation and compared on resume, so a semantic change refuses
+  by name instead of silently mixing versions.
 * ``events.jsonl`` -- the resume authority. One newline-terminated JSON record
   per terminal attempt. The record is written in full, ``fsync``-ed, and only
   then may the terminal callback be acknowledged, so a durably acknowledged
@@ -29,7 +29,7 @@ import os
 import signal
 import tempfile
 import time
-from collections.abc import Iterator, Mapping
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -70,10 +70,6 @@ class JournalCorruptionError(LocalEvalStateError):
 
 class RunLockedError(LocalEvalStateError):
     """Another supervisor holds this run's lock."""
-
-
-class OrphanChildError(LocalEvalStateError):
-    """A recorded rollout-server child is alive but could not be verified."""
 
 
 def utc_now() -> str:
@@ -202,11 +198,27 @@ def archive_run_directory(run_dir: Path, *, now: str | None = None) -> Path:
 # --------------------------------------------------------------------------- #
 
 
+#: ``(field, accepted JSON types, human label, required)`` -- the whole record
+#: schema, checked in one pass. Unlisted keys are ignored, so a journal written
+#: by an older build of the same state schema still replays.
+_RECORD_FIELDS: tuple[tuple[str, type | tuple[type, ...], str, bool], ...] = (
+    ("row_index", int, "an integer", True),
+    ("run_index", int, "an integer", True),
+    ("rollout_id", str, "a string", True),
+    ("status", str, "a string", True),
+    ("source_row_index", int, "an integer", False),
+    ("reward", (int, float), "a number", False),
+    ("tokens", int, "an integer", False),
+    ("duration_ms", (int, float), "a number", False),
+    ("error_type", str, "a string", False),
+)
+
+
 @dataclass(frozen=True)
 class TerminalRecord:
     """One terminal result for one attempt of one work item.
 
-    ``recorded_at`` is provenance only: replay arbitrates by append order, so a
+    Carries no timestamp on purpose: replay arbitrates by append order, so a
     skewed clock can never change which attempt wins (§9.4).
     """
 
@@ -214,7 +226,6 @@ class TerminalRecord:
     run_index: int
     rollout_id: str
     status: TerminalStatus
-    recorded_at: str
     source_row_index: int | None = None
     reward: float | None = None
     tokens: int | None = None
@@ -232,7 +243,6 @@ class TerminalRecord:
                 "run_index": self.run_index,
                 "rollout_id": self.rollout_id,
                 "status": self.status,
-                "recorded_at": self.recorded_at,
                 "source_row_index": self.source_row_index,
                 "reward": self.reward,
                 "tokens": self.tokens,
@@ -248,64 +258,27 @@ class TerminalRecord:
     def from_payload(cls, payload: Any, *, where: str) -> TerminalRecord:
         if not isinstance(payload, dict):
             raise JournalCorruptionError(f"{where}: record is not a JSON object")
-
-        def _int(name: str) -> int:
-            value = payload.get(name)
-            if not isinstance(value, int) or isinstance(value, bool):
-                raise JournalCorruptionError(f"{where}: {name} must be an integer")
-            return value
-
-        def _optional_int(name: str) -> int | None:
+        values: dict[str, Any] = {}
+        for name, kinds, label, required in _RECORD_FIELDS:
             value = payload.get(name)
             if value is None:
-                return None
-            if not isinstance(value, int) or isinstance(value, bool):
-                raise JournalCorruptionError(
-                    f"{where}: {name} must be an integer when present"
-                )
-            return value
-
-        def _optional_float(name: str) -> float | None:
-            value = payload.get(name)
-            if value is None:
-                return None
-            if isinstance(value, bool) or not isinstance(value, (int, float)):
-                raise JournalCorruptionError(
-                    f"{where}: {name} must be a number when present"
-                )
-            return float(value)
-
-        def _optional_str(name: str) -> str | None:
-            value = payload.get(name)
-            if value is None:
-                return None
-            if not isinstance(value, str):
-                raise JournalCorruptionError(
-                    f"{where}: {name} must be a string when present"
-                )
-            return value
-
-        rollout_id = payload.get("rollout_id")
-        if not isinstance(rollout_id, str) or not rollout_id:
-            raise JournalCorruptionError(f"{where}: rollout_id must be a string")
-        status = payload.get("status")
-        if status not in _TERMINAL_STATUSES:
+                if required:
+                    raise JournalCorruptionError(f"{where}: {name} is missing")
+                continue
+            # ``bool`` is an ``int`` subclass, and no field accepts a JSON bool.
+            if isinstance(value, bool) or not isinstance(value, kinds):
+                raise JournalCorruptionError(f"{where}: {name} must be {label}")
+            values[name] = value
+        if not values["rollout_id"]:
+            raise JournalCorruptionError(f"{where}: rollout_id must not be empty")
+        if values["status"] not in _TERMINAL_STATUSES:
             raise JournalCorruptionError(
                 f"{where}: status must be one of {sorted(_TERMINAL_STATUSES)}"
             )
-        recorded_at = _optional_str("recorded_at") or ""
-        return cls(
-            row_index=_int("row_index"),
-            run_index=_int("run_index"),
-            rollout_id=rollout_id,
-            status=status,  # type: ignore[arg-type]  # membership checked above
-            recorded_at=recorded_at,
-            source_row_index=_optional_int("source_row_index"),
-            reward=_optional_float("reward"),
-            tokens=_optional_int("tokens"),
-            duration_ms=_optional_float("duration_ms") or 0.0,
-            error_type=_optional_str("error_type"),
-        )
+        for name in ("reward", "duration_ms"):
+            if name in values:
+                values[name] = float(values[name])
+        return cls(**values)
 
 
 @dataclass(frozen=True)
@@ -397,11 +370,6 @@ class TerminalJournal:
             if replay.truncated_bytes:
                 os.ftruncate(fd, replay.committed_size)
                 os.fsync(fd)
-            elif os.lseek(fd, 0, os.SEEK_END) != replay.committed_size:
-                raise LocalEvalStateError(
-                    f"{self._path} changed between replay and open; "
-                    "another supervisor may be writing to this run"
-                )
         except BaseException:
             os.close(fd)
             raise
@@ -436,51 +404,6 @@ class TerminalJournal:
 # --------------------------------------------------------------------------- #
 # Manifest and resolved-input lock
 # --------------------------------------------------------------------------- #
-
-
-@dataclass(frozen=True)
-class InputDiff:
-    """One field-level difference between two resolved-input locks."""
-
-    field: str
-    previous: Any
-    current: Any
-
-
-def diff_inputs(
-    previous: Mapping[str, Any], current: Mapping[str, Any]
-) -> list[InputDiff]:
-    """Field-level diff of two ``inputs`` objects, with dotted nested keys."""
-    diffs: list[InputDiff] = []
-    _collect_diffs(previous, current, prefix="", diffs=diffs)
-    return diffs
-
-
-_MISSING = object()
-
-
-def _collect_diffs(
-    previous: Any, current: Any, *, prefix: str, diffs: list[InputDiff]
-) -> None:
-    if isinstance(previous, Mapping) and isinstance(current, Mapping):
-        for key in sorted({*previous.keys(), *current.keys()}):
-            child = f"{prefix}.{key}" if prefix else str(key)
-            _collect_diffs(
-                previous.get(key, _MISSING),
-                current.get(key, _MISSING),
-                prefix=child,
-                diffs=diffs,
-            )
-        return
-    if previous == current:
-        return
-    diffs.append(
-        InputDiff(
-            field=prefix or "inputs",
-            previous=None if previous is _MISSING else previous,
-            current=None if current is _MISSING else current,
-        )
-    )
 
 
 @dataclass(frozen=True)
@@ -561,51 +484,15 @@ class RunManifest:
 
 
 # --------------------------------------------------------------------------- #
-# Process lock and orphan-child metadata
+# Process lock
 # --------------------------------------------------------------------------- #
-
-
-@dataclass(frozen=True)
-class ChildProcessRecord:
-    """Runtime metadata for verified orphan cleanup. Never resume authority."""
-
-    supervisor_pid: int
-    child_pid: int
-    child_pgid: int
-    port: int
-    instance_id: str
-
-    def to_payload(self) -> dict[str, Any]:
-        return {
-            "supervisor_pid": self.supervisor_pid,
-            "child_pid": self.child_pid,
-            "child_pgid": self.child_pgid,
-            "port": self.port,
-            "instance_id": self.instance_id,
-        }
-
-    @classmethod
-    def from_payload(cls, payload: Mapping[str, Any]) -> ChildProcessRecord | None:
-        try:
-            return cls(
-                supervisor_pid=int(payload["supervisor_pid"]),
-                child_pid=int(payload["child_pid"]),
-                child_pgid=int(payload["child_pgid"]),
-                port=int(payload["port"]),
-                instance_id=str(payload["instance_id"]),
-            )
-        except (KeyError, TypeError, ValueError):
-            # Unreadable metadata is a stale record, not a reason to refuse:
-            # it can only cost us an orphan we fail to reap, and the health
-            # instance-id check is what actually authorizes any kill.
-            return None
 
 
 class RunLock:
     """Exclusive flock for one named run, held outside the run directory.
 
-    The same inode also carries rollout-server child metadata so the next
-    startup can reap a verified orphan. The path is never replaced while held.
+    The path is never replaced while the lock is held, so ``--fresh`` renaming
+    the run directory cannot leave the replacement path unlocked.
     """
 
     def __init__(self, path: Path) -> None:
@@ -630,36 +517,6 @@ class RunLock:
                 ) from exc
             raise
         self._fd = fd
-
-    def read_child(self) -> ChildProcessRecord | None:
-        if self._fd is None:
-            raise LocalEvalStateError("run lock is not held")
-        raw = os.pread(self._fd, 64 * 1024, 0)
-        if not raw.strip():
-            return None
-        try:
-            payload = json.loads(raw)
-        except json.JSONDecodeError:
-            return None
-        if not isinstance(payload, dict):
-            return None
-        child = payload.get("child")
-        if not isinstance(child, dict):
-            return None
-        return ChildProcessRecord.from_payload(child)
-
-    def write_child(self, record: ChildProcessRecord | None) -> None:
-        """Update the held inode in place, then fsync. Never replaces the path."""
-        if self._fd is None:
-            raise LocalEvalStateError("run lock is not held")
-        payload = {"child": record.to_payload()} if record is not None else {}
-        data = (json.dumps(payload, indent=2) + "\n").encode("utf-8")
-        os.ftruncate(self._fd, 0)
-        os.pwrite(self._fd, data, 0)
-        os.fsync(self._fd)
-
-    def clear_child(self) -> None:
-        self.write_child(None)
 
     def release(self) -> None:
         if self._fd is not None:
@@ -689,25 +546,12 @@ def process_is_alive(pid: int) -> bool:
     return True
 
 
-def process_group_is_alive(pgid: int) -> bool:
-    if pgid <= 0:
-        return False
-    try:
-        os.killpg(pgid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-    return True
-
-
 def terminate_process_group(
     pgid: int, *, grace_sec: float, poll_sec: float = 0.05
 ) -> None:
     """SIGTERM a process group, escalating to SIGKILL after *grace_sec*.
 
-    Blocking: call from startup reaping, or via ``asyncio.to_thread`` during an
-    async shutdown.
+    Blocking: call via ``asyncio.to_thread`` during an async shutdown.
     """
     if pgid <= 0:
         return
@@ -715,18 +559,13 @@ def terminate_process_group(
         os.killpg(pgid, signal.SIGTERM)
     deadline = time.monotonic() + max(0.0, grace_sec)
     while time.monotonic() < deadline:
-        if not process_group_is_alive(pgid):
+        try:
+            os.killpg(pgid, 0)
+        except ProcessLookupError:
             return
+        except PermissionError:
+            # Alive, but no longer ours to signal; the SIGKILL below is a no-op.
+            break
         time.sleep(poll_sec)
-    if process_group_is_alive(pgid):
-        with contextlib.suppress(ProcessLookupError, PermissionError):
-            os.killpg(pgid, signal.SIGKILL)
-
-
-def iter_run_directories(root: Path) -> Iterator[Path]:
-    """Yield run directories under ``<output>/``, skipping ``.locks``."""
-    if not root.is_dir():
-        return
-    for child in sorted(root.iterdir()):
-        if child.is_dir() and child.name != LOCKS_DIRNAME:
-            yield child
+    with contextlib.suppress(ProcessLookupError, PermissionError):
+        os.killpg(pgid, signal.SIGKILL)

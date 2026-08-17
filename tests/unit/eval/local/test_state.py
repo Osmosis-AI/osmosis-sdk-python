@@ -3,14 +3,12 @@
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 
 import pytest
 
 from osmosis_ai.eval.local.state import (
     LOCAL_STATE_SCHEMA_VERSION,
-    ChildProcessRecord,
     JournalCorruptionError,
     LocalEvalStateError,
     RunLock,
@@ -20,7 +18,6 @@ from osmosis_ai.eval.local.state import (
     TerminalRecord,
     archive_run_directory,
     atomic_write_json,
-    diff_inputs,
     digest_of,
     validate_run_name,
 )
@@ -34,7 +31,6 @@ def _record(
         "run_index": run,
         "rollout_id": f"{row:016x}{run:016x}",
         "status": status,
-        "recorded_at": "2026-08-14T00:00:00.000000Z",
         "reward": 1.0,
         "tokens": 7,
         "duration_ms": 12.5,
@@ -100,14 +96,10 @@ async def test_every_record_is_newline_terminated(tmp_path: Path) -> None:
 
 def test_latest_terminal_record_wins_in_append_order(tmp_path: Path) -> None:
     path = tmp_path / "events.jsonl"
-    # A retry appends a second record for the same key; append order decides,
-    # not the wall clock -- the later line carries the *earlier* timestamp here.
-    first = _record(
-        0, 0, status="failed", reward=0.0, recorded_at="2026-08-14T09:00:00Z"
-    )
-    second = _record(
-        0, 0, status="success", reward=1.0, recorded_at="2026-08-14T08:00:00Z"
-    )
+    # A retry appends a second record for the same key. Append order decides,
+    # and a record carries no timestamp at all, so no clock can outvote it.
+    first = _record(0, 0, status="failed", reward=0.0)
+    second = _record(0, 0, status="success", reward=1.0)
     path.write_bytes(first.to_journal_line() + second.to_journal_line())
 
     latest = TerminalJournal(path).replay().latest
@@ -160,8 +152,11 @@ def test_replay_refuses_a_malformed_committed_record(tmp_path: Path) -> None:
     [
         ({"row_index": "0"}, "row_index must be an integer"),
         ({"status": "cancelled"}, "status must be one of"),
-        ({"rollout_id": ""}, "rollout_id must be a string"),
+        ({"rollout_id": ""}, "rollout_id must not be empty"),
+        ({"rollout_id": 7}, "rollout_id must be a string"),
         ({"tokens": "many"}, "tokens must be an integer"),
+        # A required field written as JSON null is as unusable as an absent one.
+        ({"run_index": None}, "run_index is missing"),
     ],
 )
 def test_replay_refuses_records_with_bad_fields(
@@ -186,17 +181,6 @@ async def test_append_before_open_is_refused(tmp_path: Path) -> None:
     journal = TerminalJournal(tmp_path / "events.jsonl")
     with pytest.raises(LocalEvalStateError, match="not open for appending"):
         await journal.append(_record(0, 0))
-
-
-def test_open_refuses_a_journal_that_grew_since_replay(tmp_path: Path) -> None:
-    path = tmp_path / "events.jsonl"
-    path.write_bytes(_record(0, 0).to_journal_line())
-    journal = TerminalJournal(path)
-    replay = journal.replay()
-    with path.open("ab") as handle:
-        handle.write(_record(0, 1).to_journal_line())
-    with pytest.raises(LocalEvalStateError, match="changed between replay and open"):
-        journal.open_for_append(replay)
 
 
 # --------------------------------------------------------------------------- #
@@ -248,26 +232,6 @@ def test_manifest_read_refuses_a_foreign_schema_version(tmp_path: Path) -> None:
     )
     with pytest.raises(LocalEvalStateError, match="state schema version"):
         RunManifest.read(path)
-
-
-def test_diff_inputs_reports_dotted_nested_fields() -> None:
-    diffs = diff_inputs(
-        _inputs(),
-        _inputs(n=5, rollout={"entrypoint": "main.py", "source_digest": "e" * 64}),
-    )
-    fields = {diff.field: (diff.previous, diff.current) for diff in diffs}
-    assert fields["n"] == (1, 5)
-    assert fields["rollout.source_digest"] == ("b" * 64, "e" * 64)
-    assert "model_path" not in fields
-
-
-def test_diff_inputs_reports_added_and_removed_fields() -> None:
-    diffs = {d.field: (d.previous, d.current) for d in diff_inputs({"a": 1}, {"b": 2})}
-    assert diffs == {"a": (1, None), "b": (None, 2)}
-
-
-def test_identical_inputs_have_no_diff() -> None:
-    assert diff_inputs(_inputs(), _inputs()) == []
 
 
 # --------------------------------------------------------------------------- #
@@ -328,53 +292,22 @@ def test_lock_is_reacquirable_after_release(tmp_path: Path) -> None:
         pass
 
 
-def test_child_metadata_survives_a_released_lock(tmp_path: Path) -> None:
-    path = tmp_path / ".locks" / "my-run.lock"
-    record = ChildProcessRecord(
-        supervisor_pid=os.getpid(),
-        child_pid=os.getpid() + 1,
-        child_pgid=os.getpid() + 1,
-        port=54321,
-        instance_id="f" * 16,
-    )
-    lock = RunLock(path)
-    with lock:
-        assert lock.read_child() is None
-        lock.write_child(record)
-        inode = path.stat().st_ino
-
-    with RunLock(path) as reopened:
-        assert reopened.read_child() == record
-        # The path is never replaced while held, so orphan metadata is durable.
-        assert path.stat().st_ino == inode
-        reopened.clear_child()
-        assert reopened.read_child() is None
-
-
-def test_child_metadata_survives_an_archived_run_directory(tmp_path: Path) -> None:
-    # The lock lives outside the run dir precisely so --fresh cannot unlock it.
+def test_the_lock_still_holds_after_the_run_directory_is_archived(
+    tmp_path: Path,
+) -> None:
+    # The lock lives outside the run dir precisely so --fresh cannot unlock it:
+    # an inode inside the archived directory would leave the new path open to a
+    # second supervisor.
     evals = tmp_path / "evals"
     run_dir = evals / "my-run"
     run_dir.mkdir(parents=True)
     lock_path = evals / ".locks" / "my-run.lock"
     with RunLock(lock_path):
+        inode = lock_path.stat().st_ino
         archive_run_directory(run_dir, now="20260814T000000Z")
         with pytest.raises(RunLockedError):
             RunLock(lock_path).acquire()
-
-
-def test_unreadable_child_metadata_is_treated_as_absent(tmp_path: Path) -> None:
-    path = tmp_path / ".locks" / "my-run.lock"
-    path.parent.mkdir(parents=True)
-    path.write_text("{ not json")
-    with RunLock(path) as lock:
-        assert lock.read_child() is None
-
-
-def test_child_metadata_requires_a_held_lock(tmp_path: Path) -> None:
-    lock = RunLock(tmp_path / "my-run.lock")
-    with pytest.raises(LocalEvalStateError, match="not held"):
-        lock.read_child()
+        assert lock_path.stat().st_ino == inode
 
 
 # --------------------------------------------------------------------------- #

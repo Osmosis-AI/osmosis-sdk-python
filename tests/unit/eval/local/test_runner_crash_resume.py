@@ -21,7 +21,6 @@ from pathlib import Path
 import pytest
 
 from osmosis_ai.eval.local.dataset import select_rows
-from osmosis_ai.eval.local.state import RunLock
 
 from .conftest import RecordingHooks, RunnerHarness
 
@@ -195,8 +194,8 @@ async def test_kill_9_never_reruns_a_durably_acknowledged_item(
     committed_ids = {r["rollout_id"] for r in survivors}
     assert (durable[0]["row_index"], durable[0]["run_index"]) in committed
 
-    # Resume in-process. The killed supervisor left the rollout server alive, so
-    # this also exercises verified orphan reaping through the lock metadata.
+    # Resume in-process, on a fresh ephemeral port: the killed supervisor left
+    # its rollout server alive, and the resume must not depend on that corpse.
     hooks = RecordingHooks()
     summary = await harness.runner(hooks=hooks).run()
 
@@ -253,29 +252,3 @@ async def test_a_partial_journal_record_is_truncated_on_resume(
     assert journal.read_bytes() == committed
     logs = (harness.run_dir() / "logs.txt").read_text()
     assert "discarded a partial trailing journal record" in logs
-
-
-async def test_the_lock_records_the_child_while_the_run_is_live(
-    harness: RunnerHarness,
-) -> None:
-    """The orphan-cleanup metadata must be written and fsynced right after spawn."""
-    observed: list[object] = []
-    runner = harness.runner()
-    original = runner._start_rollout_server
-
-    async def spying_start(*, secrets, lock, client):
-        base_url = await original(secrets=secrets, lock=lock, client=client)
-        observed.append(lock.read_child())
-        return base_url
-
-    runner._start_rollout_server = spying_start  # type: ignore[method-assign]
-    await runner.run()
-
-    assert len(observed) == 1
-    record = observed[0]
-    assert record is not None
-    assert record.child_pid > 0  # type: ignore[union-attr]
-    assert record.instance_id  # type: ignore[union-attr]
-    # Cleared again after a confirmed clean exit.
-    with RunLock(harness.output_root / ".locks" / "run-1.lock") as lock:
-        assert lock.read_child() is None

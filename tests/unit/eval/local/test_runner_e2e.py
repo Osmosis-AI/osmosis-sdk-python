@@ -16,7 +16,7 @@ import pytest
 
 from osmosis_ai.eval.local.dataset import select_rows
 from osmosis_ai.eval.local.runner import LocalEvalOptions, ResumeRefusedError
-from osmosis_ai.eval.local.state import TerminalJournal, TerminalRecord, utc_now
+from osmosis_ai.eval.local.state import TerminalJournal, TerminalRecord
 
 from .conftest import RecordingHooks, RunnerHarness
 
@@ -182,22 +182,25 @@ async def test_a_partial_journal_reruns_only_the_missing_items(
     assert summary.resumed == 2
 
 
-async def test_a_changed_fingerprint_refuses_with_a_field_diff(
+async def test_a_changed_fingerprint_refuses_and_names_what_changed(
     harness: RunnerHarness,
 ) -> None:
     await harness.runner().run()
     with pytest.raises(ResumeRefusedError) as excinfo:
         await harness.runner(spec=harness.spec(model_path="openai/gpt-4o")).run()
     message = str(excinfo.value)
-    assert "model_path" in message
+    # The message is the whole refusal surface, so it has to name the input that
+    # moved and the flag that gets past it.
+    assert "Changed: model_path" in message
     assert "--fresh" in message
-    assert [diff.field for diff in excinfo.value.diffs] == ["model_path"]
 
 
 async def test_changed_rollout_code_refuses_resume(harness: RunnerHarness) -> None:
     await harness.runner().run()
     (harness.rollout_dir / "extra.py").write_text("# a code change\n")
-    with pytest.raises(ResumeRefusedError, match=r"rollout\.source_digest"):
+    # Editing the rollout source moves rollout.source_digest, reported by its
+    # top-level key -- enough to point the reader at the code they just changed.
+    with pytest.raises(ResumeRefusedError, match=r"Changed: rollout\b"):
         await harness.runner().run()
 
 
@@ -282,7 +285,6 @@ async def test_a_durably_journaled_item_never_reruns(harness: RunnerHarness) -> 
                 run_index=0,
                 rollout_id="f" * 32,
                 status="failed",
-                recorded_at=utc_now(),
                 source_row_index=0,
                 duration_ms=1.0,
                 error_type="hand_written",
@@ -390,16 +392,6 @@ async def test_a_second_supervisor_is_refused(harness: RunnerHarness) -> None:
     with RunLock(lock_path):
         with pytest.raises(RunLockedError, match="already holds"):
             await harness.runner().run()
-
-
-async def test_the_child_record_is_cleared_after_a_clean_shutdown(
-    harness: RunnerHarness,
-) -> None:
-    from osmosis_ai.eval.local.state import RunLock
-
-    await harness.runner().run()
-    with RunLock(harness.output_root / ".locks" / "run-1.lock") as lock:
-        assert lock.read_child() is None
 
 
 async def test_the_rollout_server_child_does_not_outlive_the_run(

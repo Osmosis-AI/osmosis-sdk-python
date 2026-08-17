@@ -1,8 +1,10 @@
-"""Supervisor unit tests that need no subprocess: fingerprint, env, orphans."""
+"""Supervisor unit tests that need no rollout server: fingerprint, env, startup."""
 
 from __future__ import annotations
 
-import os
+import asyncio
+import contextlib
+import json
 from pathlib import Path
 from typing import Any
 
@@ -18,21 +20,16 @@ from osmosis_ai.eval.local.runner import (
     RESERVED_ENV_NAMES,
     EvalRunSpec,
     LocalEvalError,
+    LocalEvalOptions,
     _classify_terminal,
     build_run_inputs,
     build_subprocess_env,
+    changed_input_keys,
     compute_source_digest,
-    format_input_diff,
     generated_run_name,
-    reap_verified_orphan,
     reserve_free_port,
 )
-from osmosis_ai.eval.local.state import (
-    ChildProcessRecord,
-    OrphanChildError,
-    diff_inputs,
-    digest_of,
-)
+from osmosis_ai.eval.local.state import digest_of
 from osmosis_ai.rollout.controller import TerminalCallbackResult
 from osmosis_ai.rollout.types import GraderCompleteRequest, GraderStatus, RolloutSample
 
@@ -149,7 +146,8 @@ def test_semantic_changes_change_the_fingerprint(
     baseline = _inputs(_spec(), _dataset(), tmp_path)
     changed = _inputs(_spec(**{field_name: value}), _dataset(), tmp_path)
     assert digest_of(changed) != digest_of(baseline)
-    assert diff_inputs(baseline, changed) != []
+    # The refusal message has to be able to name what moved.
+    assert changed_input_keys(baseline, changed) != []
 
 
 def test_dataset_bytes_change_the_fingerprint(tmp_path: Path) -> None:
@@ -207,10 +205,27 @@ def test_env_ordering_does_not_change_the_fingerprint(tmp_path: Path) -> None:
     assert digest_of(first) == digest_of(second)
 
 
-def test_input_diff_renders_field_level_lines() -> None:
-    diffs = diff_inputs({"n": 1, "model_path": "a"}, {"n": 5, "model_path": "a"})
-    rendered = format_input_diff(diffs)
-    assert rendered == "  - n: 1 -> 5"
+def test_changed_input_keys_names_the_changed_top_level_keys() -> None:
+    previous = {"n": 1, "model_path": "a", "rollout": {"source_digest": "b" * 64}}
+    current = {"n": 5, "model_path": "a", "rollout": {"source_digest": "e" * 64}}
+    # Naming the top-level key is what makes the refusal actionable; a nested
+    # change still surfaces as its owning key.
+    assert changed_input_keys(previous, current) == ["n", "rollout"]
+
+
+def test_changed_input_keys_reports_added_and_removed_keys() -> None:
+    assert changed_input_keys({"a": 1}, {"b": 2}) == ["a", "b"]
+
+
+def test_identical_inputs_have_no_changed_keys(tmp_path: Path) -> None:
+    # A plain resume of an unchanged run must never be refused.
+    assert (
+        changed_input_keys(
+            _inputs(_spec(), _dataset(), tmp_path),
+            _inputs(_spec(), _dataset(), tmp_path),
+        )
+        == []
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -296,73 +311,67 @@ def test_reserved_port_is_usable() -> None:
 
 
 # --------------------------------------------------------------------------- #
-# Verified orphan cleanup (§8)
+# Rollout-server startup on a pinned port (§8)
 # --------------------------------------------------------------------------- #
 
 
-def _child(pid: int, *, port: int = 9, instance_id: str = "iid") -> ChildProcessRecord:
-    return ChildProcessRecord(
-        supervisor_pid=os.getpid(),
-        child_pid=pid,
-        child_pgid=pid,
-        port=port,
-        instance_id=instance_id,
+async def _serve_health(payload: dict[str, Any]) -> asyncio.Server:
+    """Answer one ``GET /health`` per connection with *payload*, on a free port."""
+
+    async def handle(
+        reader: asyncio.StreamReader, writer: asyncio.StreamWriter
+    ) -> None:
+        with contextlib.suppress(Exception):
+            await reader.readuntil(b"\r\n\r\n")
+            body = json.dumps(payload).encode()
+            writer.write(
+                b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
+                b"Content-Length: " + str(len(body)).encode() + b"\r\n"
+                b"Connection: close\r\n\r\n" + body
+            )
+            await writer.drain()
+        writer.close()
+        with contextlib.suppress(Exception):
+            await writer.wait_closed()
+
+    return await asyncio.start_server(handle, "127.0.0.1", 0)
+
+
+@pytest.mark.parametrize(
+    "health",
+    [
+        {"status": "ok", "instance_id": "someone-elses-instance"},
+        # A server too old to report an instance id is just as foreign.
+        {"status": "ok"},
+    ],
+    ids=["other-instance-id", "no-instance-id"],
+)
+async def test_a_foreign_rollout_server_on_a_pinned_port_is_refused(
+    tmp_path: Path, health: dict[str, Any]
+) -> None:
+    # Something unrelated already owns the pinned --rollout-port. Driving it
+    # would dispatch this run's work to a process the supervisor cannot manage,
+    # so startup must refuse instead of silently succeeding.
+    server = await _serve_health(health)
+    port = int(server.sockets[0].getsockname()[1])
+    # The entrypoint never binds anything: the port is already taken, and the
+    # point of the test is what the supervisor does with the answer it gets.
+    (tmp_path / "main.py").write_text("import time\n\ntime.sleep(60)\n")
+    runner = _runner(
+        _spec(),
+        tmp_path,
+        options=LocalEvalOptions(name="run-1", rollout_port=port),
     )
-
-
-def _logs() -> tuple[list[tuple[str, str, str]], Any]:
-    entries: list[tuple[str, str, str]] = []
-
-    def log(level: str, step: str, message: str, **_details: Any) -> None:
-        entries.append((level, step, message))
-
-    return entries, log
-
-
-async def test_a_dead_recorded_child_is_just_cleared() -> None:
-    entries, log = _logs()
-    async with httpx.AsyncClient() as client:
-        # PID 2**31-1 is above every real pid on the platforms we support.
-        await reap_verified_orphan(_child(2**31 - 1), client=client, log=log)
-    assert entries == [("info", "orphan", "clearing a stale rollout-server record")]
-
-
-async def test_a_live_but_unverifiable_child_refuses_with_instructions() -> None:
-    _, log = _logs()
-    transport = httpx.MockTransport(lambda request: httpx.Response(500))
-    async with httpx.AsyncClient(transport=transport) as client:
-        with pytest.raises(OrphanChildError, match="could not be verified"):
-            await reap_verified_orphan(_child(os.getpid()), client=client, log=log)
-
-
-async def test_a_child_whose_instance_id_mismatches_is_never_killed() -> None:
-    # A reused pid must not be killed just because something answers /health.
-    _, log = _logs()
-    transport = httpx.MockTransport(
-        lambda request: httpx.Response(200, json={"instance_id": "someone-else"})
-    )
-    async with httpx.AsyncClient(transport=transport) as client:
-        with pytest.raises(OrphanChildError):
-            await reap_verified_orphan(_child(os.getpid()), client=client, log=log)
-
-
-async def test_a_verified_orphan_is_terminated(monkeypatch: pytest.MonkeyPatch) -> None:
-    killed: list[int] = []
-
-    def fake_terminate(pgid: int, *, grace_sec: float, poll_sec: float = 0.05) -> None:
-        killed.append(pgid)
-
-    monkeypatch.setattr(
-        "osmosis_ai.eval.local.runner.terminate_process_group", fake_terminate
-    )
-    entries, log = _logs()
-    transport = httpx.MockTransport(
-        lambda request: httpx.Response(200, json={"instance_id": "iid"})
-    )
-    async with httpx.AsyncClient(transport=transport) as client:
-        await reap_verified_orphan(_child(os.getpid()), client=client, log=log)
-    assert killed == [os.getpid()]
-    assert entries[0][0] == "warning"
+    runner._run_dir = tmp_path / "evals" / "run-1"
+    try:
+        async with httpx.AsyncClient() as client:
+            with pytest.raises(LocalEvalError, match="already listening"):
+                await runner._start_rollout_server(secrets={}, client=client)
+    finally:
+        server.close()
+        await server.wait_closed()
+    # The refusal is not allowed to leak the child it spawned.
+    assert runner._child is None
 
 
 # --------------------------------------------------------------------------- #
@@ -389,10 +398,14 @@ def test_explicit_dataset_flows_into_the_fingerprint(tmp_path: Path) -> None:
 
 
 def _runner(
-    spec: EvalRunSpec, tmp_path: Path, *, output_root: Path | None = None
+    spec: EvalRunSpec,
+    tmp_path: Path,
+    *,
+    output_root: Path | None = None,
+    options: LocalEvalOptions | None = None,
 ) -> Any:
     from osmosis_ai.eval.local.dataset import select_rows
-    from osmosis_ai.eval.local.runner import LocalEvalOptions, LocalEvalRunner
+    from osmosis_ai.eval.local.runner import LocalEvalRunner
 
     data = tmp_path / "d.jsonl"
     data.write_text('{"user_prompt": "a", "ground_truth": "1"}\n')
@@ -407,7 +420,7 @@ def _runner(
 
     return LocalEvalRunner(
         spec=spec,
-        options=LocalEvalOptions(name="run-1"),
+        options=options or LocalEvalOptions(name="run-1"),
         dataset=_dataset(),
         selection=select_rows(data),
         rollout_dir=tmp_path,
@@ -523,19 +536,9 @@ def test_remove_sample_from_a_successful_grader_is_still_skipped() -> None:
     assert _classify_terminal(_terminal(remove_sample=True)) == ("skipped", None, None)
 
 
-def test_an_out_of_range_reward_fails_the_row_rather_than_being_recorded() -> None:
-    # Recording it would overflow the mean on every later snapshot refresh, and
-    # the record is durable -- the run would stay unresumable until --fresh.
-    assert _classify_terminal(_terminal(reward=1e308)) == (
-        "failed",
-        None,
-        "reward_out_of_range",
-    )
-
-
 async def test_a_retried_failure_writes_its_own_terminal_record(tmp_path: Path) -> None:
     from osmosis_ai.eval.local.runner import WorkItem
-    from osmosis_ai.eval.local.state import TerminalJournal, TerminalRecord, utc_now
+    from osmosis_ai.eval.local.state import TerminalJournal, TerminalRecord
 
     runner = _runner(_spec(), tmp_path)
     journal = TerminalJournal(tmp_path / "events.jsonl")
@@ -547,7 +550,6 @@ async def test_a_retried_failure_writes_its_own_terminal_record(tmp_path: Path) 
         run_index=0,
         rollout_id="a" * 32,
         status="failed",
-        recorded_at=utc_now(),
         error_type="stale",
     )
     runner._dispatch_context["b" * 32] = item
