@@ -1,0 +1,33 @@
+osmosis_ai/platform/api/client.py
+  s_7e4cfb3da22901::t_e8f9ae73d7bc74 68,74-75,77,267,273-274,280,401,407-408,414,766,775,881,887-888,894,995,1001-1002,1008
+osmosis_ai/platform/auth/platform_client.py
+  s_7e4cfb3da22901::t_180446e2fb1eff 670-674,684
+tests/unit/platform/api/test_client.py
+  s_7e4cfb3da22901::t_e8f9ae73d7bc74 1005-1007,1014,1020,1075-1077,1084,1089,1144-1146,1153,1158,1362-1364,1371,1377
+tests/unit/platform/api/test_client_benchmark.py
+  s_7e4cfb3da22901::t_e8f9ae73d7bc74 421,426
+tests/unit/auth/test_platform_client.py
+  s_7e4cfb3da22901::t_921d6a095f7ad9 1389
+  s_7e4cfb3da22901::t_e252aca429c8f3 7
+  s_7e4cfb3da22901::t_180446e2fb1eff 1373-1388,1390-1393
+osmosis_ai/platform/api/models.py
+  s_7e4cfb3da22901::t_e8f9ae73d7bc74 906
+CHANGELOG.md
+  s_7e4cfb3da22901::t_180446e2fb1eff 9-12
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "66858bb13efae82236320c7f0913972e6cb2b5ab",
+  "prompts": {},
+  "sessions": {
+    "s_7e4cfb3da22901": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0170c-595b-7ca1-a05f-b678a39bc9a7",
+        "model": "azure-openai/gpt-5.6-sol"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}
