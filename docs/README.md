@@ -31,6 +31,7 @@ The single `osmosis-ai` distribution always includes the CLI and framework-neutr
 - [rollout-sdk.md](./rollout-sdk.md) — the library API you implement against: `AgentWorkflow`, `Grader`, contexts, configs, server/backends, and framework integrations.
 - [migrating-to-0.3.md](./migrating-to-0.3.md) — the source and behavior changes required when upgrading an SDK integration from 0.2.31.
 - [eval.md](./eval.md) — the `osmosis eval submit` config contract (SDK-vs-backend validation, submit flow), plus a brief note on the `evaluate_rubric` / `osmosis eval rubric` LLM-as-judge API.
+- [eval-run-local.md](./eval-run-local.md) — `osmosis eval run`: local evaluation against your own rollout server, the run-directory layout, resume/fresh/retry semantics, secrets, and Harbor sandbox specifics.
 - [benchmark.md](./benchmark.md) — the `osmosis benchmark submit` config contract: sections, the agent model union, secret-reference and env-collision rules, and the submit flow.
 - [datasets.md](./datasets.md) — the dataset row contract enforced by the SDK validator.
 - [troubleshooting.md](./troubleshooting.md) — engineering issues (rollout timeouts, event-loop blocking, concurrency tuning).

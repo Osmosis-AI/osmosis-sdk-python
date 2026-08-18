@@ -109,6 +109,97 @@ def eval_submit(
     return _submit(config_path, yes=yes, secrets_file=secrets_file)
 
 
+@app.command("run")
+def eval_run(
+    config_path: Path = typer.Argument(
+        ...,
+        exists=False,
+        file_okay=True,
+        dir_okay=False,
+        readable=False,
+        resolve_path=False,
+        help="Path to evaluation config TOML file.",
+    ),
+    name: str | None = typer.Option(
+        None,
+        "--name",
+        help=(
+            "Stable run name. Re-running the same name resumes pending work. "
+            "Omit to create a one-off run with a generated name."
+        ),
+    ),
+    output: str | None = typer.Option(
+        None,
+        "--output",
+        "-o",
+        help="Run output root (default: .osmosis/evals/).",
+    ),
+    dataset_file: str | None = typer.Option(
+        None,
+        "--dataset-file",
+        help="Local dataset file to run instead of the platform dataset.",
+    ),
+    secrets_file: str | None = typer.Option(
+        None,
+        "--secrets-file",
+        help=(
+            "Dotenv file supplying values for \\[secrets] names; - reads stdin. "
+            "Values are never saved and are re-supplied on every run."
+        ),
+    ),
+    rows: str | None = typer.Option(
+        None,
+        "--rows",
+        help='Dataset rows to run, for example "3,7,10-20". Overrides limit.',
+    ),
+    fresh: bool = typer.Option(
+        False,
+        "--fresh",
+        help="Archive this run name's existing results and start clean.",
+    ),
+    retry_failed: bool = typer.Option(
+        False,
+        "--retry-failed",
+        help="Also re-run failed and skipped work items; successes are kept.",
+    ),
+    max_in_flight: int | None = typer.Option(
+        None,
+        "--max-in-flight",
+        help="Concurrent rollouts (default: evaluation.batch_size, then 1).",
+    ),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt."),
+    rollout_port: int | None = typer.Option(
+        None,
+        "--rollout-port",
+        help="Fixed rollout-server port (default: an ephemeral port).",
+        rich_help_panel="Advanced",
+    ),
+    verbose: bool = typer.Option(
+        False,
+        "--verbose",
+        help="Stream supervisor and rollout-server log lines to the terminal.",
+        rich_help_panel="Advanced",
+    ),
+) -> CommandResult:
+    """Run an evaluation locally against this workspace's rollout server."""
+    from osmosis_ai.platform.cli.eval_run import run as _run
+
+    return _run(
+        config_path,
+        name=name,
+        output=output,
+        dataset_file=dataset_file,
+        secrets_file=secrets_file,
+        rows=rows,
+        fresh=fresh,
+        retry_failed=retry_failed,
+        max_in_flight=max_in_flight,
+        yes=yes,
+        rollout_port=rollout_port,
+        verbose=verbose,
+    )
+
+
 @app.command("list")
 def eval_list(
     limit: int = limit_option("Maximum number of evaluation runs to show."),

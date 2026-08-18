@@ -5,8 +5,7 @@ it), register before dispatch, ``wait_terminal``, and discard in
 ``finally``. A completion callback is recorded on the live session for
 duplicate detection but is not a rendezvous of its own. Accepted terminal
 acknowledgments stay until the process exits so duplicate callbacks can be
-acknowledged after cleanup. Journal replay is a small ``seed_terminal``
-API; this module does not read a journal.
+acknowledged after cleanup.
 
 The terminal commit is single-flight: the first grader/timeout contender
 creates one commit task per session and every contender (including
@@ -32,11 +31,11 @@ from osmosis_ai.rollout.types import GraderCompleteRequest, RolloutCompleteReque
 
 logger: logging.Logger = logging.getLogger(__name__)
 
-TerminalSource = Literal["grader", "timeout", "seeded", "cancelled"]
+TerminalSource = Literal["grader", "timeout", "cancelled"]
 
 
 class UnknownRolloutIdError(KeyError):
-    """No live session or seeded terminal exists for this rollout id."""
+    """No live session or finalized terminal exists for this rollout id."""
 
 
 class DuplicateRegistrationError(ValueError):
@@ -97,24 +96,6 @@ class CallbackStore:
                 f"callback session already registered for {rollout_id}"
             )
         self._sessions[rollout_id] = _LiveSession()
-
-    def seed_terminal(
-        self,
-        rollout_id: str,
-        *,
-        acknowledgment: Mapping[str, Any],
-    ) -> None:
-        """Record an already-durable terminal result for duplicate detection.
-
-        First-wins: live sessions and existing finalized rows are kept.
-        """
-        if rollout_id in self._sessions or rollout_id in self._finalized:
-            return
-        self._finalized[rollout_id] = TerminalCallbackResult(
-            rollout_id=rollout_id,
-            source="seeded",
-            acknowledgment=dict(acknowledgment),
-        )
 
     async def discard(self, rollout_id: str) -> None:
         session = self._sessions.get(rollout_id)

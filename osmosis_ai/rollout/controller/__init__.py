@@ -13,19 +13,11 @@ from osmosis_ai._imports import (
 )
 
 if TYPE_CHECKING:
-    from osmosis_ai.rollout.controller.listener import (
-        CallbackListener,
-        create_callback_app,
-    )
-    from osmosis_ai.rollout.controller.llm_bridge import (
-        LiteLLMBridge,
-        create_bridge_router,
-    )
+    from osmosis_ai.rollout.controller.listener import CallbackListener
+    from osmosis_ai.rollout.controller.llm_bridge import LiteLLMBridge
     from osmosis_ai.rollout.controller.store import (
         CallbackStore,
-        DuplicateRegistrationError,
         TerminalCallbackResult,
-        UnknownRolloutIdError,
     )
 
 _EXPORTS: dict[str, tuple[str, str]] = {
@@ -34,10 +26,6 @@ _EXPORTS: dict[str, tuple[str, str]] = {
         "CallbackListener",
     ),
     "CallbackStore": ("osmosis_ai.rollout.controller.store", "CallbackStore"),
-    "DuplicateRegistrationError": (
-        "osmosis_ai.rollout.controller.store",
-        "DuplicateRegistrationError",
-    ),
     "LiteLLMBridge": (
         "osmosis_ai.rollout.controller.llm_bridge",
         "LiteLLMBridge",
@@ -45,18 +33,6 @@ _EXPORTS: dict[str, tuple[str, str]] = {
     "TerminalCallbackResult": (
         "osmosis_ai.rollout.controller.store",
         "TerminalCallbackResult",
-    ),
-    "UnknownRolloutIdError": (
-        "osmosis_ai.rollout.controller.store",
-        "UnknownRolloutIdError",
-    ),
-    "create_bridge_router": (
-        "osmosis_ai.rollout.controller.llm_bridge",
-        "create_bridge_router",
-    ),
-    "create_callback_app": (
-        "osmosis_ai.rollout.controller.listener",
-        "create_callback_app",
     ),
 }
 
@@ -84,10 +60,6 @@ def __dir__() -> list[str]:
 __all__ = [
     "CallbackListener",
     "CallbackStore",
-    "DuplicateRegistrationError",
     "LiteLLMBridge",
     "TerminalCallbackResult",
-    "UnknownRolloutIdError",
-    "create_bridge_router",
-    "create_callback_app",
 ]

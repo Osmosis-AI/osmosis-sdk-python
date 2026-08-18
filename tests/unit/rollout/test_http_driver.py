@@ -196,9 +196,12 @@ async def test_post_200_is_protocol_error_without_looping() -> None:
         raise AssertionError(request.url.path)
 
     driver = _driver(store, handler)
-    with pytest.raises(RolloutProtocolError, match="200"):
+    with pytest.raises(RolloutProtocolError, match="200") as excinfo:
         await driver.run(_request())
     assert posts == 1
+    # The supervisor needs the status to tell a refusal of this request apart
+    # from a server that is simply broken.
+    assert excinfo.value.status_code == 200
 
 
 async def test_transport_error_on_post_propagates_without_retry() -> None:
@@ -266,7 +269,9 @@ async def test_timeout_plus_failed_cancel_keeps_timeout_result() -> None:
         ("nan", 1.0),
         ("1e999", 1.0),
         ("junk", 1.0),
-        ("-5", 0.0),
+        # Negative and zero waits clamp to the floor so a 429 loop cannot spin.
+        ("-5", 0.05),
+        ("0", 0.05),
         ("2.5", 2.5),
         ("60", 60.0),
         ("86400", 60.0),

@@ -25,7 +25,8 @@ class RolloutInitRequest(BaseModel):
 
     ``controller_api_key`` authenticates callbacks back to the controller
     listener. ``llm_api_key`` authenticates the agent to
-    ``chat_completions_url`` (the eval-proxy session token). When
+    ``chat_completions_url`` — locally the LiteLLM bridge's per-run bearer,
+    a genuinely different secret from the callback bearer. When
     ``llm_api_key`` is omitted (``None``), the server falls back to
     ``controller_api_key`` so existing single-secret callers keep working.
     An explicit empty string is rejected; only ``None`` triggers fallback.

@@ -53,6 +53,7 @@ from osmosis_ai.rollout.backend.base import ExecutionBackend, ResultCallback
 from osmosis_ai.rollout.backend.harbor.artifacts import (
     merge_grader_artifacts,
     relocate_trial_artifacts,
+    retain_trial_logs,
 )
 from osmosis_ai.rollout.backend.harbor.bundling import resolve_backend_bundle
 from osmosis_ai.rollout.backend.harbor.diagnostics import (
@@ -64,7 +65,9 @@ from osmosis_ai.rollout.backend.harbor.diagnostics import (
     trial_timings,
 )
 from osmosis_ai.rollout.backend.harbor.environment import (
+    apply_chat_endpoint_egress,
     apply_managed_skypilot_placement,
+    load_task_network_config,
     rewrite_url_for_docker,
     uses_local_docker_runtime,
 )
@@ -396,12 +399,27 @@ class HarborBackend(ExecutionBackend):
         if request.grader_timeout_sec is not None:
             verifier_config.override_timeout_sec = request.grader_timeout_sec
 
+        task_config = TaskConfig(path=task_dir)
+        environment_config = self.environment_config.model_copy(deep=True)
+        allowed_host = apply_chat_endpoint_egress(
+            environment_config,
+            agent_config,
+            task_config=load_task_network_config(task_dir),
+            chat_completions_url=container_input.chat_completions_url or "",
+        )
+        if allowed_host is not None:
+            logger.info(
+                "allowlisting chat endpoint host %s for rollout %s",
+                allowed_host,
+                request.id,
+            )
+
         return TrialConfig(
-            task=TaskConfig(path=task_dir),
+            task=task_config,
             trial_name=f"{TRIAL_NAME_PREFIX}{request.id}",
             trials_dir=self.trials_dir,
             agent=agent_config,
-            environment=self.environment_config.model_copy(deep=True),
+            environment=environment_config,
             verifier=verifier_config,
         )
 
@@ -601,8 +619,12 @@ class HarborBackend(ExecutionBackend):
             self.cleanup_rollout_residue(rollout_id, include_trial=False)
             raise
         merge_grader_artifacts(self.trials_dir, rollout_id)
+        # Retained before the trial directory can be removed below; a failed
+        # retention keeps it, since the trial dir is then the only copy.
+        retained = retain_trial_logs(self.trials_dir, self.artifact_root, rollout_id)
         delete_trial = bool(
             self.cleanup_successful_trials
+            and retained
             and trial_result is not None
             and getattr(trial_result, "exception_info", None) is None
             and not pending.preserve_trial

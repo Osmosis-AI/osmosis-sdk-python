@@ -136,19 +136,6 @@ async def test_discard_cancels_the_unresolved_terminal_future() -> None:
         await terminal_waiter
 
 
-async def test_seeded_terminal_acks_late_completion() -> None:
-    store = CallbackStore(on_terminal_commit=_passthrough_commit)
-    store.seed_terminal(ROLLOUT_ID, acknowledgment={"ok": True, "seeded": True})
-
-    terminal = await store.wait_terminal(ROLLOUT_ID)
-    assert terminal.source == "seeded"
-    # A seeded row carries the durable ack only; it stores no payloads, so a
-    # late completion is acknowledged without a duplicate comparison.
-    assert terminal.completion is None
-    ack = await store.handle_completion(ROLLOUT_ID, _completion())
-    assert ack == {"ok": True, "seeded": True}
-
-
 async def test_grader_commit_hook_runs_before_acknowledgment() -> None:
     order: list[str] = []
 
@@ -253,25 +240,6 @@ async def test_wait_terminal_returns_grader_result() -> None:
     assert result.grader.status == GraderStatus.SUCCESS
 
 
-async def test_seed_terminal_replays_without_commit(
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    commits = 0
-
-    async def commit(result: TerminalCallbackResult) -> dict[str, object]:
-        nonlocal commits
-        commits += 1
-        return {"ok": True}
-
-    store = CallbackStore(on_terminal_commit=commit)
-    store.seed_terminal(ROLLOUT_ID, acknowledgment={"ok": True, "seeded": True})
-    with caplog.at_level(logging.ERROR):
-        ack = await store.handle_grader(ROLLOUT_ID, _grader())
-    assert ack == {"ok": True, "seeded": True}
-    assert commits == 0
-    assert not any(record.levelno >= logging.ERROR for record in caplog.records)
-
-
 async def test_register_rejects_live_and_finalized_ids() -> None:
     store = CallbackStore(on_terminal_commit=_passthrough_commit)
     await store.register(ROLLOUT_ID)
@@ -303,29 +271,6 @@ async def test_finalized_id_cannot_be_registered_and_committed_again() -> None:
     assert first == {"ok": True, "n": 1}
     assert second == first
     assert commits == 1
-
-
-async def test_seed_terminal_does_not_overwrite_live_or_finalized() -> None:
-    async def commit(result: TerminalCallbackResult) -> dict[str, object]:
-        return {"ok": True, "committed": True}
-
-    store = CallbackStore(on_terminal_commit=commit)
-    await store.register(ROLLOUT_ID)
-
-    # A live session outranks a replayed row: the seed is dropped and the
-    # rollout still reaches its terminal result through the commit hook.
-    store.seed_terminal(ROLLOUT_ID, acknowledgment={"ok": True, "seeded": True})
-    assert await _terminal_or_none(store) is None
-    assert await store.handle_grader(ROLLOUT_ID, _grader()) == {
-        "ok": True,
-        "committed": True,
-    }
-
-    await store.discard(ROLLOUT_ID)
-    store.seed_terminal(ROLLOUT_ID, acknowledgment={"ok": True, "seeded": True})
-    kept = await store.wait_terminal(ROLLOUT_ID)
-    assert kept.source == "grader"
-    assert kept.acknowledgment == {"ok": True, "committed": True}
 
 
 async def test_unknown_rollout_is_rejected() -> None:
