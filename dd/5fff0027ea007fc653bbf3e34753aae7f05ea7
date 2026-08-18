@@ -1,0 +1,26 @@
+docs/datasets.md
+  s_9fb4b7cde7e424::t_18411194e11d42 9
+osmosis_ai/platform/constants.py
+  s_9fb4b7cde7e424::t_f5db3f96cdd739 40-56
+osmosis_ai/platform/cli/dataset.py
+  s_9fb4b7cde7e424::t_a57fabb1049aec 45
+  s_9fb4b7cde7e424::t_c0a9529df2bac8 37-38
+osmosis_ai/eval/local/dataset.py
+  s_9fb4b7cde7e424::t_47ae36b69e401e 28
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "dd5fff0027ea007fc653bbf3e34753aae7f05ea7",
+  "prompts": {},
+  "sessions": {
+    "s_9fb4b7cde7e424": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d027c642-ac7e-4ef5-9a37-c3ebfb767d86",
+        "model": "claude-fable-5"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}
