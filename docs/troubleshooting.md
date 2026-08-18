@@ -49,8 +49,6 @@ agent_workflow_timeout_s = 900   # 15 minutes instead of the default 7.5
   MyWorkflowConfig(name="my-rollout", concurrency=ConcurrencyConfig(max_concurrent=64))
   ```
 
-  A backend may also advertise a ceiling via `ExecutionBackend.max_concurrency`.
-
 ## Backend validation
 
 Cloud `osmosis eval submit` / `osmosis train submit` validate rollout paths and dependencies, then import the entrypoint once. The CLI does not infer backend requirements by scanning for workflow or grader classes, and there is no separate validation step: errors raised while the module constructs its backend (bad import strings, rejected configs) surface through submit preflight, and anything beyond that surfaces on the first rollout. Run an eval first — it exercises the workflow, grader, and server end to end and is the intended smoke test before training.
