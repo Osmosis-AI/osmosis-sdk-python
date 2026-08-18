@@ -37,3 +37,20 @@ MSG_NOT_LOGGED_IN = "Not logged in. Run 'osmosis auth login' first."
 # OpenAI-compatible inference base URL. Override for local/dev inference.
 DEFAULT_INFERENCE_URL = "https://inference.osmosis.ai"
 INFERENCE_URL = os.environ.get("OSMOSIS_INFERENCE_URL", DEFAULT_INFERENCE_URL)
+
+# ── Dataset contract (docs/datasets.md) ──────────────────────────
+
+# Extensions the upload validator accepts and the local eval runner can read.
+# Extending this set requires a matching reader branch in
+# ``eval/local/dataset.py`` (``iter_raw_rows``) and a validator branch in
+# ``platform/cli/dataset.py`` (``_validate_file``).
+VALID_EXTENSIONS: frozenset[str] = frozenset({"csv", "jsonl", "parquet"})
+MAX_FILE_SIZE = 5 * 1024 * 1024 * 1024  # 5 GB
+REQUIRED_COLUMNS = {"user_prompt", "ground_truth"}
+MIN_ROW_COUNT = 4
+
+# The presence of a metadata column selects metadata mode for the entire
+# dataset. Every row must then carry a non-empty JSON object. Users may author
+# it as a native object (JSONL/Parquet) or as a JSON-object string (CSV;
+# tolerated in JSONL).
+METADATA_COLUMN = "metadata"

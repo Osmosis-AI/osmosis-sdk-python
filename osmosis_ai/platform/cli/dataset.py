@@ -34,15 +34,15 @@ from osmosis_ai.platform.auth import (
     PlatformAPIError,
 )
 from osmosis_ai.platform.cli.workspace_directory_context import git_result_context
-from osmosis_ai.platform.constants import DEFAULT_PAGE_SIZE
-
-from .constants import (
+from osmosis_ai.platform.constants import (
+    DEFAULT_PAGE_SIZE,
     MAX_FILE_SIZE,
     METADATA_COLUMN,
     MIN_ROW_COUNT,
     REQUIRED_COLUMNS,
     VALID_EXTENSIONS,
 )
+
 from .utils import (
     build_dataset_detail_rows,
     build_logs_result,
