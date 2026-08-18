@@ -1,0 +1,25 @@
+osmosis_ai/platform/auth/__init__.py
+  s_9fb4b7cde7e424::t_372c5708a69fa0 3
+osmosis_ai/platform/auth/config.py
+  s_9fb4b7cde7e424::t_7cbffc562e573d 48-49
+CHANGELOG.md
+  s_9fb4b7cde7e424::t_3a26a6bc3bbf6b 13
+osmosis_ai/cli/output/error.py
+  s_9fb4b7cde7e424::t_fd3b090ec75104 56
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "0b8a0c6974fdaaf528db9e22e7b756edf0040565",
+  "prompts": {},
+  "sessions": {
+    "s_9fb4b7cde7e424": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d027c642-ac7e-4ef5-9a37-c3ebfb767d86",
+        "model": "claude-fable-5"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}
