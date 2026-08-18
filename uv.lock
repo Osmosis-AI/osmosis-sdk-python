@@ -1659,6 +1659,12 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
+eval-run = [
+    { name = "click" },
+    { name = "fastapi" },
+    { name = "litellm" },
+    { name = "uvicorn" },
+]
 full = [
     { name = "aiohttp" },
     { name = "click" },
@@ -1748,6 +1754,7 @@ requires-dist = [
     { name = "harbor", marker = "extra == 'harbor'", specifier = ">=0.20.0,<0.21" },
     { name = "httpx", specifier = ">=0.25.0,<1.0.0" },
     { name = "keyring", specifier = ">=25.0.0" },
+    { name = "litellm", marker = "extra == 'eval-run'", specifier = ">=1.91.1,!=1.95.0,<2.0.0" },
     { name = "litellm", marker = "extra == 'harbor'", specifier = ">=1.91.1,!=1.95.0,<2.0.0" },
     { name = "litellm", marker = "extra == 'openai-agents'", specifier = ">=1.91.1,!=1.95.0,<2.0.0" },
     { name = "litellm", marker = "extra == 'rubric'", specifier = ">=1.91.1,!=1.95.0,<2.0.0" },
@@ -1759,7 +1766,8 @@ requires-dist = [
     { name = "orjson", marker = "extra == 'openai-agents'", specifier = ">=3.11.6,<4.0" },
     { name = "orjson", marker = "extra == 'rubric'", specifier = ">=3.11.6,<4.0" },
     { name = "orjson", marker = "extra == 'strands'", specifier = ">=3.11.6,<4.0" },
-    { name = "osmosis-ai", extras = ["harbor", "openai-agents", "parquet", "rubric", "server", "strands"], marker = "extra == 'full'" },
+    { name = "osmosis-ai", extras = ["eval-run", "harbor", "openai-agents", "parquet", "rubric", "server", "strands"], marker = "extra == 'full'" },
+    { name = "osmosis-ai", extras = ["server"], marker = "extra == 'eval-run'" },
     { name = "packaging", specifier = ">=24.0" },
     { name = "platformdirs", marker = "extra == 'harbor'", specifier = ">=4.0" },
     { name = "prompt-toolkit", specifier = ">=3.0.0,<4.0.0" },
@@ -1776,7 +1784,7 @@ requires-dist = [
     { name = "uv", marker = "extra == 'harbor'", specifier = ">=0.9.7,<0.13" },
     { name = "uvicorn", marker = "extra == 'server'", specifier = ">=0.23.0,<1.0.0" },
 ]
-provides-extras = ["server", "strands", "openai-agents", "harbor", "rubric", "parquet", "full"]
+provides-extras = ["server", "strands", "openai-agents", "harbor", "rubric", "parquet", "eval-run", "full"]
 
 [package.metadata.requires-dev]
 dev = [

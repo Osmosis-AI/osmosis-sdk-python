@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import shutil
 from pathlib import Path
 
@@ -171,7 +172,13 @@ def default_artifact_root() -> Path:
     Each rollout's outputs live at ``<root>/<rollout_id>/`` — file
     artifacts under ``artifacts/`` and the archived trajectory as
     ``trajectory.json`` — which the platform persists to durable storage.
+
+    ``_OSMOSIS_ROLLOUT_ARTIFACT_ROOT`` overrides the default when set. Both
+    backends cache the resolved root in ``__init__``, so the variable must be
+    present before backend construction.
     """
+    if value := os.environ.get("_OSMOSIS_ROLLOUT_ARTIFACT_ROOT"):
+        return Path(value)
     return Path.home() / ".osmosis"
 
 

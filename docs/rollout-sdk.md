@@ -26,6 +26,7 @@ Optional features use these canonical modules:
 | `harbor` | `from osmosis_ai.rollout.backend.harbor import HarborBackend, TaskMode` | Harbor execution backend |
 | `strands` | `from osmosis_ai.rollout.integrations.agents.strands import OsmosisStrandsAgent, OsmosisRolloutModel` | Strands integration |
 | `openai-agents` | `from osmosis_ai.rollout.integrations.agents.openai_agents import OsmosisAgent` | OpenAI Agents integration |
+| `eval-run` | `from osmosis_ai.rollout.controller import CallbackListener` | Localhost callback listener + in-process LiteLLM bridge. Install with `pip install "osmosis-ai[eval-run]"` (includes `[server]` and LiteLLM). `CallbackStore` and `HttpRolloutDriver` ship in the base install, but a local eval run needs the listener to receive callbacks and the bridge to serve model calls. |
 
 The `Messages` return type is available from `osmosis_ai.rollout.types`.
 
@@ -206,7 +207,7 @@ backend = LocalBackend(
 app = create_rollout_server(backend=backend)  # FastAPI: POST /rollout, GET /health
 ```
 
-- `create_rollout_server` ([server/app.py](../osmosis_ai/rollout/server/app.py)) is provided by the `server` extra. It wires the protocol: it runs the backend in a background task and posts the completion + grader callbacks. It has no Harbor dependency.
+- `create_rollout_server` ([server/app.py](../osmosis_ai/rollout/server/app.py)) is provided by the `server` extra. It wires the protocol: it schedules the backend execution task before the 202 response is sent (so a dropped response cannot lose the rollout), posts the completion + grader callbacks, and drains in-flight rollouts on shutdown. Admission does not deduplicate `rollout_id`s — dispatchers mint a fresh id per attempt and own their retries. It has no Harbor dependency.
 - `ControllerAuth` ([server/auth.py](../osmosis_ai/rollout/server/auth.py)) supplies the bearer headers for callbacks.
 - `ExecutionBackend` ([backend/base.py](../osmosis_ai/rollout/backend/base.py)) is the ABC; pick one:
   - `LocalBackend` ([backend/local/](../osmosis_ai/rollout/backend/local/)) — runs workflow + grader in-process. Re-exported from `osmosis_ai.rollout`. Used by the scaffold and eval.

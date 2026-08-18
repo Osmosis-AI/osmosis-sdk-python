@@ -178,6 +178,8 @@ jobs:
             extra: "[rubric]"
           - scenario: parquet
             extra: "[parquet]"
+          - scenario: eval-run
+            extra: "[eval-run]"
           - scenario: full
             extra: "[full]"
     steps:

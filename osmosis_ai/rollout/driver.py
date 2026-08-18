@@ -10,7 +10,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any
 
-from osmosis_ai.rollout.types import RolloutSample, RolloutStatus
+from osmosis_ai.rollout.types import MessageDict, RolloutSample, RolloutStatus
 
 
 @dataclass
@@ -34,6 +34,19 @@ class RolloutOutcome:
     skipped: bool = False
 
 
+@dataclass
+class RolloutRunRequest:
+    """Inputs for one ``RolloutDriver.run`` call."""
+
+    messages: list[MessageDict]
+    label: str | None = None
+    metadata: dict[str, Any] | None = None
+    rollout_id: str = ""
+    agent_timeout_sec: float | None = None
+    grader_timeout_sec: float | None = None
+    extra_fields: dict[str, Any] | None = None
+
+
 class RolloutDriver(ABC):
     """Drives a rollout execution."""
 
@@ -43,13 +56,8 @@ class RolloutDriver(ABC):
         return 0
 
     @abstractmethod
-    async def run(
-        self,
-        messages: list[dict[str, Any]],
-        label: str | None = None,
-        rollout_id: str = "",
-    ) -> RolloutOutcome:
+    async def run(self, request: RolloutRunRequest) -> RolloutOutcome:
         raise NotImplementedError
 
 
-__all__ = ["RolloutDriver", "RolloutOutcome"]
+__all__ = ["RolloutDriver", "RolloutOutcome", "RolloutRunRequest"]

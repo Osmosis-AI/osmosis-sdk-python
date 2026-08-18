@@ -1,9 +1,14 @@
+import asyncio
 import logging
+import os
 import traceback
 import uuid
+from collections.abc import AsyncIterator
+from contextlib import AsyncExitStack, asynccontextmanager
+from functools import partial
 from typing import Any
 
-from fastapi import BackgroundTasks, FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException
 
 from osmosis_ai.rollout.backend.base import ExecutionBackend
 from osmosis_ai.rollout.context import RolloutContext
@@ -31,6 +36,11 @@ from osmosis_ai.rollout.utils.http import post_json_with_retry
 
 logger: logging.Logger = logging.getLogger(__name__)
 
+# Graceful shutdown waits this long for in-flight rollouts before cancelling
+# them. Uvicorn closes its listeners before lifespan shutdown, so nothing new
+# is admitted while draining.
+_SHUTDOWN_DRAIN_SEC = 10.0
+
 
 def _configure_default_logging() -> None:
     if logging.getLogger().handlers:
@@ -55,17 +65,55 @@ def create_rollout_server(
     """
     if configure_logging:
         _configure_default_logging()
-    app = FastAPI(lifespan=lifespan)
+    # Strong references so eagerly scheduled rollout tasks are never GC'd.
+    scheduled_tasks: set[asyncio.Task[None]] = set()
+
+    async def _drain_scheduled_tasks() -> None:
+        if not scheduled_tasks:
+            return
+        logger.info("Draining %d in-flight rollout(s)", len(scheduled_tasks))
+        _done, pending = await asyncio.wait(
+            set(scheduled_tasks), timeout=_SHUTDOWN_DRAIN_SEC
+        )
+        for task in pending:
+            task.cancel()
+        if pending:
+            await asyncio.gather(*pending, return_exceptions=True)
+
+    @asynccontextmanager
+    async def _lifespan_with_drain(app: FastAPI) -> AsyncIterator[None]:
+        # The drain runs inside the caller's lifespan: in-flight rollouts may
+        # still use resources that lifespan owns.
+        async with AsyncExitStack() as stack:
+            if lifespan is not None:
+                await stack.enter_async_context(lifespan(app))
+            try:
+                yield
+            finally:
+                await _drain_scheduled_tasks()
+
+    app = FastAPI(lifespan=_lifespan_with_drain)
+    # The instance id env var is immutable for the process lifetime.
+    instance_id = os.environ.get("_OSMOSIS_ROLLOUT_INSTANCE_ID")
 
     @app.get("/health")
     async def health() -> dict[str, Any]:
-        return backend.health()
+        payload = dict(backend.health())
+        if instance_id:
+            payload["instance_id"] = instance_id
+        return payload
 
-    # 202: the rollout is queued and runs after this response returns.
+    def _finish_rollout_task(rollout_id: str | None, task: asyncio.Task[None]) -> None:
+        scheduled_tasks.discard(task)
+        exc = None if task.cancelled() else task.exception()
+        if exc is not None:
+            logger.error("Rollout task for %s crashed", rollout_id, exc_info=exc)
+
+    # 202: the rollout is scheduled before this response is sent, so a
+    # failed/disconnected response still leaves the execution running.
     @app.post("/rollout", status_code=202)
-    async def rollout(
-        request: RolloutInitRequest, background_tasks: BackgroundTasks
-    ) -> RolloutInitResponse:
+    async def rollout(request: RolloutInitRequest) -> RolloutInitResponse:
+        rollout_id = request.rollout_id or None
         if not backend.has_capacity():
             raise HTTPException(
                 status_code=429,
@@ -73,20 +121,22 @@ def create_rollout_server(
                 headers={"Retry-After": "5"},
             )
         try:
-            background_tasks.add_task(_handle_rollout, backend, request)
-            return RolloutInitResponse()
+            task = asyncio.create_task(_handle_rollout(backend, request))
         except Exception as e:
             logger.error(traceback.format_exc())
             raise HTTPException(status_code=500, detail=str(e)) from e
+        scheduled_tasks.add(task)
+        task.add_done_callback(partial(_finish_rollout_task, rollout_id))
+        return RolloutInitResponse()
 
     @app.get("/rollout/{rollout_id}/status")
     async def rollout_status(rollout_id: str) -> RolloutStatusResponse:
         state = backend.rollout_status(rollout_id)
-        if state is None:
-            return RolloutStatusResponse(
-                rollout_id=rollout_id, status=RolloutStatus.UNKNOWN
-            )
-        return RolloutStatusResponse(rollout_id=rollout_id, **state)
+        if state is not None:
+            return RolloutStatusResponse(rollout_id=rollout_id, **state)
+        return RolloutStatusResponse(
+            rollout_id=rollout_id, status=RolloutStatus.UNKNOWN
+        )
 
     @app.post("/rollout/cancel")
     async def cancel(request: CancelRolloutsRequest) -> CancelRolloutsResponse:
@@ -114,15 +164,21 @@ def create_rollout_server(
 async def _handle_rollout(
     backend: ExecutionBackend, request: RolloutInitRequest
 ) -> None:
+    """Execute one rollout and deliver its terminal callbacks."""
     # Routing identity is in the URLs; ``rollout_id`` in the body is debug
     # metadata. We prefer the caller's id (so logs/cache rows correlate
     # across systems) and synthesize one only if the caller omits it.
     rollout_id = request.rollout_id or uuid.uuid4().hex
     auth = ControllerAuth(api_key=request.controller_api_key)
 
+    llm_api_key = (
+        request.controller_api_key
+        if request.llm_api_key is None
+        else request.llm_api_key
+    )
     rollout_ctx = RolloutContext(
         chat_completions_url=request.chat_completions_url,
-        api_key=request.controller_api_key,
+        api_key=llm_api_key,
         rollout_id=rollout_id,
     )
 
@@ -285,6 +341,7 @@ async def _handle_rollout(
                     ).model_dump(),
                     headers=auth.as_bearer_headers(),
                 )
+                completion_posted = True
                 report = report_from_response(resp) or report
             except Exception:
                 logger.error(
