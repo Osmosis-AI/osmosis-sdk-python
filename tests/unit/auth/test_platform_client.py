@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import http.client
 import json
+from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from io import BytesIO
 from typing import Any
@@ -1368,6 +1369,27 @@ class TestPlatformStream:
                     git_identity="git_1",
                 )
             )
+
+    @patch("osmosis_ai.platform.auth.platform_client.urlopen")
+    def test_read_timeout_becomes_platform_api_error(
+        self, mock_urlopen: MagicMock
+    ) -> None:
+        """A timeout while reading events is also a bare TimeoutError."""
+
+        def timeout_after_event() -> Iterator[bytes]:
+            yield b'data: {"message": "ready"}\n'
+            yield b"\n"
+            raise TimeoutError("timed out")
+
+        response = _make_stream_response([])
+        response.__iter__ = MagicMock(return_value=timeout_after_event())
+        mock_urlopen.return_value = response
+        creds = _make_credentials()
+
+        events = platform_stream("/api/stream", credentials=creds, git_identity="git_1")
+        assert next(events) == {"message": "ready"}
+        with pytest.raises(PlatformAPIError, match="Connection error: timed out"):
+            next(events)
 
     @patch("osmosis_ai.platform.auth.platform_client.surface_version_signal")
     @patch("osmosis_ai.platform.auth.platform_client.urlopen")

@@ -65,15 +65,16 @@ class OsmosisClient:
         *,
         limit: int = DEFAULT_PAGE_SIZE,
         cursor: str | None = None,
+        direction: str = "older",
         credentials: Credentials | None = None,
         git_identity: str,
     ) -> LogsPage:
         """Fetch one page of logs for ``{resource_path}/logs``.
 
-        The first page is the most recent; the returned ``next_cursor`` pages
-        further back in time.
+        Without ``cursor``, ``direction="older"`` returns the most recent page.
+        With a cursor, ``next_cursor`` continues in the requested direction.
         """
-        params: dict[str, Any] = {"limit": limit, "direction": "older"}
+        params: dict[str, Any] = {"limit": limit, "direction": direction}
         if cursor is not None:
             params["cursor"] = cursor
         data = platform_request(
@@ -263,18 +264,20 @@ class OsmosisClient:
         *,
         limit: int = DEFAULT_PAGE_SIZE,
         cursor: str | None = None,
+        direction: str = "older",
         credentials: Credentials | None = None,
         git_identity: str,
     ) -> LogsPage:
         """Fetch one page of dataset logs.
 
-        The first page is the most recent; the returned ``next_cursor`` pages
-        further back in time.
+        Without ``cursor``, ``direction="older"`` returns the most recent page.
+        With a cursor, ``next_cursor`` continues in the requested direction.
         """
         return self._get_logs(
             f"/api/cli/datasets/{_safe_path(name_or_id)}",
             limit=limit,
             cursor=cursor,
+            direction=direction,
             credentials=credentials,
             git_identity=git_identity,
         )
@@ -395,18 +398,20 @@ class OsmosisClient:
         *,
         limit: int = DEFAULT_PAGE_SIZE,
         cursor: str | None = None,
+        direction: str = "older",
         credentials: Credentials | None = None,
         git_identity: str,
     ) -> LogsPage:
         """Fetch one page of training run logs.
 
-        The first page is the most recent; the returned ``next_cursor`` pages
-        further back in time.
+        Without ``cursor``, ``direction="older"`` returns the most recent page.
+        With a cursor, ``next_cursor`` continues in the requested direction.
         """
         return self._get_logs(
             f"/api/cli/training-runs/{_safe_path(name_or_id)}",
             limit=limit,
             cursor=cursor,
+            direction=direction,
             credentials=credentials,
             git_identity=git_identity,
         )
@@ -758,6 +763,7 @@ class OsmosisClient:
         *,
         limit: int = DEFAULT_PAGE_SIZE,
         cursor: str | None = None,
+        direction: str = "older",
         credentials: Credentials | None = None,
         git_identity: str,
     ) -> LogsPage:
@@ -766,6 +772,7 @@ class OsmosisClient:
             f"/api/cli/benchmark-runs/{_safe_path(name_or_id)}",
             limit=limit,
             cursor=cursor,
+            direction=direction,
             credentials=credentials,
             git_identity=git_identity,
         )
@@ -871,18 +878,20 @@ class OsmosisClient:
         *,
         limit: int = DEFAULT_PAGE_SIZE,
         cursor: str | None = None,
+        direction: str = "older",
         credentials: Credentials | None = None,
         git_identity: str,
     ) -> LogsPage:
         """Fetch one page of evaluation run logs.
 
-        The first page is the most recent; the returned ``next_cursor`` pages
-        further back in time.
+        Without ``cursor``, ``direction="older"`` returns the most recent page.
+        With a cursor, ``next_cursor`` continues in the requested direction.
         """
         return self._get_logs(
             f"/api/cli/eval-runs/{_safe_path(name_or_id)}",
             limit=limit,
             cursor=cursor,
+            direction=direction,
             credentials=credentials,
             git_identity=git_identity,
         )
@@ -983,18 +992,20 @@ class OsmosisClient:
         *,
         limit: int = DEFAULT_PAGE_SIZE,
         cursor: str | None = None,
+        direction: str = "older",
         credentials: Credentials | None = None,
         git_identity: str,
     ) -> LogsPage:
         """Fetch one page of dev rollout server logs.
 
-        The first page is the most recent; the returned ``next_cursor`` pages
-        further back in time.
+        Without ``cursor``, ``direction="older"`` returns the most recent page;
+        ``direction="newer"`` pages forward for live follow.
         """
         return self._get_logs(
             f"/api/cli/dev-rollout-server/{_safe_path(server_id)}",
             limit=limit,
             cursor=cursor,
+            direction=direction,
             credentials=credentials,
             git_identity=git_identity,
         )

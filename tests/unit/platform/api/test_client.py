@@ -1002,19 +1002,22 @@ class TestGetTrainingRunLogs:
         assert result.next_cursor == "2026-06-01T00:00:00Z|log-1"
 
     @patch("osmosis_ai.platform.api.client.platform_request")
-    def test_includes_cursor_when_provided(self, mock_request: MagicMock) -> None:
+    def test_includes_cursor_and_direction_when_provided(
+        self, mock_request: MagicMock
+    ) -> None:
         mock_request.return_value = {"logs": [], "next_cursor": None}
 
         result = OsmosisClient().get_training_run_logs(
             "run-1",
             limit=10,
             cursor="abc|def",
+            direction="newer",
             git_identity="git_test",
         )
 
         assert mock_request.call_args[0][0] == (
             "/api/cli/training-runs/run-1/logs"
-            "?limit=10&direction=older&cursor=abc%7Cdef"
+            "?limit=10&direction=newer&cursor=abc%7Cdef"
         )
         assert result.logs == []
         assert result.next_cursor is None
@@ -1069,18 +1072,21 @@ class TestGetEvalRunLogs:
         assert result.next_cursor == "2026-06-01T00:00:00Z|log-1"
 
     @patch("osmosis_ai.platform.api.client.platform_request")
-    def test_includes_cursor_when_provided(self, mock_request: MagicMock) -> None:
+    def test_includes_cursor_and_direction_when_provided(
+        self, mock_request: MagicMock
+    ) -> None:
         mock_request.return_value = {"logs": [], "next_cursor": None}
 
         result = OsmosisClient().get_eval_run_logs(
             "eval-1",
             limit=10,
             cursor="abc|def",
+            direction="newer",
             git_identity="git_test",
         )
 
         assert mock_request.call_args[0][0] == (
-            "/api/cli/eval-runs/eval-1/logs?limit=10&direction=older&cursor=abc%7Cdef"
+            "/api/cli/eval-runs/eval-1/logs?limit=10&direction=newer&cursor=abc%7Cdef"
         )
         assert result.logs == []
         assert result.next_cursor is None
@@ -1135,18 +1141,21 @@ class TestGetDatasetLogs:
         assert result.next_cursor == "2026-06-01T00:00:00Z|log-1"
 
     @patch("osmosis_ai.platform.api.client.platform_request")
-    def test_includes_cursor_when_provided(self, mock_request: MagicMock) -> None:
+    def test_includes_cursor_and_direction_when_provided(
+        self, mock_request: MagicMock
+    ) -> None:
         mock_request.return_value = {"logs": [], "next_cursor": None}
 
         result = OsmosisClient().get_dataset_logs(
             "ds-1",
             limit=10,
             cursor="abc|def",
+            direction="newer",
             git_identity="git_test",
         )
 
         assert mock_request.call_args[0][0] == (
-            "/api/cli/datasets/ds-1/logs?limit=10&direction=older&cursor=abc%7Cdef"
+            "/api/cli/datasets/ds-1/logs?limit=10&direction=newer&cursor=abc%7Cdef"
         )
         assert result.logs == []
         assert result.next_cursor is None
@@ -1350,19 +1359,22 @@ class TestGetDevRolloutServerLogs:
         assert result.next_cursor == "tok-1"
 
     @patch("osmosis_ai.platform.api.client.platform_request")
-    def test_includes_cursor_when_provided(self, mock_request: MagicMock) -> None:
+    def test_includes_cursor_and_direction_when_provided(
+        self, mock_request: MagicMock
+    ) -> None:
         mock_request.return_value = {"logs": [], "next_cursor": None}
 
         OsmosisClient().get_dev_rollout_server_logs(
             "srv-1",
             limit=10,
             cursor="abc|def",
+            direction="newer",
             git_identity="git_test",
         )
 
         assert mock_request.call_args[0][0] == (
             "/api/cli/dev-rollout-server/srv-1/logs"
-            "?limit=10&direction=older&cursor=abc%7Cdef"
+            "?limit=10&direction=newer&cursor=abc%7Cdef"
         )
 
     @patch("osmosis_ai.platform.api.client.platform_request")

@@ -667,6 +667,11 @@ def platform_stream(
 
     try:
         response = urlopen(request, timeout=timeout)
+        with response:
+            surface_response_version_signal(response)
+            yield from iter_sse_data(
+                line.decode("utf-8", errors="replace") for line in response
+            )
     except HTTPError as e:
         _raise_for_http_error(
             e,
@@ -676,11 +681,5 @@ def platform_stream(
     except URLError as e:
         raise PlatformAPIError(f"Connection error: {e.reason}") from e
     except TimeoutError as e:
-        # A socket timeout mid-handshake is a bare TimeoutError, not a URLError.
+        # A socket timeout during setup or iteration is bare, not a URLError.
         raise PlatformAPIError("Connection error: timed out") from e
-
-    with response:
-        surface_response_version_signal(response)
-        yield from iter_sse_data(
-            line.decode("utf-8", errors="replace") for line in response
-        )
