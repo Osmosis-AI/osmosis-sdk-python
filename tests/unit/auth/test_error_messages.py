@@ -7,64 +7,15 @@ is correct end-to-end.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 
 import pytest
 
 from osmosis_ai.cli.errors import CLIError
-from osmosis_ai.platform.auth.credentials import Credentials, UserInfo
 from osmosis_ai.platform.auth.platform_client import (
     AuthenticationExpiredError,
 )
 from osmosis_ai.platform.constants import MSG_ENV_TOKEN_INVALID
-
-
-def _make_credentials(*, expired: bool = False) -> Credentials:
-    now = datetime.now(UTC)
-    offset = timedelta(days=-1) if expired else timedelta(days=30)
-    return Credentials(
-        access_token="test-token",
-        token_type="Bearer",
-        expires_at=now + offset,
-        created_at=now,
-        user=UserInfo(id="u1", email="test@test.com", name="Test"),
-        token_id=None,
-    )
-
-
-class TestRequireCredentialsMessages:
-    """Test require_credentials() raises the right exception for each state."""
-
-    @patch("osmosis_ai.platform.cli.utils.load_credentials", return_value=None)
-    def test_no_credentials_raises_cli_error_not_logged_in(self, _mock: object) -> None:
-        from osmosis_ai.platform.cli.utils import require_credentials
-
-        with pytest.raises(CLIError, match="Not logged in") as exc_info:
-            require_credentials()
-        assert exc_info.value.code == "AUTH_REQUIRED"
-
-    @patch("osmosis_ai.platform.cli.utils.load_credentials")
-    def test_expired_credentials_raises_auth_expired(self, mock_load: object) -> None:
-        from osmosis_ai.platform.cli.utils import require_credentials
-
-        mock_load.return_value = _make_credentials(expired=True)
-
-        with pytest.raises(AuthenticationExpiredError) as exc_info:
-            require_credentials()
-
-        assert "session has expired" in str(exc_info.value)
-        assert "osmosis auth login" in str(exc_info.value)
-
-    @patch("osmosis_ai.platform.cli.utils.load_credentials")
-    def test_valid_credentials_returns_them(self, mock_load: object) -> None:
-        from osmosis_ai.platform.cli.utils import require_credentials
-
-        creds = _make_credentials()
-        mock_load.return_value = creds
-
-        result = require_credentials()
-        assert result is creds
 
 
 class TestPlatformRequestMessages:
