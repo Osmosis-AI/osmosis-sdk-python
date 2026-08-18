@@ -136,7 +136,6 @@ def _inputs(
         ("model_path", "openai/gpt-4o"),
         ("n", 3),
         ("entrypoint", "server.py"),
-        ("pass_threshold", 0.5),
         ("agent_timeout_sec", 999.0),
     ],
 )
@@ -148,6 +147,12 @@ def test_semantic_changes_change_the_fingerprint(
     assert digest_of(changed) != digest_of(baseline)
     # The refusal message has to be able to name what moved.
     assert changed_input_keys(baseline, changed) != []
+
+
+def test_pass_threshold_does_not_change_the_fingerprint(tmp_path: Path) -> None:
+    baseline = _inputs(_spec(), _dataset(), tmp_path)
+    changed = _inputs(_spec(pass_threshold=0.5), _dataset(), tmp_path)
+    assert changed == baseline
 
 
 def test_dataset_bytes_change_the_fingerprint(tmp_path: Path) -> None:

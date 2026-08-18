@@ -214,8 +214,8 @@ def test_manifest_round_trips(tmp_path: Path) -> None:
     manifest.write(path)
     loaded = RunManifest.read(path)
     assert loaded.inputs == manifest.inputs
-    assert loaded.inputs_digest == digest_of(_inputs())
     assert loaded.provenance["sdk_version"] == "0.3.0"
+    assert "inputs_digest" not in json.loads(path.read_text())
     assert path.read_text().endswith("}\n")
 
 
@@ -231,7 +231,6 @@ def test_manifest_read_refuses_a_foreign_schema_version(tmp_path: Path) -> None:
         {
             "schema_version": LOCAL_STATE_SCHEMA_VERSION + 1,
             "inputs": {},
-            "inputs_digest": "x",
         },
     )
     with pytest.raises(LocalEvalStateError, match="state schema version"):

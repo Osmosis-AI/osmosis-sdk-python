@@ -39,8 +39,6 @@ from osmosis_ai.rollout.utils.identifiers import is_single_path_segment
 
 # Bumped when the on-disk meaning of events.jsonl or manifest.json changes.
 LOCAL_STATE_SCHEMA_VERSION = 1
-# Bumped when the layout under rollout_trials/ or the projections change.
-LOCAL_ARTIFACT_SCHEMA_VERSION = 1
 # Bumped when dataset row normalization changes what a row_index means.
 DATASET_NORMALIZATION_VERSION = 1
 # The rollout HTTP/callback protocol this runner speaks.
@@ -416,7 +414,6 @@ class RunManifest:
     run_name: str
     created_at: str
     inputs: dict[str, Any]
-    inputs_digest: str
     provenance: dict[str, Any] = field(default_factory=dict)
     schema_version: int = LOCAL_STATE_SCHEMA_VERSION
 
@@ -435,7 +432,6 @@ class RunManifest:
             run_name=run_name,
             created_at=utc_now(),
             inputs=resolved,
-            inputs_digest=digest_of(resolved),
             provenance=dict(provenance),
         )
 
@@ -446,7 +442,6 @@ class RunManifest:
             "run_name": self.run_name,
             "created_at": self.created_at,
             "inputs": self.inputs,
-            "inputs_digest": self.inputs_digest,
             "provenance": self.provenance,
         }
 
@@ -471,15 +466,11 @@ class RunManifest:
         inputs = payload.get("inputs")
         if not isinstance(inputs, dict):
             raise LocalEvalStateError(f"{path} has no inputs object")
-        digest = payload.get("inputs_digest")
-        if not isinstance(digest, str):
-            raise LocalEvalStateError(f"{path} has no inputs_digest")
         return cls(
             local_run_id=str(payload.get("local_run_id", "")),
             run_name=str(payload.get("run_name", "")),
             created_at=str(payload.get("created_at", "")),
             inputs=inputs,
-            inputs_digest=digest,
             provenance=payload.get("provenance") or {},
             schema_version=schema_version,
         )

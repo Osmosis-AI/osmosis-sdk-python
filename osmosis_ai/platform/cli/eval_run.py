@@ -44,7 +44,6 @@ class _Hooks:
 
     yes: bool
     secrets_file: str | None
-    model_path: str
 
     def note(self, message: str) -> None:
         console.print(message, style="dim")
@@ -254,7 +253,7 @@ def run(
         selection=selection,
         rollout_dir=rollout_dir,
         output_root=output_root,
-        hooks=_Hooks(yes=yes, secrets_file=secrets_file, model_path=spec.model_path),
+        hooks=_Hooks(yes=yes, secrets_file=secrets_file),
         provenance=_provenance(workspace_directory, spec, advanced=advanced),
         config_stem=resolved_config_path.stem,
     )

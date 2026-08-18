@@ -50,7 +50,6 @@ from osmosis_ai.eval.local.results import (
 from osmosis_ai.eval.local.state import (
     DATASET_NORMALIZATION_VERSION,
     JOURNAL_FILENAME,
-    LOCAL_ARTIFACT_SCHEMA_VERSION,
     LOCAL_STATE_SCHEMA_VERSION,
     LOCKS_DIRNAME,
     MANIFEST_FILENAME,
@@ -278,12 +277,10 @@ def build_run_inputs(
             "agent_timeout_sec": spec.agent_timeout_sec,
             "grader_timeout_sec": spec.grader_timeout_sec,
         },
-        "pass_threshold": spec.pass_threshold,
         "versions": {
             "rollout_protocol": ROLLOUT_PROTOCOL_VERSION,
             "dataset_normalization": DATASET_NORMALIZATION_VERSION,
             "state_schema": LOCAL_STATE_SCHEMA_VERSION,
-            "artifact_schema": LOCAL_ARTIFACT_SCHEMA_VERSION,
         },
     }
 
@@ -515,7 +512,6 @@ class LocalEvalRunner:
         self._dispatch_context: dict[str, WorkItem] = {}
         self._dispatch_started: dict[str, float] = {}
         self._bridge: LiteLLMBridge | None = None
-        self._store: CallbackStore | None = None
         self._materializer: Materializer | None = None
         self._identity: RunIdentity | None = None
         self._child: asyncio.subprocess.Process | None = None
@@ -526,7 +522,6 @@ class LocalEvalRunner:
         self._started_at = utc_now()
         self._started_monotonic = time.monotonic()
         self._dispatched = 0
-        self._local_run_id = uuid.uuid4().hex
 
     # ------------------------------------------------------------------ #
     # Public entry point
@@ -585,7 +580,6 @@ class LocalEvalRunner:
             echo=self._hooks.note if self._options.verbose else None,
             redact=self._redactor.scrub,
         )
-        self._local_run_id = manifest.local_run_id
         self._identity = RunIdentity(
             local_run_id=manifest.local_run_id,
             run_name=run_name,
@@ -689,7 +683,6 @@ class LocalEvalRunner:
         bridge_token = uuid.uuid4().hex
         self._redactor.extend([controller_token, bridge_token])
         store = CallbackStore(on_terminal_commit=self._commit_terminal)
-        self._store = store
 
         # litellm resolves provider credentials from the environment; a secret
         # supplied through --secrets-file must reach it the same way.
