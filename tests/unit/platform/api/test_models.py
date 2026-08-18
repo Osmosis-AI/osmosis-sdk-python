@@ -12,7 +12,6 @@ from osmosis_ai.platform.api.models import (
     STATUSES_IN_PROGRESS,
     STATUSES_INACTIVE,
     STATUSES_SUCCESS,
-    STATUSES_TERMINAL,
     DatasetDownloadInfo,
     DatasetFile,
     EnvironmentSecretInfo,
@@ -136,12 +135,6 @@ class TestDatasetDownloadInfo:
 
 class TestStatusConstants:
     """Tests for module-level status frozenset constants."""
-
-    def test_terminal_is_union(self) -> None:
-        """Verify STATUSES_TERMINAL equals the union of success, error, and inactive."""
-        assert (
-            STATUSES_TERMINAL == STATUSES_SUCCESS | STATUSES_ERROR | STATUSES_INACTIVE
-        )
 
     def test_no_overlap(self) -> None:
         """Verify no status appears in more than one category."""
@@ -615,13 +608,9 @@ class TestModelModels:
         assert s.status == "active"
 
     def test_deployment_status_frozensets(self) -> None:
-        from osmosis_ai.platform.api.models import (
-            DEPLOYMENT_STATUSES_INACTIVE,
-            DEPLOYMENT_STATUSES_SUCCESS,
-        )
+        from osmosis_ai.platform.api.models import DEPLOYMENT_STATUSES_SUCCESS
 
         assert "active" in DEPLOYMENT_STATUSES_SUCCESS
-        assert "inactive" in DEPLOYMENT_STATUSES_INACTIVE
 
     def test_lora_checkpoint_info(self) -> None:
         from osmosis_ai.platform.api.models import LoraCheckpointInfo

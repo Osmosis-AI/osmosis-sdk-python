@@ -26,13 +26,6 @@ class GitWorkspaceDirectoryContext:
     credentials: Credentials
 
 
-@dataclass(frozen=True, slots=True)
-class LocalWorkspaceDirectoryContext:
-    workspace_directory: Path
-    git_identity: str | None
-    repo_url: str | None
-
-
 def _optional_identity(workspace_directory: Path) -> tuple[str | None, str | None]:
     remote_url = get_local_git_remote_url(workspace_directory)
     if remote_url is None:
@@ -42,22 +35,6 @@ def _optional_identity(workspace_directory: Path) -> tuple[str | None, str | Non
     except CLIError:
         return None, None
     return normalized.identity, normalized.display_url
-
-
-def resolve_local_workspace_directory_context(
-    *,
-    cwd: Path | None = None,
-    require_scaffold: bool = True,
-) -> LocalWorkspaceDirectoryContext:
-    workspace_directory = resolve_workspace_directory(cwd)
-    if require_scaffold:
-        validate_workspace_directory_contract(workspace_directory)
-    git_identity, repo_url = _optional_identity(workspace_directory)
-    return LocalWorkspaceDirectoryContext(
-        workspace_directory=workspace_directory,
-        git_identity=git_identity,
-        repo_url=repo_url,
-    )
 
 
 def resolve_optional_git_identity(cwd: Path | None = None) -> str | None:
@@ -102,9 +79,7 @@ def resolve_git_workspace_directory_context(
     )
 
 
-def git_result_context(
-    ctx: GitWorkspaceDirectoryContext | LocalWorkspaceDirectoryContext,
-) -> dict[str, object]:
+def git_result_context(ctx: GitWorkspaceDirectoryContext) -> dict[str, object]:
     return {
         "git": {"identity": ctx.git_identity, "remote_url": ctx.repo_url},
         "workspace_directory": str(ctx.workspace_directory),
@@ -113,9 +88,7 @@ def git_result_context(
 
 __all__ = [
     "GitWorkspaceDirectoryContext",
-    "LocalWorkspaceDirectoryContext",
     "git_result_context",
     "resolve_git_workspace_directory_context",
-    "resolve_local_workspace_directory_context",
     "resolve_optional_git_identity",
 ]

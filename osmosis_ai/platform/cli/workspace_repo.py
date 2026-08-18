@@ -263,14 +263,6 @@ def git_worktree_top_level(workspace_directory: Path) -> Path | None:
     return Path(top).resolve() if top else None
 
 
-def require_git_top_level(workspace_directory: Path, command_label: str) -> None:
-    top = git_worktree_top_level(workspace_directory)
-    if top != workspace_directory.resolve():
-        raise CLIError(
-            f"{command_label} must be run from a Git worktree top-level Osmosis workspace directory."
-        )
-
-
 @dataclass(frozen=True, slots=True)
 class LocalGitState:
     """Best-effort summary of a local git working tree.
@@ -518,7 +510,6 @@ __all__ = [
     "get_local_git_remote_url",
     "git_worktree_top_level",
     "normalize_git_identity",
-    "require_git_top_level",
     "resolve_canonical_git_identity",
     "summarize_local_git_state",
 ]
