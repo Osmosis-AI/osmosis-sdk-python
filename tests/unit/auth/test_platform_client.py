@@ -188,23 +188,6 @@ class TestPlatformRequest:
     # Request Construction
     # -------------------------------------------------------------------------
 
-    @patch("osmosis_ai.platform.auth.platform_client.urlopen")
-    def test_constructs_correct_url(self, mock_urlopen: MagicMock) -> None:
-        """Verify the full URL is built from PLATFORM_URL + endpoint."""
-        mock_urlopen.return_value = _make_http_response({"ok": True})
-        creds = _make_credentials()
-
-        with patch(
-            "osmosis_ai.platform.auth.platform_client.PLATFORM_URL",
-            "https://test.osmosis.ai",
-        ):
-            platform_request(
-                "/api/v1/verify", credentials=creds, git_identity="git_test"
-            )
-
-        request_obj = mock_urlopen.call_args[0][0]
-        assert request_obj.full_url == "https://test.osmosis.ai/api/v1/verify"
-
     @pytest.mark.parametrize(
         ("platform_url", "expected_url"),
         [
