@@ -988,15 +988,12 @@ def _check_parquet_metadata_column(pf: Any) -> list[str]:
 
 
 def _validate_parquet(file_path: Path) -> list[str]:
-    """Validate parquet file structure and required columns."""
-    try:
-        import pyarrow.parquet as pq
-    except ImportError:
-        console.print(
-            f"Note: {PARQUET_VALIDATION_SKIPPED_WARNING}",
-            style="dim yellow",
-        )
-        return []
+    """Validate parquet file structure and required columns.
+
+    ``_validate_file_with_warnings`` establishes the pyarrow precondition and
+    returns a structured skip warning when it fails, so this import is safe.
+    """
+    import pyarrow.parquet as pq
 
     errors = []
     try:
