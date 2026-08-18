@@ -20,7 +20,6 @@ AuthenticationError = _litellm.AuthenticationError
 Timeout = _litellm.Timeout
 APIConnectionError = _litellm.APIConnectionError
 BudgetExceededError = _litellm.BudgetExceededError
-ContextWindowExceededError = _litellm.ContextWindowExceededError
 
 # ---------------------------------------------------------------------------
 # Functions

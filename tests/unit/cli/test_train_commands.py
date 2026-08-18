@@ -175,11 +175,6 @@ def _mock_workspace_repo(monkeypatch: pytest.MonkeyPatch) -> None:
         _git_top_level,
         raising=False,
     )
-    monkeypatch.setattr(
-        "osmosis_ai.platform.cli.workspace_repo.require_git_top_level",
-        lambda *args, **kwargs: None,
-        raising=False,
-    )
     # Disable the pinned-commit preflight by default so submit tests don't make
     # real git/GitHub calls; tests that exercise it patch this explicitly.
     disable_commit_preflight(monkeypatch)

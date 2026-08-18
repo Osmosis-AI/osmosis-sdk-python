@@ -231,10 +231,6 @@ rollout_batch_size = 64
     monkeypatch.chdir(project)
     _stub_git_context(monkeypatch)
     monkeypatch.setattr(
-        "osmosis_ai.platform.cli.workspace_repo.require_git_top_level",
-        lambda *args, **kwargs: None,
-    )
-    monkeypatch.setattr(
         "osmosis_ai.platform.cli.workspace_repo.summarize_local_git_state",
         lambda _root: None,
     )

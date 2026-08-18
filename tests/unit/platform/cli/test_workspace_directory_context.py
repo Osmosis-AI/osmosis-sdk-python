@@ -42,17 +42,34 @@ def _scaffold(path: Path) -> None:
         (path / rel).mkdir(parents=True, exist_ok=True)
 
 
-def test_local_context_allows_missing_origin(tmp_path: Path) -> None:
+def test_optional_git_identity_resolves_origin(tmp_path: Path) -> None:
+    _repo(tmp_path, origin="https://github.com/Acme/Rollouts.git")
+
+    identity = workspace_directory_context.resolve_optional_git_identity(tmp_path)
+
+    assert identity == "acme/rollouts"
+
+
+def test_optional_git_identity_none_without_origin(tmp_path: Path) -> None:
     _repo(tmp_path)
-    _scaffold(tmp_path)
 
-    ctx = workspace_directory_context.resolve_local_workspace_directory_context(
-        cwd=tmp_path
-    )
+    assert workspace_directory_context.resolve_optional_git_identity(tmp_path) is None
 
-    assert ctx.workspace_directory == tmp_path.resolve()
-    assert ctx.git_identity is None
-    assert ctx.repo_url is None
+
+def test_optional_git_identity_none_outside_git_worktree(tmp_path: Path) -> None:
+    assert workspace_directory_context.resolve_optional_git_identity(tmp_path) is None
+
+
+def test_optional_git_identity_ignores_invalid_origin(tmp_path: Path) -> None:
+    _repo(tmp_path, origin="https://gitlab.com/acme/rollouts.git")
+
+    assert workspace_directory_context.resolve_optional_git_identity(tmp_path) is None
+
+
+def test_optional_git_identity_ignores_malformed_origin(tmp_path: Path) -> None:
+    _repo(tmp_path, origin="https://[github.com/acme/rollouts.git")
+
+    assert workspace_directory_context.resolve_optional_git_identity(tmp_path) is None
 
 
 def test_platform_context_requires_origin_and_credentials(
@@ -84,56 +101,6 @@ def test_platform_context_rejects_missing_origin(tmp_path: Path) -> None:
         )
 
     assert "Set `origin` to the Platform-connected repository" in str(exc.value)
-
-
-def test_scaffold_required_context_rejects_missing_paths(tmp_path: Path) -> None:
-    _repo(tmp_path, origin="https://github.com/acme/rollouts.git")
-
-    with pytest.raises(CLIError) as exc:
-        workspace_directory_context.resolve_local_workspace_directory_context(
-            cwd=tmp_path, require_scaffold=True
-        )
-
-    assert "missing required Osmosis scaffold paths" in str(exc.value)
-
-
-def test_local_context_allows_missing_scaffold_when_not_required(
-    tmp_path: Path,
-) -> None:
-    _repo(tmp_path, origin="https://github.com/acme/rollouts.git")
-
-    ctx = workspace_directory_context.resolve_local_workspace_directory_context(
-        cwd=tmp_path,
-        require_scaffold=False,
-    )
-
-    assert ctx.workspace_directory == tmp_path.resolve()
-    assert ctx.git_identity == "acme/rollouts"
-    assert ctx.repo_url == "https://github.com/acme/rollouts.git"
-
-
-def test_local_context_ignores_invalid_origin(tmp_path: Path) -> None:
-    _repo(tmp_path, origin="https://gitlab.com/acme/rollouts.git")
-    _scaffold(tmp_path)
-
-    ctx = workspace_directory_context.resolve_local_workspace_directory_context(
-        cwd=tmp_path
-    )
-
-    assert ctx.git_identity is None
-    assert ctx.repo_url is None
-
-
-def test_local_context_ignores_malformed_origin(tmp_path: Path) -> None:
-    _repo(tmp_path, origin="https://[github.com/acme/rollouts.git")
-    _scaffold(tmp_path)
-
-    ctx = workspace_directory_context.resolve_local_workspace_directory_context(
-        cwd=tmp_path
-    )
-
-    assert ctx.git_identity is None
-    assert ctx.repo_url is None
 
 
 def test_platform_context_requires_credentials(
@@ -168,10 +135,11 @@ def test_platform_context_rejects_expired_credentials(
 
 
 def test_git_result_context_shape(tmp_path: Path) -> None:
-    ctx = workspace_directory_context.LocalWorkspaceDirectoryContext(
+    ctx = workspace_directory_context.GitWorkspaceDirectoryContext(
         workspace_directory=tmp_path.resolve(),
         git_identity="acme/rollouts",
         repo_url="https://github.com/acme/rollouts.git",
+        credentials=_make_credentials(),
     )
 
     result: dict[str, Any] = workspace_directory_context.git_result_context(ctx)

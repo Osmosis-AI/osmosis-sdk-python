@@ -16,9 +16,6 @@ STATUSES_ACTIVE: frozenset[str] = frozenset({"uploading", "processing"})
 STATUSES_IN_PROGRESS: frozenset[str] = STATUSES_PENDING | STATUSES_ACTIVE
 STATUSES_ERROR: frozenset[str] = frozenset({"error"})
 STATUSES_INACTIVE: frozenset[str] = frozenset({"cancelled"})
-STATUSES_TERMINAL: frozenset[str] = (
-    STATUSES_SUCCESS | STATUSES_ERROR | STATUSES_INACTIVE
-)
 
 
 @dataclass
@@ -1262,7 +1259,6 @@ class PaginatedEnvironmentSecrets:
 # Lifecycle of a LoRA model's deployment: "active" / "inactive".
 
 DEPLOYMENT_STATUSES_SUCCESS: frozenset[str] = frozenset({"active"})
-DEPLOYMENT_STATUSES_INACTIVE: frozenset[str] = frozenset({"inactive"})
 
 
 # ── Rollouts ─────────────────────────────────────────────────────
