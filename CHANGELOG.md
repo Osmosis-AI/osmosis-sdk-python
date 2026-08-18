@@ -7,6 +7,7 @@ This file records changes to `osmosis-ai`. For earlier versions, see [GitHub Rel
 ### Breaking Changes
 
 - Removed `ExecutionBackend.max_concurrency` and its `LocalBackend` override; nothing read it, and `/health` is the single capacity channel. Out-of-tree backends that override it keep working, but a `super().max_concurrency` call now raises `AttributeError`.
+- Removed the `deps` parameter from `osmosis_ai.packaging.build_bundle()`; it overrode a rollout project's declared dependencies for a caller that no longer exists.
 - `RolloutDriver.run` now takes a single `RolloutRunRequest` argument; update custom drivers and callers to pass the request object ([#307](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/307)).
 
 ### Changed
