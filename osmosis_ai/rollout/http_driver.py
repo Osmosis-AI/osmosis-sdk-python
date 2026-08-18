@@ -29,17 +29,28 @@ from osmosis_ai.rollout.types import (
 
 logger: logging.Logger = logging.getLogger(__name__)
 
-# Ceiling on a server-dictated Retry-After: the backpressure wait is
-# uninterruptible, so an outsized header must not park a rollout for hours.
+# Bounds on a server-dictated Retry-After. The floor keeps a server that
+# answers 429 with "0" from turning the admission loop into a busy spin; the
+# ceiling keeps an outsized header from parking a rollout for hours, since the
+# backpressure wait is uninterruptible.
+_RETRY_AFTER_FLOOR_SEC = 0.05
 _MAX_RETRY_AFTER_SEC = 60.0
 
 
 class RolloutProtocolError(RuntimeError):
-    """The rollout server returned a response outside the v0.3 admission contract."""
+    """The rollout server returned a response outside the v0.3 admission contract.
+
+    ``status_code`` is part of the contract: a caller has to tell a refusal of
+    *this* request apart from a server that is simply broken.
+    """
+
+    def __init__(self, message: str, *, status_code: int) -> None:
+        super().__init__(message)
+        self.status_code: int = status_code
 
 
 def _retry_after_seconds(response: httpx.Response, default: float = 1.0) -> float:
-    """Parse Retry-After into a finite, non-negative, capped wait; else the default."""
+    """Parse Retry-After into a finite, positive, bounded wait; else the default."""
     raw = response.headers.get("Retry-After")
     if raw is None:
         return default
@@ -49,7 +60,7 @@ def _retry_after_seconds(response: httpx.Response, default: float = 1.0) -> floa
         return default
     if not math.isfinite(value):
         return default
-    return min(max(0.0, value), _MAX_RETRY_AFTER_SEC)
+    return min(max(_RETRY_AFTER_FLOOR_SEC, value), _MAX_RETRY_AFTER_SEC)
 
 
 class HttpRolloutDriver(RolloutDriver):
@@ -138,7 +149,8 @@ class HttpRolloutDriver(RolloutDriver):
                 continue
             raise RolloutProtocolError(
                 f"POST /rollout returned {response.status_code}; "
-                "only 202 and 429 are accepted"
+                "only 202 and 429 are accepted",
+                status_code=response.status_code,
             )
 
     async def _wait_for_terminal(self, rollout_id: str) -> TerminalCallbackResult:

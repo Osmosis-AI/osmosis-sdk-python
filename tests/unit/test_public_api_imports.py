@@ -349,7 +349,7 @@ def test_extra_modules_table_matches_pyproject_extras() -> None:
             "rubric",
         ),
         (
-            "osmosis_ai.rollout.controller",
+            "osmosis_ai.rollout.controller.listener",
             "create_callback_app",
             "fastapi",
             "eval-run",
@@ -361,7 +361,7 @@ def test_extra_modules_table_matches_pyproject_extras() -> None:
             "eval-run",
         ),
         (
-            "osmosis_ai.rollout.controller",
+            "osmosis_ai.rollout.controller.llm_bridge",
             "create_bridge_router",
             "fastapi",
             "eval-run",

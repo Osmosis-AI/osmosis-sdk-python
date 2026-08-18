@@ -8,9 +8,7 @@ def test_rollout_outcome_defaults():
     assert outcome.status == RolloutStatus.SUCCESS
     assert outcome.sample is None
     assert outcome.error is None
-    assert outcome.duration_ms == 0.0
-    assert outcome.tokens == 0
-    assert outcome.systemic_error is None
+    assert outcome.rollout_id is None
 
 
 def test_driver_exports_controller_contract_only():
