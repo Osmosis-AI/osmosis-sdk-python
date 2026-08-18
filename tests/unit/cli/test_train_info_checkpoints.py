@@ -109,7 +109,6 @@ class TestStatusCheckpoints:
                 assert credentials is FAKE_CREDENTIALS
                 assert git_identity == GIT_IDENTITY
                 return TrainingRunCheckpoints(
-                    training_run_id="run_1",
                     training_run_name="qwen3-run1",
                     checkpoints=[
                         LoraCheckpointInfo(
@@ -193,7 +192,6 @@ class TestStatusCheckpoints:
                 assert credentials is FAKE_CREDENTIALS
                 assert git_identity == GIT_IDENTITY
                 return TrainingRunCheckpoints(
-                    training_run_id="run_1",
                     training_run_name="qwen3-run1",
                     checkpoints=[
                         LoraCheckpointInfo(
@@ -276,7 +274,6 @@ class TestStatusCheckpoints:
                 assert credentials is FAKE_CREDENTIALS
                 assert git_identity == GIT_IDENTITY
                 return TrainingRunCheckpoints(
-                    training_run_id="run_1",
                     training_run_name="qwen3-run1",
                     checkpoints=[
                         LoraCheckpointInfo(
@@ -321,7 +318,6 @@ class TestStatusCheckpoints:
                 assert credentials is FAKE_CREDENTIALS
                 assert git_identity == GIT_IDENTITY
                 return TrainingRunCheckpoints(
-                    training_run_id="run_1",
                     training_run_name="qwen3-run1",
                     checkpoints=[],
                 )

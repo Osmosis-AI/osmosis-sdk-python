@@ -579,8 +579,7 @@ def platform_request(
             raw = response.read()
             if not raw:
                 return {}
-            result: dict[str, Any] = json.loads(raw.decode())
-            return result
+            parsed = json.loads(raw)
     except HTTPError as e:
         _raise_for_http_error(
             e,
@@ -590,8 +589,14 @@ def platform_request(
         )
     except URLError as e:
         raise PlatformAPIError(f"Connection error: {e.reason}") from e
-    except json.JSONDecodeError as e:
+    except TimeoutError as e:
+        # A socket timeout mid-read is a bare TimeoutError, not a URLError.
+        raise PlatformAPIError("Connection error: timed out") from e
+    except (json.JSONDecodeError, UnicodeDecodeError) as e:
         raise PlatformAPIError("Invalid JSON response from platform") from e
+    if not isinstance(parsed, dict):
+        raise PlatformAPIError("Invalid JSON response from platform")
+    return parsed
 
 
 def iter_sse_data(lines: Iterable[str]) -> Iterator[dict[str, Any]]:
@@ -662,6 +667,11 @@ def platform_stream(
 
     try:
         response = urlopen(request, timeout=timeout)
+        with response:
+            surface_response_version_signal(response)
+            yield from iter_sse_data(
+                line.decode("utf-8", errors="replace") for line in response
+            )
     except HTTPError as e:
         _raise_for_http_error(
             e,
@@ -670,9 +680,6 @@ def platform_stream(
         )
     except URLError as e:
         raise PlatformAPIError(f"Connection error: {e.reason}") from e
-
-    with response:
-        surface_response_version_signal(response)
-        yield from iter_sse_data(
-            line.decode("utf-8", errors="replace") for line in response
-        )
+    except TimeoutError as e:
+        # A socket timeout during setup or iteration is bare, not a URLError.
+        raise PlatformAPIError("Connection error: timed out") from e

@@ -131,7 +131,6 @@ def test_upload_passes_git_context_to_api_calls_without_subscription_preflight(
                 status="created",
                 upload=UploadInfo(
                     method="simple",
-                    s3_key="uploads/data",
                     presigned_url="https://example.com/upload",
                 ),
             )

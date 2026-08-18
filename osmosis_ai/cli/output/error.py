@@ -53,10 +53,7 @@ def classify_error(exc: BaseException) -> CLIError:
     if isinstance(exc, CLIError):
         return exc
 
-    # Resolved before the platform import: usage errors must stay import-light,
-    # and the auth package can itself raise (bad OSMOSIS_PLATFORM_URL evaluates
-    # at import time) — importing it while handling an error would replace the
-    # envelope with a traceback.
+    # Resolved before the platform import: usage errors must stay import-light.
     if isinstance(exc, UsageError):
         return CLIError(str(exc) or "Invalid usage.", code=CLIErrorCode.VALIDATION)
 

@@ -457,7 +457,6 @@ def test_dataset_upload_json_stdout_is_one_envelope(
                 status="created",
                 upload=UploadInfo(
                     method="simple",
-                    s3_key="uploads/train",
                     presigned_url="https://example.com/upload",
                 ),
             )
@@ -529,7 +528,6 @@ def test_dataset_upload_json_surfaces_parquet_skip_warning(
                 status="created",
                 upload=UploadInfo(
                     method="simple",
-                    s3_key="uploads/train",
                     presigned_url="https://example.com/upload",
                 ),
             )
@@ -740,7 +738,6 @@ def test_dataset_upload_json_overwrite_stdout_is_one_envelope(
                 status="created",
                 upload=UploadInfo(
                     method="simple",
-                    s3_key="uploads/train",
                     presigned_url="https://example.com/upload",
                 ),
             )
@@ -859,7 +856,6 @@ def test_dataset_upload_no_platform_url_hint_uses_file_name(
                 status="created",
                 upload=UploadInfo(
                     method="simple",
-                    s3_key="uploads/my_dataset",
                     presigned_url="https://example.com/upload",
                 ),
             )

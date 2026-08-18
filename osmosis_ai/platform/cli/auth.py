@@ -169,46 +169,28 @@ def _cli_error_from_login_error(exc: Any) -> CLIError:
     return CLIError(str(exc), code="PLATFORM_ERROR", details=details)
 
 
-def _save_replacement_credentials(
+def _finish_login(
     *,
     creds: Any,
     old_credentials: Any | None,
-    local_data_cleared: bool,
-    clear_all_local_data: Any,
-    save_credentials: Any,
-) -> str:
-    """Save new credentials after destructive cleanup, restoring old ones on failure."""
-    if not local_data_cleared:
-        return save_credentials(creds)
+    result: Any,
+    force: bool,
+    source: str,
+    output: Any,
+) -> OperationResult:
+    """Replace the stored session with *creds* and report the outcome.
 
-    clear_all_local_data()
-    try:
-        return save_credentials(creds)
-    except Exception:
-        if old_credentials is not None:
-            with contextlib.suppress(Exception):
-                save_credentials(old_credentials)
-        raise
+    Shared by the token and device-code paths, which differ only in how they
+    obtain *creds*. Wipes local data when the user changed or --force was
+    passed, restores the previous credentials if the save then fails, and
+    revokes the old CLI token when it is still live and distinct.
 
-
-def _login_with_token(*, token: str, force: bool) -> OperationResult:
-    """Verify and persist an explicit token, returning structured output."""
-    from osmosis_ai.platform.auth import load_credentials, verify_token
-    from osmosis_ai.platform.auth.credentials import (
-        Credentials,
-        save_credentials,
-    )
-    from osmosis_ai.platform.auth.flow import LoginResult
+    Imports stay inside the body: callers patch the source modules, and
+    hoisting them would also undo the deferred-import CLI startup work.
+    """
+    from osmosis_ai.platform.auth.credentials import save_credentials
     from osmosis_ai.platform.auth.local_config import clear_all_local_data
     from osmosis_ai.platform.auth.platform_client import revoke_cli_token
-
-    output = get_output_context()
-    old_credentials = load_credentials(include_env=False)
-
-    with output.status("Verifying token..."):
-        verified = verify_token(token)
-    creds = Credentials.from_verify_result(token, verified)
-    result = LoginResult.from_verify_result(verified)
 
     local_data_cleared = bool(
         force or (old_credentials and old_credentials.user.id != creds.user.id)
@@ -222,13 +204,17 @@ def _login_with_token(*, token: str, force: bool) -> OperationResult:
         else None
     )
 
-    token_store = _save_replacement_credentials(
-        creds=creds,
-        old_credentials=old_credentials,
-        local_data_cleared=local_data_cleared,
-        clear_all_local_data=clear_all_local_data,
-        save_credentials=save_credentials,
-    )
+    if local_data_cleared:
+        clear_all_local_data()
+        try:
+            token_store = save_credentials(creds)
+        except Exception:
+            if old_credentials is not None:
+                with contextlib.suppress(Exception):
+                    save_credentials(old_credentials)
+            raise
+    else:
+        token_store = save_credentials(creds)
 
     if old_credentials_to_revoke is not None:
         with output.status("Revoking old session..."):
@@ -238,10 +224,34 @@ def _login_with_token(*, token: str, force: bool) -> OperationResult:
         email=result.user.email,
         name=result.user.name,
         expires_at=result.expires_at,
-        source="token",
+        source=source,
         saved=True,
         token_store=token_store,
-        local_data_cleared=bool(local_data_cleared),
+        local_data_cleared=local_data_cleared,
+    )
+
+
+def _login_with_token(*, token: str, force: bool) -> OperationResult:
+    """Verify and persist an explicit token, returning structured output."""
+    from osmosis_ai.platform.auth import load_credentials, verify_token
+    from osmosis_ai.platform.auth.credentials import Credentials
+    from osmosis_ai.platform.auth.flow import LoginResult
+
+    output = get_output_context()
+    old_credentials = load_credentials(include_env=False)
+
+    with output.status("Verifying token..."):
+        verified = verify_token(token)
+    creds = Credentials.from_verify_result(token, verified)
+    result = LoginResult.from_verify_result(verified)
+
+    return _finish_login(
+        creds=creds,
+        old_credentials=old_credentials,
+        result=result,
+        force=force,
+        source="token",
+        output=output,
     )
 
 
@@ -280,46 +290,18 @@ def _login_with_env_token(*, env_token: str) -> OperationResult:
 def _login_with_device_flow(*, force: bool) -> OperationResult:
     """Interactive device-code login. Caller must have already gated on interactivity."""
     from osmosis_ai.platform.auth import device_login, load_credentials
-    from osmosis_ai.platform.auth.credentials import save_credentials
-    from osmosis_ai.platform.auth.local_config import clear_all_local_data
-    from osmosis_ai.platform.auth.platform_client import revoke_cli_token
 
     output = get_output_context()
     old_credentials = load_credentials()
     result, creds = device_login()
 
-    local_data_cleared = bool(
-        force or (old_credentials and old_credentials.user.id != creds.user.id)
-    )
-    old_credentials_to_revoke = (
-        old_credentials
-        if old_credentials is not None
-        and not old_credentials.is_expired()
-        and old_credentials.token_id
-        and old_credentials.token_id != creds.token_id
-        else None
-    )
-
-    token_store = _save_replacement_credentials(
+    return _finish_login(
         creds=creds,
         old_credentials=old_credentials,
-        local_data_cleared=local_data_cleared,
-        clear_all_local_data=clear_all_local_data,
-        save_credentials=save_credentials,
-    )
-
-    if old_credentials_to_revoke is not None:
-        with output.status("Revoking old session..."):
-            revoke_cli_token(old_credentials_to_revoke)
-
-    return _login_operation_result(
-        email=result.user.email,
-        name=result.user.name,
-        expires_at=result.expires_at,
+        result=result,
+        force=force,
         source="device",
-        saved=True,
-        token_store=token_store,
-        local_data_cleared=bool(local_data_cleared),
+        output=output,
     )
 
 

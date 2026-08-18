@@ -105,10 +105,6 @@ class DeviceCodeResponse:
 # ---------------------------------------------------------------------------
 
 
-def _platform_url() -> str:
-    return get_platform_url()
-
-
 def _parse_expires_at(raw: str | None) -> datetime:
     """Parse an ISO 8601 expires_at string into a timezone-aware datetime.
 
@@ -235,7 +231,7 @@ def verify_token(token: str, *, git_identity: str | None = None) -> VerifyResult
     Raises:
         LoginError: If verification fails.
     """
-    verify_url = f"{_platform_url()}/api/cli/verify"
+    verify_url = f"{get_platform_url()}/api/cli/verify"
 
     req_headers = cli_request_headers(token=token)
     if git_identity:
@@ -301,7 +297,7 @@ def verify_token(token: str, *, git_identity: str | None = None) -> VerifyResult
 
 def request_device_code(device_name: str | None = None) -> DeviceCodeResponse:
     """Request a device code from the platform."""
-    url = f"{_platform_url()}/api/cli/device/authorize"
+    url = f"{get_platform_url()}/api/cli/device/authorize"
     body = json.dumps(
         {
             "deviceName": device_name or _get_device_name(),
@@ -342,7 +338,7 @@ def poll_device_token(
     on_poll: Callable[[], None] | None = None,
 ) -> dict[str, Any]:
     """Poll for device authorization completion. Returns token response dict."""
-    url = f"{_platform_url()}/api/cli/device/token"
+    url = f"{get_platform_url()}/api/cli/device/token"
     body = json.dumps({"device_code": device_code}).encode()
     req_headers = cli_request_headers()
     deadline = time.monotonic() + timeout

@@ -418,11 +418,12 @@ def test_benchmark_logs_stop_and_output_routes(mock_request: MagicMock) -> None:
         "run/name",
         limit=20,
         cursor="cursor-1",
+        direction="newer",
         git_identity="acme/workspace",
     )
     assert mock_request.call_args.args[0] == (
         "/api/cli/benchmark-runs/run%2Fname/logs?"
-        "limit=20&direction=older&cursor=cursor-1"
+        "limit=20&direction=newer&cursor=cursor-1"
     )
 
     mock_request.return_value = {}

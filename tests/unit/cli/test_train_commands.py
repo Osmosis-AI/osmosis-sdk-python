@@ -397,7 +397,6 @@ class TestInfo:
             created_at="2026-01-01T01:00:00Z",
         )
         metric_data = TrainingRunMetrics(
-            training_run_id=detail.id,
             status="finished",
             overview=TrainingRunMetricsOverview(
                 duration_ms=1000,
@@ -557,7 +556,6 @@ class TestInfo:
         )
 
         metrics = TrainingRunMetrics(
-            training_run_id=detail.id,
             status="running",
             overview=TrainingRunMetricsOverview(
                 duration_ms=None,
@@ -1957,7 +1955,6 @@ class TestMetrics:
             platform_url="https://platform.osmosis.ai/ws/training/abcdef1234567890abcdef1234567890",
         )
         metrics = TrainingRunMetrics(
-            training_run_id=detail.id,
             status="completed",
             overview=TrainingRunMetricsOverview(
                 duration_ms=None,

@@ -6,7 +6,7 @@ Datasets supply prompt/answer pairs or metadata-driven examples for cloud `osmos
 
 ## What the SDK checks
 
-Constants: [../osmosis_ai/platform/cli/constants.py](../osmosis_ai/platform/cli/constants.py). Validation: [../osmosis_ai/platform/cli/dataset.py](../osmosis_ai/platform/cli/dataset.py) (`_validate_file`, `_check_required_columns`).
+Constants: [../osmosis_ai/platform/constants.py](../osmosis_ai/platform/constants.py). Validation: [../osmosis_ai/platform/cli/dataset.py](../osmosis_ai/platform/cli/dataset.py) (`_validate_file`, `_check_required_columns`).
 
 | Rule | Value | Source |
 |------|-------|--------|

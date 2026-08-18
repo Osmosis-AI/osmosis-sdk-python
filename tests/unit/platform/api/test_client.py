@@ -939,7 +939,6 @@ class TestGetTrainingRunMetrics:
         }
         client = OsmosisClient()
         result = client.get_training_run_metrics("run-1", git_identity="git_test")
-        assert result.training_run_id == "run-1"
         assert result.overview.metric_summaries[0].latest == 0.85
         assert len(result.metrics) == 1
         path = mock_request.call_args[0][0]
@@ -1220,7 +1219,6 @@ class TestGetEvalRunMetrics:
 
         result = OsmosisClient().get_eval_run_metrics("a/b", git_identity="git_test")
 
-        assert result.eval_run_id == "a/b"
         assert result.overview.pass_rate == 0.8163
         assert result.reward_stats is not None
         assert result.reward_stats.mean == 0.72

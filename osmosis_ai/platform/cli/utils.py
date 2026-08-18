@@ -34,10 +34,6 @@ from osmosis_ai.platform.api.models import (
     STATUSES_PENDING,
     STATUSES_SUCCESS,
 )
-from osmosis_ai.platform.auth import (
-    AuthenticationExpiredError,
-    load_credentials,
-)
 from osmosis_ai.platform.cli.workspace_directory_context import (
     GitWorkspaceDirectoryContext,
     git_result_context,
@@ -47,7 +43,6 @@ from osmosis_ai.platform.constants import DEFAULT_PAGE_SIZE
 
 if TYPE_CHECKING:
     from osmosis_ai.platform.api.models import LogsPage
-    from osmosis_ai.platform.auth.credentials import Credentials
 
 
 def make_progress(
@@ -103,18 +98,6 @@ def platform_call[T](message: str, call: Callable[[], T]) -> T:
 
     with get_output_context().status(message):
         return call()
-
-
-def require_credentials() -> Credentials:
-    """Load valid credentials, raising if not available or expired."""
-    from osmosis_ai.platform.constants import MSG_NOT_LOGGED_IN
-
-    credentials = load_credentials()
-    if credentials is None:
-        raise CLIError(MSG_NOT_LOGGED_IN, code="AUTH_REQUIRED")
-    if credentials.is_expired():
-        raise AuthenticationExpiredError()
-    return credentials
 
 
 def require_git_workspace_directory_context() -> GitWorkspaceDirectoryContext:
