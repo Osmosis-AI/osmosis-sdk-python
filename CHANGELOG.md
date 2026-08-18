@@ -6,6 +6,8 @@ This file records changes to `osmosis-ai`. For earlier versions, see [GitHub Rel
 
 ### Breaking Changes
 
+- Removed eight server-owned fields from the `osmosis_ai.platform.api.models` record types, which the package documents as a direct import path: `UploadInfo.s3_key` / `.upload_id`, `DatasetFile.df_stats` / `.organization_id`, `TrainingRunMetrics.training_run_id`, `EvalRunMetrics.eval_run_id`, `RolloutInfo.last_synced_at`, and `TrainingRunCheckpoints.training_run_id`. Nothing in the SDK read them. Reading one of these attributes out of tree now raises `AttributeError`, and the four that were required keys are no longer required, so `from_dict` accepts responses that omit them.
+- Removed the `direction` parameter from every `OsmosisClient.*_logs()` method. It was never varied and forward paging was never completable, since `LogsPage` carries only a backward `next_cursor`. The request the platform receives is unchanged.
 - Removed `ExecutionBackend.max_concurrency` and its `LocalBackend` override; nothing read it, and `/health` is the single capacity channel. Out-of-tree backends that override it keep working, but a `super().max_concurrency` call now raises `AttributeError`.
 - Removed the `deps` parameter from `osmosis_ai.packaging.build_bundle()`; it overrode a rollout project's declared dependencies for a caller that no longer exists.
 - `RolloutDriver.run` now takes a single `RolloutRunRequest` argument; update custom drivers and callers to pass the request object ([#307](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/307)).
