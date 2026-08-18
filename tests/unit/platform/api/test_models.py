@@ -53,11 +53,9 @@ class TestUploadInfo:
         }
         info = UploadInfo.from_dict(data)
         assert info.method == "simple"
-        assert info.s3_key == "uploads/abc123.jsonl"
         assert info.presigned_url == "https://s3.example.com/bucket/abc123?sig=xxx"
         assert info.expires_in == 3600
         assert info.upload_headers == {"Content-Type": "application/octet-stream"}
-        assert info.upload_id is None
         assert info.part_size is None
         assert info.total_parts is None
         assert info.presigned_urls is None
@@ -79,8 +77,6 @@ class TestUploadInfo:
         }
         info = UploadInfo.from_dict(data)
         assert info.method == "multipart"
-        assert info.s3_key == "uploads/large-file.jsonl"
-        assert info.upload_id == "mp-upload-xyz"
         assert info.part_size == 5242880
         assert info.total_parts == 3
         assert info.presigned_urls == urls
@@ -97,7 +93,6 @@ class TestUploadInfo:
         data = {"s3_key": "uploads/file.jsonl"}
         info = UploadInfo.from_dict(data)
         assert info.method == "simple"
-        assert info.s3_key == "uploads/file.jsonl"
 
 
 class TestDatasetDownloadInfo:
@@ -401,7 +396,6 @@ class TestTrainingRunMetrics:
             ],
         }
         result = TrainingRunMetrics.from_dict(data)
-        assert result.training_run_id == "550e8400-e29b-41d4-a716-446655440000"
         assert result.status == "finished"
         assert result.overview.metric_summaries[0].latest == 0.85
         assert len(result.metrics) == 1
@@ -803,7 +797,6 @@ class TestEvalRunMetrics:
             }
         )
 
-        assert metrics.eval_run_id == "eval_1"
         assert metrics.status == "succeeded"
         assert metrics.overview.duration_ms == 1800000
         assert metrics.overview.total_samples == 100

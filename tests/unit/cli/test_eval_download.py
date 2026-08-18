@@ -184,7 +184,6 @@ def test_eval_info_uses_same_run_scoped_metrics_path(monkeypatch, tmp_path):
 
         def get_eval_run_metrics(self, eval_run_id, *, git_identity, credentials=None):
             return EvalRunMetrics(
-                eval_run_id=eval_run_id,
                 status="finished",
                 overview=EvalRunMetricsOverview(
                     duration_ms=None,

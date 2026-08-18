@@ -40,7 +40,6 @@ def _make_run_detail(**overrides) -> TrainingRunDetail:
 
 def _make_metrics(**overrides) -> TrainingRunMetrics:
     defaults = dict(
-        training_run_id="550e8400-e29b-41d4-a716-446655440000",
         status="finished",
         overview=TrainingRunMetricsOverview(
             duration_ms=3600000,
