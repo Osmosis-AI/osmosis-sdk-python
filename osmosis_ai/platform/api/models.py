@@ -902,9 +902,8 @@ class LogEntry:
 class LogsPage:
     """One cursor page of logs.
 
-    The server returns entries oldest-first within the page for both paging
-    directions; ``next_cursor`` pages further back in time (``None`` when no
-    more pages exist).
+    The server returns entries oldest-first within the page; ``next_cursor``
+    pages further back in time (``None`` when no more pages exist).
     """
 
     logs: list[LogEntry]

@@ -616,11 +616,9 @@ class TestDevServerLogs:
                 *,
                 limit,
                 cursor=None,
-                direction="older",
                 credentials=None,
                 git_identity,
             ):
-                assert direction == "older"
                 assert limit == 100
                 return outer._page(["a", "b"], next_cursor="c1")
 
@@ -646,10 +644,7 @@ class TestDevServerLogs:
         outer = self
 
         class FakeClient:
-            def get_dev_rollout_server_logs(
-                self, server_id, *, direction="older", **kw
-            ):
-                assert direction == "older"
+            def get_dev_rollout_server_logs(self, server_id, **kw):
                 return outer._page(["hello"], next_cursor=None)
 
         self._install(monkeypatch, FakeClient)
@@ -671,10 +666,8 @@ class TestDevServerLogs:
         calls = []
 
         class FakeClient:
-            def get_dev_rollout_server_logs(
-                self, server_id, *, direction="older", cursor=None, **kw
-            ):
-                calls.append((direction, cursor))
+            def get_dev_rollout_server_logs(self, server_id, *, cursor=None, **kw):
+                calls.append(cursor)
                 return outer._page(["a"], next_cursor="c1")
 
         self._install(monkeypatch, FakeClient)
@@ -683,7 +676,7 @@ class TestDevServerLogs:
             with pytest.raises(typer.Exit):
                 dev_server_module.logs("srv-1", follow=None, tail=100)
 
-        assert calls == [("older", None)]
+        assert calls == [None]
 
     @staticmethod
     def _entries(messages):
