@@ -45,7 +45,7 @@ class Hooks:
     def note(self, message):
         print(f"NOTE {message}", flush=True)
 
-    def confirm_dispatch(self, *, pending, model_path):
+    async def confirm_dispatch(self, *, pending, model_path):
         print(f"PENDING {pending}", flush=True)
 
     def resolve_secrets(self, names):

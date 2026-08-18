@@ -10,7 +10,13 @@ from prompt_toolkit.application import create_app_session
 from prompt_toolkit.input import PipeInput, create_pipe_input
 from prompt_toolkit.output import DummyOutput
 
-from osmosis_ai.cli.prompts import confirm, pause, select_list, text_input
+from osmosis_ai.cli.prompts import (
+    confirm,
+    confirm_async,
+    pause,
+    select_list,
+    text_input,
+)
 
 ESCAPE = "\x1b"
 OPTION_LEFT = "\x1b[1;3D"
@@ -122,4 +128,21 @@ async def test_escape_cancels_confirm(keys: PipeInput) -> None:
         asyncio.to_thread(confirm, "Proceed?"),
         timeout=ASK_TIMEOUT,
     )
+    assert answered is None
+
+
+# ── Prompting from inside a running event loop ───────────────────────
+
+
+async def test_confirm_async_answers_on_the_callers_loop(keys: PipeInput) -> None:
+    """Awaited directly, with no worker thread: the sync ``confirm`` would
+    start a second event loop here and raise ``RuntimeError``."""
+    keys.send_text("y")
+    answered = await asyncio.wait_for(confirm_async("Proceed?"), timeout=ASK_TIMEOUT)
+    assert answered is True
+
+
+async def test_escape_cancels_confirm_async(keys: PipeInput) -> None:
+    keys.send_text(ESCAPE)
+    answered = await asyncio.wait_for(confirm_async("Proceed?"), timeout=ASK_TIMEOUT)
     assert answered is None

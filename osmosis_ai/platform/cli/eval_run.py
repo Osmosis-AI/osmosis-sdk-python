@@ -19,7 +19,7 @@ from osmosis_ai.cli.errors import CLIError, CLIErrorCode
 from osmosis_ai.cli.output import CommandResult, OperationResult
 from osmosis_ai.cli.output.context import get_output_context
 from osmosis_ai.cli.paths import parse_cli_path
-from osmosis_ai.cli.prompts import require_confirmation
+from osmosis_ai.cli.prompts import require_confirmation_async
 from osmosis_ai.platform.cli.eval_config import (
     load_eval_submit_config,
     validate_eval_submit_context_paths,
@@ -48,8 +48,8 @@ class _Hooks:
     def note(self, message: str) -> None:
         console.print(message, style="dim")
 
-    def confirm_dispatch(self, *, pending: int, model_path: str) -> None:
-        require_confirmation(
+    async def confirm_dispatch(self, *, pending: int, model_path: str) -> None:
+        await require_confirmation_async(
             f"{pending} rollouts x model {model_path} — continue?",
             yes=self.yes,
             default=False,

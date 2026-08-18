@@ -294,6 +294,17 @@ def select_list(
     return question.ask()
 
 
+def _confirm_question(message: str, *, default: bool) -> questionary.Question:
+    return _add_escape_binding(
+        questionary.confirm(
+            message,
+            default=default,
+            style=OSMOSIS_STYLE,
+            qmark="?",
+        )
+    )
+
+
 def confirm(
     message: str,
     *,
@@ -302,15 +313,26 @@ def confirm(
     """Interactive yes/no confirmation prompt.
 
     Returns True/False, or None if the user cancels (Ctrl+C / ESC).
+
+    Only for callers with no event loop of their own: ``ask()`` reaches
+    ``Application.run()``, which starts one. Inside a coroutine use
+    :func:`confirm_async`.
     """
-    return _add_escape_binding(
-        questionary.confirm(
-            message,
-            default=default,
-            style=OSMOSIS_STYLE,
-            qmark="?",
-        )
-    ).ask()
+    return _confirm_question(message, default=default).ask()
+
+
+async def confirm_async(
+    message: str,
+    *,
+    default: bool = True,
+) -> bool | None:
+    """:func:`confirm` for callers already running inside an event loop.
+
+    ``ask()`` would raise ``RuntimeError: asyncio.run() cannot be called from
+    a running event loop`` there; ``ask_async()`` awaits the same prompt on the
+    caller's loop instead (prompt_toolkit 3.0: ``run_async`` from a coroutine).
+    """
+    return await _confirm_question(message, default=default).ask_async()
 
 
 def text_input(
@@ -385,6 +407,80 @@ def password(
     ).ask()
 
 
+def _confirmation_needs_prompt(
+    message: str,
+    *,
+    yes: bool,
+    summary: list[tuple[str, str]] | None,
+    notes: list[str] | None,
+    warnings: list[str] | None,
+) -> bool:
+    """Whether the caller still has to ask a human, shared by both guards.
+
+    False when ``--yes`` already answered. Non-interactive sessions never reach
+    a prompt at all: they raise here, after JSON mode has emitted the
+    structured ``INTERACTIVE_REQUIRED`` envelope and plain mode has written the
+    same context to stderr.
+    """
+    if yes:
+        return False
+
+    from osmosis_ai.cli.output import OutputFormat, get_output_context
+
+    output = get_output_context()
+    if output.format is OutputFormat.rich and output.interactive:
+        return True
+
+    from osmosis_ai.cli.errors import CLIError
+
+    details: dict[str, Any] = {"prompt": message}
+    if summary:
+        details["summary"] = {label: value for label, value in summary}
+    if notes:
+        details["notes"] = list(notes)
+    if warnings:
+        details["warnings"] = list(warnings)
+
+    if output.format is OutputFormat.plain:
+        lines: list[str] = [f"Confirmation required: {message}"]
+        if summary:
+            for label, value in summary:
+                lines.append(f"  {label}: {value}")
+        if notes:
+            lines.append("Notes:")
+            for note in notes:
+                lines.append(f"  - {note}")
+        if warnings:
+            lines.append("Warnings:")
+            for warning in warnings:
+                lines.append(f"  - {warning}")
+        sys.stderr.write("\n".join(lines) + "\n")
+        sys.stderr.flush()
+
+    err = CLIError(
+        "Use --yes to confirm in non-interactive mode.",
+        code="INTERACTIVE_REQUIRED",
+        details=details,
+    )
+    if output.format is OutputFormat.json:
+        import typer
+
+        from osmosis_ai.cli.output import emit_structured_error_to_stderr
+
+        emit_structured_error_to_stderr(err)
+        raise typer.Exit(1)
+    raise err
+
+
+def _exit_on_decline() -> None:
+    import typer
+
+    from osmosis_ai.cli.console import console
+
+    console.print("Cancelled.", style="dim")
+    raise typer.Exit(0)
+
+
 def require_confirmation(
     message: str,
     *,
@@ -406,61 +502,37 @@ def require_confirmation(
     The optional *summary*, *notes*, and *warnings* carry the same context
     the rich panel showed: the JSON envelope embeds them as structured
     fields, and the plain-mode stderr output prints them inline.
+
+    Callers inside an event loop must use :func:`require_confirmation_async`.
     """
-    if yes:
+    if not _confirmation_needs_prompt(
+        message, yes=yes, summary=summary, notes=notes, warnings=warnings
+    ):
         return
-
-    from osmosis_ai.cli.output import OutputFormat, get_output_context
-
-    output = get_output_context()
-    if output.format is not OutputFormat.rich or not output.interactive:
-        from osmosis_ai.cli.errors import CLIError
-
-        details: dict[str, Any] = {"prompt": message}
-        if summary:
-            details["summary"] = {label: value for label, value in summary}
-        if notes:
-            details["notes"] = list(notes)
-        if warnings:
-            details["warnings"] = list(warnings)
-
-        if output.format is OutputFormat.plain:
-            lines: list[str] = [f"Confirmation required: {message}"]
-            if summary:
-                for label, value in summary:
-                    lines.append(f"  {label}: {value}")
-            if notes:
-                lines.append("Notes:")
-                for note in notes:
-                    lines.append(f"  - {note}")
-            if warnings:
-                lines.append("Warnings:")
-                for warning in warnings:
-                    lines.append(f"  - {warning}")
-            sys.stderr.write("\n".join(lines) + "\n")
-            sys.stderr.flush()
-
-        err = CLIError(
-            "Use --yes to confirm in non-interactive mode.",
-            code="INTERACTIVE_REQUIRED",
-            details=details,
-        )
-        if output.format is OutputFormat.json:
-            import typer
-
-            from osmosis_ai.cli.output import emit_structured_error_to_stderr
-
-            emit_structured_error_to_stderr(err)
-            raise typer.Exit(1)
-        raise err
-
     if not confirm(message, default=default):
-        import typer
+        _exit_on_decline()
 
-        from osmosis_ai.cli.console import console
 
-        console.print("Cancelled.", style="dim")
-        raise typer.Exit(0)
+async def require_confirmation_async(
+    message: str,
+    *,
+    yes: bool = False,
+    default: bool = True,
+    summary: list[tuple[str, str]] | None = None,
+    notes: list[str] | None = None,
+    warnings: list[str] | None = None,
+) -> None:
+    """:func:`require_confirmation` for callers inside an event loop.
+
+    Same contract, same non-interactive envelopes; only the prompt itself is
+    awaited rather than run on a nested loop.
+    """
+    if not _confirmation_needs_prompt(
+        message, yes=yes, summary=summary, notes=notes, warnings=warnings
+    ):
+        return
+    if not await confirm_async(message, default=default):
+        _exit_on_decline()
 
 
 __all__ = [
@@ -468,9 +540,11 @@ __all__ = [
     "Choice",
     "Separator",
     "confirm",
+    "confirm_async",
     "password",
     "pause",
     "require_confirmation",
+    "require_confirmation_async",
     "select_list",
     "text_input",
 ]

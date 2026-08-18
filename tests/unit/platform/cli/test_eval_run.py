@@ -2,17 +2,24 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import subprocess
+from collections.abc import Iterator
 from io import StringIO
 from pathlib import Path
 from typing import Any
 
 import pytest
+import typer
+from prompt_toolkit.application import create_app_session
+from prompt_toolkit.input import PipeInput, create_pipe_input
+from prompt_toolkit.output import DummyOutput
 
 import osmosis_ai.platform.cli.eval_run as eval_run_module
 from osmosis_ai.cli.console import Console
 from osmosis_ai.cli.errors import CLIError
+from osmosis_ai.cli.output import OutputFormat, override_output_context
 
 GIT_IDENTITY = "acme/rollouts"
 ROLLOUT = "echo-rollout"
@@ -461,3 +468,43 @@ def test_the_command_is_registered_under_the_eval_group() -> None:
         for command in app.registered_commands
     }
     assert "run" in names
+
+
+# ── The dispatch confirmation, on the supervisor's own loop ──────────
+
+# A prompt that never answers hangs the suite, so bound every ask.
+ASK_TIMEOUT = 10.0
+
+
+@pytest.fixture
+def keys() -> Iterator[PipeInput]:
+    with create_pipe_input() as pipe_input:
+        with create_app_session(input=pipe_input, output=DummyOutput()):
+            yield pipe_input
+
+
+async def _confirm_dispatch() -> None:
+    hooks = eval_run_module._Hooks(yes=False, secrets_file=None)
+    with override_output_context(format=OutputFormat.rich, interactive=True):
+        await asyncio.wait_for(
+            hooks.confirm_dispatch(pending=4, model_path="openai/gpt-5-mini"),
+            timeout=ASK_TIMEOUT,
+        )
+
+
+async def test_the_dispatch_confirmation_prompts_on_the_running_loop(
+    keys: PipeInput,
+) -> None:
+    """The supervisor awaits this hook from inside ``asyncio.run``; a prompt
+    that ran on a loop of its own would raise ``RuntimeError`` there."""
+    keys.send_text("y")
+    await _confirm_dispatch()
+
+
+async def test_declining_the_dispatch_confirmation_exits_before_any_rollout(
+    keys: PipeInput,
+) -> None:
+    keys.send_text("n")
+    with pytest.raises(typer.Exit) as raised:
+        await _confirm_dispatch()
+    assert raised.value.exit_code == 0
