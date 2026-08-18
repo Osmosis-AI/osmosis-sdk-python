@@ -1,6 +1,6 @@
 """Osmosis CLI authentication module."""
 
-from .config import CONFIG_DIR, CREDENTIALS_FILE, PLATFORM_URL, get_platform_url
+from .config import CONFIG_DIR, CREDENTIALS_FILE, get_platform_url
 from .credentials import (
     Credentials,
     UserInfo,
@@ -23,7 +23,6 @@ from .platform_client import (
 __all__ = [
     "CONFIG_DIR",
     "CREDENTIALS_FILE",
-    "PLATFORM_URL",
     "AuthenticationExpiredError",
     "Credentials",
     "LoginError",
