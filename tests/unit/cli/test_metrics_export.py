@@ -138,7 +138,6 @@ class TestBuildExportDict:
         if steps is None:
             steps = [(0, 0.5, 1711800000000), (10, 0.65, 1711800060000)]
         return TrainingRunMetrics(
-            training_run_id="550e8400-e29b-41d4-a716-446655440000",
             status="finished",
             overview=TrainingRunMetricsOverview(
                 duration_ms=3600000,
@@ -261,7 +260,6 @@ class TestBuildExportDict:
     def test_empty_metrics_list(self) -> None:
         run = self._make_run_detail()
         metrics = TrainingRunMetrics(
-            training_run_id="run-1",
             status="finished",
             overview=TrainingRunMetricsOverview(
                 duration_ms=None,
@@ -277,7 +275,6 @@ class TestBuildExportDict:
     def test_summary_includes_all_metric_summaries(self) -> None:
         run = self._make_run_detail()
         metrics = TrainingRunMetrics(
-            training_run_id="run-1",
             status="finished",
             overview=TrainingRunMetricsOverview(
                 duration_ms=None,
@@ -365,7 +362,6 @@ class TestBuildEvalExportDict:
         pass_at_k: list[EvalPassAtKPoint] | None = None,
     ) -> EvalRunMetrics:
         return EvalRunMetrics(
-            eval_run_id="eval_1",
             status="succeeded",
             overview=EvalRunMetricsOverview(
                 duration_ms=1800000,
@@ -419,7 +415,6 @@ class TestBuildEvalExportDict:
             created_at="2026-05-04T00:00:00Z",
         )
         metrics = EvalRunMetrics(
-            eval_run_id="eval_1",
             status="pending",
             overview=EvalRunMetricsOverview(
                 duration_ms=None,

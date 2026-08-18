@@ -28,11 +28,9 @@ def _make_upload_info(**overrides) -> UploadInfo:
     """Create an UploadInfo with sensible defaults, applying any overrides."""
     defaults = dict(
         method="simple",
-        s3_key="datasets/test-file.jsonl",
         presigned_url=None,
         expires_in=3600,
         upload_headers=None,
-        upload_id=None,
         part_size=None,
         total_parts=None,
         presigned_urls=None,

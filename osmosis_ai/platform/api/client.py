@@ -71,8 +71,8 @@ class OsmosisClient:
     ) -> LogsPage:
         """Fetch one page of logs for ``{resource_path}/logs``.
 
-        Without ``cursor``, ``direction="older"`` returns the most recent page;
-        the returned ``next_cursor`` pages further back in time.
+        Without ``cursor``, ``direction="older"`` returns the most recent page.
+        With a cursor, ``next_cursor`` continues in the requested direction.
         """
         params: dict[str, Any] = {"limit": limit, "direction": direction}
         if cursor is not None:
@@ -270,8 +270,8 @@ class OsmosisClient:
     ) -> LogsPage:
         """Fetch one page of dataset logs.
 
-        Without ``cursor``, ``direction="older"`` returns the most recent page;
-        the returned ``next_cursor`` pages further back in time.
+        Without ``cursor``, ``direction="older"`` returns the most recent page.
+        With a cursor, ``next_cursor`` continues in the requested direction.
         """
         return self._get_logs(
             f"/api/cli/datasets/{_safe_path(name_or_id)}",
@@ -404,8 +404,8 @@ class OsmosisClient:
     ) -> LogsPage:
         """Fetch one page of training run logs.
 
-        Without ``cursor``, ``direction="older"`` returns the most recent page;
-        the returned ``next_cursor`` pages further back in time.
+        Without ``cursor``, ``direction="older"`` returns the most recent page.
+        With a cursor, ``next_cursor`` continues in the requested direction.
         """
         return self._get_logs(
             f"/api/cli/training-runs/{_safe_path(name_or_id)}",
@@ -884,8 +884,8 @@ class OsmosisClient:
     ) -> LogsPage:
         """Fetch one page of evaluation run logs.
 
-        Without ``cursor``, ``direction="older"`` returns the most recent page;
-        the returned ``next_cursor`` pages further back in time.
+        Without ``cursor``, ``direction="older"`` returns the most recent page.
+        With a cursor, ``next_cursor`` continues in the requested direction.
         """
         return self._get_logs(
             f"/api/cli/eval-runs/{_safe_path(name_or_id)}",

@@ -195,7 +195,6 @@ def logs(server_id: str, *, follow: bool | None, tail: int) -> NoReturn:
         page = client.get_dev_rollout_server_logs(
             server_id,
             limit=tail,
-            direction="older",
             credentials=ctx.credentials,
             git_identity=ctx.git_identity,
         )

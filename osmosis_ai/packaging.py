@@ -175,10 +175,6 @@ def find_package_dir(code_dir: Path, package: str) -> Path:
     raise ValueError(f"package {package!r} not found; looked in {searched}")
 
 
-def requirement_name(spec: str) -> str:
-    return canonicalize_name(Requirement(spec).name)
-
-
 def split_ref(ref: str, label: str) -> tuple[str, str]:
     if ":" not in ref:
         raise ValueError(f"{label} must be 'module:attr', got {ref!r}")
@@ -254,7 +250,6 @@ def build_bundle(
     grader: str | None = None,
     workflow_config: str | None = None,
     grader_config: str | None = None,
-    deps: list[str] | None = None,
     package: str | None = None,
     bundles_dir: Path = BUNDLES_DIR,
 ) -> Path:
@@ -262,8 +257,7 @@ def build_bundle(
 
     workflow/grader are 'module:Class' refs; the config refs point at
     module-level instances and are passed to the runner as-is. Grader-only
-    bundles (workflow=None) carry just the grading script. Entries in *deps*
-    replace same-named dependencies from the project's pyproject.toml.
+    bundles (workflow=None) carry just the grading script.
     """
     code_dir = code_dir.resolve()
     pyproject_path = code_dir / "pyproject.toml"
@@ -311,7 +305,6 @@ def build_bundle(
         (
             pyproject_path.read_text(),
             shim,
-            repr(deps or []),
             package,
             sys.implementation.cache_tag or "",
             sysconfig.get_platform(),
@@ -373,12 +366,6 @@ def build_bundle(
         (find_package_dir(stage, package) / "bundle_main.py").write_text(shim)
         staged = tomllib.loads((stage / "pyproject.toml").read_text())
         staged_project = staged.setdefault("project", {})
-        overridden = {requirement_name(d) for d in deps or []}
-        staged_project["dependencies"] = [
-            d
-            for d in staged_project.get("dependencies", [])
-            if requirement_name(d) not in overridden
-        ] + list(deps or [])
         staged_project["scripts"] = {**staged_project.get("scripts", {}), **scripts}
         (stage / "pyproject.toml").write_text(toml.dumps(staged))
         subprocess.run(

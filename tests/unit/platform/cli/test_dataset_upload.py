@@ -24,9 +24,7 @@ def _make_fake_dataset(
         status="created",
         upload=UploadInfo(
             method=method,
-            s3_key=f"uploads/{file_name}",
             presigned_url="https://example.com/upload" if method == "simple" else None,
-            upload_id="up-1" if method == "multipart" else None,
             part_size=5 * 1024 * 1024 if method == "multipart" else None,
             total_parts=1 if method == "multipart" else None,
             presigned_urls=(

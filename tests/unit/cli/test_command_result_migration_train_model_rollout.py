@@ -307,7 +307,6 @@ def test_train_info_json_does_not_write_default_file(
             assert credentials is FAKE_CREDENTIALS
             assert git_identity == GIT_IDENTITY
             return TrainingRunMetrics(
-                training_run_id=run_id,
                 status="finished",
                 overview=TrainingRunMetricsOverview(
                     duration_ms=1000,

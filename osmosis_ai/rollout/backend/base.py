@@ -18,11 +18,6 @@ class ExecutionBackend(ABC):
         raise NotImplementedError
 
     @property
-    def max_concurrency(self) -> int:
-        """Max concurrent executions this backend supports. 0 = no limit."""
-        return 0
-
-    @property
     def capture_final_result(self) -> bool:
         """Accept the grader result for archival even without a grader
         callback URL. True for backends that compute the reward themselves."""

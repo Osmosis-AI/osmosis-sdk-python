@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import http.client
 import json
+from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from io import BytesIO
 from typing import Any
@@ -890,6 +891,36 @@ class TestPlatformRequest:
         with pytest.raises(PlatformAPIError, match="Invalid JSON response"):
             platform_request("/api/test", credentials=creds, git_identity="git_test")
 
+    @patch("osmosis_ai.platform.auth.platform_client.urlopen")
+    def test_non_dict_json_response_raises_platform_api_error(
+        self, mock_urlopen: MagicMock
+    ) -> None:
+        """A 200 body that parses to a non-object must not escape as-is."""
+        mock_resp = MagicMock()
+        mock_resp.read.return_value = b'["not", "an", "object"]'
+        mock_resp.__enter__ = MagicMock(return_value=mock_resp)
+        mock_resp.__exit__ = MagicMock(return_value=False)
+        mock_urlopen.return_value = mock_resp
+        creds = _make_credentials()
+
+        with pytest.raises(PlatformAPIError, match="Invalid JSON response"):
+            platform_request("/api/test", credentials=creds, git_identity="git_test")
+
+    @patch("osmosis_ai.platform.auth.platform_client.urlopen")
+    def test_mid_read_timeout_raises_platform_api_error(
+        self, mock_urlopen: MagicMock
+    ) -> None:
+        """A socket timeout during body read is a bare TimeoutError, not URLError."""
+        mock_resp = MagicMock()
+        mock_resp.read.side_effect = TimeoutError("timed out")
+        mock_resp.__enter__ = MagicMock(return_value=mock_resp)
+        mock_resp.__exit__ = MagicMock(return_value=False)
+        mock_urlopen.return_value = mock_resp
+        creds = _make_credentials()
+
+        with pytest.raises(PlatformAPIError, match="Connection error"):
+            platform_request("/api/test", credentials=creds, git_identity="git_test")
+
     # -------------------------------------------------------------------------
     # Integration-style: Credential flow
     # -------------------------------------------------------------------------
@@ -1321,6 +1352,44 @@ class TestPlatformStream:
                     git_identity="git_1",
                 )
             )
+
+    @patch("osmosis_ai.platform.auth.platform_client.urlopen")
+    def test_connect_timeout_becomes_platform_api_error(
+        self, mock_urlopen: MagicMock
+    ) -> None:
+        """A timeout while awaiting response headers is a bare TimeoutError."""
+        mock_urlopen.side_effect = TimeoutError("timed out")
+        creds = _make_credentials()
+
+        with pytest.raises(PlatformAPIError, match="Connection error"):
+            list(
+                platform_stream(
+                    "/api/stream",
+                    credentials=creds,
+                    git_identity="git_1",
+                )
+            )
+
+    @patch("osmosis_ai.platform.auth.platform_client.urlopen")
+    def test_read_timeout_becomes_platform_api_error(
+        self, mock_urlopen: MagicMock
+    ) -> None:
+        """A timeout while reading events is also a bare TimeoutError."""
+
+        def timeout_after_event() -> Iterator[bytes]:
+            yield b'data: {"message": "ready"}\n'
+            yield b"\n"
+            raise TimeoutError("timed out")
+
+        response = _make_stream_response([])
+        response.__iter__ = MagicMock(return_value=timeout_after_event())
+        mock_urlopen.return_value = response
+        creds = _make_credentials()
+
+        events = platform_stream("/api/stream", credentials=creds, git_identity="git_1")
+        assert next(events) == {"message": "ready"}
+        with pytest.raises(PlatformAPIError, match="Connection error: timed out"):
+            next(events)
 
     @patch("osmosis_ai.platform.auth.platform_client.surface_version_signal")
     @patch("osmosis_ai.platform.auth.platform_client.urlopen")

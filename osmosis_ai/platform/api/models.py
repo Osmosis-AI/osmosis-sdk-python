@@ -23,13 +23,11 @@ class UploadInfo:
     """Upload instructions returned by the create-dataset endpoint."""
 
     method: Literal["simple", "multipart"]
-    s3_key: str
     # simple upload fields
     presigned_url: str | None = None
     expires_in: int | None = None
     upload_headers: dict[str, str] | None = None
     # multipart upload fields
-    upload_id: str | None = None
     part_size: int | None = None
     total_parts: int | None = None
     presigned_urls: list[dict[str, Any]] | None = None  # [{part_number, presigned_url}]
@@ -46,11 +44,9 @@ class UploadInfo:
             )
         return cls(
             method=method,
-            s3_key=data["s3_key"],
             presigned_url=data.get("presigned_url"),
             expires_in=data.get("expires_in"),
             upload_headers=data.get("upload_headers"),
-            upload_id=data.get("upload_id"),
             part_size=data.get("part_size"),
             total_parts=data.get("total_parts"),
             presigned_urls=data.get("presigned_urls"),
@@ -66,13 +62,11 @@ class DatasetFile:
     file_size: int
     status: str
     data_preview: Any = None
-    df_stats: Any = None
     file_format: str | None = None
     original_file_format: str | None = None
     row_count: int | None = None
     original_file_size: int | None = None
     creator_name: str | None = None
-    organization_id: str | None = None
     created_at: str = ""
     updated_at: str = ""
     platform_url: str | None = None
@@ -90,13 +84,11 @@ class DatasetFile:
             file_size=data.get("file_size", 0),
             status=data.get("status", ""),
             data_preview=data.get("data_preview"),
-            df_stats=data.get("df_stats"),
             file_format=data.get("file_format"),
             original_file_format=data.get("original_file_format"),
             row_count=data.get("row_count"),
             original_file_size=data.get("original_file_size"),
             creator_name=data.get("creator_name"),
-            organization_id=data.get("organization_id"),
             created_at=data.get("created_at", ""),
             updated_at=data.get("updated_at", ""),
             platform_url=data.get("platform_url"),
@@ -867,7 +859,6 @@ class TrainingRunMetricsOverview:
 class TrainingRunMetrics:
     """Complete metrics response for a training run."""
 
-    training_run_id: str
     status: str
     overview: TrainingRunMetricsOverview
     metrics: list[MetricHistory]
@@ -875,7 +866,6 @@ class TrainingRunMetrics:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> TrainingRunMetrics:
         return cls(
-            training_run_id=data["training_run_id"],
             status=data["status"],
             overview=TrainingRunMetricsOverview.from_dict(data["overview"]),
             metrics=[MetricHistory.from_dict(m) for m in data.get("metrics", [])],
@@ -912,9 +902,8 @@ class LogEntry:
 class LogsPage:
     """One cursor page of logs.
 
-    The server returns entries oldest-first within the page for both paging
-    directions; ``next_cursor`` pages further back in time (``None`` when no
-    more pages exist).
+    The server returns entries oldest-first within the page; ``next_cursor``
+    continues in the requested paging direction (``None`` at the end).
     """
 
     logs: list[LogEntry]
@@ -996,7 +985,6 @@ class EvalRunMetricsOverview:
 class EvalRunMetrics:
     """Complete metrics response for an evaluation run."""
 
-    eval_run_id: str
     status: str
     overview: EvalRunMetricsOverview
     reward_stats: EvalRewardStats | None
@@ -1006,7 +994,6 @@ class EvalRunMetrics:
     def from_dict(cls, data: dict[str, Any]) -> EvalRunMetrics:
         reward_stats = data.get("reward_stats")
         return cls(
-            eval_run_id=data["eval_run_id"],
             status=data["status"],
             overview=EvalRunMetricsOverview.from_dict(data["overview"]),
             reward_stats=(
@@ -1272,7 +1259,6 @@ class RolloutInfo:
     name: str
     description: str | None = None
     is_active: bool = True
-    last_synced_at: str | None = None
     last_synced_commit_sha: str | None = None
     repo_full_name: str | None = None
     created_at: str = ""
@@ -1284,7 +1270,6 @@ class RolloutInfo:
             name=data.get("name", ""),
             description=data.get("description"),
             is_active=data.get("is_active", True),
-            last_synced_at=data.get("last_synced_at"),
             last_synced_commit_sha=data.get("last_synced_commit_sha"),
             repo_full_name=data.get("repo_full_name"),
             created_at=data.get("created_at", ""),
@@ -1383,14 +1368,12 @@ class LoraCheckpointInfo:
 class TrainingRunCheckpoints:
     """All deployable LoRA checkpoints for a training run."""
 
-    training_run_id: str
     training_run_name: str
     checkpoints: list[LoraCheckpointInfo]
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> TrainingRunCheckpoints:
         return cls(
-            training_run_id=data["training_run_id"],
             training_run_name=data.get("training_run_name", ""),
             checkpoints=[
                 LoraCheckpointInfo.from_dict(c) for c in data.get("checkpoints", [])

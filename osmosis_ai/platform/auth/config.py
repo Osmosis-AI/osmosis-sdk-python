@@ -45,9 +45,8 @@ def normalize_platform_url(url: str | None) -> str:
         hostname = (parsed.hostname or "").lower()
         port = parsed.port
     except ValueError:
-        # This also runs while ``osmosis_ai.platform.auth`` is being imported
-        # (PLATFORM_URL below), so the message must stand on its own and the
-        # error must stay a CLIError the envelope path can classify.
+        # The message must stand on its own and the error must stay a CLIError
+        # the envelope path can classify.
         raise CLIError(
             f"Invalid platform URL '{raw}'",
             code="VALIDATION",
@@ -82,8 +81,6 @@ def get_platform_url() -> str:
         os.environ.get("OSMOSIS_PLATFORM_URL", DEFAULT_PLATFORM_URL)
     )
 
-
-PLATFORM_URL = get_platform_url()
 
 # Configuration directory and credentials file
 CONFIG_DIR = Path.home() / ".config" / "osmosis"
