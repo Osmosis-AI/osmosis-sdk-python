@@ -38,6 +38,7 @@ from osmosis_ai.platform.constants import DEFAULT_PAGE_SIZE
 
 from .constants import (
     MAX_FILE_SIZE,
+    METADATA_COLUMN,
     MIN_ROW_COUNT,
     REQUIRED_COLUMNS,
     VALID_EXTENSIONS,
@@ -796,12 +797,6 @@ def _check_required_columns(columns: Iterable[str]) -> list[str]:
 
 
 # ── "metadata" mode validation ────────────────────────────────────
-# The presence of a metadata column selects metadata mode for the
-# entire dataset. Every row must then carry a non-empty JSON object.
-# Users may author it as a native object (JSONL/Parquet) or as a
-# JSON-object string (CSV; tolerated in JSONL).
-
-METADATA_COLUMN = "metadata"
 
 
 def _metadata_is_absent(value: Any) -> bool:
