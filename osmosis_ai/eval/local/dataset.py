@@ -25,13 +25,8 @@ from pathlib import Path
 from typing import Any, Literal, Protocol
 
 from osmosis_ai.eval.local.state import atomic_write_json
+from osmosis_ai.platform.cli.constants import METADATA_COLUMN, VALID_EXTENSIONS
 from osmosis_ai.rollout.types.sample import MessageDict
-
-#: Dataset extensions the platform validator accepts.
-VALID_EXTENSIONS: frozenset[str] = frozenset({"csv", "jsonl", "parquet"})
-
-#: Column that switches a dataset into metadata mode (``docs/datasets.md``).
-METADATA_COLUMN = "metadata"
 
 _ROW_SELECTOR_RE = re.compile(r"^\d+(?:-\d+)?(?:,\d+(?:-\d+)?)*$")
 _HASH_CHUNK_SIZE = 1024 * 1024
