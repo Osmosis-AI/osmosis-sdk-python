@@ -9,8 +9,9 @@ journalling, and materialization.
 from __future__ import annotations
 
 import json
+import sys
 from collections.abc import AsyncIterator, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -129,6 +130,7 @@ class RecordingHooks:
 
     secrets: dict[str, str] = field(default_factory=dict)
     notes: list[str] = field(default_factory=list)
+    stages: list[str] = field(default_factory=list)
     confirmations: list[tuple[int, str]] = field(default_factory=list)
     progress_snapshots: list[ProgressSnapshot] = field(default_factory=list)
     secret_requests: list[list[str]] = field(default_factory=list)
@@ -136,6 +138,9 @@ class RecordingHooks:
 
     def note(self, message: str) -> None:
         self.notes.append(message)
+
+    def stage(self, message: str) -> None:
+        self.stages.append(message)
 
     async def confirm_dispatch(self, *, pending: int, model_path: str) -> None:
         self.confirmations.append((pending, model_path))
@@ -186,9 +191,16 @@ class RunnerHarness:
         selection: RowSelection | None = None,
         hooks: RecordingHooks | None = None,
     ) -> LocalEvalRunner:
+        # The fake rollout project below has no pyproject.toml and needs none:
+        # pinning the interpreter keeps every E2E spawn direct, offline, and out
+        # of uv's resolver.
+        options = replace(
+            options or LocalEvalOptions(name="run-1"),
+            server_interpreter=sys.executable,
+        )
         return LocalEvalRunner(
             spec=spec or self.spec(),
-            options=options or LocalEvalOptions(name="run-1"),
+            options=options,
             dataset=self.dataset,
             selection=selection or self.selection,
             rollout_dir=self.rollout_dir,

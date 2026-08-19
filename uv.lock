@@ -1663,6 +1663,7 @@ eval-run = [
     { name = "click" },
     { name = "fastapi" },
     { name = "litellm" },
+    { name = "uv" },
     { name = "uvicorn" },
 ]
 full = [
@@ -1781,6 +1782,7 @@ requires-dist = [
     { name = "toml", marker = "extra == 'harbor'", specifier = ">=0.10.2,<1.0.0" },
     { name = "tqdm", marker = "extra == 'rubric'", specifier = ">=4.0.0,<5.0.0" },
     { name = "typer", specifier = ">=0.27,<0.28" },
+    { name = "uv", marker = "extra == 'eval-run'", specifier = ">=0.9.7,<0.13" },
     { name = "uv", marker = "extra == 'harbor'", specifier = ">=0.9.7,<0.13" },
     { name = "uvicorn", marker = "extra == 'server'", specifier = ">=0.23.0,<1.0.0" },
 ]

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -97,6 +98,21 @@ def test_source_digest_ignores_caches(tmp_path: Path) -> None:
     (project / "main.py").write_text("print(1)")
     before = compute_source_digest(project)
     (project / "__pycache__" / "main.pyc").write_bytes(b"\x00")
+    assert compute_source_digest(project) == before
+
+
+def test_source_digest_ignores_uv_sync_artifacts(tmp_path: Path) -> None:
+    # The runner runs `uv sync` in the rollout project itself; if its lockfile
+    # and build metadata counted, the first run would move the digest it locked
+    # and resuming that same run would be refused.
+    project = tmp_path / "rollout"
+    project.mkdir()
+    (project / "main.py").write_text("print(1)")
+    before = compute_source_digest(project)
+    (project / "uv.lock").write_text("version = 1\n")
+    egg_info = project / "echo_rollout.egg-info"
+    egg_info.mkdir()
+    (egg_info / "PKG-INFO").write_text("Name: echo-rollout\n")
     assert compute_source_digest(project) == before
 
 
@@ -300,6 +316,14 @@ def test_secrets_override_config_env_for_the_same_name() -> None:
     assert env["TOKEN"] == "from-secret"
 
 
+def test_an_activated_virtualenv_is_never_inherited() -> None:
+    # A parent shell's venv is not the rollout's environment: passing it down
+    # makes uv warn about a mismatch and means nothing to a direct spawn.
+    env = _env(base={"PATH": "/usr/bin", "VIRTUAL_ENV": "/home/dev/.venv"})
+    assert "VIRTUAL_ENV" not in env
+    assert env["PATH"] == "/usr/bin"
+
+
 # --------------------------------------------------------------------------- #
 # Port reservation
 # --------------------------------------------------------------------------- #
@@ -365,7 +389,9 @@ async def test_a_foreign_rollout_server_on_a_pinned_port_is_refused(
     runner = _runner(
         _spec(),
         tmp_path,
-        options=LocalEvalOptions(name="run-1", rollout_port=port),
+        options=LocalEvalOptions(
+            name="run-1", rollout_port=port, server_interpreter=sys.executable
+        ),
     )
     runner._run_dir = tmp_path / "evals" / "run-1"
     try:
@@ -512,7 +538,14 @@ def _runner(
     data.write_text('{"user_prompt": "a", "ground_truth": "1"}\n')
 
     class _Hooks:
+        def __init__(self) -> None:
+            self.stages: list[str] = []
+
         def note(self, message: str) -> None: ...
+
+        def stage(self, message: str) -> None:
+            self.stages.append(message)
+
         async def confirm_dispatch(self, *, pending: int, model_path: str) -> None: ...
         def resolve_secrets(self, names: Any) -> dict[str, str]:
             return {}
@@ -521,7 +554,10 @@ def _runner(
 
     return LocalEvalRunner(
         spec=spec,
-        options=options or LocalEvalOptions(name="run-1"),
+        # Default to a direct spawn: only the tests that exercise the uv path
+        # below leave ``server_interpreter`` unset.
+        options=options
+        or LocalEvalOptions(name="run-1", server_interpreter=sys.executable),
         dataset=_dataset(),
         selection=select_rows(data),
         rollout_dir=tmp_path,
@@ -678,3 +714,164 @@ def test_the_run_log_redacts_and_is_owner_only(tmp_path: Path) -> None:
     assert "sk-live-abcdef123456" not in text
     assert text.count("[REDACTED]") == 2
     assert (tmp_path / "logs.txt").stat().st_mode & 0o077 == 0
+
+
+# --------------------------------------------------------------------------- #
+# Rollout environment: uv sync and uv run (§8)
+# --------------------------------------------------------------------------- #
+
+
+class _ExitedChild:
+    """A subprocess that already exited, with its combined output ready to read.
+
+    Pre-set ``returncode`` matters: the supervisor only signals a child whose
+    return code is still ``None``, so a live-looking fake would have it kill a
+    process group that does not belong to this test.
+    """
+
+    def __init__(self, returncode: int, output: bytes) -> None:
+        self.returncode = returncode
+        self.pid = -1
+        self.stdout = asyncio.StreamReader()
+        self.stdout.feed_data(output)
+        self.stdout.feed_eof()
+
+    async def wait(self) -> int:
+        return self.returncode
+
+
+def _record_spawns(
+    monkeypatch: pytest.MonkeyPatch, *, sync_returncode: int = 0
+) -> list[tuple[list[str], dict[str, Any]]]:
+    """Stand in for uv: record every spawn instead of touching the network."""
+    from osmosis_ai.eval.local import runner as runner_module
+
+    spawns: list[tuple[list[str], dict[str, Any]]] = []
+
+    async def fake_exec(*argv: str, **kwargs: Any) -> Any:
+        spawns.append((list(argv), kwargs))
+        returncode = sync_returncode if argv[1] == "sync" else 0
+        return _ExitedChild(returncode, b"uv output\n")
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
+    monkeypatch.setattr(runner_module, "_uv_executable", lambda: "/fake/bin/uv")
+    return spawns
+
+
+def _uv_runner(tmp_path: Path) -> Any:
+    (tmp_path / "main.py").write_text("")
+    runner = _runner(_spec(), tmp_path, options=LocalEvalOptions(name="run-1"))
+    runner._run_dir = tmp_path / "evals" / "run-1"
+    return runner
+
+
+async def test_the_default_path_syncs_then_runs_the_rollout_project(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from osmosis_ai.eval.local import runner as runner_module
+
+    monkeypatch.setenv("VIRTUAL_ENV", "/home/dev/.venv")
+    spawns = _record_spawns(monkeypatch)
+    runner = _uv_runner(tmp_path)
+
+    async with httpx.AsyncClient() as client:
+        with pytest.raises(LocalEvalError, match="before becoming healthy"):
+            await runner._start_rollout_server(secrets={}, client=client)
+
+    argvs = [argv for argv, _ in spawns]
+    assert argvs[0] == ["/fake/bin/uv", "sync", "--project", str(tmp_path)]
+    assert argvs[1] == [
+        "/fake/bin/uv",
+        "run",
+        "--no-sync",
+        "--project",
+        str(tmp_path),
+        str(tmp_path / "main.py"),
+    ]
+    # Dependencies do not change when the port does, so the sync runs once for
+    # the whole port-retry loop.
+    assert [argv[1] for argv in argvs] == ["sync"] + [
+        "run"
+    ] * runner_module._PORT_ATTEMPTS
+    assert runner._hooks.stages[0] == "syncing rollout dependencies (echo-rollout)"
+    for _, kwargs in spawns:
+        assert kwargs["cwd"] == str(tmp_path)
+        assert "VIRTUAL_ENV" not in kwargs["env"]
+        assert kwargs["start_new_session"] is True
+
+
+async def test_a_failing_uv_sync_is_reported_as_a_dependency_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Attribution is the point: an unresolvable dependency must not surface
+    # later as a rollout server that never became healthy.
+    spawns = _record_spawns(monkeypatch, sync_returncode=2)
+    runner = _uv_runner(tmp_path)
+
+    async with httpx.AsyncClient() as client:
+        with pytest.raises(LocalEvalError, match=r"uv sync failed .*exit code 2"):
+            await runner._start_rollout_server(secrets={}, client=client)
+
+    assert [argv[1] for argv, _ in spawns] == ["sync"]
+
+
+async def test_a_cancelled_sync_terminates_and_reaps_the_uv_process_group(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from osmosis_ai.eval.local import runner as runner_module
+
+    # The sync child sits outside _stop_rollout_server's lifecycle, so the
+    # cancellation path itself must stop descendants and reap the direct child.
+    class _HangingChild:
+        def __init__(self) -> None:
+            self.returncode: int | None = None
+            self.pid = 123
+            # No data, no EOF: the tee blocks on readline like a live child.
+            self.stdout = asyncio.StreamReader()
+            self.waited = False
+
+        async def wait(self) -> int:
+            self.waited = True
+            assert self.returncode is not None
+            return -15
+
+    child = _HangingChild()
+    terminated: list[tuple[int, float]] = []
+
+    def fake_terminate_process_group(pgid: int, *, grace_sec: float) -> None:
+        terminated.append((pgid, grace_sec))
+        child.returncode = -15
+
+    async def fake_exec(*argv: str, **kwargs: Any) -> Any:
+        return child
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
+    monkeypatch.setattr(runner_module, "_process_group_of", lambda pid: pid)
+    monkeypatch.setattr(
+        runner_module, "terminate_process_group", fake_terminate_process_group
+    )
+    runner = _uv_runner(tmp_path)
+
+    task = asyncio.create_task(runner._sync_rollout_dependencies("/fake/bin/uv"))
+    await asyncio.sleep(0)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert terminated == [(child.pid, runner_module._SERVER_TERM_GRACE_SEC)]
+    assert child.waited is True
+
+
+async def test_a_missing_uv_is_reported_against_eval_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from osmosis_ai.eval.local import runner as runner_module
+
+    def _no_uv() -> str:
+        raise RuntimeError("uv is required to build rollout bundles")
+
+    monkeypatch.setattr(runner_module, "_uv_executable", _no_uv)
+    runner = _uv_runner(tmp_path)
+
+    async with httpx.AsyncClient() as client:
+        with pytest.raises(LocalEvalError, match="uv is required to launch"):
+            await runner._start_rollout_server(secrets={}, client=client)

@@ -21,7 +21,6 @@ import logging
 import os
 import signal
 import socket
-import sys
 import time
 import uuid
 from collections.abc import Callable, Mapping, Sequence
@@ -31,6 +30,7 @@ from typing import Any, Protocol
 
 import httpx
 
+from osmosis_ai._uv import _uv_executable
 from osmosis_ai.consts import PACKAGE_VERSION
 from osmosis_ai.eval.local.dataset import (
     EvalDatasetRow,
@@ -156,6 +156,11 @@ class LocalEvalOptions:
     max_in_flight: int | None = None
     rollout_port: int | None = None
     verbose: bool = False
+    # Test seam, not a CLI flag: the CLI always leaves this ``None``, which runs
+    # the rollout server through uv so its dependencies resolve from
+    # ``rollouts/<name>/pyproject.toml``. Tests set it to ``sys.executable`` so
+    # their fake rollout servers spawn directly -- offline and fast.
+    server_interpreter: str | None = None
 
 
 class RunnerHooks(Protocol):
@@ -163,6 +168,15 @@ class RunnerHooks(Protocol):
 
     def note(self, message: str) -> None:
         """Surface a human-readable status line."""
+
+    def stage(self, message: str) -> None:
+        """Surface a run milestone.
+
+        Separate from ``note`` because the two feed different displays: ``note``
+        carries the log echo a ``--verbose`` run streams, while stages are the
+        handful of lines a plain run prints so the long gaps -- model preflight,
+        rollout-server startup -- are not silent (§4.3).
+        """
 
     async def confirm_dispatch(self, *, pending: int, model_path: str) -> None:
         """Cost boundary before any rollout is dispatched. Raise to abort.
@@ -230,6 +244,7 @@ class RunSummary:
     skipped: int
     resumed: int
     cancelled: bool
+    duration_ms: float = 0.0
     metrics: dict[str, Any] = field(default_factory=dict)
     failures: list[FailedWorkItem] = field(default_factory=list)
 
@@ -408,6 +423,38 @@ def reserve_free_port() -> int:
         return int(sock.getsockname()[1])
 
 
+def inherited_env(base: Mapping[str, str]) -> dict[str, str]:
+    """Copy an inherited environment, minus ``VIRTUAL_ENV``.
+
+    A parent shell's activated venv makes uv warn about a mismatched
+    environment, and the direct-interpreter path does not need it either.
+    """
+    return {name: value for name, value in base.items() if name != "VIRTUAL_ENV"}
+
+
+def uv_sync_command(uv_executable: str, rollout_dir: Path) -> list[str]:
+    """Argv that resolves the rollout's own environment from its pyproject."""
+    return [uv_executable, "sync", "--project", str(rollout_dir)]
+
+
+def uv_run_command(
+    uv_executable: str, rollout_dir: Path, entrypoint: Path
+) -> list[str]:
+    """Argv that runs the rollout server inside the rollout's own environment.
+
+    ``--no-sync`` because dependencies are synced once beforehand, as their own
+    attributable stage.
+    """
+    return [
+        uv_executable,
+        "run",
+        "--no-sync",
+        "--project",
+        str(rollout_dir),
+        str(entrypoint),
+    ]
+
+
 def build_subprocess_env(
     *,
     base: Mapping[str, str],
@@ -429,7 +476,7 @@ def build_subprocess_env(
             "[env]/[secrets] must not set supervisor-owned variables: "
             + ", ".join(collisions)
         )
-    env = dict(base)
+    env = inherited_env(base)
     env.update(config_env)
     env.update(secrets)
     env.update(
@@ -612,9 +659,19 @@ class LocalEvalRunner:
 
             pending = self._pending_work_items()
             self._refresh_snapshots()
+            total = len(self._selection.rows) * max(1, self._spec.n)
             if not pending:
-                self._write_log("info", "resume", "no pending work items; finalizing")
+                self._stage(
+                    "resume",
+                    f"{run_name}: all {total} work items already have results",
+                )
                 return self._finalize(cancelled=False)
+            recorded = len(self._latest)
+            self._stage(
+                "run",
+                f"{run_name}: {len(pending)} of {total} work items pending"
+                + (f", {recorded} already recorded" if recorded else ""),
+            )
 
             await self._hooks.confirm_dispatch(
                 pending=len(pending), model_path=self._spec.model_path
@@ -706,6 +763,7 @@ class LocalEvalRunner:
         try:
             await listener.start()
             self._write_log("info", "listener", "callback listener started")
+            self._stage("preflight", f"checking model {self._spec.model_path}")
             await self._model_preflight(bridge)
             async with httpx.AsyncClient() as client:
                 base_url = await self._start_rollout_server(
@@ -723,13 +781,14 @@ class LocalEvalRunner:
                     callback_timeout_sec=self._callback_deadline(),
                 )
                 concurrency = await self._resolve_concurrency(client, base_url)
-                self._write_log(
-                    "info",
+                self._stage(
                     "schedule",
-                    "scheduling work items",
-                    pending=len(pending),
-                    max_in_flight=concurrency,
+                    f"running {len(pending)} work items, up to {concurrency} in flight",
                 )
+                # Open the progress display before the first result, not after
+                # it: a rollout can take minutes, and that wait is exactly when
+                # the user needs to see that something is running.
+                self._report_progress()
                 cancelled = await self._schedule(pending, driver, concurrency)
                 if cancelled:
                     await self._settle_cancellations(client, base_url)
@@ -753,11 +812,9 @@ class LocalEvalRunner:
         rollout_ids = list(self._dispatch_context)
         if not rollout_ids:
             return
-        self._write_log(
-            "info",
+        self._stage(
             "cancel",
-            "waiting for cancelled work to unwind",
-            rollouts=len(rollout_ids),
+            f"waiting for {len(rollout_ids)} cancelled rollouts to unwind",
         )
         try:
             observed = await asyncio.wait_for(
@@ -1204,6 +1261,53 @@ class LocalEvalRunner:
     # Rollout-server lifecycle
     # ------------------------------------------------------------------ #
 
+    def _resolve_uv(self) -> str:
+        try:
+            return _uv_executable()
+        except RuntimeError as exc:
+            raise LocalEvalError(
+                "uv is required to launch the rollout server from "
+                f"rollouts/{self._spec.rollout_name}/pyproject.toml; install uv "
+                "and retry"
+            ) from exc
+
+    async def _sync_rollout_dependencies(self, uv_executable: str) -> None:
+        """Resolve the rollout's own environment before the server is spawned.
+
+        Its own stage, so a dependency-resolution failure is attributed to deps
+        instead of surfacing later as a server-health timeout.
+        """
+        self._stage("deps", f"syncing rollout dependencies ({self._spec.rollout_name})")
+        child = await asyncio.create_subprocess_exec(
+            *uv_sync_command(uv_executable, self._rollout_dir),
+            cwd=str(self._rollout_dir),
+            env=inherited_env(os.environ),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+            start_new_session=True,
+        )
+        try:
+            await self._tee_child_output(child, step="deps")
+            returncode = await child.wait()
+        except asyncio.CancelledError:
+            # The sync child is outside _stop_rollout_server's lifecycle, so
+            # cancellation must stop its whole build tree and reap it here.
+            if child.returncode is None:
+                with contextlib.suppress(ProcessLookupError, PermissionError, OSError):
+                    await asyncio.to_thread(
+                        terminate_process_group,
+                        _process_group_of(child.pid),
+                        grace_sec=_SERVER_TERM_GRACE_SEC,
+                    )
+            with contextlib.suppress(Exception):
+                await child.wait()
+            raise
+        if returncode != 0:
+            raise LocalEvalError(
+                f"uv sync failed for rollouts/{self._spec.rollout_name} with exit "
+                f"code {returncode}; see {LOGS_FILENAME}"
+            )
+
     async def _start_rollout_server(
         self, *, secrets: Mapping[str, str], client: httpx.AsyncClient
     ) -> str:
@@ -1215,6 +1319,14 @@ class LocalEvalRunner:
                 "experiment.rollout and experiment.entrypoint"
             )
         artifact_root = self._run_dir / TRIALS_DIRNAME
+        if self._options.server_interpreter is None:
+            uv_executable = self._resolve_uv()
+            # Once, outside the retry loop: dependencies do not change when the
+            # port does.
+            await self._sync_rollout_dependencies(uv_executable)
+            argv = uv_run_command(uv_executable, self._rollout_dir, entrypoint)
+        else:
+            argv = [self._options.server_interpreter, str(entrypoint)]
         last_error: BaseException | None = None
         for attempt in range(1, _PORT_ATTEMPTS + 1):
             port = self._options.rollout_port or reserve_free_port()
@@ -1227,12 +1339,14 @@ class LocalEvalRunner:
                 artifact_root=artifact_root,
                 instance_id=instance_id,
             )
-            self._write_log(
-                "info", "server", "starting rollout server", port=port, attempt=attempt
+            self._stage(
+                "server",
+                f"starting rollout server ({self._spec.entrypoint})",
+                port=port,
+                attempt=attempt,
             )
             child = await asyncio.create_subprocess_exec(
-                sys.executable,
-                str(entrypoint),
+                *argv,
                 cwd=str(self._rollout_dir),
                 env=env,
                 stdout=asyncio.subprocess.PIPE,
@@ -1258,7 +1372,7 @@ class LocalEvalRunner:
                     error=str(exc),
                 )
                 continue
-            self._write_log("info", "server", "rollout server healthy", port=port)
+            self._stage("server", f"rollout server healthy on port {port}", port=port)
             return base_url
         raise LocalEvalError(f"rollout server did not start: {last_error}")
 
@@ -1308,8 +1422,10 @@ class LocalEvalRunner:
                 )
             await asyncio.sleep(min(_HEALTH_POLL_INTERVAL_SEC, remaining))
 
-    async def _tee_child_output(self, child: asyncio.subprocess.Process) -> None:
-        """Tee the rollout server's combined output into the run log (§4.3)."""
+    async def _tee_child_output(
+        self, child: asyncio.subprocess.Process, *, step: str = "rollout-server"
+    ) -> None:
+        """Tee a child's combined output into the run log under *step* (§4.3)."""
         stream = child.stdout
         if stream is None:
             return
@@ -1322,9 +1438,7 @@ class LocalEvalRunner:
                 return
             # RunLog redacts every line it writes, so a secret echoed by the
             # workflow or an HTTP debug log never lands in logs.txt (§7.4).
-            self._write_log(
-                "info", "rollout-server", raw.decode(errors="replace").rstrip()
-            )
+            self._write_log("info", step, raw.decode(errors="replace").rstrip())
 
     async def _stop_rollout_server(self) -> None:
         child = self._child
@@ -1426,6 +1540,7 @@ class LocalEvalRunner:
             skipped=sum(1 for status in statuses if status == "skipped"),
             resumed=len(self._resumed_keys),
             cancelled=cancelled,
+            duration_ms=duration_ms,
             metrics=aggregate_metrics(rows, pass_threshold=self._spec.pass_threshold),
             failures=self._collect_failures(),
         )
@@ -1456,6 +1571,16 @@ class LocalEvalRunner:
     # ------------------------------------------------------------------ #
     # Logging helpers
     # ------------------------------------------------------------------ #
+
+    def _stage(self, step: str, message: str, **details: Any) -> None:
+        """Log a milestone and surface it to the CLI.
+
+        One call site keeps the log and the terminal from drifting apart: a
+        stage a plain run prints is always a line the run log also carries.
+        """
+        self._write_log("info", step, message, **details)
+        with contextlib.suppress(Exception):
+            self._hooks.stage(message)
 
     def _write_log(self, level: str, step: str, message: str, **details: Any) -> None:
         if self._log is not None:

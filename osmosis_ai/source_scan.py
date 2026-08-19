@@ -16,6 +16,7 @@ from __future__ import annotations
 import hashlib
 import os
 from collections.abc import Iterator
+from fnmatch import fnmatch
 from pathlib import Path
 
 EXCLUDE_DIRS: frozenset[str] = frozenset(
@@ -32,9 +33,19 @@ EXCLUDE_DIRS: frozenset[str] = frozenset(
     }
 )
 
+# Glob-style names, matched against every path component so a matching
+# directory takes its contents with it. Resolving a project's environment
+# writes these into its source tree -- ``uv sync`` drops ``uv.lock``, and a
+# setuptools build backend drops ``<name>.egg-info/`` -- so counting them would
+# let running a project change the digest that describes that project.
+EXCLUDE_PATTERNS: tuple[str, ...] = ("uv.lock", "*.egg-info")
+
 
 def _is_excluded(relative: Path, *, path: Path, exclude: Path | None) -> bool:
-    if set(relative.parts) & EXCLUDE_DIRS:
+    parts = relative.parts
+    if set(parts) & EXCLUDE_DIRS:
+        return True
+    if any(fnmatch(part, pattern) for pattern in EXCLUDE_PATTERNS for part in parts):
         return True
     return exclude is not None and path.is_relative_to(exclude)
 
@@ -42,9 +53,10 @@ def _is_excluded(relative: Path, *, path: Path, exclude: Path | None) -> bool:
 def iter_source_files(root: Path, *, exclude: Path | None = None) -> Iterator[Path]:
     """Yield every source file under *root*, in unspecified order.
 
-    Skips anything inside :data:`EXCLUDE_DIRS` and, when given, anything under
-    *exclude* -- used to keep a cache or run-output directory nested in the
-    project from changing the project's own digest.
+    Skips anything matching :data:`EXCLUDE_DIRS` or :data:`EXCLUDE_PATTERNS`
+    and, when given, anything under *exclude* -- used to keep a cache or
+    run-output directory nested in the project from changing the project's own
+    digest.
     """
     for candidate in root.rglob("*"):
         if not candidate.is_file():

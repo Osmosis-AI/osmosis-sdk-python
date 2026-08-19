@@ -5,17 +5,31 @@ Runs an evaluation on your machine against the rollout server in your own worksp
 ## Install
 
 ```bash
-pip install "osmosis-ai[eval-run]"          # LocalBackend rollouts
-pip install "osmosis-ai[eval-run,harbor]"   # Harbor (sandboxed) rollouts
+pip install "osmosis-ai[eval-run]"
 ```
 
-A missing dependency is reported with that exact command, so you never have to guess which extra you are short of.
+That extra covers the supervisor process only — the CLI, the localhost callback listener, and the in-process LiteLLM bridge. The rollout server's dependencies do **not** come from here: they are resolved from `rollouts/<name>/pyproject.toml`, which the `osmosis rollout init` scaffold already declares as `osmosis-ai[server]`. A Harbor rollout adds the `harbor` extra *there*, in its own `pyproject.toml`, not next to the CLI.
+
+Running a local eval also requires [uv](https://docs.astral.sh/uv/): it is what launches the rollout server in that environment. The `eval-run` extra installs it; a uv already on `PATH` works too.
 
 ## Requirements
 
 `eval run` requires being logged in (`osmosis auth login`) and run from the workspace directory. All LLM traffic is served by an in-process LiteLLM bridge on your machine — the same design as the hosted eval controller — so `experiment.model_path` is a LiteLLM model id (`openai/gpt-5-mini`, `anthropic/claude-sonnet-4-6`, …) and provider credentials resolve exactly as LiteLLM resolves them anywhere: from the process environment (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, provider `*_API_BASE` overrides, …) or from `--secrets-file`. Local OpenAI-compatible endpoints (a laptop vLLM or Ollama) work through the corresponding LiteLLM provider id and its environment variables.
 
 Execution is local-only: the rollout entrypoint must build `LocalBackend`, or `HarborBackend` on Harbor's Docker environment (the host Docker runtime). Harbor's SkyPilot environment is not supported by `eval run`.
+
+## The rollout environment
+
+The rollout server does not run in the CLI's environment. It is launched with `uv run --project rollouts/<name>`, in an environment resolved from that rollout's own `pyproject.toml` — the same dependency truth `osmosis eval submit` and training already use, so the rollout that runs here is the rollout that runs in the cloud.
+
+The first run of a rollout resolves and installs those dependencies as its own milestone (`→ syncing rollout dependencies (<rollout>)`) and creates `rollouts/<name>/.venv`; later runs reuse it and the step is quick. Being a named stage is the point: a dependency failure is reported as a dependency failure — with the resolver's output in `logs.txt` — never as a rollout-server health timeout.
+
+The `osmosis-ai` version inside that environment is whatever the rollout's `pyproject.toml` resolves to, which may differ from the version of the CLI you invoked. That is deliberate, and matches how cloud eval and training resolve it. To point the rollout environment at a local SDK checkout while developing, use uv's standard mechanism in `rollouts/<name>/pyproject.toml`:
+
+```toml
+[tool.uv.sources]
+osmosis-ai = { path = "/path/to/osmosis-sdk-python", editable = true }
+```
 
 ## Basic use
 
@@ -49,6 +63,40 @@ Advanced: `--rollout-port` pins the rollout-server port and `--verbose` streams 
 
 There is deliberately **no** `[local]` or `[execution]` config section: everything that differs between a local and a cloud run is a CLI flag, so one TOML means the same thing to both commands.
 
+## What a run prints
+
+A plain run narrates itself: the plan table (the same one `eval submit` prints) before the cost confirmation, one line per milestone, a live progress bar while rollouts are in flight, and the metrics at the end.
+
+```text
+          Local Evaluation
+╭──────────────┬───────────────────╮
+│ Rollout      │ echo              │
+│ Entrypoint   │ main.py           │
+│ Model        │ openai/gpt-5-mini │
+│ Dataset      │ multiply (cache)  │
+│ Rows         │ 20 of 200         │
+│ Runs Per Row │ 3                 │
+│ Work Items   │ 60                │
+│ Output       │ .osmosis/evals    │
+╰──────────────┴───────────────────╯
+→ echo-eval-7f3a2b: 60 of 60 work items pending
+60 rollouts x model openai/gpt-5-mini — continue? [y/N] y
+→ checking model openai/gpt-5-mini
+→ syncing rollout dependencies (echo)
+→ starting rollout server (main.py)
+→ rollout server healthy on port 51423
+→ running 60 work items, up to 8 in flight
+⠹ rollouts ━━━━━━━━━━━━━━━━━━━━━━━━ 42/60 pass 90% · failed 4 0:03:11
+```
+
+The milestones are the waits worth naming: resume replay, the model preflight, the rollout dependency sync, the rollout server's startup and health, scheduling, and the grace period Ctrl-C spends unwinding cancelled rollouts. Each is also a line in `logs.txt`, written by the same call — the terminal and the log cannot drift apart.
+
+The bar needs a terminal. Redirected output gets one printed line per completed work item instead; `--plain` and `--json` print no progress at all, and keep stdout to the result line or the envelope alone.
+
+`--verbose` replaces the milestone lines with the full log stream — `logs.txt` line for line, rollout-server output included. The plan table, the progress display, and the results table stay.
+
+The run ends with a results table: work items by outcome, pass rate against the threshold, reward statistics, pass@k for multi-attempt runs, tokens, duration, and the output directory. Every number in it is read straight from what `metrics.json` holds — nothing is recomputed for display, so the terminal and the file cannot disagree. Durations use the same formatter as `osmosis eval info`, so a local run and a cloud run of the same evaluation read alike.
+
 ## Output layout
 
 ```text
@@ -77,7 +125,7 @@ Resume is **crash and interrupt recovery, not iteration recovery.**
 
 A work item is complete only when it has a durable terminal result. A result is durable once its journal record has been written and `fsync`-ed, which happens *before* the rollout server's callback is acknowledged — so a `kill -9` can never lose an acknowledged result, and can never skip an unacknowledged one. Ctrl-C cancels in-flight rollouts without writing a terminal record, so they simply run again next time.
 
-A named run is pinned to its resolved inputs: model, dataset bytes, selected rows, `n`, timeouts, pass threshold, rollout entrypoint, and a digest of the rollout's source files. Change any of them and the run refuses to resume, naming the input group that changed:
+A named run is pinned to its resolved inputs: model, dataset bytes, selected rows, `n`, timeouts, pass threshold, rollout entrypoint, and a digest of the rollout's source files. The environment the dependency sync builds is not source: `.venv/`, `uv.lock`, and a build backend's `*.egg-info/` are excluded, so resolving dependencies never changes the digest of the project that owns them. Change any of the inputs and the run refuses to resume, naming the input group that changed:
 
 ```text
 Error: run 'my-local-run' was created with different resolved inputs, so resuming it would

@@ -247,7 +247,7 @@ def test_extra_modules_table_matches_pyproject_extras() -> None:
         for extra, requirements in declared_extras.items()
         if extra != "full"  # full only aggregates osmosis-ai[...] self-references
     }
-    executable_only = {"harbor": {"uv"}}
+    executable_only = {"harbor": {"uv"}, "eval-run": {"uv"}}
     assert set(EXTRA_MODULES) == set(checkable)
 
     for extra in checkable:
@@ -366,6 +366,12 @@ def test_extra_modules_table_matches_pyproject_extras() -> None:
             "fastapi",
             "eval-run",
         ),
+        (
+            "osmosis_ai.eval.local.runner",
+            "LocalEvalRunner",
+            "fastapi",
+            "eval-run",
+        ),
     ],
 )
 def test_missing_optional_dependency_names_the_install_extra(
@@ -422,6 +428,40 @@ def test_agent_integration_classes_use_canonical_module_paths() -> None:
         OsmosisStrandsAgent.__module__
         == "osmosis_ai.rollout.integrations.agents.strands"
     )
+
+
+def test_local_eval_runner_imports_without_harbor_extra() -> None:
+    """`osmosis eval run` ships with `[eval-run]`, which does not carry harbor.
+
+    The runner spawns the rollout server through uv, so it needs uv resolution
+    -- but reaching it through `osmosis_ai.packaging`, whose platformdirs and
+    toml imports ship with `[harbor]`, would break `eval run` at startup for an
+    `[eval-run]`-only install.
+    """
+    result = _run_python(
+        """
+        import builtins
+        import sys
+
+        real_import = builtins.__import__
+        blocked = {"platformdirs", "toml"}
+
+        def guarded_import(name, globals=None, locals=None, fromlist=(), level=0):
+            root = name.partition(".")[0]
+            if root in blocked:
+                raise ModuleNotFoundError("No module named " + repr(root), name=root)
+            return real_import(name, globals, locals, fromlist, level)
+
+        builtins.__import__ = guarded_import
+        from osmosis_ai.eval.local.runner import LocalEvalRunner
+
+        assert LocalEvalRunner is not None
+        loaded_roots = {name.partition(".")[0] for name in sys.modules}
+        assert not (blocked & loaded_roots)
+        assert "osmosis_ai.packaging" not in sys.modules
+        """
+    )
+    assert result.returncode == 0, result.stderr
 
 
 def test_driver_core_imports_without_eval_run_extra() -> None:
