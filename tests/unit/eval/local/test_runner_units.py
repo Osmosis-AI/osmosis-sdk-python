@@ -814,6 +814,42 @@ async def test_a_failing_uv_sync_is_reported_as_a_dependency_failure(
     assert [argv[1] for argv, _ in spawns] == ["sync"]
 
 
+async def test_a_cancelled_sync_terminates_the_uv_child(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The sync child sits outside _stop_rollout_server's process-group cleanup,
+    # so the cancellation path itself must reap it or the uv process is orphaned.
+    class _HangingChild:
+        def __init__(self) -> None:
+            self.returncode: int | None = None
+            self.pid = -1
+            # No data, no EOF: the tee blocks on readline like a live child.
+            self.stdout = asyncio.StreamReader()
+            self.terminated = asyncio.Event()
+
+        def terminate(self) -> None:
+            self.terminated.set()
+
+        async def wait(self) -> int:
+            await self.terminated.wait()
+            return -15
+
+    child = _HangingChild()
+
+    async def fake_exec(*argv: str, **kwargs: Any) -> Any:
+        return child
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
+    runner = _uv_runner(tmp_path)
+
+    task = asyncio.create_task(runner._sync_rollout_dependencies("/fake/bin/uv"))
+    await asyncio.sleep(0)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert child.terminated.is_set()
+
+
 async def test_a_missing_uv_is_reported_against_eval_run(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

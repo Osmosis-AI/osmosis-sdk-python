@@ -1285,8 +1285,15 @@ class LocalEvalRunner:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
         )
-        await self._tee_child_output(child, step="deps")
-        returncode = await child.wait()
+        try:
+            await self._tee_child_output(child, step="deps")
+            returncode = await child.wait()
+        except asyncio.CancelledError:
+            # The sync child is outside _stop_rollout_server's process-group
+            # cleanup, so cancellation must reap it here or orphan it.
+            with contextlib.suppress(ProcessLookupError):
+                child.terminate()
+            raise
         if returncode != 0:
             raise LocalEvalError(
                 f"uv sync failed for rollouts/{self._spec.rollout_name} with exit "
