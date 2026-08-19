@@ -137,7 +137,7 @@ class RecordingHooks:
     def note(self, message: str) -> None:
         self.notes.append(message)
 
-    def confirm_dispatch(self, *, pending: int, model_path: str) -> None:
+    async def confirm_dispatch(self, *, pending: int, model_path: str) -> None:
         self.confirmations.append((pending, model_path))
         if self.refuse_confirmation:
             raise RuntimeError("dispatch declined")

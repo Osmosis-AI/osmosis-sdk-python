@@ -164,8 +164,13 @@ class RunnerHooks(Protocol):
     def note(self, message: str) -> None:
         """Surface a human-readable status line."""
 
-    def confirm_dispatch(self, *, pending: int, model_path: str) -> None:
-        """Cost boundary before any rollout is dispatched. Raise to abort."""
+    async def confirm_dispatch(self, *, pending: int, model_path: str) -> None:
+        """Cost boundary before any rollout is dispatched. Raise to abort.
+
+        Awaited, not called: the CLI answers this by prompting the user, and a
+        terminal prompt library needs the supervisor's own event loop to render
+        on. A synchronous implementation that starts a second loop would fail.
+        """
 
     def resolve_secrets(self, names: Sequence[str]) -> dict[str, str]:
         """Resolve workflow-secret values. Called only when work is pending."""
@@ -611,7 +616,7 @@ class LocalEvalRunner:
                 self._write_log("info", "resume", "no pending work items; finalizing")
                 return self._finalize(cancelled=False)
 
-            self._hooks.confirm_dispatch(
+            await self._hooks.confirm_dispatch(
                 pending=len(pending), model_path=self._spec.model_path
             )
             secrets = self._hooks.resolve_secrets(list(self._spec.secret_names))
