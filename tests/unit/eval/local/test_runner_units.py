@@ -797,6 +797,7 @@ async def test_the_default_path_syncs_then_runs_the_rollout_project(
     for _, kwargs in spawns:
         assert kwargs["cwd"] == str(tmp_path)
         assert "VIRTUAL_ENV" not in kwargs["env"]
+        assert kwargs["start_new_session"] is True
 
 
 async def test_a_failing_uv_sync_is_reported_as_a_dependency_failure(
@@ -814,32 +815,41 @@ async def test_a_failing_uv_sync_is_reported_as_a_dependency_failure(
     assert [argv[1] for argv, _ in spawns] == ["sync"]
 
 
-async def test_a_cancelled_sync_terminates_the_uv_child(
+async def test_a_cancelled_sync_terminates_and_reaps_the_uv_process_group(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # The sync child sits outside _stop_rollout_server's process-group cleanup,
-    # so the cancellation path itself must reap it or the uv process is orphaned.
+    from osmosis_ai.eval.local import runner as runner_module
+
+    # The sync child sits outside _stop_rollout_server's lifecycle, so the
+    # cancellation path itself must stop descendants and reap the direct child.
     class _HangingChild:
         def __init__(self) -> None:
             self.returncode: int | None = None
-            self.pid = -1
+            self.pid = 123
             # No data, no EOF: the tee blocks on readline like a live child.
             self.stdout = asyncio.StreamReader()
-            self.terminated = asyncio.Event()
-
-        def terminate(self) -> None:
-            self.terminated.set()
+            self.waited = False
 
         async def wait(self) -> int:
-            await self.terminated.wait()
+            self.waited = True
+            assert self.returncode is not None
             return -15
 
     child = _HangingChild()
+    terminated: list[tuple[int, float]] = []
+
+    def fake_terminate_process_group(pgid: int, *, grace_sec: float) -> None:
+        terminated.append((pgid, grace_sec))
+        child.returncode = -15
 
     async def fake_exec(*argv: str, **kwargs: Any) -> Any:
         return child
 
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
+    monkeypatch.setattr(runner_module, "_process_group_of", lambda pid: pid)
+    monkeypatch.setattr(
+        runner_module, "terminate_process_group", fake_terminate_process_group
+    )
     runner = _uv_runner(tmp_path)
 
     task = asyncio.create_task(runner._sync_rollout_dependencies("/fake/bin/uv"))
@@ -847,7 +857,8 @@ async def test_a_cancelled_sync_terminates_the_uv_child(
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task
-    assert child.terminated.is_set()
+    assert terminated == [(child.pid, runner_module._SERVER_TERM_GRACE_SEC)]
+    assert child.waited is True
 
 
 async def test_a_missing_uv_is_reported_against_eval_run(

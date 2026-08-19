@@ -70,8 +70,8 @@ EXTRA_REQUIREMENTS: dict[str, set[str]] = {
     "rubric": {"aiohttp", "click", "litellm", "orjson", "tqdm"},
     "parquet": {"pyarrow"},
     # eval-run = osmosis-ai[server] self-reference + the in-process LiteLLM
-    # bridge dependency.
-    "eval-run": {"litellm", "osmosis-ai"},
+    # bridge and the uv executable used to launch rollout environments.
+    "eval-run": {"litellm", "osmosis-ai", "uv"},
     "full": {"osmosis-ai"},
 }
 
@@ -364,7 +364,7 @@ SCENARIO_PRESENT: dict[str, set[str]] = {
     "harbor": {"dockerfile-parse", "harbor", "platformdirs", "toml", "uv"},
     "rubric": {"litellm", "orjson", "tqdm"},
     "parquet": {"pyarrow"},
-    "eval-run": {"fastapi", "litellm", "uvicorn"},
+    "eval-run": {"fastapi", "litellm", "uv", "uvicorn"},
     "full": {
         "fastapi",
         "dockerfile-parse",
@@ -470,7 +470,6 @@ SCENARIO_ABSENT: dict[str, set[str]] = {
         "pyarrow",
         "strands-agents",
         "toml",
-        "uv",
     },
     "full": set(),
 }

@@ -1284,15 +1284,23 @@ class LocalEvalRunner:
             env=inherited_env(os.environ),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
+            start_new_session=True,
         )
         try:
             await self._tee_child_output(child, step="deps")
             returncode = await child.wait()
         except asyncio.CancelledError:
-            # The sync child is outside _stop_rollout_server's process-group
-            # cleanup, so cancellation must reap it here or orphan it.
-            with contextlib.suppress(ProcessLookupError):
-                child.terminate()
+            # The sync child is outside _stop_rollout_server's lifecycle, so
+            # cancellation must stop its whole build tree and reap it here.
+            if child.returncode is None:
+                with contextlib.suppress(ProcessLookupError, PermissionError, OSError):
+                    await asyncio.to_thread(
+                        terminate_process_group,
+                        _process_group_of(child.pid),
+                        grace_sec=_SERVER_TERM_GRACE_SEC,
+                    )
+            with contextlib.suppress(Exception):
+                await child.wait()
             raise
         if returncode != 0:
             raise LocalEvalError(

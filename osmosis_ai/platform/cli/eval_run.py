@@ -129,7 +129,7 @@ class _Hooks:
         # it; printing here too would double each milestone.
         if self.verbose:
             return
-        console.print(f"→ {message}", style="cyan")
+        console.print(f"→ {console.escape(message)}", style="cyan")
 
     async def confirm_dispatch(self, *, pending: int, model_path: str) -> None:
         await require_confirmation_async(

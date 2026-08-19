@@ -481,11 +481,15 @@ def test_stage_lines_print_once_and_only_without_verbose(
     """--verbose echoes every log line, and each stage is one of them."""
     with override_output_context(format=OutputFormat.rich, interactive=False):
         eval_run_module._Hooks(yes=True, secrets_file=None).stage("preflight ok")
+        eval_run_module._Hooks(yes=True, secrets_file=None).stage(
+            "checking model [/bold]"
+        )
         eval_run_module._Hooks(yes=True, secrets_file=None, verbose=True).stage(
             "not repeated"
         )
     printed = console_capture.getvalue()
     assert "preflight ok" in printed
+    assert "checking model [/bold]" in printed
     assert "not repeated" not in printed
 
 
