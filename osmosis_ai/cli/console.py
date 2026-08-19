@@ -77,9 +77,9 @@ class Console:
 
         self._rich_stdout: RichConsole | None = None
         self._rich_stderr_console: RichConsole | None = None
-        # Rich Status of a currently-live spinner, if any. print_warning stops
-        # it before printing and restarts it after, so the transient spinner
-        # line is not left stranded on screen mid-spin.
+        # Rich Status of a currently-live spinner, if any. Output written while
+        # it is active pauses and resumes it so the transient line is not left
+        # stranded on screen mid-spin.
         self._active_status: Any = None
 
     def _make_rich_console(self, *, file: Any, **extra: Any) -> RichConsole:
@@ -140,6 +140,18 @@ class Console:
 
         return self._output_format() is OutputFormat.rich
 
+    @contextmanager
+    def _pause_active_spinner(self) -> Generator[None, None, None]:
+        """Temporarily erase the active Rich status around terminal output."""
+        status = self._active_status
+        if status is not None:
+            status.stop()
+        try:
+            yield
+        finally:
+            if status is not None:
+                status.start()
+
     def print(
         self,
         *args: Any,
@@ -157,7 +169,8 @@ class Console:
         """
         if not self._is_rich_mode():
             return
-        self._rich.print(*args, style=style, end=end, **kwargs)
+        with self._pause_active_spinner():
+            self._rich.print(*args, style=style, end=end, **kwargs)
 
     def print_error(
         self,
@@ -176,7 +189,8 @@ class Console:
         kwargs: dict[str, Any] = {"markup": markup}
         if soft_wrap is not None:
             kwargs["soft_wrap"] = soft_wrap
-        self._rich_stderr.print(message, style="bold red", **kwargs)
+        with self._pause_active_spinner():
+            self._rich_stderr.print(message, style="bold red", **kwargs)
 
     def print_warning(
         self,
@@ -222,12 +236,8 @@ class Console:
         # A live spinner owns the terminal via a Rich Live region; writing to the
         # separate stderr console mid-spin would strand the spinner line. Pause
         # it (a clean transient erase), print, then resume so it redraws below.
-        status = self._active_status
-        if status is not None:
-            status.stop()
-        self._rich_stderr.print(f"⚠ {message}", style="yellow", **kwargs)
-        if status is not None:
-            status.start()
+        with self._pause_active_spinner():
+            self._rich_stderr.print(f"⚠ {message}", style="yellow", **kwargs)
 
     def separator(self, title: str = "") -> None:
         """Print a separator line with optional title.
@@ -239,7 +249,8 @@ class Console:
             return
         from rich.rule import Rule
 
-        self._rich.print(Rule(title, style="dim"))
+        with self._pause_active_spinner():
+            self._rich.print(Rule(title, style="dim"))
 
     def panel(
         self,
@@ -262,7 +273,8 @@ class Console:
         from rich.panel import Panel
 
         panel = Panel(content, title=title, border_style=style, padding=padding)
-        self._rich.print(panel)
+        with self._pause_active_spinner():
+            self._rich.print(panel)
 
     def table(
         self,
@@ -296,7 +308,8 @@ class Console:
             table.add_column("")
         for key, value in rows:
             table.add_row(key, value)
-        self._rich.print(table)
+        with self._pause_active_spinner():
+            self._rich.print(table)
 
     def escape(self, text: str | None) -> str:
         """Escape text so it is not interpreted as Rich markup.
@@ -364,12 +377,13 @@ class Console:
         """Print a URL without inserting hard line breaks into the link target."""
         if not self._is_rich_mode():
             return
-        self._rich.print(
-            self.format_text(prefix),
-            self.format_url(url, label=label, style=style),
-            sep="",
-            soft_wrap=True,
-        )
+        with self._pause_active_spinner():
+            self._rich.print(
+                self.format_text(prefix),
+                self.format_url(url, label=label, style=style),
+                sep="",
+                soft_wrap=True,
+            )
 
     @contextmanager
     def spinner(self, message: str) -> Generator[None, None, None]:
@@ -397,13 +411,12 @@ class Console:
         A terminal can only show one spinner at a time, so the active Rich
         ``Status`` is tracked on this (singleton) console regardless of which
         spinner implementation created it — ``console.spinner`` here, or
-        ``OutputContext.status`` on its own stderr console. ``print_warning``
-        consults it to pause/resume the spinner around a stderr write, so a
-        warning fired mid-spin (e.g. the upgrade nudge from deep in the request
-        path) neither glues onto the spinner line nor strands it on screen.
+        ``OutputContext.status`` on its own stderr console. Terminal output
+        consults it to pause/resume the spinner around a write, so a note or
+        warning fired mid-spin neither glues onto nor strands the spinner line.
 
         Saves and restores any previously-active status so nested spinners
-        behave; the innermost live spinner is the one a warning pauses.
+        behave; the innermost live spinner is the one output pauses.
         """
         prev = self._active_status
         self._active_status = status
@@ -417,7 +430,7 @@ class Console:
         """Alias for spinner with output-context aware routing."""
         from osmosis_ai.cli.output.context import get_output_context
 
-        with get_output_context().status(message):
+        with get_output_context().status(message, spinner_tracker=self):
             yield
 
 

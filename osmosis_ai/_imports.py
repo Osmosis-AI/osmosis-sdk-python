@@ -33,7 +33,7 @@ EXTRA_MODULES: Final[Mapping[str, frozenset[str]]] = {
     ),
     "rubric": frozenset({"aiohttp", "click", "litellm", "orjson", "tqdm"}),
     "parquet": frozenset({"pyarrow"}),
-    "eval-run": frozenset({"click", "fastapi", "litellm", "uvicorn"}),
+    "eval-run": frozenset({"click", "fastapi", "litellm", "pyarrow", "uvicorn"}),
 }
 
 

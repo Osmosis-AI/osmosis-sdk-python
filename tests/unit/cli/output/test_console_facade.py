@@ -6,6 +6,7 @@ import io
 from contextlib import redirect_stderr, redirect_stdout
 
 from osmosis_ai.cli.console import Console
+from osmosis_ai.cli.console import console as shared_console
 from osmosis_ai.cli.output.context import (
     OutputContext,
     OutputFormat,
@@ -77,6 +78,17 @@ def test_console_spinner_does_not_leak_into_stdout_under_redirection() -> None:
                 out.write("REAL_RESULT_ROW\n")
     assert out.getvalue() == "REAL_RESULT_ROW\n"
     assert "Fetching datasets..." in err.getvalue()
+
+
+def test_non_global_console_tracks_its_own_spinner() -> None:
+    out, err = io.StringIO(), io.StringIO()
+    local_console = Console(file=out, force_terminal=True)
+
+    with override_output_context(format=OutputFormat.rich, interactive=True):
+        with redirect_stderr(err), local_console.spinner("Loading..."):
+            assert local_console._active_status is not None
+            assert shared_console._active_status is None
+            local_console.print("Still working...")
 
 
 def test_output_context_status_no_op_in_json() -> None:

@@ -8,7 +8,6 @@ This file records changes to `osmosis-ai`. For earlier versions, see [GitHub Rel
 
 - Removed eight server-owned fields from the `osmosis_ai.platform.api.models` record types, which the package documents as a direct import path: `UploadInfo.s3_key` / `.upload_id`, `DatasetFile.df_stats` / `.organization_id`, `TrainingRunMetrics.training_run_id`, `EvalRunMetrics.eval_run_id`, `RolloutInfo.last_synced_at`, and `TrainingRunCheckpoints.training_run_id`. Nothing in the SDK read them. Reading one of these attributes out of tree now raises `AttributeError`, and the four that were required keys are no longer required, so `from_dict` accepts responses that omit them ([#315](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/315)).
 - Removed `ExecutionBackend.max_concurrency` and its `LocalBackend` override; nothing read it, and `/health` is the single capacity channel. Out-of-tree backends that override it keep working, but a `super().max_concurrency` call now raises `AttributeError` ([#315](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/315)).
-- Removed the `deps` parameter from `osmosis_ai.packaging.build_bundle()`; it overrode a rollout project's declared dependencies for a caller that no longer exists ([#315](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/315)).
 - Removed `PLATFORM_URL` from `osmosis_ai.platform.auth`. It was a snapshot frozen at import time, so it silently ignored `OSMOSIS_PLATFORM_URL` changes (including CLI-loaded `.env` files) that every request path honors; call `get_platform_url()` instead. Its removal also means importing `osmosis_ai.platform.auth` no longer raises on a malformed `OSMOSIS_PLATFORM_URL` — the URL is validated when first used ([#315](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/315)).
 - `RolloutDriver.run` now takes a single `RolloutRunRequest` argument; update custom drivers and callers to pass the request object ([#307](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/307)).
 
@@ -19,6 +18,7 @@ This file records changes to `osmosis-ai`. For earlier versions, see [GitHub Rel
 
 ### Fixed
 
+- Restored `osmosis_ai.packaging.build_bundle(deps=...)` for bundle-time dependency overrides while preserving projects that declare dependencies dynamically.
 - Prevented `--json` and `--plain` submits from prompting for missing secrets, surfaced all missing names in `INTERACTIVE_REQUIRED` details, redacted supplied secrets from platform errors without losing specialized error codes, and restored rich login presentation ([#304](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/304)).
 - Refused insecure non-loopback platform URLs unless explicitly allowed, kept insecure-URL warnings machine-readable, and preserved lazy CLI startup paths without loading authentication dependencies for shell-only usage errors ([#304](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/304)).
 

@@ -160,6 +160,11 @@ def find_package_dir(code_dir: Path, package: str) -> Path:
     raise ValueError(f"package {package!r} not found; looked in {searched}")
 
 
+def requirement_name(spec: str) -> str:
+    """Return the normalized distribution name from a requirement specifier."""
+    return canonicalize_name(Requirement(spec).name)
+
+
 def split_ref(ref: str, label: str) -> tuple[str, str]:
     if ":" not in ref:
         raise ValueError(f"{label} must be 'module:attr', got {ref!r}")
@@ -235,6 +240,7 @@ def build_bundle(
     grader: str | None = None,
     workflow_config: str | None = None,
     grader_config: str | None = None,
+    deps: list[str] | None = None,
     package: str | None = None,
     bundles_dir: Path = BUNDLES_DIR,
 ) -> Path:
@@ -242,7 +248,8 @@ def build_bundle(
 
     workflow/grader are 'module:Class' refs; the config refs point at
     module-level instances and are passed to the runner as-is. Grader-only
-    bundles (workflow=None) carry just the grading script.
+    bundles (workflow=None) carry just the grading script. Entries in *deps*
+    replace same-named static dependencies from the project's pyproject.toml.
     """
     code_dir = code_dir.resolve()
     pyproject_path = code_dir / "pyproject.toml"
@@ -283,13 +290,23 @@ def build_bundle(
         )
         scripts[grader_script_name(package)] = f"{package}.bundle_main:grader_main"
 
-    project = tomllib.loads(pyproject_path.read_text()).get("project", {})
+    pyproject_text = pyproject_path.read_text()
+    project = tomllib.loads(pyproject_text).get("project", {})
+    dependency_overrides = list(deps or [])
+    if dependency_overrides and "dependencies" in project.get("dynamic", []):
+        raise ValueError(
+            "deps cannot override project dependencies declared as dynamic"
+        )
+    overridden_dependency_names = {
+        requirement_name(spec) for spec in dependency_overrides
+    }
     name = project.get("name") or f"osmosis-harness-{package}"
     wheel_distribution = canonicalize_name(name, validate=True).replace("-", "_")
     build_descriptor = "\0".join(
         (
-            pyproject_path.read_text(),
+            pyproject_text,
             shim,
+            repr(dependency_overrides),
             package,
             sys.implementation.cache_tag or "",
             sysconfig.get_platform(),
@@ -351,6 +368,12 @@ def build_bundle(
         (find_package_dir(stage, package) / "bundle_main.py").write_text(shim)
         staged = tomllib.loads((stage / "pyproject.toml").read_text())
         staged_project = staged.setdefault("project", {})
+        if dependency_overrides:
+            staged_project["dependencies"] = [
+                spec
+                for spec in staged_project.get("dependencies", [])
+                if requirement_name(spec) not in overridden_dependency_names
+            ] + dependency_overrides
         staged_project["scripts"] = {**staged_project.get("scripts", {}), **scripts}
         (stage / "pyproject.toml").write_text(toml.dumps(staged))
         subprocess.run(
