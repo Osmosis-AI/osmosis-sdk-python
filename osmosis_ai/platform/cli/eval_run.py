@@ -19,8 +19,13 @@ from osmosis_ai.cli.errors import CLIError, CLIErrorCode
 from osmosis_ai.cli.output import CommandResult, OperationResult
 from osmosis_ai.cli.output.context import get_output_context
 from osmosis_ai.cli.output.display import format_duration_ms
+from osmosis_ai.cli.output.error import classify_error
 from osmosis_ai.cli.paths import parse_cli_path
 from osmosis_ai.cli.prompts import require_confirmation_async
+from osmosis_ai.platform.auth.platform_client import (
+    AuthenticationExpiredError,
+    PlatformAPIError,
+)
 from osmosis_ai.platform.cli.eval_config import (
     load_eval_submit_config,
     validate_eval_submit_context_paths,
@@ -356,10 +361,16 @@ def run(
                 f"the platform upload was interrupted.\nRetry with: {retry}"
             ) from exc
         except Exception as exc:
-            raise CLIError(
+            message = (
                 f"Local evaluation results are complete at {summary.run_dir}, but "
                 f"the platform upload failed: {exc}\nRetry with: {retry}"
-            ) from exc
+            )
+            if isinstance(exc, (AuthenticationExpiredError, PlatformAPIError)):
+                classified = classify_error(exc)
+                raise CLIError(
+                    message, code=classified.code, details=classified.details
+                ) from exc
+            raise CLIError(message) from exc
 
     try:
         summary = asyncio.run(

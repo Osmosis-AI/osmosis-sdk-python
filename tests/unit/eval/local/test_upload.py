@@ -311,3 +311,15 @@ def test_run_directory_symlink_is_rejected(tmp_path: Path) -> None:
     alias.symlink_to(run_dir, target_is_directory=True)
     with pytest.raises(LocalEvalUploadError, match="non-symlink run directory"):
         build_eval_upload_plan(alias)
+
+
+def test_rollout_trials_root_symlink_is_rejected(tmp_path: Path) -> None:
+    run_dir = _run_dir(tmp_path)
+    real_trials = tmp_path / "linked-trials"
+    trials_root = run_dir / "rollout_trials"
+    trials_root.rename(real_trials)
+    trials_root.symlink_to(real_trials, target_is_directory=True)
+    with pytest.raises(
+        LocalEvalUploadError, match="rollout_trials must be a regular, non-symlink"
+    ):
+        build_eval_upload_plan(run_dir)

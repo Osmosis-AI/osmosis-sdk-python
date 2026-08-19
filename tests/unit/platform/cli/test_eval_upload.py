@@ -244,3 +244,58 @@ def test_finalized_start_is_confirmed_by_idempotent_finalize(tmp_path: Path) -> 
 
     assert result.eval_run_id == "eval-1"
     assert client.finalized_calls == 1
+
+
+def test_incomplete_finalized_response_is_rejected(tmp_path: Path) -> None:
+    file = _local_file(tmp_path, "index.jsonl", b"{}\n")
+    plan = EvalUploadPlan(
+        run_dir=tmp_path,
+        local_run_id="a" * 32,
+        manifest_digest="b" * 64,
+        run={"name": "run-1"},
+        schema_versions={},
+        provenance={},
+        files=(file,),
+    )
+
+    class FakeClient:
+        def start_eval_run_import(self, **_kwargs: Any) -> EvalRunImportResult:
+            return EvalRunImportResult(
+                session_id="session-1",
+                status="finalized",
+                expected_files=1,
+                uploaded_files=1,
+                files=[
+                    EvalRunImportFileStatus(
+                        path=file.path,
+                        size=file.size,
+                        sha256=file.sha256,
+                        state="uploaded",
+                    )
+                ],
+            )
+
+        def finalize_eval_run_import(
+            self, _session_id: str, **_kwargs: Any
+        ) -> EvalRunImportResult:
+            return EvalRunImportResult(
+                session_id="session-1",
+                status="finalized",
+                expected_files=1,
+                uploaded_files=0,
+                files=[
+                    EvalRunImportFileStatus(
+                        path=file.path,
+                        size=file.size,
+                        sha256=file.sha256,
+                        state="pending",
+                    )
+                ],
+                eval_run_id="eval-1",
+                eval_run_name="run-1",
+                platform_url="https://platform.example/evals/eval-1",
+            )
+
+    context = SimpleNamespace(credentials=None, git_identity="acme/repo")
+    with pytest.raises(RuntimeError, match="incomplete files"):
+        upload_plan(plan, context=context, client=FakeClient())  # type: ignore[arg-type]

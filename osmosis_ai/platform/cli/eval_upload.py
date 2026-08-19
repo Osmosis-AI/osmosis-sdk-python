@@ -65,6 +65,12 @@ def _validate_finalized(result: EvalRunImportResult) -> None:
         )
     if not result.eval_run_id or not result.eval_run_name or not result.platform_url:
         raise RuntimeError("Finalized eval import response is missing run details")
+    if (
+        result.uploaded_files != result.expected_files
+        or len(result.files) != result.expected_files
+        or any(file.state != "uploaded" for file in result.files)
+    ):
+        raise RuntimeError("Finalized eval import response has incomplete files")
 
 
 def _upload_one(

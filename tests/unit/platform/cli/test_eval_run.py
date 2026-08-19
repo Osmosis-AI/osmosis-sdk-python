@@ -21,7 +21,7 @@ from prompt_toolkit.output import DummyOutput
 
 import osmosis_ai.platform.cli.eval_run as eval_run_module
 from osmosis_ai.cli.console import Console
-from osmosis_ai.cli.errors import CLIError
+from osmosis_ai.cli.errors import CLIError, CLIErrorCode
 from osmosis_ai.cli.output import OutputFormat, override_output_context
 
 GIT_IDENTITY = "acme/rollouts"
@@ -486,6 +486,47 @@ def test_upload_failure_says_local_results_are_complete_and_gives_retry_command(
     with pytest.raises(CLIError) as raised:
         _run(workspace, upload=True)
 
+    assert f"Local evaluation results are complete at {run_dir}" in raised.value.message
+    assert f"osmosis eval upload {run_dir}" in raised.value.message
+
+
+def test_upload_platform_error_keeps_auth_code_and_retry_context(
+    workspace: Path,
+    captured_runner: type[_CapturedRunner],
+    console_capture: StringIO,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import osmosis_ai.eval.local.upload as local_upload_module
+    import osmosis_ai.platform.cli.eval_upload as eval_upload_module
+    from osmosis_ai.platform.auth.platform_client import PlatformAPIError
+
+    original_run = _CapturedRunner.run
+
+    async def run_with_callback(self: Any, *, after_finalize: Any) -> Any:
+        summary = await original_run(self)
+        after_finalize(summary)
+        return summary
+
+    monkeypatch.setattr(_CapturedRunner, "run", run_with_callback)
+    monkeypatch.setattr(
+        local_upload_module,
+        "build_eval_upload_plan",
+        lambda run_dir: SimpleNamespace(run_dir=run_dir),
+    )
+    monkeypatch.setattr(
+        eval_upload_module,
+        "upload_plan",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            PlatformAPIError("session expired", status_code=401)
+        ),
+    )
+    run_dir = workspace / ".osmosis" / "evals" / "run-1"
+
+    with pytest.raises(CLIError) as raised:
+        _run(workspace, upload=True)
+
+    assert raised.value.code == CLIErrorCode.AUTH_REQUIRED
+    assert raised.value.details["status_code"] == 401
     assert f"Local evaluation results are complete at {run_dir}" in raised.value.message
     assert f"osmosis eval upload {run_dir}" in raised.value.message
 

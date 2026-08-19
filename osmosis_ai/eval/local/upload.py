@@ -314,6 +314,11 @@ def build_eval_upload_plan(run_dir: Path) -> EvalUploadPlan:
             f"{run_dir} must be a regular, non-symlink run directory"
         )
     run_dir = run_dir.resolve()
+    trials_root = run_dir / "rollout_trials"
+    if trials_root.is_symlink():
+        raise LocalEvalUploadError(
+            "rollout_trials must be a regular, non-symlink directory"
+        )
 
     manifest_path = run_dir / "manifest.json"
     manifest_raw = _read_bytes(manifest_path, where="manifest.json")
