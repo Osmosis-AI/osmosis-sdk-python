@@ -164,6 +164,15 @@ class RunnerHooks(Protocol):
     def note(self, message: str) -> None:
         """Surface a human-readable status line."""
 
+    def stage(self, message: str) -> None:
+        """Surface a run milestone.
+
+        Separate from ``note`` because the two feed different displays: ``note``
+        carries the log echo a ``--verbose`` run streams, while stages are the
+        handful of lines a plain run prints so the long gaps -- model preflight,
+        rollout-server startup -- are not silent (§4.3).
+        """
+
     async def confirm_dispatch(self, *, pending: int, model_path: str) -> None:
         """Cost boundary before any rollout is dispatched. Raise to abort.
 
@@ -230,6 +239,7 @@ class RunSummary:
     skipped: int
     resumed: int
     cancelled: bool
+    duration_ms: float = 0.0
     metrics: dict[str, Any] = field(default_factory=dict)
     failures: list[FailedWorkItem] = field(default_factory=list)
 
@@ -612,9 +622,19 @@ class LocalEvalRunner:
 
             pending = self._pending_work_items()
             self._refresh_snapshots()
+            total = len(self._selection.rows) * max(1, self._spec.n)
             if not pending:
-                self._write_log("info", "resume", "no pending work items; finalizing")
+                self._stage(
+                    "resume",
+                    f"{run_name}: all {total} work items already have results",
+                )
                 return self._finalize(cancelled=False)
+            recorded = len(self._latest)
+            self._stage(
+                "run",
+                f"{run_name}: {len(pending)} of {total} work items pending"
+                + (f", {recorded} already recorded" if recorded else ""),
+            )
 
             await self._hooks.confirm_dispatch(
                 pending=len(pending), model_path=self._spec.model_path
@@ -706,6 +726,7 @@ class LocalEvalRunner:
         try:
             await listener.start()
             self._write_log("info", "listener", "callback listener started")
+            self._stage("preflight", f"checking model {self._spec.model_path}")
             await self._model_preflight(bridge)
             async with httpx.AsyncClient() as client:
                 base_url = await self._start_rollout_server(
@@ -723,13 +744,14 @@ class LocalEvalRunner:
                     callback_timeout_sec=self._callback_deadline(),
                 )
                 concurrency = await self._resolve_concurrency(client, base_url)
-                self._write_log(
-                    "info",
+                self._stage(
                     "schedule",
-                    "scheduling work items",
-                    pending=len(pending),
-                    max_in_flight=concurrency,
+                    f"running {len(pending)} work items, up to {concurrency} in flight",
                 )
+                # Open the progress display before the first result, not after
+                # it: a rollout can take minutes, and that wait is exactly when
+                # the user needs to see that something is running.
+                self._report_progress()
                 cancelled = await self._schedule(pending, driver, concurrency)
                 if cancelled:
                     await self._settle_cancellations(client, base_url)
@@ -753,11 +775,9 @@ class LocalEvalRunner:
         rollout_ids = list(self._dispatch_context)
         if not rollout_ids:
             return
-        self._write_log(
-            "info",
+        self._stage(
             "cancel",
-            "waiting for cancelled work to unwind",
-            rollouts=len(rollout_ids),
+            f"waiting for {len(rollout_ids)} cancelled rollouts to unwind",
         )
         try:
             observed = await asyncio.wait_for(
@@ -1227,8 +1247,11 @@ class LocalEvalRunner:
                 artifact_root=artifact_root,
                 instance_id=instance_id,
             )
-            self._write_log(
-                "info", "server", "starting rollout server", port=port, attempt=attempt
+            self._stage(
+                "server",
+                f"starting rollout server ({self._spec.entrypoint})",
+                port=port,
+                attempt=attempt,
             )
             child = await asyncio.create_subprocess_exec(
                 sys.executable,
@@ -1258,7 +1281,7 @@ class LocalEvalRunner:
                     error=str(exc),
                 )
                 continue
-            self._write_log("info", "server", "rollout server healthy", port=port)
+            self._stage("server", f"rollout server healthy on port {port}", port=port)
             return base_url
         raise LocalEvalError(f"rollout server did not start: {last_error}")
 
@@ -1426,6 +1449,7 @@ class LocalEvalRunner:
             skipped=sum(1 for status in statuses if status == "skipped"),
             resumed=len(self._resumed_keys),
             cancelled=cancelled,
+            duration_ms=duration_ms,
             metrics=aggregate_metrics(rows, pass_threshold=self._spec.pass_threshold),
             failures=self._collect_failures(),
         )
@@ -1456,6 +1480,16 @@ class LocalEvalRunner:
     # ------------------------------------------------------------------ #
     # Logging helpers
     # ------------------------------------------------------------------ #
+
+    def _stage(self, step: str, message: str, **details: Any) -> None:
+        """Log a milestone and surface it to the CLI.
+
+        One call site keeps the log and the terminal from drifting apart: a
+        stage a plain run prints is always a line the run log also carries.
+        """
+        self._write_log("info", step, message, **details)
+        with contextlib.suppress(Exception):
+            self._hooks.stage(message)
 
     def _write_log(self, level: str, step: str, message: str, **details: Any) -> None:
         if self._log is not None:

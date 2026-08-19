@@ -378,6 +378,27 @@ async def test_confirmation_receives_the_pending_count(harness: RunnerHarness) -
     assert hooks.progress_snapshots[-1].completed == 4
 
 
+async def test_the_run_narrates_its_stages(harness: RunnerHarness) -> None:
+    """Without --verbose these lines are the whole run report, so every wait a
+    user sits through -- preflight, server startup, scheduling -- names itself."""
+    hooks = RecordingHooks()
+    await harness.runner(hooks=hooks).run()
+    narration = " | ".join(hooks.stages)
+    assert "4 of 4 work items pending" in narration
+    assert "checking model openai/gpt-5-mini" in narration
+    assert "starting rollout server" in narration
+    assert "rollout server healthy on port" in narration
+    assert "running 4 work items" in narration
+
+
+async def test_progress_opens_before_the_first_result(harness: RunnerHarness) -> None:
+    """A rollout can take minutes; the display must exist during that wait."""
+    hooks = RecordingHooks()
+    await harness.runner(hooks=hooks).run()
+    assert hooks.progress_snapshots[0].completed == 0
+    assert hooks.progress_snapshots[0].total == 4
+
+
 async def test_declining_confirmation_dispatches_nothing(
     harness: RunnerHarness,
 ) -> None:

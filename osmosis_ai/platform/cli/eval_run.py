@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -18,6 +18,7 @@ from osmosis_ai.cli.console import console
 from osmosis_ai.cli.errors import CLIError, CLIErrorCode
 from osmosis_ai.cli.output import CommandResult, OperationResult
 from osmosis_ai.cli.output.context import get_output_context
+from osmosis_ai.cli.output.display import format_duration_ms
 from osmosis_ai.cli.paths import parse_cli_path
 from osmosis_ai.cli.prompts import require_confirmation_async
 from osmosis_ai.platform.cli.eval_config import (
@@ -25,6 +26,7 @@ from osmosis_ai.platform.cli.eval_config import (
     validate_eval_submit_context_paths,
 )
 from osmosis_ai.platform.cli.secret_resolution import resolve_run_secrets
+from osmosis_ai.platform.cli.shared_config import build_submit_summary_rows
 from osmosis_ai.platform.cli.utils import require_git_workspace_directory_context
 from osmosis_ai.platform.cli.workspace_directory_context import git_result_context
 from osmosis_ai.platform.cli.workspace_directory_contract import (
@@ -38,15 +40,97 @@ EVAL_CONFIG_DIR = "configs/eval"
 DEFAULT_OUTPUT_SUBPATH = (".osmosis", "evals")
 
 
+class _ProgressDisplay:
+    """Live one-line progress on a terminal; a printed line per item elsewhere.
+
+    The supervisor reports once per completed work item, so on anything larger
+    than a smoke test the line-per-item form scrolls the stage lines -- and the
+    plan table -- out of the scrollback. The bar keeps the run on one line and
+    leaves the final counts on screen. Redirected rich output falls back to the
+    printed form, which is what a log file wants; ``--plain`` and ``--json``
+    print no progress at all, because ``console.print`` is a no-op there and
+    their stdout belongs to the result alone.
+    """
+
+    def __init__(self) -> None:
+        self._progress: Any | None = None
+        self._task_id: Any = None
+        self._resolved = False
+
+    def update(self, snapshot: Any) -> None:
+        detail = f"pass {snapshot.pass_rate:.0%} · failed {snapshot.failed}"
+        progress = self._start(snapshot)
+        if progress is None:
+            console.print(
+                f"{snapshot.completed}/{snapshot.total} {detail}", style="dim"
+            )
+            return
+        progress.update(self._task_id, completed=snapshot.completed, detail=detail)
+
+    def close(self) -> None:
+        progress, self._progress = self._progress, None
+        if progress is None:
+            return
+        # Stopping renders one final frame. An unfinished task -- an interrupted
+        # run, a halted dispatch, any run that did not reach its total -- would
+        # freeze its spinner mid-animation and leave the glyph on screen for
+        # good. Marking the task finished swaps the spinner for its blank
+        # finished text, so the line the user keeps carries only the counts.
+        for task in progress.tasks:
+            if task.finished_time is None:
+                task.finished_time = task.elapsed or 0.0
+        progress.stop()
+
+    def _start(self, snapshot: Any) -> Any | None:
+        if self._resolved:
+            return self._progress
+        self._resolved = True
+        from osmosis_ai.cli.output.context import OutputFormat
+
+        if not console.is_tty or get_output_context().format is not OutputFormat.rich:
+            return None
+        from rich.progress import (
+            BarColumn,
+            MofNCompleteColumn,
+            Progress,
+            SpinnerColumn,
+            TextColumn,
+            TimeElapsedColumn,
+        )
+
+        progress = Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            MofNCompleteColumn(),
+            TextColumn("{task.fields[detail]}"),
+            TimeElapsedColumn(),
+            console=console.rich,
+        )
+        progress.start()
+        self._task_id = progress.add_task("rollouts", total=snapshot.total, detail="")
+        self._progress = progress
+        return progress
+
+
 @dataclass(frozen=True)
 class _Hooks:
     """Bridges the supervisor's callbacks onto CLI output primitives."""
 
     yes: bool
     secrets_file: str | None
+    verbose: bool = False
+    display: _ProgressDisplay = field(default_factory=_ProgressDisplay)
 
     def note(self, message: str) -> None:
         console.print(message, style="dim")
+
+    def stage(self, message: str) -> None:
+        # --verbose echoes the whole log stream, and every stage is a line in
+        # it; printing here too would double each milestone.
+        if self.verbose:
+            return
+        console.print(f"→ {message}", style="cyan")
 
     async def confirm_dispatch(self, *, pending: int, model_path: str) -> None:
         await require_confirmation_async(
@@ -68,11 +152,7 @@ class _Hooks:
         )
 
     def progress(self, snapshot: Any) -> None:
-        console.print(
-            f"{snapshot.completed}/{snapshot.total} "
-            f"pass_rate={snapshot.pass_rate:.2f} failed={snapshot.failed}",
-            style="dim",
-        )
+        self.display.update(snapshot)
 
 
 def _missing_extra_error(exc: ModuleNotFoundError) -> CLIError:
@@ -239,6 +319,7 @@ def run(
     except DatasetResolutionError as exc:
         raise CLIError(str(exc)) from exc
 
+    hooks = _Hooks(yes=yes, secrets_file=secrets_file, verbose=verbose)
     runner = LocalEvalRunner(
         spec=spec,
         options=LocalEvalOptions(
@@ -253,11 +334,12 @@ def run(
         selection=selection,
         rollout_dir=rollout_dir,
         output_root=output_root,
-        hooks=_Hooks(yes=yes, secrets_file=secrets_file),
+        hooks=hooks,
         provenance=_provenance(workspace_directory, spec, advanced=advanced),
         config_stem=resolved_config_path.stem,
     )
 
+    _print_plan(spec, dataset=dataset, selection=selection, output_root=output_root)
     try:
         summary = asyncio.run(runner.run())
     except (LocalEvalError, LocalEvalStateError) as exc:
@@ -267,8 +349,13 @@ def run(
             "Interrupted. Re-run the same command to resume the pending work items.",
             code=CLIErrorCode.VALIDATION,
         ) from None
+    finally:
+        # The bar owns a live terminal region; leaving it running would print
+        # the summary, an error, or a traceback into it.
+        hooks.display.close()
 
     _print_failures(summary)
+    _print_summary(summary)
     return _result(summary, context=context, dataset_source=dataset.source)
 
 
@@ -305,6 +392,85 @@ def _provenance(
     return {key: value for key, value in provenance.items() if value is not None}
 
 
+def _print_plan(spec: Any, *, dataset: Any, selection: Any, output_root: Path) -> None:
+    """What is about to run, before the cost confirmation.
+
+    Deliberately the same table ``osmosis eval submit`` prints: the two commands
+    read one TOML, so they owe the user one reading of it.
+    """
+    rows = build_submit_summary_rows(
+        rollout=spec.rollout_name,
+        entrypoint=spec.entrypoint,
+        model=spec.model_path,
+        dataset=f"{dataset.dataset_name} ({dataset.source})",
+        branch=spec.branch,
+        commit_sha=spec.commit_sha,
+    )
+    sampled = len(selection.rows)
+    runs = max(1, spec.n)
+    rows.append(("Rows", f"{sampled} of {selection.total_dataset_rows}"))
+    if runs > 1:
+        rows.append(("Runs Per Row", str(runs)))
+    rows.append(("Work Items", str(sampled * runs)))
+    rows.append(("Output", str(output_root)))
+    console.table(
+        [(label, console.escape(value)) for label, value in rows],
+        title="Local Evaluation",
+    )
+
+
+def _print_summary(summary: Any) -> None:
+    """The numbers the run produced (§4.3).
+
+    ``metrics`` is what ``metrics.json`` holds, so the terminal and the file
+    can never disagree -- nothing here is recomputed.
+    """
+    metrics: dict[str, Any] = summary.metrics or {}
+    completed = summary.succeeded + summary.failed + summary.skipped
+    counts = f"{summary.succeeded} ok · {summary.failed} failed"
+    if summary.skipped:
+        counts += f" · {summary.skipped} skipped"
+    rows: list[tuple[str, str]] = [
+        ("Run", summary.run_name),
+        (
+            "Work Items",
+            f"{completed}/{summary.total_work_items} complete · {counts}",
+        ),
+        (
+            "Pass Rate",
+            f"{metrics.get('pass_rate', 0.0):.1%} "
+            f"({metrics.get('passed', 0)}/{metrics.get('completed_samples', 0)} "
+            f"scored, threshold {metrics.get('pass_threshold', 1.0):g})",
+        ),
+    ]
+    # Only these two are conditional in ``aggregate_metrics``: rewards need a
+    # graded sample, and pass@k needs at least two attempts per row.
+    stats = metrics.get("reward_stats")
+    if stats:
+        rows.append(
+            (
+                "Reward",
+                f"mean {stats['mean']:.3f} · median {stats['median']:.3f} · "
+                f"min {stats['min']:.3f} · max {stats['max']:.3f}",
+            )
+        )
+    points = metrics.get("pass_at_k")
+    if points:
+        rows.append(
+            (
+                "pass@k",
+                " · ".join(f"k={point['k']} {point['value']:.2f}" for point in points),
+            )
+        )
+    rows.append(("Tokens Used", f"{metrics.get('tokens_used', 0):,}"))
+    rows.append(("Duration", format_duration_ms(summary.duration_ms)))
+    rows.append(("Output", str(summary.run_dir)))
+    console.table(
+        [(label, console.escape(value)) for label, value in rows],
+        title="Results" + (" (incomplete)" if summary.cancelled else ""),
+    )
+
+
 def _print_failures(summary: Any) -> None:
     """Print failed rows with zero-friction paths (§4.3)."""
     if not summary.failures:
@@ -336,6 +502,7 @@ def _result(summary: Any, *, context: Any, dataset_source: str) -> OperationResu
         "skipped": summary.skipped,
         "resumed": summary.resumed,
         "cancelled": summary.cancelled,
+        "duration_ms": summary.duration_ms,
         "metrics": summary.metrics,
         "failed_rows": [
             {

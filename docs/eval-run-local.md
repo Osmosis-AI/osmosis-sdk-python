@@ -49,6 +49,39 @@ Advanced: `--rollout-port` pins the rollout-server port and `--verbose` streams 
 
 There is deliberately **no** `[local]` or `[execution]` config section: everything that differs between a local and a cloud run is a CLI flag, so one TOML means the same thing to both commands.
 
+## What a run prints
+
+A plain run narrates itself: the plan table (the same one `eval submit` prints) before the cost confirmation, one line per milestone, a live progress bar while rollouts are in flight, and the metrics at the end.
+
+```text
+          Local Evaluation
+╭──────────────┬───────────────────╮
+│ Rollout      │ echo              │
+│ Entrypoint   │ main.py           │
+│ Model        │ openai/gpt-5-mini │
+│ Dataset      │ multiply (cache)  │
+│ Rows         │ 20 of 200         │
+│ Runs Per Row │ 3                 │
+│ Work Items   │ 60                │
+│ Output       │ .osmosis/evals    │
+╰──────────────┴───────────────────╯
+→ echo-eval-7f3a2b: 60 of 60 work items pending
+60 rollouts x model openai/gpt-5-mini — continue? [y/N] y
+→ checking model openai/gpt-5-mini
+→ starting rollout server (main.py)
+→ rollout server healthy on port 51423
+→ running 60 work items, up to 8 in flight
+⠹ rollouts ━━━━━━━━━━━━━━━━━━━━━━━━ 42/60 pass 90% · failed 4 0:03:11
+```
+
+The milestones are the waits worth naming: resume replay, the model preflight, the rollout server's startup and health, scheduling, and the grace period Ctrl-C spends unwinding cancelled rollouts. Each is also a line in `logs.txt`, written by the same call — the terminal and the log cannot drift apart.
+
+The bar needs a terminal. Redirected output gets one printed line per completed work item instead; `--plain` and `--json` print no progress at all, and keep stdout to the result line or the envelope alone.
+
+`--verbose` replaces the milestone lines with the full log stream — `logs.txt` line for line, rollout-server output included. The plan table, the progress display, and the results table stay.
+
+The run ends with a results table: work items by outcome, pass rate against the threshold, reward statistics, pass@k for multi-attempt runs, tokens, duration, and the output directory. Every number in it is read straight from what `metrics.json` holds — nothing is recomputed for display, so the terminal and the file cannot disagree. Durations use the same formatter as `osmosis eval info`, so a local run and a cloud run of the same evaluation read alike.
+
 ## Output layout
 
 ```text

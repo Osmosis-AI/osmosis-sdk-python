@@ -123,6 +123,21 @@ def _stub_context(monkeypatch: pytest.MonkeyPatch, workspace: Path) -> None:
     monkeypatch.setattr(eval_run_module, "validate_rollout_backend", lambda **_: [])
 
 
+def _metrics(*, passed: int, scored: int) -> dict[str, Any]:
+    """The subset of ``aggregate_metrics`` output the CLI layer reads."""
+    return {
+        "total_samples": scored,
+        "completed_samples": scored,
+        "graded": scored,
+        "passed": passed,
+        "failed": scored - passed,
+        "skipped": 0,
+        "pass_rate": passed / scored,
+        "pass_threshold": 0.5,
+        "tokens_used": 4096,
+    }
+
+
 class _CapturedRunner:
     """Stands in for the supervisor and records exactly how it was constructed."""
 
@@ -146,7 +161,8 @@ class _CapturedRunner:
             skipped=0,
             resumed=0,
             cancelled=False,
-            metrics={"pass_rate": 1.0},
+            duration_ms=4200.0,
+            metrics=_metrics(passed=6, scored=6),
         )
 
 
@@ -398,7 +414,8 @@ def test_an_incomplete_run_is_partial_and_suggests_resuming(
             skipped=0,
             resumed=0,
             cancelled=True,
-            metrics={"pass_rate": 0.5},
+            duration_ms=1500.0,
+            metrics=_metrics(passed=1, scored=2),
             failures=[
                 FailedWorkItem(
                     row_index=1,
@@ -422,6 +439,67 @@ def test_an_incomplete_run_is_partial_and_suggests_resuming(
     assert "row 1 (source 4) run 0" in printed
     assert "error_type=grader_timeout" in printed
     assert "/runs/rollout_trials/bbbb" in printed
+
+
+# --------------------------------------------------------------------------- #
+# What a plain (non---verbose) run prints
+# --------------------------------------------------------------------------- #
+
+
+def test_the_plan_is_printed_before_the_run_starts(
+    workspace: Path, captured_runner: type[_CapturedRunner], console_capture: StringIO
+) -> None:
+    """The same reading of the TOML `eval submit` gives, so the confirmation is
+    answered against what will actually run."""
+    _run(workspace)
+    printed = console_capture.getvalue()
+    assert "Local Evaluation" in printed
+    assert "openai/gpt-5-mini" in printed
+    assert "echo.jsonl (explicit)" in printed
+    assert "3 of 4" in printed  # rows selected of the dataset
+    work_items = next(line for line in printed.splitlines() if "Work Items" in line)
+    assert "6" in work_items  # 3 rows x n=2
+
+
+def test_the_results_table_reports_the_metrics(
+    workspace: Path, captured_runner: type[_CapturedRunner], console_capture: StringIO
+) -> None:
+    _run(workspace)
+    printed = console_capture.getvalue()
+    assert "Results" in printed
+    assert "Pass Rate" in printed
+    assert "100.0%" in printed
+    assert "6/6 complete" in printed
+    # The same formatter `eval info` uses, so local and cloud runs read alike.
+    assert "Duration" in printed
+    assert "4.2s" in printed
+
+
+def test_stage_lines_print_once_and_only_without_verbose(
+    console_capture: StringIO,
+) -> None:
+    """--verbose echoes every log line, and each stage is one of them."""
+    with override_output_context(format=OutputFormat.rich, interactive=False):
+        eval_run_module._Hooks(yes=True, secrets_file=None).stage("preflight ok")
+        eval_run_module._Hooks(yes=True, secrets_file=None, verbose=True).stage(
+            "not repeated"
+        )
+    printed = console_capture.getvalue()
+    assert "preflight ok" in printed
+    assert "not repeated" not in printed
+
+
+def test_progress_falls_back_to_printed_lines_without_a_terminal(
+    console_capture: StringIO,
+) -> None:
+    """Redirected output gets one line per completion, not a live region."""
+    from osmosis_ai.eval.local.runner import ProgressSnapshot
+
+    display = eval_run_module._ProgressDisplay()
+    with override_output_context(format=OutputFormat.rich, interactive=False):
+        display.update(ProgressSnapshot(completed=2, total=6, passed=1, failed=1))
+        display.close()
+    assert "2/6 pass 50% · failed 1" in console_capture.getvalue()
 
 
 # --------------------------------------------------------------------------- #
@@ -458,6 +536,7 @@ def test_the_json_envelope_carries_the_run_resource(
     assert envelope["operation"] == "eval.run"
     assert envelope["resource"]["run_name"] == "run-1"
     assert envelope["resource"]["metrics"]["pass_rate"] == 1.0
+    assert envelope["resource"]["duration_ms"] == 4200.0
 
 
 def test_the_command_is_registered_under_the_eval_group() -> None:
