@@ -120,7 +120,6 @@ def _stub_context(monkeypatch: pytest.MonkeyPatch, workspace: Path) -> None:
     monkeypatch.setattr(
         eval_run_module, "validate_workspace_directory_contract", lambda _: None
     )
-    monkeypatch.setattr(eval_run_module, "validate_rollout_backend", lambda **_: [])
 
 
 def _metrics(*, passed: int, scored: int) -> dict[str, Any]:
@@ -325,7 +324,8 @@ def test_a_missing_dataset_file_is_a_validation_error(
 def test_the_missing_extra_hint_names_the_install_command() -> None:
     error = eval_run_module._missing_extra_error(ModuleNotFoundError(name="fastapi"))
     assert 'pip install "osmosis-ai[eval-run]"' in error.message
-    assert "osmosis-ai[eval-run,harbor]" in error.message
+    # No harbor variant: harbor deps live in the rollout's own environment.
+    assert "harbor" not in error.message
     assert error.details == {"missing_module": "fastapi", "extra": "eval-run"}
 
 

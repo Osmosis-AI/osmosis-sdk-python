@@ -70,7 +70,11 @@ async def main() -> int:
             grader_timeout_sec=30.0,
             batch_size=1,
         ),
-        options=LocalEvalOptions(name="run-1", max_in_flight=1),
+        # Same as RunnerHarness: the fake rollout project has no pyproject.toml,
+        # so the server is spawned directly instead of through uv.
+        options=LocalEvalOptions(
+            name="run-1", max_in_flight=1, server_interpreter=sys.executable
+        ),
         dataset=resolve_explicit_dataset_file(dataset_file),
         selection=select_rows(dataset_file),
         rollout_dir=Path(rollout_dir),

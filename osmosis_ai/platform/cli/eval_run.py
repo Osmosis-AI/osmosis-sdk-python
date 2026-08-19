@@ -31,7 +31,6 @@ from osmosis_ai.platform.cli.utils import require_git_workspace_directory_contex
 from osmosis_ai.platform.cli.workspace_directory_context import git_result_context
 from osmosis_ai.platform.cli.workspace_directory_contract import (
     ensure_workspace_directory_config_path,
-    validate_rollout_backend,
     validate_workspace_directory_contract,
 )
 
@@ -156,10 +155,11 @@ class _Hooks:
 
 
 def _missing_extra_error(exc: ModuleNotFoundError) -> CLIError:
+    # No harbor variant: the rollout server runs in the rollout's own uv
+    # environment, so harbor never has to be importable in this process.
     return CLIError(
         "Local evaluation requires optional dependencies. Install them with "
-        '`pip install "osmosis-ai[eval-run]"` (Harbor backends: '
-        '`pip install "osmosis-ai[eval-run,harbor]"`).',
+        '`pip install "osmosis-ai[eval-run]"`.',
         code=CLIErrorCode.VALIDATION,
         details={"missing_module": exc.name, "extra": "eval-run"},
     )
@@ -247,14 +247,9 @@ def run(
         command_label=COMMAND_LABEL,
     )
     config = load_eval_submit_config(resolved_config_path)
+    # Path contract only: the rollout runs in its own uv-resolved environment, so
+    # importing it here would validate the wrong dependency set.
     validate_eval_submit_context_paths(config, workspace_directory)
-    for warning in validate_rollout_backend(
-        workspace_directory=workspace_directory,
-        rollout=config.experiment_rollout,
-        entrypoint=config.experiment_entrypoint,
-        command_label=COMMAND_LABEL,
-    ):
-        console.print_warning(warning)
 
     evaluation = config.evaluation_config
     # ``or 1.0`` would turn a configured 0.0 -- "every graded row passes" -- into

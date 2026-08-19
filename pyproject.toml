@@ -127,11 +127,13 @@ parquet = [
 ]
 
 # Local eval-run primitives: localhost callback listener + in-process LiteLLM
-# bridge. The runner also spawns the user's rollout entrypoint, which serves
-# the FastAPI rollout server, so [server] is always required alongside.
+# bridge, both served on the FastAPI stack [server] provides. The rollout
+# entrypoint itself runs in the rollout's own environment, which uv resolves
+# from rollouts/<name>/pyproject.toml and launches.
 eval-run = [
     "osmosis-ai[server]",
     "litellm>=1.91.1,!=1.95.0,<2.0.0",
+    "uv>=0.9.7,<0.13",
 ]
 
 # Full installation with all optional features

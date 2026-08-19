@@ -257,55 +257,6 @@ def test_rejects_invalid_distribution_name(project, tmp_path):
         )
 
 
-def test_uv_executable_uses_active_scripts_scheme(tmp_path, monkeypatch):
-    import osmosis_ai.packaging as packaging
-
-    scripts_dir = tmp_path / "Scripts"
-    scripts_dir.mkdir()
-    uv = scripts_dir / "uv.exe"
-    uv.touch()
-    uv.chmod(0o755)
-
-    def get_path(name):
-        assert name == "scripts"
-        return str(scripts_dir)
-
-    monkeypatch.setattr(packaging.sysconfig, "get_path", get_path)
-    monkeypatch.setattr(packaging.sys, "executable", str(tmp_path / "python.exe"))
-    monkeypatch.setattr(packaging.shutil, "which", lambda _name: None)
-
-    assert packaging._uv_executable() == str(uv)
-
-
-def test_uv_executable_reports_missing_builder(tmp_path, monkeypatch):
-    import osmosis_ai.packaging as packaging
-
-    scripts_dir = tmp_path / "scripts"
-    scripts_dir.mkdir()
-    monkeypatch.setattr(packaging.sysconfig, "get_path", lambda name: str(scripts_dir))
-    monkeypatch.setattr(packaging.sys, "executable", str(tmp_path / "python"))
-    monkeypatch.setattr(packaging.shutil, "which", lambda _name: None)
-
-    with pytest.raises(RuntimeError, match=r"install osmosis-ai\[harbor\]"):
-        packaging._uv_executable()
-
-
-def test_uv_executable_skips_non_executable_candidate(tmp_path, monkeypatch):
-    import osmosis_ai.packaging as packaging
-
-    scripts_dir = tmp_path / "scripts"
-    scripts_dir.mkdir()
-    candidate = scripts_dir / "uv"
-    candidate.touch()
-    fallback = tmp_path / "path" / "uv"
-    monkeypatch.setattr(packaging.sysconfig, "get_path", lambda name: str(scripts_dir))
-    monkeypatch.setattr(packaging.sys, "executable", str(tmp_path / "python"))
-    monkeypatch.setattr(packaging.os, "access", lambda path, mode: path != candidate)
-    monkeypatch.setattr(packaging.shutil, "which", lambda _name: str(fallback))
-
-    assert packaging._uv_executable() == str(fallback)
-
-
 @pytest.mark.parametrize("wheel_names", [[], ["one.whl", "two.whl"]])
 def test_build_requires_exactly_one_wheel(project, tmp_path, monkeypatch, wheel_names):
     import osmosis_ai.packaging as packaging

@@ -8,7 +8,6 @@ anywhere with one ``pip install`` — a rollout container or a user's own box.
 
 from __future__ import annotations
 
-import os
 import shutil
 import subprocess
 import sys
@@ -25,8 +24,10 @@ from packaging.requirements import Requirement
 from packaging.utils import canonicalize_name
 
 from osmosis_ai._imports import raise_optional_dependency_error
+from osmosis_ai._uv import _uv_executable
 from osmosis_ai.source_scan import (
     EXCLUDE_DIRS,
+    EXCLUDE_PATTERNS,
     reject_directory_symlinks,
     source_digest,
 )
@@ -79,22 +80,6 @@ def grader_script_name(package: str) -> str:
     return f"{package.replace('_', '-')}-grade"
 
 
-def _uv_executable() -> str:
-    """Find uv installed with this interpreter, then fall back to PATH."""
-    script_dirs = (Path(sysconfig.get_path("scripts")), Path(sys.executable).parent)
-    for script_dir in dict.fromkeys(script_dirs):
-        for name in ("uv", "uv.exe"):
-            candidate = script_dir / name
-            if candidate.is_file() and os.access(candidate, os.X_OK):
-                return str(candidate)
-    executable = shutil.which("uv")
-    if executable is None:
-        raise RuntimeError(
-            "uv is required to build rollout bundles; install osmosis-ai[harbor]"
-        )
-    return executable
-
-
 def content_hash(path: Path, *, extra: str = "", exclude: Path | None = None) -> str:
     """Bundle cache key: the shared source digest, truncated."""
     return source_digest(path, extra=extra, exclude=exclude)[:32]
@@ -116,7 +101,7 @@ def _stage_ignore(exclude: Path | None) -> Callable[[str, list[str]], set[str]]:
     ``ignore_patterns`` matches bare names, so it cannot distinguish the one
     ``bundles/`` that is this build's own output directory from any other.
     """
-    patterns = shutil.ignore_patterns(*EXCLUDE_DIRS, "*.pyc")
+    patterns = shutil.ignore_patterns(*EXCLUDE_DIRS, *EXCLUDE_PATTERNS, "*.pyc")
 
     def ignore(src: str, names: list[str]) -> set[str]:
         ignored = set(patterns(src, names))
