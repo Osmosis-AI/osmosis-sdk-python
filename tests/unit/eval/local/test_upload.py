@@ -191,6 +191,25 @@ def test_pending_run_is_rejected_by_index_progress_guard(tmp_path: Path) -> None
         build_eval_upload_plan(run_dir)
 
 
+def test_total_runs_must_equal_sampled_rows_times_n(tmp_path: Path) -> None:
+    run_dir = _run_dir(tmp_path, trajectory=False)
+    _write_json(
+        run_dir / "progress.json",
+        {"total_runs": 1, "sampled_rows": 2, "total_dataset_rows": 2},
+    )
+    with pytest.raises(LocalEvalUploadError, match="sampled_rows multiplied"):
+        build_eval_upload_plan(run_dir)
+
+
+def test_index_keys_must_cover_sampled_rows_and_n(tmp_path: Path) -> None:
+    run_dir = _run_dir(tmp_path, trajectory=False)
+    row = json.loads((run_dir / "index.jsonl").read_text(encoding="utf-8"))
+    row["row_index"] = 1
+    (run_dir / "index.jsonl").write_text(json.dumps(row) + "\n", encoding="utf-8")
+    with pytest.raises(LocalEvalUploadError, match="outside total_dataset_rows"):
+        build_eval_upload_plan(run_dir)
+
+
 def test_trajectory_identity_must_match_index_rollout_id(tmp_path: Path) -> None:
     run_dir = _run_dir(tmp_path)
     _write_json(

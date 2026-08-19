@@ -218,6 +218,38 @@ def _read_index(path: Path) -> list[dict[str, Any]]:
     return rows
 
 
+def _assert_index_matches_progress(
+    rows: list[dict[str, Any]],
+    *,
+    sampled_rows: int,
+    total_dataset_rows: int,
+    n: int,
+    total_runs: int,
+) -> None:
+    if total_runs != sampled_rows * n:
+        raise LocalEvalUploadError(
+            "progress.json total_runs must equal sampled_rows multiplied by "
+            "manifest.json inputs.n"
+        )
+    by_row: dict[int, set[int]] = {}
+    for row in rows:
+        by_row.setdefault(int(row["row_index"]), set()).add(int(row["run_index"]))
+    if len(by_row) != sampled_rows:
+        raise LocalEvalUploadError(
+            "index.jsonl selected row count does not match progress.json sampled_rows"
+        )
+    expected_runs = set(range(n))
+    for row_index, run_indices in by_row.items():
+        if row_index >= total_dataset_rows:
+            raise LocalEvalUploadError(
+                f"index.jsonl row_index {row_index} is outside total_dataset_rows"
+            )
+        if run_indices != expected_runs:
+            raise LocalEvalUploadError(
+                f"index.jsonl row {row_index} does not contain every configured run_index"
+            )
+
+
 def _trajectory_path(run_dir: Path, row: dict[str, Any]) -> tuple[str, Path] | None:
     trajectory_name = row.get("trajectory_filename")
     if trajectory_name is None:
@@ -378,12 +410,29 @@ def build_eval_upload_plan(run_dir: Path) -> EvalUploadPlan:
             "progress.json total_runs must be a nonnegative integer"
         )
     total_runs_value = int(total_runs)
+    sampled_rows = progress.get("sampled_rows")
+    if not _is_int(sampled_rows) or sampled_rows < 0:
+        raise LocalEvalUploadError(
+            "progress.json sampled_rows must be a nonnegative integer"
+        )
+    total_dataset_rows = progress.get("total_dataset_rows")
+    if not _is_int(total_dataset_rows) or total_dataset_rows < 0:
+        raise LocalEvalUploadError(
+            "progress.json total_dataset_rows must be a nonnegative integer"
+        )
     rows = _read_index(run_dir / "index.jsonl")
     if len(rows) != total_runs_value:
         raise LocalEvalUploadError(
             f"local evaluation is incomplete: index.jsonl has {len(rows)} terminal "
             f"results but progress.json expects {total_runs_value}"
         )
+    _assert_index_matches_progress(
+        rows,
+        sampled_rows=int(sampled_rows),
+        total_dataset_rows=int(total_dataset_rows),
+        n=n_value,
+        total_runs=total_runs_value,
+    )
 
     metrics = _json_object(run_dir / "metrics.json", where="metrics.json")
     identity = _object(metrics.get("eval_run"), where="metrics.json eval_run")
