@@ -342,11 +342,9 @@ class SecretRedactor:
 
     Substring replacement rather than dropping the whole line: a redacted line
     still carries its stack frame or status code, which is the reason the line
-    exists. Short values are ignored -- ``dummy`` and friends are placeholders,
-    and redacting them would blank unrelated text.
+    exists. Every non-empty configured value is sensitive, including short
+    values; treating placeholders specially could leak a real short secret.
     """
-
-    _MIN_LENGTH = 8
 
     def __init__(self, values: Sequence[str] = ()) -> None:
         self._values: list[str] = []
@@ -354,7 +352,7 @@ class SecretRedactor:
 
     def extend(self, values: Sequence[str]) -> None:
         for value in values:
-            if value and len(value) >= self._MIN_LENGTH and value not in self._values:
+            if value and value not in self._values:
                 self._values.append(value)
         # Longest first, so a value containing another is redacted whole.
         self._values.sort(key=len, reverse=True)
@@ -579,15 +577,24 @@ class LocalEvalRunner:
     # Public entry point
     # ------------------------------------------------------------------ #
 
-    async def run(self) -> RunSummary:
-        """Execute the full startup order from §8, then schedule and finalize."""
+    async def run(
+        self, *, after_finalize: Callable[[RunSummary], None] | None = None
+    ) -> RunSummary:
+        """Execute, finalize, then optionally act while still holding the lock."""
         run_name = self._options.name or generated_run_name(
             self._config_stem, self._pending_inputs_digest()
         )
         validate_run_name(run_name)
         lock_path = self._output_root / LOCKS_DIRNAME / f"{run_name}.lock"
         with RunLock(lock_path):
-            return await self._run_locked(run_name=run_name)
+            summary = await self._run_locked(run_name=run_name)
+            completed = (
+                summary.succeeded + summary.failed + summary.skipped
+                == summary.total_work_items
+            )
+            if after_finalize is not None and completed and not summary.cancelled:
+                after_finalize(summary)
+            return summary
 
     # ------------------------------------------------------------------ #
     # Startup

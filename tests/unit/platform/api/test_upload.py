@@ -62,8 +62,11 @@ class TestRequireHttps:
         _require_https("https://s3.amazonaws.com/bucket/key")
 
     def test_http_non_loopback_raises(self) -> None:
-        with pytest.raises(RuntimeError, match="must use HTTPS"):
-            _require_https("http://s3.amazonaws.com/bucket/key")
+        url = "http://s3.amazonaws.com/bucket/key?X-Amz-Signature=secret"
+        with pytest.raises(RuntimeError, match="must use HTTPS") as raised:
+            _require_https(url)
+        assert url not in str(raised.value)
+        assert "secret" not in str(raised.value)
 
     @pytest.mark.parametrize(
         "url",
@@ -238,14 +241,15 @@ class TestHttpPutWithBackoff:
         self, mock_client_cls: MagicMock, mock_sleep: MagicMock
     ) -> None:
         """A 403 response raises RuntimeError immediately without retries."""
-        resp_403 = _make_response(403, text="Forbidden")
+        resp_403 = _make_response(403, text="Forbidden X-Amz-Signature=response-secret")
 
         ctx = self._make_mock_client()
         ctx.put.return_value = resp_403
         mock_client_cls.return_value = ctx
 
-        with pytest.raises(RuntimeError, match="Upload failed: HTTP 403"):
+        with pytest.raises(RuntimeError, match="Upload failed: HTTP 403") as raised:
             _http_put_with_backoff("https://s3.example.com/obj", data=b"data")
+        assert "response-secret" not in str(raised.value)
 
         mock_sleep.assert_not_called()
 
@@ -255,16 +259,17 @@ class TestHttpPutWithBackoff:
         self, mock_client_cls: MagicMock, mock_sleep: MagicMock
     ) -> None:
         """Repeated 500 responses exhaust retries and raise RuntimeError."""
-        resp_500 = _make_response(500, text="Internal Server Error")
+        resp_500 = _make_response(500, text="response-secret")
 
         ctx = self._make_mock_client()
         ctx.put.return_value = resp_500
         mock_client_cls.return_value = ctx
 
-        with pytest.raises(RuntimeError, match="after 3 attempts"):
+        with pytest.raises(RuntimeError, match="after 3 attempts") as raised:
             _http_put_with_backoff(
                 "https://s3.example.com/obj", data=b"data", max_retries=3
             )
+        assert "response-secret" not in str(raised.value)
 
     @patch("osmosis_ai.platform.api.upload.time.sleep")
     @patch("osmosis_ai.platform.api.upload.httpx.Client")
@@ -304,6 +309,26 @@ class TestHttpPutWithBackoff:
 
         assert result.status_code == 200
         mock_sleep.assert_called_once()
+
+    @patch("osmosis_ai.platform.api.upload.time.sleep")
+    @patch("osmosis_ai.platform.api.upload.httpx.Client")
+    def test_network_error_does_not_expose_exception_or_presigned_url(
+        self, mock_client_cls: MagicMock, mock_sleep: MagicMock
+    ) -> None:
+        url = "https://s3.example.com/obj?X-Amz-Signature=url-secret"
+        ctx = self._make_mock_client()
+        ctx.put.side_effect = httpx.NetworkError(
+            f"connection failed for {url}: exception-secret"
+        )
+        mock_client_cls.return_value = ctx
+
+        with pytest.raises(RuntimeError, match="NetworkError") as raised:
+            _http_put_with_backoff(url, data=b"data", max_retries=2)
+
+        message = str(raised.value)
+        assert url not in message
+        assert "url-secret" not in message
+        assert "exception-secret" not in message
 
 
 # =============================================================================
@@ -359,17 +384,22 @@ class TestUploadFileMultipart:
         self, mock_put: MagicMock, tmp_path: Path
     ) -> None:
         """RuntimeError when a presigned URL entry is missing presigned_url."""
+        secret = "https://s3.example/upload?X-Amz-Signature=entry-secret"
         info = _make_upload_info(
             method="multipart",
-            presigned_urls=[{"part_number": 1}],  # missing presigned_url
+            presigned_urls=[{"part_number": 1, "unexpected": secret}],
             total_parts=1,
             part_size=1024,
         )
         file_path = tmp_path / "data.bin"
         file_path.write_bytes(b"x" * 1024)
 
-        with pytest.raises(RuntimeError, match="Malformed presigned URL entry"):
+        with pytest.raises(
+            RuntimeError, match="Malformed presigned URL entry"
+        ) as raised:
             upload_file_multipart(file_path, info)
+        assert secret not in str(raised.value)
+        assert "entry-secret" not in str(raised.value)
 
         mock_put.assert_not_called()
 
@@ -379,8 +409,16 @@ class TestUploadFileMultipart:
         info = _make_upload_info(
             method="multipart",
             presigned_urls=[
-                {"part_number": 2, "presigned_url": "https://s3/part2"},
-                {"part_number": 1, "presigned_url": "https://s3/part1"},
+                {
+                    "part_number": 2,
+                    "presigned_url": "https://s3/part2",
+                    "size": 10,
+                },
+                {
+                    "part_number": 1,
+                    "presigned_url": "https://s3/part1",
+                    "size": 10,
+                },
             ],
             total_parts=2,
             part_size=10,
@@ -398,6 +436,34 @@ class TestUploadFileMultipart:
         assert result[0] == {"PartNumber": 1, "ETag": "etag-part1"}
         assert result[1] == {"PartNumber": 2, "ETag": "etag-part2"}
         assert mock_put.call_count == 2
+        assert all(
+            call.kwargs["headers"] == {"Content-Length": "10"}
+            for call in mock_put.call_args_list
+        )
+
+    @patch("osmosis_ai.platform.api.upload._http_put_with_backoff")
+    def test_signed_part_size_must_match_local_slice(
+        self, mock_put: MagicMock, tmp_path: Path
+    ) -> None:
+        info = _make_upload_info(
+            method="multipart",
+            presigned_urls=[
+                {
+                    "part_number": 1,
+                    "presigned_url": "https://s3/part1",
+                    "size": 11,
+                },
+            ],
+            total_parts=1,
+            part_size=10,
+        )
+        file_path = tmp_path / "data.bin"
+        file_path.write_bytes(b"a" * 10)
+
+        with pytest.raises(RuntimeError, match="server signed 11 bytes"):
+            upload_file_multipart(file_path, info)
+
+        mock_put.assert_not_called()
 
     @patch("osmosis_ai.platform.api.upload._http_put_with_backoff")
     def test_missing_etag_raises(self, mock_put: MagicMock, tmp_path: Path) -> None:

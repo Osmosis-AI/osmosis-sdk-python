@@ -8,6 +8,7 @@ import subprocess
 from collections.abc import Iterator
 from io import StringIO
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -394,6 +395,85 @@ def test_a_complete_run_reports_success_with_the_output_path(
     assert result.display_next_steps == []
 
 
+def test_upload_flag_uploads_after_finalize_and_surfaces_platform_url(
+    workspace: Path,
+    captured_runner: type[_CapturedRunner],
+    console_capture: StringIO,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import osmosis_ai.eval.local.upload as local_upload_module
+    import osmosis_ai.platform.cli.eval_upload as eval_upload_module
+
+    original_run = _CapturedRunner.run
+
+    async def run_with_callback(self: Any, *, after_finalize: Any) -> Any:
+        summary = await original_run(self)
+        after_finalize(summary)
+        return summary
+
+    monkeypatch.setattr(_CapturedRunner, "run", run_with_callback)
+    monkeypatch.setattr(
+        local_upload_module,
+        "build_eval_upload_plan",
+        lambda run_dir: SimpleNamespace(run_dir=run_dir),
+    )
+    monkeypatch.setattr(
+        eval_upload_module,
+        "upload_plan",
+        lambda _plan, *, context: SimpleNamespace(
+            session_id="session-1",
+            eval_run_id="eval-1",
+            eval_run_name="uploaded-run",
+            status="finalized",
+            expected_files=2,
+            uploaded_files=2,
+            platform_url="https://platform.example/evals/eval-1",
+        ),
+    )
+
+    result = _run(workspace, upload=True)
+
+    assert result.resource["upload"]["eval_run_id"] == "eval-1"
+    assert result.resource["platform_url"] == "https://platform.example/evals/eval-1"
+    assert result.display_next_steps == ["View: https://platform.example/evals/eval-1"]
+
+
+def test_upload_failure_says_local_results_are_complete_and_gives_retry_command(
+    workspace: Path,
+    captured_runner: type[_CapturedRunner],
+    console_capture: StringIO,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import osmosis_ai.eval.local.upload as local_upload_module
+    import osmosis_ai.platform.cli.eval_upload as eval_upload_module
+
+    original_run = _CapturedRunner.run
+
+    async def run_with_callback(self: Any, *, after_finalize: Any) -> Any:
+        summary = await original_run(self)
+        after_finalize(summary)
+        return summary
+
+    monkeypatch.setattr(_CapturedRunner, "run", run_with_callback)
+    monkeypatch.setattr(
+        local_upload_module,
+        "build_eval_upload_plan",
+        lambda run_dir: SimpleNamespace(run_dir=run_dir),
+    )
+    monkeypatch.setattr(
+        eval_upload_module,
+        "upload_plan",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("offline")),
+    )
+    run_dir = workspace / ".osmosis" / "evals" / "run-1"
+
+    with pytest.raises(CLIError) as raised:
+        _run(workspace, upload=True)
+
+    assert f"Local evaluation results are complete at {run_dir}" in raised.value.message
+    assert f"osmosis eval upload {run_dir}" in raised.value.message
+
+
 def test_an_incomplete_run_is_partial_and_suggests_resuming(
     workspace: Path,
     captured_runner: type[_CapturedRunner],
@@ -551,6 +631,7 @@ def test_the_command_is_registered_under_the_eval_group() -> None:
         for command in app.registered_commands
     }
     assert "run" in names
+    assert "upload" in names
 
 
 # ── The dispatch confirmation, on the supervisor's own loop ──────────

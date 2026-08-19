@@ -45,6 +45,18 @@ osmosis eval run configs/eval/my-rollout.toml --dataset-file data/dev.jsonl --ro
 
 `--rows` selects dataset rows by their offset in the file, which is the cheapest way to smoke-test a rollout. `--dataset-file` runs a local file instead of the platform dataset named in `experiment.dataset`.
 
+Add `--upload` to import a completed local run into the platform before `eval run` releases its run lock:
+
+```bash
+osmosis eval run configs/eval/my-rollout.toml --name my-local-run --upload
+```
+
+An existing completed run can be uploaded or resumed independently:
+
+```bash
+osmosis eval upload .osmosis/evals/my-local-run
+```
+
 ## Options
 
 | Flag | Meaning |
@@ -58,6 +70,7 @@ osmosis eval run configs/eval/my-rollout.toml --dataset-file data/dev.jsonl --ro
 | `--retry-failed` | Also re-run failed and skipped work items. Successes are kept. |
 | `--max-in-flight` | Concurrent rollouts. Default: `evaluation.batch_size`, then the backend's advertised capacity, then 1. |
 | `--yes`, `-y` | Skip the cost confirmation. |
+| `--upload` | Import completed results into the platform while the run lock is still held. |
 
 Advanced: `--rollout-port` pins the rollout-server port and `--verbose` streams log lines to the terminal. Before any dispatch the run makes one probe completion against the configured model, so a bad model id or key fails once, loudly, instead of failing every row.
 
@@ -139,13 +152,21 @@ This is deliberate. The common loop — "some rows failed, edit the agent, re-ru
 
 Throughput knobs (`--max-in-flight`, `evaluation.batch_size`) are excluded from the lock, so you can change concurrency and still resume.
 
+## Uploading completed results
+
+`eval upload` validates and hashes the local run under the same sibling `.locks/<run-name>.lock` used by the supervisor. Only `index.jsonl`, `progress.json`, index-referenced canonical trajectories, and safe artifacts belonging to the selected rollout ids are sent. The immutable local manifest, journal, metrics projection, summaries, logs, top-level projections, superseded attempts, per-trial logs, control files, and secret-bearing inputs are never uploaded. Local `logs.txt` is intentionally excluded because an older SDK may have written it without redacting short configured secrets.
+
+The platform owns resumability. Each retry starts the same import from `local_run_id` plus the exact manifest digest, skips files the server already has, and finalizes once all declared hashes are present; the SDK writes no local upload-state file and does not abort a session when interrupted. A run must be complete: failed and skipped samples count as terminal, but pending work does not.
+
+`pass_threshold` is taken from the completed `metrics.json` projection when binding the import metadata. It is not added to the shipped manifest input schema in this release, because doing so would make existing named runs refuse resume; the platform still recomputes imported results from the uploaded index and trajectories.
+
 ## Secrets
 
 `[secrets]` names are **workflow** secrets, consumed by your rollout, grader, or tool code. They resolve locally in this order: `--secrets-file`, then the process environment, then an interactive prompt. A name existing in the platform secret store does **not** satisfy them locally.
 
 LLM provider keys resolve the same way — a `--secrets-file` entry is exported to the environment where LiteLLM reads it — but they stay on your machine: the container only ever sees the bridge's loopback URL and a per-run bearer, never the provider key. Everything that lands in the run log is redacted.
 
-Secret values never appear in `manifest.json`, `events.jsonl`, or `logs.txt` — rollout-server output is redacted on the way into the log, and `logs.txt` and the journal are owner-only.
+Secret values never appear in `manifest.json` or `events.jsonl`. The current SDK redacts every non-empty configured secret value from rollout-server output on the way into `logs.txt`; the log and journal are owner-only, and local logs are not uploaded because runs produced by older SDKs cannot prove the same short-secret redaction.
 
 ## Harbor (sandboxed) rollouts
 
@@ -178,4 +199,3 @@ If a process-wide fault stops the run — the rollout server dies, the model pro
 - An in-sandbox LLM-judge grader works only if your Harbor environment already provides its own credentials: `GraderContext` carries no LLM endpoint.
 - `allowlist` egress is not yet validated end-to-end; it needs Linux Docker, or a macOS host whose Docker Desktop kernel has `CONFIG_NFT_FIB_INET` (see above).
 - Windows/WSL2 is out of scope and untested.
-- Uploading a local run to the platform is not implemented yet.

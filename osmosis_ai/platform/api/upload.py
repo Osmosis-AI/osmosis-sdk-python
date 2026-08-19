@@ -34,10 +34,15 @@ def _require_https(url: str, context: str = "Upload URL") -> None:
     never leaves the machine — this allows local development with tools like
     LocalStack.
     """
-    if not url.lower().startswith("https://") and not _is_loopback_url(url):
+    if not isinstance(url, str) or not url:
+        raise RuntimeError(f"{context} is invalid. Refusing to upload.")
+    try:
+        secure = url.lower().startswith("https://") or _is_loopback_url(url)
+    except ValueError:
+        raise RuntimeError(f"{context} is invalid. Refusing to upload.") from None
+    if not secure:
         raise RuntimeError(
-            f"{context} must use HTTPS (got {url[:60]!r}). "
-            "Refusing to upload over an insecure connection."
+            f"{context} must use HTTPS. Refusing to upload over an insecure connection."
         )
 
 
@@ -154,7 +159,7 @@ def _http_put_with_backoff(
     if owns_client:
         client = httpx.Client(timeout=httpx.Timeout(timeout, connect=30.0))
 
-    last_error: Exception | None = None
+    last_failure = "unknown upload error"
     try:
         for attempt in range(max_retries):
             if attempt > 0:
@@ -171,22 +176,20 @@ def _http_put_with_backoff(
                     return resp
 
                 if resp.status_code in _RETRY_STATUS_CODES:
-                    last_error = RuntimeError(
-                        f"HTTP {resp.status_code}: {resp.text[:200]}"
-                    )
+                    last_failure = f"HTTP {resp.status_code}"
                     continue
 
                 # Non-retryable HTTP error
-                raise RuntimeError(
-                    f"Upload failed: HTTP {resp.status_code}. {resp.text[:500]}"
-                )
-            except (httpx.TimeoutException, httpx.NetworkError) as exc:
-                last_error = exc
+                raise RuntimeError(f"Upload failed: HTTP {resp.status_code}")
+            except httpx.RequestError as exc:
+                last_failure = type(exc).__name__
     finally:
         if owns_client:
             client.close()
 
-    raise RuntimeError(f"Upload failed after {max_retries} attempts: {last_error}")
+    raise RuntimeError(
+        f"Upload failed after {max_retries} attempts (last failure: {last_failure})"
+    )
 
 
 # ── Progress wrapper ──────────────────────────────────────────────
@@ -335,15 +338,38 @@ def upload_file_multipart(
             "The file would be silently truncated."
         )
 
-    # Build part_number → presigned_url mapping
-    url_map: dict[int, str] = {}
-    for entry in info.presigned_urls:
+    # Build part_number → (presigned_url, signed_size) mapping.
+    url_map: dict[int, tuple[str, int | None]] = {}
+    for index, entry in enumerate(info.presigned_urls):
+        if not isinstance(entry, dict):
+            raise RuntimeError(
+                f"Malformed presigned URL entry from server at index {index}"
+            )
         pn = entry.get("part_number")
         url = entry.get("presigned_url")
-        if pn is None or url is None:
-            raise RuntimeError(f"Malformed presigned URL entry from server: {entry!r}")
+        signed_size = entry.get("size")
+        if (
+            isinstance(pn, bool)
+            or not isinstance(pn, int)
+            or pn <= 0
+            or not isinstance(url, str)
+            or not url
+            or (
+                signed_size is not None
+                and (
+                    isinstance(signed_size, bool)
+                    or not isinstance(signed_size, int)
+                    or signed_size <= 0
+                )
+            )
+        ):
+            raise RuntimeError(
+                f"Malformed presigned URL entry from server at index {index}"
+            )
+        if pn in url_map:
+            raise RuntimeError(f"Duplicate multipart presigned URL for part {pn}")
         _require_https(url, f"Multipart presigned URL (part {pn})")
-        url_map[pn] = url
+        url_map[pn] = (url, signed_size)
 
     # Verify server returned URLs for every expected part
     missing = [i for i in range(1, info.total_parts + 1) if i not in url_map]
@@ -366,11 +392,18 @@ def upload_file_multipart(
             part_number = i + 1
             offset = i * part_size
             size = min(part_size, file_size - offset)
+            url, signed_size = url_map[part_number]
+            if signed_size is not None and signed_size != size:
+                raise RuntimeError(
+                    f"Part {part_number}: server signed {signed_size} bytes, "
+                    f"but the local part is {size} bytes"
+                )
 
             with SliceFileObj(f, seek_from=offset, read_limit=size) as slice_obj:
                 resp = _http_put_with_backoff(
-                    url_map[part_number],
+                    url,
                     data=slice_obj,
+                    headers={"Content-Length": str(size)},
                     timeout=PART_UPLOAD_TIMEOUT,
                     client=client,
                 )

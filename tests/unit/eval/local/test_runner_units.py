@@ -616,13 +616,11 @@ def test_the_redactor_replaces_secrets_and_keeps_context() -> None:
     assert "[REDACTED]" in scrubbed
 
 
-def test_the_redactor_ignores_short_placeholder_values() -> None:
+def test_the_redactor_replaces_short_values_but_ignores_empty_values() -> None:
     from osmosis_ai.eval.local.runner import SecretRedactor
 
-    # "dummy" and friends are placeholders; redacting them would blank
-    # unrelated text.
     redactor = SecretRedactor(["dummy", ""])
-    assert redactor.scrub("using dummy credentials") == "using dummy credentials"
+    assert redactor.scrub("using dummy credentials") == "using [REDACTED] credentials"
 
 
 def test_the_redactor_prefers_the_longest_overlapping_value() -> None:

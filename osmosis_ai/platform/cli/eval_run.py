@@ -210,6 +210,7 @@ def run(
     yes: bool = False,
     rollout_port: int | None = None,
     verbose: bool = False,
+    upload: bool = False,
 ) -> CommandResult:
     """Run an evaluation locally against the workspace's rollout server."""
     import asyncio
@@ -335,8 +336,35 @@ def run(
     )
 
     _print_plan(spec, dataset=dataset, selection=selection, output_root=output_root)
+    imported: Any | None = None
+
+    def _upload_completed(summary: Any) -> None:
+        nonlocal imported
+        from shlex import quote
+
+        from osmosis_ai.eval.local.upload import build_eval_upload_plan
+        from osmosis_ai.platform.cli.eval_upload import upload_plan
+
+        retry = f"osmosis eval upload {quote(str(summary.run_dir))}"
+        try:
+            imported = upload_plan(
+                build_eval_upload_plan(summary.run_dir), context=context
+            )
+        except KeyboardInterrupt as exc:
+            raise CLIError(
+                f"Local evaluation results are complete at {summary.run_dir}, but "
+                f"the platform upload was interrupted.\nRetry with: {retry}"
+            ) from exc
+        except Exception as exc:
+            raise CLIError(
+                f"Local evaluation results are complete at {summary.run_dir}, but "
+                f"the platform upload failed: {exc}\nRetry with: {retry}"
+            ) from exc
+
     try:
-        summary = asyncio.run(runner.run())
+        summary = asyncio.run(
+            runner.run(after_finalize=_upload_completed) if upload else runner.run()
+        )
     except (LocalEvalError, LocalEvalStateError) as exc:
         raise CLIError(str(exc)) from exc
     except KeyboardInterrupt:
@@ -351,7 +379,12 @@ def run(
 
     _print_failures(summary)
     _print_summary(summary)
-    return _result(summary, context=context, dataset_source=dataset.source)
+    return _result(
+        summary,
+        context=context,
+        dataset_source=dataset.source,
+        imported=imported,
+    )
 
 
 def _provenance(
@@ -484,7 +517,13 @@ def _print_failures(summary: Any) -> None:
         )
 
 
-def _result(summary: Any, *, context: Any, dataset_source: str) -> OperationResult:
+def _result(
+    summary: Any,
+    *,
+    context: Any,
+    dataset_source: str,
+    imported: Any | None = None,
+) -> OperationResult:
     resource: dict[str, Any] = {
         "run_name": summary.run_name,
         "local_run_id": summary.local_run_id,
@@ -512,6 +551,16 @@ def _result(summary: Any, *, context: Any, dataset_source: str) -> OperationResu
         ],
     }
     resource.update(git_result_context(context))
+    if imported is not None:
+        resource["upload"] = {
+            "session_id": imported.session_id,
+            "eval_run_id": imported.eval_run_id,
+            "eval_run_name": imported.eval_run_name,
+            "status": imported.status,
+            "expected_files": imported.expected_files,
+            "uploaded_files": imported.uploaded_files,
+        }
+        resource["platform_url"] = imported.platform_url
     incomplete = summary.cancelled or (
         summary.succeeded + summary.failed + summary.skipped < summary.total_work_items
     )
@@ -524,6 +573,13 @@ def _result(summary: Any, *, context: Any, dataset_source: str) -> OperationResu
         next_steps.append(
             "Retry failures under the same name: "
             f"osmosis eval run <config> --name {summary.run_name} --retry-failed"
+        )
+    if imported is not None:
+        imported_name = imported.eval_run_name or summary.run_name
+        next_steps.append(
+            f"View: {imported.platform_url}"
+            if imported.platform_url
+            else f"Inspect the imported run: osmosis eval info {imported_name}"
         )
     return OperationResult(
         operation="eval.run",
