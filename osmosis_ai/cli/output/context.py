@@ -8,8 +8,12 @@ from contextlib import contextmanager
 from contextvars import ContextVar, Token
 from dataclasses import dataclass
 from enum import StrEnum
+from typing import TYPE_CHECKING
 
 from osmosis_ai.cli._click_compat import Context
+
+if TYPE_CHECKING:
+    from osmosis_ai.cli.console import Console
 
 
 class OutputFormat(StrEnum):
@@ -30,7 +34,9 @@ class OutputContext:
     output_emitted: bool = False
 
     @contextmanager
-    def status(self, message: str) -> Iterator[None]:
+    def status(
+        self, message: str, *, spinner_tracker: Console | None = None
+    ) -> Iterator[None]:
         """Spinner-equivalent that respects the active output format."""
         if self.format is OutputFormat.json:
             yield
@@ -49,10 +55,10 @@ class OutputContext:
 
         rich_stderr = RichConsole(stderr=True)
         status = Status(message, console=rich_stderr, spinner="dots")
-        # Register on the shared console so a warning emitted mid-spin (e.g. the
-        # upgrade nudge) can pause/resume this spinner instead of gluing onto or
-        # stranding its line. This is the dominant spinner path for the CLI.
-        with console.track_spinner(status), status:
+        # Direct OutputContext callers use the shared console. Console.status
+        # supplies its own instance so non-global facades pause their own spinner.
+        tracker = spinner_tracker or console
+        with tracker.track_spinner(status), status:
             yield
 
 

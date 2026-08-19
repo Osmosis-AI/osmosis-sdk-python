@@ -8,7 +8,7 @@ Runs an evaluation on your machine against the rollout server in your own worksp
 pip install "osmosis-ai[eval-run]"
 ```
 
-That extra covers the supervisor process only — the CLI, the localhost callback listener, and the in-process LiteLLM bridge. The rollout server's dependencies do **not** come from here: they are resolved from `rollouts/<name>/pyproject.toml`, which the `osmosis rollout init` scaffold already declares as `osmosis-ai[server]`. A Harbor rollout adds the `harbor` extra *there*, in its own `pyproject.toml`, not next to the CLI.
+That extra covers the supervisor process only — the CLI, CSV/JSONL/Parquet dataset readers, the localhost callback listener, and the in-process LiteLLM bridge. The rollout server's dependencies do **not** come from here: they are resolved from `rollouts/<name>/pyproject.toml`, which the `osmosis rollout init` scaffold already declares as `osmosis-ai[server]`. A Harbor rollout adds the `harbor` extra *there*, in its own `pyproject.toml`, not next to the CLI.
 
 Running a local eval also requires [uv](https://docs.astral.sh/uv/): it is what launches the rollout server in that environment. The `eval-run` extra installs it; a uv already on `PATH` works too.
 
@@ -20,7 +20,7 @@ Execution is local-only: the rollout entrypoint must build `LocalBackend`, or `H
 
 ## The rollout environment
 
-The rollout server does not run in the CLI's environment. It is launched with `uv run --project rollouts/<name>`, in an environment resolved from that rollout's own `pyproject.toml` — the same dependency truth `osmosis eval submit` and training already use, so the rollout that runs here is the rollout that runs in the cloud.
+The rollout server does not run in the CLI's environment. It is launched with `uv run --project rollouts/<name>`, in an environment resolved from that rollout's own `pyproject.toml` — the same dependency truth `osmosis eval submit` and training already use, so the rollout that runs here is the rollout that runs in the cloud. A small supervisor bootstrap adds a private ownership marker to `/health`, allowing rollout projects pinned to older SDK versions to remain compatible without weakening the check that prevents dispatching work to an unrelated local process.
 
 The first run of a rollout resolves and installs those dependencies as its own milestone (`→ syncing rollout dependencies (<rollout>)`) and creates `rollouts/<name>/.venv`; later runs reuse it and the step is quick. Being a named stage is the point: a dependency failure is reported as a dependency failure — with the resolver's output in `logs.txt` — never as a rollout-server health timeout.
 

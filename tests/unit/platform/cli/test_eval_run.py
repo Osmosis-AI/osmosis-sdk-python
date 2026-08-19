@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import subprocess
+import tomllib
 from collections.abc import Iterator
 from io import StringIO
 from pathlib import Path
@@ -12,6 +13,7 @@ from typing import Any
 
 import pytest
 import typer
+from packaging.requirements import Requirement
 from prompt_toolkit.application import create_app_session
 from prompt_toolkit.input import PipeInput, create_pipe_input
 from prompt_toolkit.output import DummyOutput
@@ -327,6 +329,20 @@ def test_the_missing_extra_hint_names_the_install_command() -> None:
     # No harbor variant: harbor deps live in the rollout's own environment.
     assert "harbor" not in error.message
     assert error.details == {"missing_module": "fastapi", "extra": "eval-run"}
+
+
+def test_eval_run_extra_includes_parquet_dataset_support() -> None:
+    repo_root = Path(__file__).parents[4]
+    pyproject = tomllib.loads(
+        (repo_root / "pyproject.toml").read_text(encoding="utf-8")
+    )
+    requirements = [
+        Requirement(value)
+        for value in pyproject["project"]["optional-dependencies"]["eval-run"]
+    ]
+    sdk_requirement = next(req for req in requirements if req.name == "osmosis-ai")
+
+    assert {"server", "parquet"} <= sdk_requirement.extras
 
 
 def _with_pass_threshold(workspace: Path, value: str) -> None:
