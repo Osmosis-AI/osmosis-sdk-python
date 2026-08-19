@@ -142,6 +142,38 @@ def test_print_pauses_live_spinner() -> None:
     assert output.getvalue() == "dataset cache hit for 'email-generation'\n"
 
 
+def test_other_terminal_writes_pause_live_spinner(monkeypatch) -> None:
+    """Every facade-owned terminal write preserves the active status line."""
+
+    class _FakeStatus:
+        def __init__(self) -> None:
+            self.events: list[str] = []
+
+        def stop(self) -> None:
+            self.events.append("stop")
+
+        def start(self) -> None:
+            self.events.append("start")
+
+    output = StringIO()
+    monkeypatch.setattr(sys, "stderr", output)
+    console = Console(file=output, force_terminal=True, no_color=True, width=120)
+    status = _FakeStatus()
+    console._active_status = status
+    writes = (
+        lambda: console.print_error("error"),
+        lambda: console.separator("section"),
+        lambda: console.panel("title", "content"),
+        lambda: console.table([("key", "value")]),
+        lambda: console.print_url("View: ", "https://example.com"),
+    )
+
+    for write in writes:
+        status.events.clear()
+        write()
+        assert status.events == ["stop", "start"]
+
+
 def test_print_respects_sep() -> None:
     """Console.print preserves separator behavior via Rich."""
     output = StringIO()

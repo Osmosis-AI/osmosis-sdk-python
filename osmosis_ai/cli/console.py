@@ -189,7 +189,8 @@ class Console:
         kwargs: dict[str, Any] = {"markup": markup}
         if soft_wrap is not None:
             kwargs["soft_wrap"] = soft_wrap
-        self._rich_stderr.print(message, style="bold red", **kwargs)
+        with self._pause_active_spinner():
+            self._rich_stderr.print(message, style="bold red", **kwargs)
 
     def print_warning(
         self,
@@ -248,7 +249,8 @@ class Console:
             return
         from rich.rule import Rule
 
-        self._rich.print(Rule(title, style="dim"))
+        with self._pause_active_spinner():
+            self._rich.print(Rule(title, style="dim"))
 
     def panel(
         self,
@@ -271,7 +273,8 @@ class Console:
         from rich.panel import Panel
 
         panel = Panel(content, title=title, border_style=style, padding=padding)
-        self._rich.print(panel)
+        with self._pause_active_spinner():
+            self._rich.print(panel)
 
     def table(
         self,
@@ -305,7 +308,8 @@ class Console:
             table.add_column("")
         for key, value in rows:
             table.add_row(key, value)
-        self._rich.print(table)
+        with self._pause_active_spinner():
+            self._rich.print(table)
 
     def escape(self, text: str | None) -> str:
         """Escape text so it is not interpreted as Rich markup.
@@ -373,12 +377,13 @@ class Console:
         """Print a URL without inserting hard line breaks into the link target."""
         if not self._is_rich_mode():
             return
-        self._rich.print(
-            self.format_text(prefix),
-            self.format_url(url, label=label, style=style),
-            sep="",
-            soft_wrap=True,
-        )
+        with self._pause_active_spinner():
+            self._rich.print(
+                self.format_text(prefix),
+                self.format_url(url, label=label, style=style),
+                sep="",
+                soft_wrap=True,
+            )
 
     @contextmanager
     def spinner(self, message: str) -> Generator[None, None, None]:
@@ -425,7 +430,7 @@ class Console:
         """Alias for spinner with output-context aware routing."""
         from osmosis_ai.cli.output.context import get_output_context
 
-        with get_output_context().status(message):
+        with get_output_context().status(message, spinner_tracker=self):
             yield
 
 
