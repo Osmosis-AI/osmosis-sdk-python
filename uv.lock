@@ -1663,6 +1663,7 @@ eval-run = [
     { name = "click" },
     { name = "fastapi" },
     { name = "litellm" },
+    { name = "pyarrow" },
     { name = "uv" },
     { name = "uvicorn" },
 ]
@@ -1768,7 +1769,7 @@ requires-dist = [
     { name = "orjson", marker = "extra == 'rubric'", specifier = ">=3.11.6,<4.0" },
     { name = "orjson", marker = "extra == 'strands'", specifier = ">=3.11.6,<4.0" },
     { name = "osmosis-ai", extras = ["eval-run", "harbor", "openai-agents", "parquet", "rubric", "server", "strands"], marker = "extra == 'full'" },
-    { name = "osmosis-ai", extras = ["server"], marker = "extra == 'eval-run'" },
+    { name = "osmosis-ai", extras = ["parquet", "server"], marker = "extra == 'eval-run'" },
     { name = "packaging", specifier = ">=24.0" },
     { name = "platformdirs", marker = "extra == 'harbor'", specifier = ">=4.0" },
     { name = "prompt-toolkit", specifier = ">=3.0.0,<4.0.0" },

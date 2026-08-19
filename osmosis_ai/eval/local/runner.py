@@ -32,6 +32,7 @@ import httpx
 
 from osmosis_ai._uv import _uv_executable
 from osmosis_ai.consts import PACKAGE_VERSION
+from osmosis_ai.eval.local._server_bootstrap import ROLLOUT_INSTANCE_HEADER
 from osmosis_ai.eval.local.dataset import (
     EvalDatasetRow,
     ResolvedDataset,
@@ -451,6 +452,7 @@ def uv_run_command(
         "--no-sync",
         "--project",
         str(rollout_dir),
+        str(Path(__file__).with_name("_server_bootstrap.py")),
         str(entrypoint),
     ]
 
@@ -490,10 +492,15 @@ def build_subprocess_env(
     return env
 
 
-async def probe_health(
+@dataclass(frozen=True)
+class _HealthProbe:
+    payload: dict[str, Any]
+    instance_id: str | None
+
+
+async def _probe_health(
     client: httpx.AsyncClient, base_url: str
-) -> dict[str, Any] | None:
-    """Return ``/health`` when reachable, else ``None``."""
+) -> _HealthProbe | None:
     try:
         response = await client.get(f"{base_url}/health", timeout=5.0)
     except httpx.HTTPError:
@@ -504,7 +511,20 @@ async def probe_health(
         payload = response.json()
     except ValueError:
         return None
-    return payload if isinstance(payload, dict) else None
+    if not isinstance(payload, dict):
+        return None
+    return _HealthProbe(
+        payload=payload,
+        instance_id=response.headers.get(ROLLOUT_INSTANCE_HEADER),
+    )
+
+
+async def probe_health(
+    client: httpx.AsyncClient, base_url: str
+) -> dict[str, Any] | None:
+    """Return ``/health`` when reachable, else ``None``."""
+    probe = await _probe_health(client, base_url)
+    return probe.payload if probe is not None else None
 
 
 def health_capacity(health: Mapping[str, Any]) -> int | None:
@@ -1398,14 +1418,13 @@ class LocalEvalRunner:
                     f"rollout server exited with code {child.returncode} "
                     f"before becoming healthy; see {LOGS_FILENAME}"
                 )
-            health = await probe_health(client, base_url)
+            health = await _probe_health(client, base_url)
             if health is not None:
-                # The supervisor always sets _OSMOSIS_ROLLOUT_INSTANCE_ID for
-                # its own child, so a /health that does not echo this run's
-                # id back -- a different id, or none at all -- belongs to
-                # some other process. Driving it would send this run's work
-                # to a server the supervisor neither started nor can stop.
-                reported = health.get("instance_id")
+                # The compatibility bootstrap writes the ownership id to a
+                # response header even when the rollout's independently-resolved
+                # SDK predates the JSON field. Direct test spawns and current SDK
+                # servers can still prove ownership through the body fallback.
+                reported = health.instance_id or health.payload.get("instance_id")
                 if reported != instance_id:
                     raise LocalEvalError(
                         f"another process is already listening on {base_url} "

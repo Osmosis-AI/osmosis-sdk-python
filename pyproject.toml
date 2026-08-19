@@ -126,12 +126,12 @@ parquet = [
     "pyarrow>=23.0.1",
 ]
 
-# Local eval-run primitives: localhost callback listener + in-process LiteLLM
-# bridge, both served on the FastAPI stack [server] provides. The rollout
-# entrypoint itself runs in the rollout's own environment, which uv resolves
-# from rollouts/<name>/pyproject.toml and launches.
+# Local eval-run primitives: dataset readers, localhost callback listener, and
+# the in-process LiteLLM bridge served on the FastAPI stack [server] provides.
+# The rollout entrypoint itself runs in the rollout's own environment, which uv
+# resolves from rollouts/<name>/pyproject.toml and launches.
 eval-run = [
-    "osmosis-ai[server]",
+    "osmosis-ai[server,parquet]",
     "litellm>=1.91.1,!=1.95.0,<2.0.0",
     "uv>=0.9.7,<0.13",
 ]

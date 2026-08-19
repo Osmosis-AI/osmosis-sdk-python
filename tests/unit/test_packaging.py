@@ -59,6 +59,74 @@ def test_build_produces_scripts_and_keeps_deps(project, tmp_path):
     assert info.grader_script == "my-harness-grade"
 
 
+def test_deps_override_same_named_pyproject_entries(project, tmp_path):
+    wheel = build_bundle(
+        project,
+        workflow="my_harness.solver:MyWorkflow",
+        deps=["httpx @ https://example.com/httpx.tar.gz"],
+        bundles_dir=tmp_path / "bundles",
+    )
+    with zipfile.ZipFile(wheel) as archive:
+        metadata = archive.read(
+            next(n for n in archive.namelist() if n.endswith("METADATA"))
+        ).decode()
+    assert "Requires-Dist: httpx>=0.27" not in metadata
+    assert "Requires-Dist: httpx @ https://example.com/httpx.tar.gz" in metadata
+
+
+def test_deps_override_changes_cache_key(project, tmp_path):
+    bundles_dir = tmp_path / "bundles"
+    kwargs = dict(workflow="my_harness.solver:MyWorkflow", bundles_dir=bundles_dir)
+
+    first = build_bundle(project, deps=["httpx==0.27.0"], **kwargs)
+    second = build_bundle(project, deps=["httpx==0.28.0"], **kwargs)
+
+    assert first != second
+    assert inspect_bundle(first).requirements == ["httpx==0.27.0"]
+    assert inspect_bundle(second).requirements == ["httpx==0.28.0"]
+
+
+def test_dynamic_dependencies_are_preserved_without_overrides(project, tmp_path):
+    (project / "pyproject.toml").write_text(
+        PYPROJECT.replace(
+            'dependencies = ["httpx>=0.27"]', 'dynamic = ["dependencies"]'
+        )
+        + """\
+
+[tool.setuptools.dynamic]
+dependencies = {file = ["requirements.txt"]}
+"""
+    )
+    (project / "requirements.txt").write_text("httpx>=0.27\n")
+
+    wheel = build_bundle(
+        project,
+        workflow="my_harness.solver:MyWorkflow",
+        deps=None,
+        bundles_dir=tmp_path / "bundles",
+    )
+
+    assert inspect_bundle(wheel).requirements == ["httpx>=0.27"]
+
+
+def test_dynamic_dependencies_reject_overrides(project, tmp_path):
+    (project / "pyproject.toml").write_text(
+        PYPROJECT.replace(
+            'dependencies = ["httpx>=0.27"]', 'dynamic = ["dependencies"]'
+        )
+    )
+
+    with pytest.raises(
+        ValueError, match="cannot override project dependencies declared as dynamic"
+    ):
+        build_bundle(
+            project,
+            workflow="my_harness.solver:MyWorkflow",
+            deps=["httpx==0.28.0"],
+            bundles_dir=tmp_path / "bundles",
+        )
+
+
 def test_requirements_keep_markers_drop_extras(tmp_path):
     code_dir = tmp_path / "harness"
     package = code_dir / "my_harness"

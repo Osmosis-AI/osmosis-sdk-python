@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -12,6 +13,7 @@ from typing import Any
 import httpx
 import pytest
 
+from osmosis_ai.eval.local._server_bootstrap import ROLLOUT_INSTANCE_HEADER
 from osmosis_ai.eval.local.dataset import (
     ResolvedDataset,
     resolve_explicit_dataset_file,
@@ -786,6 +788,7 @@ async def test_the_default_path_syncs_then_runs_the_rollout_project(
         "--no-sync",
         "--project",
         str(tmp_path),
+        str(Path(runner_module.__file__).with_name("_server_bootstrap.py")),
         str(tmp_path / "main.py"),
     ]
     # Dependencies do not change when the port does, so the sync runs once for
@@ -798,6 +801,61 @@ async def test_the_default_path_syncs_then_runs_the_rollout_project(
         assert kwargs["cwd"] == str(tmp_path)
         assert "VIRTUAL_ENV" not in kwargs["env"]
         assert kwargs["start_new_session"] is True
+
+
+async def test_bootstrap_marks_old_server_health_as_supervisor_owned(
+    tmp_path: Path,
+) -> None:
+    """The published 0.3.0 server has no JSON instance_id field."""
+    from osmosis_ai.eval.local import runner as runner_module
+
+    entrypoint = tmp_path / "old_server.py"
+    entrypoint.write_text(
+        "import os\n"
+        "import uvicorn\n"
+        "from fastapi import FastAPI\n"
+        "app = FastAPI()\n"
+        "@app.get('/health')\n"
+        "async def health(): return {'status': 'ok'}\n"
+        "uvicorn.run(app, host='127.0.0.1', "
+        "port=int(os.environ['_OSMOSIS_ROLLOUT_PORT']), log_level='error')\n",
+        encoding="utf-8",
+    )
+    port = reserve_free_port()
+    instance_id = "supervisor-owned-instance"
+    env = build_subprocess_env(
+        base=os.environ,
+        config_env={},
+        secrets={},
+        port=port,
+        artifact_root=tmp_path / "artifacts",
+        instance_id=instance_id,
+    )
+    child = await asyncio.create_subprocess_exec(
+        sys.executable,
+        str(Path(runner_module.__file__).with_name("_server_bootstrap.py")),
+        str(entrypoint),
+        env=env,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.STDOUT,
+    )
+    try:
+        async with httpx.AsyncClient() as client:
+            response = None
+            for _ in range(50):
+                try:
+                    response = await client.get(f"http://127.0.0.1:{port}/health")
+                    break
+                except httpx.HTTPError:
+                    await asyncio.sleep(0.05)
+        assert response is not None
+        assert response.json() == {"status": "ok"}
+        assert response.headers[ROLLOUT_INSTANCE_HEADER] == instance_id
+    finally:
+        if child.returncode is None:
+            child.terminate()
+        with contextlib.suppress(Exception):
+            await asyncio.wait_for(child.wait(), timeout=5.0)
 
 
 async def test_a_failing_uv_sync_is_reported_as_a_dependency_failure(

@@ -118,6 +118,30 @@ def test_print_passes_rich_kwargs_through() -> None:
     assert "world" in text
 
 
+def test_print_pauses_live_spinner() -> None:
+    """A note emitted mid-spin must not strand the spinner line."""
+
+    class _FakeStatus:
+        def __init__(self) -> None:
+            self.events: list[str] = []
+
+        def stop(self) -> None:
+            self.events.append("stop")
+
+        def start(self) -> None:
+            self.events.append("start")
+
+    output = StringIO()
+    console = Console(file=output, force_terminal=True, no_color=True, width=120)
+    status = _FakeStatus()
+    console._active_status = status
+
+    console.print("dataset cache hit for 'email-generation'", style="dim")
+
+    assert status.events == ["stop", "start"]
+    assert output.getvalue() == "dataset cache hit for 'email-generation'\n"
+
+
 def test_print_respects_sep() -> None:
     """Console.print preserves separator behavior via Rich."""
     output = StringIO()

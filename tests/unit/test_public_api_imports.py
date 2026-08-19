@@ -227,8 +227,9 @@ def test_extra_modules_table_matches_pyproject_extras() -> None:
         """Third-party distributions an extra installs, self-references expanded.
 
         An extra may pull another extra in as ``osmosis-ai[other]`` (``eval-run``
-        does this for ``server``), so those requirements resolve to the packages
-        of the referenced extra instead of counting as a dependency themselves.
+        does this for ``server`` and ``parquet``), so those requirements resolve
+        to the packages of the referenced extra instead of counting as a
+        dependency themselves.
         """
         names: set[str] = set()
         for raw in declared_extras[extra]:
