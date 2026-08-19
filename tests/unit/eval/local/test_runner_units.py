@@ -346,7 +346,11 @@ def test_reserved_port_is_usable() -> None:
 # --------------------------------------------------------------------------- #
 
 
-async def _serve_health(payload: dict[str, Any]) -> asyncio.Server:
+async def _serve_health(
+    payload: Any,
+    *,
+    extra_headers: dict[str, str] | None = None,
+) -> asyncio.Server:
     """Answer one ``GET /health`` per connection with *payload*, on a free port."""
 
     async def handle(
@@ -355,10 +359,17 @@ async def _serve_health(payload: dict[str, Any]) -> asyncio.Server:
         with contextlib.suppress(Exception):
             await reader.readuntil(b"\r\n\r\n")
             body = json.dumps(payload).encode()
+            extra = b"".join(
+                f"{name}: {value}\r\n".encode()
+                for name, value in (extra_headers or {}).items()
+            )
             writer.write(
                 b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
-                b"Content-Length: " + str(len(body)).encode() + b"\r\n"
-                b"Connection: close\r\n\r\n" + body
+                + extra
+                + b"Content-Length: "
+                + str(len(body)).encode()
+                + b"\r\nConnection: close\r\n\r\n"
+                + body
             )
             await writer.drain()
         writer.close()
@@ -405,6 +416,70 @@ async def test_a_foreign_rollout_server_on_a_pinned_port_is_refused(
         await server.wait_closed()
     # The refusal is not allowed to leak the child it spawned.
     assert runner._child is None
+
+
+async def test_probe_health_reads_the_ownership_header() -> None:
+    from osmosis_ai.eval.local import runner as runner_module
+
+    server = await _serve_health(
+        {"status": "ok"},
+        extra_headers={ROLLOUT_INSTANCE_HEADER: "hdr-id"},
+    )
+    port = int(server.sockets[0].getsockname()[1])
+    try:
+        async with httpx.AsyncClient() as client:
+            probe = await runner_module._probe_health(
+                client, f"http://127.0.0.1:{port}"
+            )
+    finally:
+        server.close()
+        await server.wait_closed()
+    assert probe is not None
+    assert probe.instance_id == "hdr-id"
+    assert probe.payload == {"status": "ok"}
+
+
+async def test_probe_health_rejects_a_non_object_json_body() -> None:
+    from osmosis_ai.eval.local import runner as runner_module
+
+    server = await _serve_health(["not", "an", "object"])
+    port = int(server.sockets[0].getsockname()[1])
+    try:
+        async with httpx.AsyncClient() as client:
+            probe = await runner_module._probe_health(
+                client, f"http://127.0.0.1:{port}"
+            )
+    finally:
+        server.close()
+        await server.wait_closed()
+    assert probe is None
+
+
+async def test_wait_for_health_accepts_header_ownership_without_json_id(
+    tmp_path: Path,
+) -> None:
+    """An older SDK's /health has no JSON instance_id; the header is enough."""
+
+    class _LiveChild:
+        returncode = None
+
+    server = await _serve_health(
+        {"status": "ok"},
+        extra_headers={ROLLOUT_INSTANCE_HEADER: "owned"},
+    )
+    port = int(server.sockets[0].getsockname()[1])
+    runner = _runner(_spec(), tmp_path)
+    try:
+        async with httpx.AsyncClient() as client:
+            await runner._wait_for_health(
+                client,
+                f"http://127.0.0.1:{port}",
+                instance_id="owned",
+                child=_LiveChild(),
+            )
+    finally:
+        server.close()
+        await server.wait_closed()
 
 
 # --------------------------------------------------------------------------- #
