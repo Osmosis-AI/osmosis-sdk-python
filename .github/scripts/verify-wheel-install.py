@@ -69,8 +69,8 @@ EXTRA_REQUIREMENTS: dict[str, set[str]] = {
     },
     "rubric": {"aiohttp", "click", "litellm", "orjson", "tqdm"},
     "parquet": {"pyarrow"},
-    # eval-run = osmosis-ai[server] self-reference + the in-process LiteLLM
-    # bridge and the uv executable used to launch rollout environments.
+    # eval-run = osmosis-ai[server,parquet] self-reference + the in-process
+    # LiteLLM bridge and the uv executable used to launch rollout environments.
     "eval-run": {"litellm", "osmosis-ai", "uv"},
     "full": {"osmosis-ai"},
 }
@@ -343,6 +343,7 @@ def _smoke_eval_run() -> None:
         "osmosis_ai.rollout.http_driver",
         ("HttpRolloutDriver",),
     )
+    _smoke_parquet()
 
 
 SCENARIO_SMOKE: dict[str, Callable[[], None]] = {
@@ -364,7 +365,7 @@ SCENARIO_PRESENT: dict[str, set[str]] = {
     "harbor": {"dockerfile-parse", "harbor", "platformdirs", "toml", "uv"},
     "rubric": {"litellm", "orjson", "tqdm"},
     "parquet": {"pyarrow"},
-    "eval-run": {"fastapi", "litellm", "uv", "uvicorn"},
+    "eval-run": {"fastapi", "litellm", "pyarrow", "uv", "uvicorn"},
     "full": {
         "fastapi",
         "dockerfile-parse",
@@ -467,7 +468,6 @@ SCENARIO_ABSENT: dict[str, set[str]] = {
         "openai-agents",
         "orjson",
         "platformdirs",
-        "pyarrow",
         "strands-agents",
         "toml",
     },

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import sys
 from io import StringIO
 
@@ -139,7 +140,10 @@ def test_print_pauses_live_spinner() -> None:
     console.print("dataset cache hit for 'email-generation'", style="dim")
 
     assert status.events == ["stop", "start"]
-    assert output.getvalue() == "dataset cache hit for 'email-generation'\n"
+    # `no_color=True` suppresses color, not dim (SGR 2). Strip styling so the
+    # assertion stays on the spinner-pause contract, not Rich's SGR details.
+    text = re.sub(r"\x1b\[[0-9;]*m", "", output.getvalue())
+    assert text == "dataset cache hit for 'email-generation'\n"
 
 
 def test_other_terminal_writes_pause_live_spinner(monkeypatch) -> None:
