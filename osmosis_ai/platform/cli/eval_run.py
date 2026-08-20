@@ -356,6 +356,7 @@ def run(
         )
         from osmosis_ai.platform.cli.eval_upload import upload_plan
 
+        hooks.display.close()
         retry = f"osmosis eval upload {quote(str(summary.run_dir))}"
         try:
             imported = upload_plan(
@@ -386,9 +387,12 @@ def run(
                 f"the local evaluation upload failed: {exc}\nRetry with: {retry}"
             ) from exc
         except Exception as exc:
+            classified = classify_error(exc)
             raise CLIError(
                 f"Local evaluation results are complete at {summary.run_dir}, but "
-                f"the upload failed: {exc}\nRetry with: {retry}"
+                f"the upload failed: {exc}\nRetry with: {retry}",
+                code=classified.code,
+                details=classified.details,
             ) from exc
 
     try:

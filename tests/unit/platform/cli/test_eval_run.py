@@ -430,13 +430,32 @@ def test_upload_flag_uploads_after_finalize_and_surfaces_platform_url(
     import osmosis_ai.eval.local.upload as local_upload_module
     import osmosis_ai.platform.cli.eval_upload as eval_upload_module
 
+    events: list[str] = []
+    original_close = eval_run_module._ProgressDisplay.close
     original_run = _CapturedRunner.run
+
+    def close_display(self: Any) -> None:
+        events.append("close")
+        original_close(self)
 
     async def run_with_callback(self: Any, *, after_finalize: Any) -> Any:
         summary = await original_run(self)
         after_finalize(summary)
         return summary
 
+    def upload_plan(_plan: Any, *, context: Any) -> SimpleNamespace:
+        events.append("upload")
+        return SimpleNamespace(
+            session_id="session-1",
+            eval_run_id="eval-1",
+            eval_run_name="uploaded-run",
+            status="finalized",
+            expected_files=2,
+            uploaded_files=2,
+            platform_url="https://platform.example/evals/eval-1",
+        )
+
+    monkeypatch.setattr(eval_run_module._ProgressDisplay, "close", close_display)
     monkeypatch.setattr(_CapturedRunner, "run", run_with_callback)
     monkeypatch.setattr(
         local_upload_module,
@@ -446,15 +465,7 @@ def test_upload_flag_uploads_after_finalize_and_surfaces_platform_url(
     monkeypatch.setattr(
         eval_upload_module,
         "upload_plan",
-        lambda _plan, *, context: SimpleNamespace(
-            session_id="session-1",
-            eval_run_id="eval-1",
-            eval_run_name="uploaded-run",
-            status="finalized",
-            expected_files=2,
-            uploaded_files=2,
-            platform_url="https://platform.example/evals/eval-1",
-        ),
+        upload_plan,
     )
 
     result = _run(workspace, upload=True)
@@ -462,6 +473,7 @@ def test_upload_flag_uploads_after_finalize_and_surfaces_platform_url(
     assert result.resource["upload"]["eval_run_id"] == "eval-1"
     assert result.resource["platform_url"] == "https://platform.example/evals/eval-1"
     assert result.display_next_steps == ["View: https://platform.example/evals/eval-1"]
+    assert events[:2] == ["close", "upload"]
 
 
 def test_upload_failure_says_local_results_are_complete_and_gives_retry_command(
@@ -532,6 +544,47 @@ def test_upload_plan_error_reports_local_problem_without_retry_guidance(
     assert "cannot be uploaded: index.jsonl is invalid" in raised.value.message
     assert "Retry with:" not in raised.value.message
     assert "platform upload failed" not in raised.value.message
+
+
+def test_unexpected_upload_error_keeps_internal_classification(
+    workspace: Path,
+    captured_runner: type[_CapturedRunner],
+    console_capture: StringIO,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import osmosis_ai.eval.local.upload as local_upload_module
+    import osmosis_ai.platform.cli.eval_upload as eval_upload_module
+
+    class UnexpectedUploadError(Exception):
+        pass
+
+    original_run = _CapturedRunner.run
+
+    async def run_with_callback(self: Any, *, after_finalize: Any) -> Any:
+        summary = await original_run(self)
+        after_finalize(summary)
+        return summary
+
+    monkeypatch.setattr(_CapturedRunner, "run", run_with_callback)
+    monkeypatch.setattr(
+        local_upload_module,
+        "build_eval_upload_plan",
+        lambda run_dir: SimpleNamespace(run_dir=run_dir),
+    )
+    monkeypatch.setattr(
+        eval_upload_module,
+        "upload_plan",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            UnexpectedUploadError("unexpected")
+        ),
+    )
+
+    with pytest.raises(CLIError) as raised:
+        _run(workspace, upload=True)
+
+    assert raised.value.code == CLIErrorCode.INTERNAL
+    assert raised.value.details == {"exception_type": "UnexpectedUploadError"}
+    assert "the upload failed: unexpected" in raised.value.message
 
 
 def test_upload_platform_error_keeps_auth_code_and_retry_context(
