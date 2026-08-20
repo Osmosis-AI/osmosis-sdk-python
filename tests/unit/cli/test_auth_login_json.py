@@ -332,23 +332,30 @@ def test_login_save_failure_does_not_revoke_old_token(
     assert calls == ["save"]
 
 
-def test_explicit_token_conflicts_with_active_environment_token(
-    monkeypatch, capsys
+def test_explicit_token_overrides_active_environment_token(
+    monkeypatch, capsys, fake_verify_result
 ) -> None:
     monkeypatch.setenv("OSMOSIS_TOKEN", "env-token")
     monkeypatch.setattr(
-        "osmosis_ai.platform.auth.verify_token",
-        lambda *args, **kwargs: pytest.fail("conflicting login must not verify"),
+        "osmosis_ai.platform.auth.load_credentials", lambda **kwargs: None
     )
     monkeypatch.setattr(
+        "osmosis_ai.platform.auth.verify_token",
+        lambda token, git_identity=None: fake_verify_result,
+    )
+    saved: list[str] = []
+    monkeypatch.setattr(
         "osmosis_ai.platform.auth.credentials.save_credentials",
-        lambda *args, **kwargs: pytest.fail("conflicting login must not save"),
+        lambda credentials, **kwargs: (
+            saved.append(credentials.access_token) or "keyring"
+        ),
     )
 
     exit_code = cli.main(["--json", "auth", "login", "--token", "new-token"])
 
-    assert exit_code == 1
-    assert json.loads(capsys.readouterr().err)["error"]["code"] == "CONFLICT"
+    assert exit_code == 0
+    assert json.loads(capsys.readouterr().out)["status"] == "success"
+    assert saved == ["new-token"]
 
 
 def test_login_with_env_token_reports_conflict_without_verifying(
@@ -396,7 +403,7 @@ def test_logout_json_with_yes_removes_persistent_login(monkeypatch, capsys) -> N
     _patch_persistent_login(monkeypatch, _credentials())
     monkeypatch.delenv("OSMOSIS_TOKEN", raising=False)
     monkeypatch.setattr(
-        "osmosis_ai.platform.auth.local_config.reset_session", lambda: None
+        "osmosis_ai.platform.auth.local_config.reset_session", lambda **kwargs: None
     )
     monkeypatch.setattr(
         "osmosis_ai.platform.auth.platform_client.revoke_cli_token",
@@ -414,7 +421,7 @@ def test_logout_json_with_yes_removes_persistent_login(monkeypatch, capsys) -> N
     assert payload["resource"]["effective_source"] is None
 
 
-def test_logout_does_not_report_success_when_keyring_is_unavailable(
+def test_logout_removes_metadata_when_keyring_is_unavailable(
     monkeypatch, capsys
 ) -> None:
     monkeypatch.delenv("OSMOSIS_TOKEN", raising=False)
@@ -428,16 +435,23 @@ def test_logout_does_not_report_success_when_keyring_is_unavailable(
             CLIError("keyring locked", code="KEYRING_UNAVAILABLE")
         ),
     )
+    reset_kwargs: list[dict[str, bool]] = []
     monkeypatch.setattr(
         "osmosis_ai.platform.auth.local_config.reset_session",
-        lambda: pytest.fail("failed keyring access must preserve metadata"),
+        lambda **kwargs: reset_kwargs.append(kwargs),
     )
 
     exit_code = cli.main(["--json", "auth", "logout", "--yes"])
 
-    error = json.loads(capsys.readouterr().err)["error"]
-    assert exit_code == 1
-    assert error["code"] == "KEYRING_UNAVAILABLE"
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert payload["status"] == "success"
+    assert reset_kwargs == [
+        {
+            "recover_invalid_credentials": True,
+            "tolerate_keyring_unavailable": True,
+        }
+    ]
 
 
 def test_logout_with_env_token_only_does_not_reset_session(monkeypatch, capsys) -> None:
@@ -445,7 +459,7 @@ def test_logout_with_env_token_only_does_not_reset_session(monkeypatch, capsys) 
     calls: list[str] = []
     monkeypatch.setattr(
         "osmosis_ai.platform.auth.local_config.reset_session",
-        lambda: calls.append("reset"),
+        lambda **kwargs: calls.append("reset"),
     )
 
     exit_code = cli.main(["--json", "auth", "logout", "--yes"])
@@ -467,7 +481,7 @@ def test_logout_removes_saved_login_but_env_token_remains_active(
     calls: list[str] = []
     monkeypatch.setattr(
         "osmosis_ai.platform.auth.local_config.reset_session",
-        lambda: calls.append("reset"),
+        lambda **kwargs: calls.append("reset"),
     )
     monkeypatch.setattr(
         "osmosis_ai.platform.auth.platform_client.revoke_cli_token",
@@ -490,7 +504,7 @@ def test_logout_cleans_stale_metadata_without_a_token(monkeypatch, capsys) -> No
     calls: list[str] = []
     monkeypatch.setattr(
         "osmosis_ai.platform.auth.local_config.reset_session",
-        lambda: calls.append("reset"),
+        lambda **kwargs: calls.append("reset"),
     )
     monkeypatch.setattr(
         "osmosis_ai.platform.auth.platform_client.revoke_cli_token",

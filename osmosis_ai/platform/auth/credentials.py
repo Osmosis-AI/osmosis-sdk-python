@@ -14,10 +14,11 @@ from __future__ import annotations
 
 import json
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from hashlib import sha256
 from typing import TYPE_CHECKING, Any
+from uuid import uuid4
 
 import keyring
 from keyring.backends.fail import Keyring as FailKeyring
@@ -67,7 +68,50 @@ def _warn(message: str, *, code: str) -> None:
     console.print_warning(message, code=code)
 
 
-def _read_metadata() -> dict[str, Any] | None:
+def _metadata_parse_error() -> CLIError:
+    return CLIError(
+        "Credential metadata is invalid and was left unchanged. "
+        f"Repair or move {CREDENTIALS_FILE}, then try again.",
+        code="CREDENTIALS_PARSE_FAILED",
+    )
+
+
+def _backup_invalid_metadata() -> str:
+    """Move invalid metadata aside without overwriting an earlier backup."""
+    backup = CREDENTIALS_FILE.with_name(f"{CREDENTIALS_FILE.name}.bak")
+    suffix = 1
+    while backup.exists():
+        backup = CREDENTIALS_FILE.with_name(f"{CREDENTIALS_FILE.name}.bak.{suffix}")
+        suffix += 1
+    try:
+        CREDENTIALS_FILE.replace(backup)
+    except OSError as exc:
+        raise CLIError(
+            "Credential metadata could not be backed up for recovery. "
+            f"Move {CREDENTIALS_FILE} manually, then try again.",
+            code="CREDENTIALS_UNAVAILABLE",
+        ) from exc
+    _warn(
+        f"Invalid credential metadata was moved to {backup}.",
+        code="CREDENTIALS_METADATA_BACKED_UP",
+    )
+    return str(backup)
+
+
+def _handle_invalid_metadata(
+    error: CLIError,
+    *,
+    recover_invalid: bool,
+    cause: BaseException | None = None,
+) -> None:
+    if not recover_invalid:
+        if cause is not None:
+            raise error from cause
+        raise error
+    _backup_invalid_metadata()
+
+
+def _read_metadata(*, recover_invalid: bool = False) -> dict[str, Any] | None:
     """Read credential metadata without treating corruption as logout."""
     try:
         with open(CREDENTIALS_FILE, encoding="utf-8") as f:
@@ -75,11 +119,10 @@ def _read_metadata() -> dict[str, Any] | None:
     except FileNotFoundError:
         return None
     except (json.JSONDecodeError, UnicodeError) as exc:
-        raise CLIError(
-            "Credential metadata is invalid and was left unchanged. "
-            f"Repair or move {CREDENTIALS_FILE}, then try again.",
-            code="CREDENTIALS_PARSE_FAILED",
-        ) from exc
+        _handle_invalid_metadata(
+            _metadata_parse_error(), recover_invalid=recover_invalid, cause=exc
+        )
+        return None
     except OSError as exc:
         raise CLIError(
             "Could not read credential metadata. Check permissions for "
@@ -88,28 +131,27 @@ def _read_metadata() -> dict[str, Any] | None:
         ) from exc
 
     if not isinstance(data, dict):
-        raise CLIError(
-            "Credential metadata is invalid and was left unchanged. "
-            f"Repair or move {CREDENTIALS_FILE}, then try again.",
-            code="CREDENTIALS_PARSE_FAILED",
+        _handle_invalid_metadata(
+            _metadata_parse_error(), recover_invalid=recover_invalid
         )
+        return None
     if data.get("version") != CREDENTIALS_VERSION:
-        raise CLIError(
-            "Credential metadata uses an unsupported format and was left "
-            f"unchanged: {CREDENTIALS_FILE}.",
-            code="CREDENTIALS_VERSION_CHANGED",
-            details={"version": data.get("version")},
+        _handle_invalid_metadata(
+            CLIError(
+                "Credential metadata uses an unsupported format and was left "
+                f"unchanged: {CREDENTIALS_FILE}.",
+                code="CREDENTIALS_VERSION_CHANGED",
+                details={"version": data.get("version")},
+            ),
+            recover_invalid=recover_invalid,
         )
-    _validate_metadata(data)
+        return None
+    try:
+        _validate_metadata(data)
+    except CLIError as exc:
+        _handle_invalid_metadata(exc, recover_invalid=recover_invalid)
+        return None
     return data
-
-
-def _metadata_parse_error() -> CLIError:
-    return CLIError(
-        "Credential metadata is invalid and was left unchanged. "
-        f"Repair or move {CREDENTIALS_FILE}, then try again.",
-        code="CREDENTIALS_PARSE_FAILED",
-    )
 
 
 def _validate_entry(entry: dict[str, Any]) -> None:
@@ -174,9 +216,19 @@ def _keyring_account_for_credentials(
     credentials: Credentials, platform_url: str
 ) -> str:
     """Return a platform-scoped account unique to this token identity."""
-    token_identity = credentials.token_id or credentials.access_token
-    digest = sha256(token_identity.encode("utf-8")).hexdigest()[:24]
-    return f"{keyring_account_for_platform(platform_url)}:{digest}"
+    platform_account = keyring_account_for_platform(platform_url)
+    if credentials.keyring_account and (
+        credentials.keyring_account == platform_account
+        or credentials.keyring_account.startswith(f"{platform_account}:")
+    ):
+        return credentials.keyring_account
+    suffix = (
+        sha256(credentials.token_id.encode("utf-8")).hexdigest()[:24]
+        if credentials.token_id
+        else uuid4().hex[:24]
+    )
+    credentials.keyring_account = f"{platform_account}:{suffix}"
+    return credentials.keyring_account
 
 
 def _default_platform_url() -> str:
@@ -308,12 +360,19 @@ def _keyring_accounts_for_entry(
 def _cleanup_platform_keyring_entries(
     entry: dict[str, Any] | None,
     platform_url: str,
+    *,
+    tolerate_unavailable: bool = False,
 ) -> bool:
     if entry is not None and not _entry_used_keyring(entry):
         return True
     cleaned = True
     for account in _keyring_accounts_for_entry(entry, platform_url):
-        cleaned = _keyring_delete(account) and cleaned
+        try:
+            cleaned = _keyring_delete(account) and cleaned
+        except CLIError:
+            if not tolerate_unavailable:
+                raise
+            cleaned = False
     return cleaned
 
 
@@ -360,6 +419,25 @@ def _keyring_set(account: str, token: str) -> bool:
             "Could not save credentials in the system keyring. "
             "Unlock or repair the keyring, or use OSMOSIS_TOKEN for "
             "non-interactive authentication.",
+            code="KEYRING_UNAVAILABLE",
+        ) from exc
+
+
+def ensure_keyring_available() -> None:
+    """Fail before device login when no system keyring backend is available."""
+    try:
+        if isinstance(keyring.get_keyring(), FailKeyring):
+            raise CLIError(
+                "No system keyring is available. Set OSMOSIS_TOKEN for CI/CD or "
+                "configure a keyring backend for interactive login.",
+                code="KEYRING_UNAVAILABLE",
+            )
+    except CLIError:
+        raise
+    except Exception as exc:
+        raise CLIError(
+            "Could not access the system keyring. Unlock or repair the keyring, "
+            "or use OSMOSIS_TOKEN for non-interactive authentication.",
             code="KEYRING_UNAVAILABLE",
         ) from exc
 
@@ -442,6 +520,7 @@ class Credentials:
     created_at: datetime
     user: UserInfo
     token_id: str | None = None
+    keyring_account: str | None = field(default=None, repr=False, compare=False)
 
     def to_dict(self) -> dict[str, Any]:
         result: dict[str, Any] = {
@@ -471,6 +550,7 @@ class Credentials:
             created_at=created_at,
             user=UserInfo.from_dict(data["user"]),
             token_id=data.get("token_id"),
+            keyring_account=data.get("keyring_account"),
         )
 
     @classmethod
@@ -526,7 +606,12 @@ def _cleanup_replaced_credentials(
 # ---------------------------------------------------------------------------
 
 
-def save_credentials(credentials: Credentials, *, cleanup_replaced: bool = True) -> str:
+def save_credentials(
+    credentials: Credentials,
+    *,
+    cleanup_replaced: bool = True,
+    recover_invalid_metadata: bool = False,
+) -> str:
     """Save user credentials.
 
     The token is written to the platform-scoped system-keyring account before
@@ -537,7 +622,7 @@ def save_credentials(credentials: Credentials, *, cleanup_replaced: bool = True)
         The storage backend used: ``"keyring"``.
     """
     platform_url = get_platform_url()
-    old_metadata = _read_metadata()
+    old_metadata = _read_metadata(recover_invalid=recover_invalid_metadata)
     registry = _registry_from_metadata(old_metadata)
     old_key = _platform_entry_key(registry, platform_url)
     old_entry = registry["platforms"].get(old_key) if old_key is not None else None
@@ -650,7 +735,11 @@ def load_credentials(*, include_env: bool = True) -> Credentials | None:
         ) from exc
 
 
-def delete_credentials() -> bool:
+def delete_credentials(
+    *,
+    recover_invalid_metadata: bool = False,
+    tolerate_keyring_unavailable: bool = False,
+) -> bool:
     """Delete credentials for the current platform.
 
     Legacy single-platform files are treated as credentials for the default
@@ -658,17 +747,27 @@ def delete_credentials() -> bool:
     cannot destroy entries belonging to another platform.
     """
     platform_url = get_platform_url()
-    old_metadata = _read_metadata()
+    old_metadata = _read_metadata(recover_invalid=recover_invalid_metadata)
     old_entry = (
         _entry_for_platform(old_metadata, platform_url)
         if isinstance(old_metadata, dict)
         else None
     )
-    keyring_cleaned = _cleanup_platform_keyring_entries(old_entry, platform_url)
+    keyring_cleaned = _cleanup_platform_keyring_entries(
+        old_entry,
+        platform_url,
+        tolerate_unavailable=tolerate_keyring_unavailable,
+    )
     if not keyring_cleaned:
-        raise CLIError(
-            "Could not remove token from the system keyring. Credential "
-            "metadata was left unchanged so logout can be retried.",
+        if not tolerate_keyring_unavailable:
+            raise CLIError(
+                "Could not remove token from the system keyring. Credential "
+                "metadata was left unchanged so logout can be retried.",
+                code="KEYRING_CLEANUP_FAILED",
+            )
+        _warn(
+            "Saved credential metadata was removed, but the system keyring "
+            "entry could not be verified or deleted on this host.",
             code="KEYRING_CLEANUP_FAILED",
         )
 

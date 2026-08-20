@@ -34,7 +34,7 @@ def test_reset_session_deletes_credentials_and_legacy_config(
     monkeypatch.setattr(local_config, "CONFIG_FILE", config_file)
     monkeypatch.setattr(
         "osmosis_ai.platform.auth.credentials.delete_credentials",
-        lambda: calls.append("delete_credentials"),
+        lambda **kwargs: calls.append("delete_credentials"),
     )
 
     local_config.reset_session()

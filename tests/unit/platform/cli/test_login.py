@@ -279,7 +279,7 @@ def test_login_cleans_old_keyring_when_both_token_ids_are_missing(
     assert cleaned == [(old_creds, new_creds)]
 
 
-def test_login_save_failure_does_not_revoke_old_token(monkeypatch) -> None:
+def test_device_login_save_failure_revokes_new_token(monkeypatch) -> None:
     old_creds = _make_credentials(access_token="old", token_id="tok_old")
     new_creds = _make_credentials(access_token="new", token_id="tok_new")
     result = _make_login_result()
@@ -313,7 +313,23 @@ def test_login_save_failure_does_not_revoke_old_token(monkeypatch) -> None:
     with pytest.raises(OSError, match="disk full"):
         auth_module.login()
 
-    assert calls == ["save"]
+    assert calls == ["save", "revoke"]
+
+
+def test_device_login_stops_before_minting_without_keyring(monkeypatch) -> None:
+    from keyring.backends.fail import Keyring as FailKeyring
+
+    monkeypatch.delenv("OSMOSIS_TOKEN", raising=False)
+    monkeypatch.setattr("keyring.get_keyring", lambda: FailKeyring())
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.device_login",
+        lambda: pytest.fail("device flow must not mint a token without a keyring"),
+    )
+
+    with pytest.raises(CLIError) as exc_info:
+        auth_module.login()
+
+    assert exc_info.value.code == "KEYRING_UNAVAILABLE"
 
 
 def test_device_login_loads_persistent_credentials_without_env(monkeypatch) -> None:

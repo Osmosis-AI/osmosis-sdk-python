@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime, timedelta
+from hashlib import sha256
 from unittest.mock import patch
 
 import pytest
@@ -781,6 +782,36 @@ def test_keyring_delete_fails_without_a_backend() -> None:
     assert exc_info.value.code == "KEYRING_UNAVAILABLE"
 
 
+def test_explicit_delete_removes_metadata_without_a_keyring(
+    tmp_path, monkeypatch
+) -> None:
+    from keyring.backends.fail import Keyring as FailKeyring
+
+    creds_file = tmp_path / "creds.json"
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.credentials.CREDENTIALS_FILE", creds_file
+    )
+    entry = _make_credentials(token_id="tok_saved").to_dict()
+    entry.pop("access_token")
+    entry["platform_url"] = DEFAULT_PLATFORM
+    entry["token_store"] = TOKEN_STORE_KEYRING
+    entry["keyring_account"] = f"{keyring_account_for_platform(DEFAULT_PLATFORM)}:saved"
+    creds_file.write_text(
+        json.dumps({"version": 2, "platforms": {DEFAULT_PLATFORM: entry}})
+    )
+
+    with (
+        patch("keyring.get_keyring", return_value=FailKeyring()),
+        patch("osmosis_ai.cli.console.console.print_warning") as mock_warn,
+    ):
+        from osmosis_ai.platform.auth.credentials import delete_credentials
+
+        assert delete_credentials(tolerate_keyring_unavailable=True) is True
+
+    assert not creds_file.exists()
+    mock_warn.assert_called_once()
+
+
 def test_keyring_delete_fails_when_the_backend_reports_no_keyring() -> None:
     """The host has a backend object, but keyring still resolves none."""
     from keyring.errors import NoKeyringError
@@ -1049,6 +1080,55 @@ def test_save_preserves_invalid_shared_metadata(
 
     assert exc_info.value.code == error_code
     assert creds_file.read_text() == contents
+
+
+@pytest.mark.parametrize(
+    "contents",
+    [
+        "{invalid json!!!}",
+        json.dumps({"version": 1, "access_token": "legacy-token"}),
+    ],
+)
+def test_explicit_save_backs_up_invalid_metadata_and_recovers(
+    tmp_path, monkeypatch, contents: str
+) -> None:
+    creds_file = tmp_path / "creds.json"
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.credentials.CREDENTIALS_FILE", creds_file
+    )
+    creds_file.write_text(contents)
+
+    with (
+        patch("osmosis_ai.platform.auth.credentials._keyring_set", return_value=True),
+        patch(
+            "osmosis_ai.platform.auth.credentials._keyring_delete",
+            return_value=True,
+        ),
+        patch("osmosis_ai.cli.console.console.print_warning"),
+    ):
+        from osmosis_ai.platform.auth.credentials import save_credentials
+
+        save_credentials(_make_credentials(), recover_invalid_metadata=True)
+
+    assert creds_file.exists()
+    assert json.loads(creds_file.read_text())["version"] == 2
+    assert (tmp_path / "creds.json.bak").read_text() == contents
+
+
+def test_token_without_id_uses_random_keyring_account_suffix() -> None:
+    from osmosis_ai.platform.auth.credentials import _keyring_account_for_credentials
+
+    first = _keyring_account_for_credentials(
+        _make_credentials(access_token="shared-secret"), DEFAULT_PLATFORM
+    )
+    second = _keyring_account_for_credentials(
+        _make_credentials(access_token="shared-secret"), DEFAULT_PLATFORM
+    )
+
+    token_digest = sha256(b"shared-secret").hexdigest()[:24]
+    assert first != second
+    assert token_digest not in first
+    assert token_digest not in second
 
 
 @pytest.mark.parametrize(

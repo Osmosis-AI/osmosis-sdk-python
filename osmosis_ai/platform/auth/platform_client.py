@@ -183,6 +183,9 @@ def cli_request_headers(*, token: str | None = None) -> dict[str, str]:
     ``Authorization`` header when a token is supplied. Centralizing this keeps the
     version stamp in exactly one place across the handshake and API calls.
     """
+    if token is not None:
+        validate_env_token_platform(token)
+
     headers = {
         "Content-Type": "application/json",
         "User-Agent": f"osmosis-cli/{PACKAGE_VERSION}",
@@ -366,8 +369,6 @@ def revoke_cli_token(credentials: Credentials) -> bool:
     """
     if not credentials.token_id:
         return False
-    if _credentials_match_env_token(credentials):
-        validate_env_token_platform(credentials.access_token)
 
     url = f"{get_platform_url()}/api/cli/tokens/{credentials.token_id}"
     request = Request(
@@ -539,8 +540,6 @@ def platform_request(
     if credentials is None:
         raise CLIError(MSG_NOT_LOGGED_IN, code="AUTH_REQUIRED")
     using_env_token = _credentials_match_env_token(credentials)
-    if using_env_token:
-        validate_env_token_platform(credentials.access_token)
 
     url = f"{get_platform_url()}{endpoint}"
 
@@ -639,8 +638,6 @@ def platform_stream(
     if credentials is None:
         raise CLIError(MSG_NOT_LOGGED_IN, code="AUTH_REQUIRED")
     using_env_token = _credentials_match_env_token(credentials)
-    if using_env_token:
-        validate_env_token_platform(credentials.access_token)
 
     url = f"{get_platform_url()}{endpoint}"
     req_headers = cli_request_headers(token=credentials.access_token)

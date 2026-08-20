@@ -98,7 +98,7 @@ def test_implicit_dotenv_http_platform_url_fails_closed(
     assert stderr_envelopes[1]["error"]["code"] == "VALIDATION"
 
 
-def test_implicit_env_file_cannot_mix_with_an_unrelated_ambient_token(
+def test_implicit_env_file_defers_unbound_token_rejection_to_platform_validation(
     _platform_env: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
@@ -113,9 +113,8 @@ def test_implicit_env_file_cannot_mix_with_an_unrelated_ambient_token(
 
     error = json.loads(capsys.readouterr().err)["error"]
     assert rc == 1
-    assert error["code"] == "CONFLICT"
-    assert "different auth profile" in error["message"]
-    assert os.environ.get("OSMOSIS_PLATFORM_URL") is None
+    assert error["code"] == "ENV_TOKEN_PLATFORM_REQUIRED"
+    assert os.environ["OSMOSIS_PLATFORM_URL"] == ("https://platform-staging.osmosis.ai")
 
 
 @pytest.mark.parametrize(
@@ -125,10 +124,9 @@ def test_implicit_env_file_cannot_mix_with_an_unrelated_ambient_token(
         ("OSMOSIS_TOKEN_PLATFORM_URL", "https://platform.osmosis.ai"),
     ],
 )
-def test_dotenv_token_cannot_merge_with_an_inherited_auth_profile_value(
+def test_dotenv_token_can_load_with_a_nonoverlapping_ambient_profile_value(
     _platform_env: Path,
     monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
     ambient_name: str,
     ambient_value: str,
 ) -> None:
@@ -138,16 +136,13 @@ def test_dotenv_token_cannot_merge_with_an_inherited_auth_profile_value(
         encoding="utf-8",
     )
 
-    rc = cli.main(["--json", "auth", "whoami"])
+    cli._load_env_file(_platform_env / ".env")
 
-    error = json.loads(capsys.readouterr().err)["error"]
-    assert rc == 1
-    assert error["code"] == "CONFLICT"
-    assert "complete auth profile" in error["message"]
-    assert os.environ.get("OSMOSIS_TOKEN") is None
+    assert os.environ["OSMOSIS_TOKEN"] == "dotenv-token"
+    assert os.environ[ambient_name] == ambient_value
 
 
-def test_uv_preloaded_url_only_env_cannot_mix_with_an_ambient_token(
+def test_uv_preloaded_url_only_env_does_not_conflict_with_an_ambient_token(
     _platform_env: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
@@ -164,9 +159,29 @@ def test_uv_preloaded_url_only_env_cannot_mix_with_an_ambient_token(
 
     error = json.loads(capsys.readouterr().err)["error"]
     assert rc == 1
-    assert error["code"] == "CONFLICT"
-    assert "complete auth profile" in error["message"]
+    assert error["code"] == "ENV_TOKEN_PLATFORM_REQUIRED"
     assert os.environ["OSMOSIS_PLATFORM_URL"] == platform_url
+
+
+@pytest.mark.parametrize(
+    "name",
+    ["OSMOSIS_TOKEN", "OSMOSIS_PLATFORM_URL", "OSMOSIS_TOKEN_PLATFORM_URL"],
+)
+def test_empty_ambient_auth_values_do_not_conflict_with_dotenv(
+    _platform_env: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    name: str,
+) -> None:
+    monkeypatch.setenv(name, "")
+    env_file = _platform_env / "staging.env"
+    env_file.write_text(
+        "OSMOSIS_PLATFORM_URL=https://platform-staging.osmosis.ai\n",
+        encoding="utf-8",
+    )
+
+    cli._load_env_file(env_file)
+
+    assert get_platform_url() == "https://platform-staging.osmosis.ai"
 
 
 def test_implicit_env_file_accepts_profile_already_loaded_by_uv(

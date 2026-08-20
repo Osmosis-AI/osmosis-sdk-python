@@ -109,26 +109,33 @@ def _load_env_file(env_file: Path, *, platform_overridden: bool = False) -> None
     """Load a dotenv file without combining unrelated auth profiles."""
     from dotenv import dotenv_values, load_dotenv
 
+    for name in _AUTH_PROFILE_ENV_VARS:
+        if os.environ.get(name) == "":
+            os.environ.pop(name)
+
     values = dotenv_values(env_file)
     auth_values = {
         name: value
         for name, value in values.items()
         if name in _AUTH_PROFILE_ENV_VARS
         and isinstance(value, str)
+        and bool(value)
         and not (platform_overridden and name == "OSMOSIS_PLATFORM_URL")
     }
     existing_auth_values = {
         name: value
         for name in _AUTH_PROFILE_ENV_VARS
         if isinstance((value := os.environ.get(name)), str)
+        and bool(value)
         and not (platform_overridden and name == "OSMOSIS_PLATFORM_URL")
     }
     if existing_auth_values and auth_values:
-        safe_existing_profile = all(
-            name in auth_values and _auth_value_matches(name, value, auth_values[name])
+        profiles_conflict = any(
+            name in auth_values
+            and not _auth_value_matches(name, value, auth_values[name])
             for name, value in existing_auth_values.items()
         )
-        if not safe_existing_profile:
+        if profiles_conflict:
             from osmosis_ai.cli.errors import CLIError
 
             raise CLIError(

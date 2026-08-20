@@ -35,7 +35,9 @@ from osmosis_ai.platform.auth import (
     save_credentials,
 )
 from osmosis_ai.platform.auth.config import get_platform_url
+from osmosis_ai.platform.auth.credentials import ensure_keyring_available
 from osmosis_ai.platform.auth.flow import device_login
+from osmosis_ai.platform.auth.platform_client import revoke_cli_token
 from osmosis_ai.platform.cli.workspace_directories import (
     forget_workspace_directory,
     recall_workspace_directory,
@@ -141,8 +143,19 @@ def _platform_url(organization_name: str, path: str) -> str:
 
 
 def _login() -> Credentials:
+    ensure_keyring_available()
     result, credentials = device_login()
-    save_credentials(credentials)
+    try:
+        save_credentials(credentials, recover_invalid_metadata=True)
+    except Exception:
+        try:
+            revoke_cli_token(credentials)
+        except Exception:
+            console.print_warning(
+                "The new device-login token could not be saved or revoked.",
+                code="TOKEN_REVOKE_FAILED",
+            )
+        raise
     _step(f"authenticated as {result.user.email}")
     return credentials
 

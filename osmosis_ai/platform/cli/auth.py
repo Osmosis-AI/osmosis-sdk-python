@@ -23,6 +23,10 @@ _AUTH_LOGIN_ERROR_CODES = {
     "TOKEN_REVOKED",
     "UNKNOWN_AUTH_ERROR",
 }
+_RECOVERABLE_CREDENTIAL_METADATA_CODES = {
+    "CREDENTIALS_PARSE_FAILED",
+    "CREDENTIALS_VERSION_CHANGED",
+}
 _PLATFORM_CREATE_REPO_STEP = (
     "Create or open a workspace in the Osmosis Platform, then clone the repository "
     "created there."
@@ -208,7 +212,25 @@ def _finish_login(
         and not same_server_token
         else None
     )
-    token_store = save_credentials(creds, cleanup_replaced=False)
+    try:
+        token_store = save_credentials(
+            creds,
+            cleanup_replaced=False,
+            recover_invalid_metadata=True,
+        )
+    except Exception:
+        if source == "device":
+            try:
+                with output.status("Revoking new session..."):
+                    revoke_cli_token(creds)
+            except Exception:
+                from osmosis_ai.cli.console import console
+
+                console.print_warning(
+                    "The new device-login token could not be saved or revoked.",
+                    code="TOKEN_REVOKE_FAILED",
+                )
+        raise
 
     if old_credentials_to_revoke is not None:
         if not old_credentials_to_revoke.token_id:
@@ -265,7 +287,12 @@ def _login_with_token(*, token: str) -> OperationResult:
     from osmosis_ai.platform.auth.flow import LoginResult
 
     output = get_output_context()
-    old_credentials = load_credentials(include_env=False)
+    try:
+        old_credentials = load_credentials(include_env=False)
+    except CLIError as exc:
+        if exc.code not in _RECOVERABLE_CREDENTIAL_METADATA_CODES:
+            raise
+        old_credentials = None
 
     with output.status("Verifying token..."):
         verified = verify_token(token)
@@ -284,9 +311,16 @@ def _login_with_token(*, token: str) -> OperationResult:
 def _login_with_device_flow() -> OperationResult:
     """Interactive device-code login. Caller must have already gated on interactivity."""
     from osmosis_ai.platform.auth import device_login, load_credentials
+    from osmosis_ai.platform.auth.credentials import ensure_keyring_available
 
     output = get_output_context()
-    old_credentials = load_credentials(include_env=False)
+    ensure_keyring_available()
+    try:
+        old_credentials = load_credentials(include_env=False)
+    except CLIError as exc:
+        if exc.code not in _RECOVERABLE_CREDENTIAL_METADATA_CODES:
+            raise
+        old_credentials = None
     result, creds = device_login()
 
     return _finish_login(
@@ -303,15 +337,15 @@ def login(*, token: str | None = None) -> OperationResult:
     from osmosis_ai.platform.auth import LoginError
 
     try:
+        if token is not None:
+            return _login_with_token(token=token)
+
         if os.environ.get("OSMOSIS_TOKEN"):
             raise CLIError(
                 "OSMOSIS_TOKEN is already active for this process. "
                 "Skip 'auth login' for CI/CD, or unset it before logging in.",
                 code="CONFLICT",
             )
-
-        if token is not None:
-            return _login_with_token(token=token)
 
         output = get_output_context()
         if output.format is not OutputFormat.rich:
@@ -335,10 +369,22 @@ def logout(*, skip_confirm: bool = False) -> OperationResult:
 
     output = get_output_context()
     env_token_set = bool(os.environ.get("OSMOSIS_TOKEN"))
-    persistent_store = get_credential_store(include_env=False)
-    credentials = (
-        load_credentials(include_env=False) if persistent_store is not None else None
-    )
+    try:
+        persistent_store = get_credential_store(include_env=False)
+        credentials = (
+            load_credentials(include_env=False)
+            if persistent_store is not None
+            else None
+        )
+    except CLIError as exc:
+        if exc.code in _RECOVERABLE_CREDENTIAL_METADATA_CODES:
+            persistent_store = "unknown"
+            credentials = None
+        elif exc.code == "KEYRING_UNAVAILABLE":
+            persistent_store = "keyring"
+            credentials = None
+        else:
+            raise
 
     if persistent_store is None:
         if env_token_set:
@@ -396,7 +442,10 @@ def logout(*, skip_confirm: bool = False) -> OperationResult:
         with output.status("Revoking session..."):
             revoked = revoke_cli_token(credentials)
 
-    reset_session()
+    reset_session(
+        recover_invalid_credentials=True,
+        tolerate_keyring_unavailable=True,
+    )
     effective_source = "environment" if env_token_set else None
 
     return OperationResult(

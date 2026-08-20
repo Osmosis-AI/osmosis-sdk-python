@@ -264,7 +264,10 @@ def wizard(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Any:
         "device_login",
         lambda: pytest.fail("valid credentials must not trigger a login"),
     )
-    monkeypatch.setattr(quickstart_module, "save_credentials", lambda _creds: "keyring")
+    monkeypatch.setattr(quickstart_module, "ensure_keyring_available", lambda: None)
+    monkeypatch.setattr(
+        quickstart_module, "save_credentials", lambda _creds, **kwargs: "keyring"
+    )
     monkeypatch.setattr(
         quickstart_module,
         "_run_git_clone",
@@ -1098,7 +1101,9 @@ def test_an_expired_session_relogs_in_and_retries_the_workspace_list(
 
     wizard.monkeypatch.setattr(quickstart_module, "device_login", _device_login)
     wizard.monkeypatch.setattr(
-        quickstart_module, "save_credentials", lambda creds: saved.append(creds)
+        quickstart_module,
+        "save_credentials",
+        lambda creds, **kwargs: saved.append(creds),
     )
 
     result = quickstart_module.run_quickstart(cwd=tmp_path)
@@ -1139,7 +1144,9 @@ def test_a_session_expiring_mid_wait_relogs_in_and_keeps_polling(
         )
 
     wizard.monkeypatch.setattr(quickstart_module, "device_login", _device_login)
-    wizard.monkeypatch.setattr(quickstart_module, "save_credentials", lambda _c: None)
+    wizard.monkeypatch.setattr(
+        quickstart_module, "save_credentials", lambda _c, **kwargs: None
+    )
 
     result = quickstart_module.run_quickstart(cwd=tmp_path)
 
@@ -1200,10 +1207,37 @@ def test_missing_credentials_trigger_the_browser_login(
         ),
     )
     wizard.monkeypatch.setattr(
-        quickstart_module, "save_credentials", lambda creds: saved.append(creds)
+        quickstart_module,
+        "save_credentials",
+        lambda creds, **kwargs: saved.append(creds),
     )
 
     quickstart_module.run_quickstart(cwd=tmp_path)
 
     assert saved == [new_credentials]
     assert "new@osmosis.ai" in _out(wizard)
+
+
+def test_quickstart_login_revokes_new_token_when_save_fails(wizard: Any) -> None:
+    credentials = SimpleNamespace(user=SimpleNamespace(email="new@osmosis.ai"))
+    wizard.monkeypatch.setattr(
+        quickstart_module,
+        "device_login",
+        lambda: (SimpleNamespace(user=credentials.user), credentials),
+    )
+    wizard.monkeypatch.setattr(
+        quickstart_module,
+        "save_credentials",
+        lambda _credentials, **kwargs: (_ for _ in ()).throw(OSError("disk full")),
+    )
+    revoked: list[Any] = []
+    wizard.monkeypatch.setattr(
+        quickstart_module,
+        "revoke_cli_token",
+        lambda token: revoked.append(token) or True,
+    )
+
+    with pytest.raises(OSError, match="disk full"):
+        quickstart_module._login()
+
+    assert revoked == [credentials]

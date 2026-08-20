@@ -14,7 +14,11 @@ def _clear_legacy_config_file() -> None:
         CONFIG_FILE.unlink()
 
 
-def reset_session() -> None:
+def reset_session(
+    *,
+    recover_invalid_credentials: bool = False,
+    tolerate_keyring_unavailable: bool = False,
+) -> None:
     """Complete current-platform session teardown: credentials and legacy config.
 
     Logout is the only automatic caller; request failures never mutate stored
@@ -22,5 +26,8 @@ def reset_session() -> None:
     """
     from .credentials import delete_credentials
 
-    delete_credentials()
+    delete_credentials(
+        recover_invalid_metadata=recover_invalid_credentials,
+        tolerate_keyring_unavailable=tolerate_keyring_unavailable,
+    )
     _clear_legacy_config_file()

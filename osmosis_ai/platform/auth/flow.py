@@ -21,7 +21,7 @@ from urllib.request import Request, urlopen
 from osmosis_ai.cli.clipboard import copy_to_clipboard
 from osmosis_ai.cli.console import console
 
-from .config import get_platform_url, validate_env_token_platform
+from .config import get_platform_url
 from .credentials import Credentials, UserInfo
 from .platform_client import (
     cli_request_headers,
@@ -231,7 +231,6 @@ def verify_token(token: str, *, git_identity: str | None = None) -> VerifyResult
     Raises:
         LoginError: If verification fails.
     """
-    validate_env_token_platform(token)
     verify_url = f"{get_platform_url()}/api/cli/verify"
 
     req_headers = cli_request_headers(token=token)
