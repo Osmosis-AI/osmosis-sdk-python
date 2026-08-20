@@ -398,6 +398,7 @@ def run(
         context=context,
         dataset_source=dataset.source,
         imported=imported,
+        upload_requested=upload,
     )
 
 
@@ -537,6 +538,7 @@ def _result(
     context: Any,
     dataset_source: str,
     imported: Any | None = None,
+    upload_requested: bool = False,
 ) -> OperationResult:
     resource: dict[str, Any] = {
         "run_name": summary.run_name,
@@ -580,8 +582,9 @@ def _result(
     )
     next_steps = []
     if incomplete:
+        upload_flag = " --upload" if upload_requested else ""
         next_steps.append(
-            f"Resume: osmosis eval run <config> --name {summary.run_name}"
+            f"Resume: osmosis eval run <config> --name {summary.run_name}{upload_flag}"
         )
     if summary.failed:
         next_steps.append(
@@ -595,14 +598,17 @@ def _result(
             if imported.platform_url
             else f"Inspect the imported run: osmosis eval info {imported_name}"
         )
+    message = (
+        f"Evaluation run {'interrupted' if incomplete else 'finished'}: "
+        f"{summary.run_dir}"
+    )
+    if incomplete and upload_requested:
+        message += " Upload skipped because the local evaluation is incomplete."
     return OperationResult(
         operation="eval.run",
         status="partial" if incomplete else "success",
         resource=resource,
-        message=(
-            f"Evaluation run {'interrupted' if incomplete else 'finished'}: "
-            f"{summary.run_dir}"
-        ),
+        message=message,
         display_next_steps=next_steps,
         exit_code=1 if incomplete else 0,
     )

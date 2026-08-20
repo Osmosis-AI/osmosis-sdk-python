@@ -541,7 +541,7 @@ def test_upload_platform_error_keeps_auth_code_and_retry_context(
     assert f"osmosis eval upload {run_dir}" in raised.value.message
 
 
-def test_an_incomplete_run_is_partial_and_suggests_resuming(
+def test_an_incomplete_upload_run_reports_skipped_upload_and_resumes_with_upload(
     workspace: Path,
     captured_runner: type[_CapturedRunner],
     console_capture: StringIO,
@@ -549,7 +549,7 @@ def test_an_incomplete_run_is_partial_and_suggests_resuming(
 ) -> None:
     from osmosis_ai.eval.local.runner import FailedWorkItem, RunSummary
 
-    async def partial_run(self: Any) -> RunSummary:
+    async def partial_run(self: Any, *, after_finalize: Any) -> RunSummary:
         return RunSummary(
             run_dir=self.kwargs["output_root"] / "run-1",
             local_run_id="a" * 32,
@@ -576,10 +576,12 @@ def test_an_incomplete_run_is_partial_and_suggests_resuming(
         )
 
     monkeypatch.setattr(captured_runner, "run", partial_run)
-    result = _run(workspace)
+    result = _run(workspace, upload=True)
     assert result.status == "partial"
     assert result.exit_code == 1
-    assert any("--name run-1" in step for step in result.display_next_steps)
+    assert "Upload skipped" in result.message
+    assert "upload" not in result.resource
+    assert any("--name run-1 --upload" in step for step in result.display_next_steps)
     assert any("--retry-failed" in step for step in result.display_next_steps)
     assert result.resource["failed_rows"][0]["error_type"] == "grader_timeout"
     printed = console_capture.getvalue()
