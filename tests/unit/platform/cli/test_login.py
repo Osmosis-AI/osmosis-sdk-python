@@ -57,6 +57,12 @@ def _stub_workspace_resolution(monkeypatch) -> None:
     )
 
 
+@pytest.fixture(autouse=True)
+def _stub_keyring_available(monkeypatch) -> None:
+    """Exercise login behavior independently of the host keyring backend."""
+    monkeypatch.setattr("keyring.get_keyring", lambda: object())
+
+
 def test_login_revokes_before_cleaning_up_old_keyring_token(monkeypatch) -> None:
     old_creds = _make_credentials(access_token="old", token_id="tok_old")
     new_creds = _make_credentials(access_token="new", token_id="tok_new")
