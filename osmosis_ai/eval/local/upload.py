@@ -71,6 +71,15 @@ def _is_int(value: Any) -> TypeGuard[int]:
     return isinstance(value, int) and not isinstance(value, bool)
 
 
+def _is_finite_number(value: Any) -> TypeGuard[int | float]:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    try:
+        return math.isfinite(value)
+    except OverflowError:
+        return False
+
+
 def _object(value: Any, *, where: str) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise LocalEvalUploadError(f"{where} must be a JSON object")
@@ -238,12 +247,16 @@ def _assert_index_matches_progress(
         raise LocalEvalUploadError(
             "index.jsonl selected row count does not match progress.json sampled_rows"
         )
+    if sampled_rows > total_dataset_rows:
+        raise LocalEvalUploadError(
+            "progress.json sampled_rows exceeds total_dataset_rows"
+        )
+    if set(by_row) != set(range(sampled_rows)):
+        raise LocalEvalUploadError(
+            "index.jsonl row_index values must equal the selected row range"
+        )
     expected_runs = set(range(n))
     for row_index, run_indices in by_row.items():
-        if row_index >= total_dataset_rows:
-            raise LocalEvalUploadError(
-                f"index.jsonl row_index {row_index} is outside total_dataset_rows"
-            )
         if run_indices != expected_runs:
             raise LocalEvalUploadError(
                 f"index.jsonl row {row_index} does not contain every configured run_index"
@@ -463,11 +476,7 @@ def build_eval_upload_plan(run_dir: Path) -> EvalUploadPlan:
             "metrics.json eval_run.rollout_name does not match manifest.json"
         )
     pass_threshold = summary.get("pass_threshold")
-    if (
-        isinstance(pass_threshold, bool)
-        or not isinstance(pass_threshold, (int, float))
-        or not math.isfinite(pass_threshold)
-    ):
+    if not _is_finite_number(pass_threshold):
         raise LocalEvalUploadError(
             "metrics.json summary.pass_threshold must be a finite number"
         )

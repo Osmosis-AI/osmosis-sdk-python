@@ -191,6 +191,16 @@ def test_pending_run_is_rejected_by_index_progress_guard(tmp_path: Path) -> None
         build_eval_upload_plan(run_dir)
 
 
+def test_sampled_rows_cannot_exceed_total_dataset_rows(tmp_path: Path) -> None:
+    run_dir = _run_dir(tmp_path, trajectory=False)
+    _write_json(
+        run_dir / "progress.json",
+        {"total_runs": 1, "sampled_rows": 1, "total_dataset_rows": 0},
+    )
+    with pytest.raises(LocalEvalUploadError, match="exceeds total_dataset_rows"):
+        build_eval_upload_plan(run_dir)
+
+
 def test_total_runs_must_equal_sampled_rows_times_n(tmp_path: Path) -> None:
     run_dir = _run_dir(tmp_path, trajectory=False)
     _write_json(
@@ -206,7 +216,87 @@ def test_index_keys_must_cover_sampled_rows_and_n(tmp_path: Path) -> None:
     row = json.loads((run_dir / "index.jsonl").read_text(encoding="utf-8"))
     row["row_index"] = 1
     (run_dir / "index.jsonl").write_text(json.dumps(row) + "\n", encoding="utf-8")
-    with pytest.raises(LocalEvalUploadError, match="outside total_dataset_rows"):
+    with pytest.raises(LocalEvalUploadError, match="selected row range"):
+        build_eval_upload_plan(run_dir)
+
+
+def test_index_row_indices_can_map_to_noncontiguous_source_rows(
+    tmp_path: Path,
+) -> None:
+    run_dir = _run_dir(tmp_path, trajectory=False)
+    manifest_path = run_dir / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["inputs"]["dataset"]["selected_source_rows"] = "0,7"
+    _write_json(manifest_path, manifest)
+    _write_json(
+        run_dir / "progress.json",
+        {"total_runs": 2, "sampled_rows": 2, "total_dataset_rows": 10},
+    )
+    rows = [
+        {
+            "row_index": 0,
+            "run_index": 0,
+            "rollout_id": ROLLOUT_ID,
+            "status": "success",
+        },
+        {
+            "row_index": 1,
+            "run_index": 0,
+            "rollout_id": "c" * 32,
+            "status": "success",
+        },
+    ]
+    (run_dir / "index.jsonl").write_text(
+        "".join(json.dumps(row) + "\n" for row in rows),
+        encoding="utf-8",
+    )
+    plan = build_eval_upload_plan(run_dir)
+    assert plan.run["experiment_config"]["dataset"]["selected_source_rows"] == "0,7"
+
+
+def test_index_row_indices_must_be_the_contiguous_selected_range(
+    tmp_path: Path,
+) -> None:
+    run_dir = _run_dir(tmp_path, trajectory=False)
+    manifest_path = run_dir / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["inputs"]["dataset"]["selected_source_rows"] = "0,7"
+    _write_json(manifest_path, manifest)
+    _write_json(
+        run_dir / "progress.json",
+        {"total_runs": 2, "sampled_rows": 2, "total_dataset_rows": 10},
+    )
+    rows = [
+        {
+            "row_index": 0,
+            "run_index": 0,
+            "rollout_id": ROLLOUT_ID,
+            "status": "success",
+        },
+        {
+            "row_index": 7,
+            "run_index": 0,
+            "rollout_id": "c" * 32,
+            "status": "success",
+        },
+    ]
+    (run_dir / "index.jsonl").write_text(
+        "".join(json.dumps(row) + "\n" for row in rows),
+        encoding="utf-8",
+    )
+    with pytest.raises(LocalEvalUploadError, match="selected row range"):
+        build_eval_upload_plan(run_dir)
+
+
+def test_oversized_integer_pass_threshold_is_a_validation_error(
+    tmp_path: Path,
+) -> None:
+    run_dir = _run_dir(tmp_path, trajectory=False)
+    metrics_path = run_dir / "metrics.json"
+    metrics = json.loads(metrics_path.read_text(encoding="utf-8"))
+    metrics["summary"]["pass_threshold"] = 10**400
+    _write_json(metrics_path, metrics)
+    with pytest.raises(LocalEvalUploadError, match="finite number"):
         build_eval_upload_plan(run_dir)
 
 
