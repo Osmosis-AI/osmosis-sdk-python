@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import re
 from dataclasses import dataclass, field
 from typing import Any, Literal, TypedDict
 
@@ -16,6 +17,36 @@ STATUSES_ACTIVE: frozenset[str] = frozenset({"uploading", "processing"})
 STATUSES_IN_PROGRESS: frozenset[str] = STATUSES_PENDING | STATUSES_ACTIVE
 STATUSES_ERROR: frozenset[str] = frozenset({"error"})
 STATUSES_INACTIVE: frozenset[str] = frozenset({"cancelled"})
+
+_SHA256_HEX = re.compile(r"^[0-9a-f]{64}$")
+
+
+def _eval_import_string(data: dict[str, Any], key: str) -> str:
+    value = data.get(key)
+    if not isinstance(value, str) or not value:
+        raise ValueError(f"Eval import {key} must be a non-empty string")
+    return value
+
+
+def _eval_import_nonnegative_int(data: dict[str, Any], key: str) -> int:
+    value = data.get(key)
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise ValueError(f"Eval import {key} must be a nonnegative integer")
+    return value
+
+
+def _eval_import_sha256(data: dict[str, Any]) -> str:
+    value = data.get("sha256")
+    if not isinstance(value, str) or _SHA256_HEX.fullmatch(value) is None:
+        raise ValueError("Eval import sha256 must be 64 lowercase hex characters")
+    return value
+
+
+def _eval_import_optional_string(data: dict[str, Any], key: str) -> str | None:
+    value = data.get(key)
+    if value is not None and not isinstance(value, str):
+        raise ValueError(f"Eval import {key} must be a string or null")
+    return value
 
 
 @dataclass
@@ -50,6 +81,127 @@ class UploadInfo:
             part_size=data.get("part_size"),
             total_parts=data.get("total_parts"),
             presigned_urls=data.get("presigned_urls"),
+        )
+
+
+@dataclass(frozen=True)
+class EvalRunImportUploadInstruction:
+    """One local-eval file and the presigned upload instructions for it."""
+
+    path: str
+    size: int
+    sha256: str
+    upload: UploadInfo
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> EvalRunImportUploadInstruction:
+        upload = data.get("upload")
+        if not isinstance(upload, dict):
+            raise ValueError("Eval import upload instruction is missing upload details")
+        return cls(
+            path=_eval_import_string(data, "path"),
+            size=_eval_import_nonnegative_int(data, "size"),
+            sha256=_eval_import_sha256(data),
+            upload=UploadInfo.from_dict(upload),
+        )
+
+
+@dataclass(frozen=True)
+class EvalRunImportUploads:
+    """Batch of upload instructions returned for files the server still needs."""
+
+    files: list[EvalRunImportUploadInstruction]
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> EvalRunImportUploads:
+        files = data.get("files", [])
+        if not isinstance(files, list):
+            raise ValueError("Eval import upload instructions must be a list")
+        parsed: list[EvalRunImportUploadInstruction] = []
+        paths: set[str] = set()
+        for item in files:
+            if not isinstance(item, dict):
+                raise ValueError(
+                    "Each eval import upload instruction must be an object"
+                )
+            instruction = EvalRunImportUploadInstruction.from_dict(item)
+            if instruction.path in paths:
+                raise ValueError(
+                    f"Duplicate eval import upload instruction {instruction.path!r}"
+                )
+            paths.add(instruction.path)
+            parsed.append(instruction)
+        return cls(files=parsed)
+
+
+@dataclass(frozen=True)
+class EvalRunImportFileStatus:
+    """Server state for one file declared in an eval import."""
+
+    path: str
+    size: int
+    sha256: str
+    state: Literal["pending", "uploaded"]
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> EvalRunImportFileStatus:
+        state = data.get("state")
+        if state not in ("pending", "uploaded"):
+            raise ValueError(f"Unknown eval import file state {state!r}")
+        return cls(
+            path=_eval_import_string(data, "path"),
+            size=_eval_import_nonnegative_int(data, "size"),
+            sha256=_eval_import_sha256(data),
+            state=state,
+        )
+
+
+@dataclass(frozen=True)
+class EvalRunImportResult:
+    """State returned while starting or finalizing a local-eval import."""
+
+    session_id: str
+    status: str
+    expected_files: int
+    uploaded_files: int
+    files: list[EvalRunImportFileStatus] = field(default_factory=list)
+    expires_at: str | None = None
+    eval_run_id: str | None = None
+    eval_run_name: str | None = None
+    platform_url: str | None = None
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> EvalRunImportResult:
+        status = data.get("status")
+        if status not in ("uploading", "finalized"):
+            raise ValueError(f"Unknown eval import status {status!r}")
+        raw_files = data.get("files")
+        if not isinstance(raw_files, list):
+            raise ValueError("Eval import files must be a list")
+        files: list[EvalRunImportFileStatus] = []
+        paths: set[str] = set()
+        for item in raw_files:
+            if not isinstance(item, dict):
+                raise ValueError("Each eval import file must be an object")
+            file = EvalRunImportFileStatus.from_dict(item)
+            if file.path in paths:
+                raise ValueError(f"Duplicate eval import file {file.path!r}")
+            paths.add(file.path)
+            files.append(file)
+        expected_files = _eval_import_nonnegative_int(data, "expected_files")
+        uploaded_files = _eval_import_nonnegative_int(data, "uploaded_files")
+        if uploaded_files > expected_files:
+            raise ValueError("Eval import uploaded_files exceeds expected_files")
+        return cls(
+            session_id=_eval_import_string(data, "session_id"),
+            status=status,
+            expected_files=expected_files,
+            uploaded_files=uploaded_files,
+            files=files,
+            expires_at=_eval_import_optional_string(data, "expires_at"),
+            eval_run_id=_eval_import_optional_string(data, "eval_run_id"),
+            eval_run_name=_eval_import_optional_string(data, "eval_run_name"),
+            platform_url=_eval_import_optional_string(data, "platform_url"),
         )
 
 

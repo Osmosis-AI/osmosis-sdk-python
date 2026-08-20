@@ -19,8 +19,13 @@ from osmosis_ai.cli.errors import CLIError, CLIErrorCode
 from osmosis_ai.cli.output import CommandResult, OperationResult
 from osmosis_ai.cli.output.context import get_output_context
 from osmosis_ai.cli.output.display import format_duration_ms
+from osmosis_ai.cli.output.error import classify_error
 from osmosis_ai.cli.paths import parse_cli_path
 from osmosis_ai.cli.prompts import require_confirmation_async
+from osmosis_ai.platform.auth.platform_client import (
+    AuthenticationExpiredError,
+    PlatformAPIError,
+)
 from osmosis_ai.platform.cli.eval_config import (
     load_eval_submit_config,
     validate_eval_submit_context_paths,
@@ -210,6 +215,7 @@ def run(
     yes: bool = False,
     rollout_port: int | None = None,
     verbose: bool = False,
+    upload: bool = False,
 ) -> CommandResult:
     """Run an evaluation locally against the workspace's rollout server."""
     import asyncio
@@ -255,12 +261,15 @@ def run(
     # ``or 1.0`` would turn a configured 0.0 -- "every graded row passes" -- into
     # the default, so the fallback has to test for absence, not falsiness.
     pass_threshold = _numeric(evaluation.get("pass_threshold"), field="pass_threshold")
+    n = _integer(evaluation.get("n"), field="n")
+    if n is not None and n <= 0:
+        raise CLIError(f"evaluation.n must be a positive integer, got {n!r}")
     spec = EvalRunSpec(
         rollout_name=config.experiment_rollout,
         entrypoint=config.experiment_entrypoint,
         model_path=config.experiment_model_path,
         dataset_name=config.experiment_dataset,
-        n=_integer(evaluation.get("n"), field="n") or 1,
+        n=1 if n is None else n,
         batch_size=_integer(evaluation.get("batch_size"), field="batch_size"),
         pass_threshold=1.0 if pass_threshold is None else pass_threshold,
         agent_timeout_sec=_numeric(
@@ -335,8 +344,61 @@ def run(
     )
 
     _print_plan(spec, dataset=dataset, selection=selection, output_root=output_root)
+    imported: Any | None = None
+
+    def _upload_completed(summary: Any) -> None:
+        nonlocal imported
+        from shlex import quote
+
+        from osmosis_ai.eval.local.upload import (
+            LocalEvalUploadError,
+            build_eval_upload_plan,
+        )
+        from osmosis_ai.platform.cli.eval_upload import upload_plan
+
+        hooks.display.close()
+        retry = f"osmosis eval upload {quote(str(summary.run_dir))}"
+        try:
+            imported = upload_plan(
+                build_eval_upload_plan(summary.run_dir), context=context
+            )
+        except KeyboardInterrupt as exc:
+            raise CLIError(
+                f"Local evaluation results are complete at {summary.run_dir}, but "
+                f"the platform upload was interrupted.\nRetry with: {retry}"
+            ) from exc
+        except (AuthenticationExpiredError, PlatformAPIError) as exc:
+            message = (
+                f"Local evaluation results are complete at {summary.run_dir}, but "
+                f"the platform upload failed: {exc}\nRetry with: {retry}"
+            )
+            classified = classify_error(exc)
+            raise CLIError(
+                message, code=classified.code, details=classified.details
+            ) from exc
+        except LocalEvalUploadError as exc:
+            raise CLIError(
+                f"Local evaluation results are complete at {summary.run_dir}, but "
+                f"cannot be uploaded: {exc}"
+            ) from exc
+        except (OSError, RuntimeError, ValueError) as exc:
+            raise CLIError(
+                f"Local evaluation results are complete at {summary.run_dir}, but "
+                f"the local evaluation upload failed: {exc}\nRetry with: {retry}"
+            ) from exc
+        except Exception as exc:
+            classified = classify_error(exc)
+            raise CLIError(
+                f"Local evaluation results are complete at {summary.run_dir}, but "
+                f"the upload failed: {exc}\nRetry with: {retry}",
+                code=classified.code,
+                details=classified.details,
+            ) from exc
+
     try:
-        summary = asyncio.run(runner.run())
+        summary = asyncio.run(
+            runner.run(after_finalize=_upload_completed) if upload else runner.run()
+        )
     except (LocalEvalError, LocalEvalStateError) as exc:
         raise CLIError(str(exc)) from exc
     except KeyboardInterrupt:
@@ -351,7 +413,13 @@ def run(
 
     _print_failures(summary)
     _print_summary(summary)
-    return _result(summary, context=context, dataset_source=dataset.source)
+    return _result(
+        summary,
+        context=context,
+        dataset_source=dataset.source,
+        imported=imported,
+        upload_requested=upload,
+    )
 
 
 def _provenance(
@@ -484,7 +552,14 @@ def _print_failures(summary: Any) -> None:
         )
 
 
-def _result(summary: Any, *, context: Any, dataset_source: str) -> OperationResult:
+def _result(
+    summary: Any,
+    *,
+    context: Any,
+    dataset_source: str,
+    imported: Any | None = None,
+    upload_requested: bool = False,
+) -> OperationResult:
     resource: dict[str, Any] = {
         "run_name": summary.run_name,
         "local_run_id": summary.local_run_id,
@@ -512,27 +587,50 @@ def _result(summary: Any, *, context: Any, dataset_source: str) -> OperationResu
         ],
     }
     resource.update(git_result_context(context))
+    if imported is not None:
+        resource["upload"] = {
+            "session_id": imported.session_id,
+            "eval_run_id": imported.eval_run_id,
+            "eval_run_name": imported.eval_run_name,
+            "status": imported.status,
+            "expected_files": imported.expected_files,
+            "uploaded_files": imported.uploaded_files,
+        }
+        resource["platform_url"] = imported.platform_url
     incomplete = summary.cancelled or (
         summary.succeeded + summary.failed + summary.skipped < summary.total_work_items
     )
     next_steps = []
     if incomplete:
+        upload_flag = " --upload" if upload_requested else ""
         next_steps.append(
-            f"Resume: osmosis eval run <config> --name {summary.run_name}"
+            f"Resume: osmosis eval run <config> --name {summary.run_name}{upload_flag}"
         )
     if summary.failed:
+        upload_flag = " --upload" if upload_requested else ""
         next_steps.append(
             "Retry failures under the same name: "
-            f"osmosis eval run <config> --name {summary.run_name} --retry-failed"
+            f"osmosis eval run <config> --name {summary.run_name} "
+            f"--retry-failed{upload_flag}"
         )
+    if imported is not None:
+        imported_name = imported.eval_run_name or summary.run_name
+        next_steps.append(
+            f"View: {imported.platform_url}"
+            if imported.platform_url
+            else f"Inspect the imported run: osmosis eval info {imported_name}"
+        )
+    message = (
+        f"Evaluation run {'interrupted' if incomplete else 'finished'}: "
+        f"{summary.run_dir}"
+    )
+    if incomplete and upload_requested:
+        message += " Upload skipped because the local evaluation is incomplete."
     return OperationResult(
         operation="eval.run",
         status="partial" if incomplete else "success",
         resource=resource,
-        message=(
-            f"Evaluation run {'interrupted' if incomplete else 'finished'}: "
-            f"{summary.run_dir}"
-        ),
+        message=message,
         display_next_steps=next_steps,
         exit_code=1 if incomplete else 0,
     )

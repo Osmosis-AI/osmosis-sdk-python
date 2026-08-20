@@ -15,6 +15,8 @@ from .models import (
     DatasetDownloadInfo,
     DatasetFile,
     EnvironmentSecretInfo,
+    EvalRunImportResult,
+    EvalRunImportUploads,
     EvalRunMetrics,
     EvaluationRunDetail,
     LogEntry,
@@ -651,6 +653,103 @@ class OsmosisClient:
             git_identity=git_identity,
         )
         return SubmitRunResult.from_dict(result)
+
+    def start_eval_run_import(
+        self,
+        *,
+        local_run_id: str,
+        manifest_digest: str,
+        run: dict[str, Any],
+        schema_versions: dict[str, Any],
+        provenance: dict[str, Any],
+        files: Sequence[dict[str, Any]],
+        credentials: Credentials | None = None,
+        git_identity: str,
+    ) -> EvalRunImportResult:
+        """Start or resume the server-authoritative import for a local eval."""
+        result = platform_request(
+            "/api/cli/eval-runs/imports",
+            method="POST",
+            data={
+                "schema_version": 1,
+                "local_run_id": local_run_id,
+                "manifest_digest": manifest_digest,
+                "run": run,
+                "schema_versions": schema_versions,
+                "provenance": provenance,
+                "files": list(files),
+            },
+            credentials=credentials,
+            git_identity=git_identity,
+        )
+        return EvalRunImportResult.from_dict(result)
+
+    def get_eval_run_import_uploads(
+        self,
+        session_id: str,
+        *,
+        paths: Sequence[str],
+        credentials: Credentials | None = None,
+        git_identity: str,
+    ) -> EvalRunImportUploads:
+        """Return upload instructions for up to 100 files still missing."""
+        if not 1 <= len(paths) <= 100:
+            raise ValueError("Eval import upload batches must contain 1 to 100 paths")
+        result = platform_request(
+            f"/api/cli/eval-runs/imports/{_safe_path(session_id)}/uploads",
+            method="POST",
+            data={"paths": list(paths)},
+            credentials=credentials,
+            git_identity=git_identity,
+        )
+        return EvalRunImportUploads.from_dict(result)
+
+    def complete_eval_run_import_upload(
+        self,
+        session_id: str,
+        *,
+        path: str,
+        parts: list[dict[str, Any]] | None = None,
+        credentials: Credentials | None = None,
+        git_identity: str,
+    ) -> None:
+        """Record one simple or multipart file upload as complete."""
+        payload: dict[str, Any] = {"path": path}
+        if parts is not None:
+            normalized_parts = [
+                {"part_number": part["PartNumber"], "etag": part["ETag"]}
+                for part in parts
+            ]
+            part_numbers = [part["part_number"] for part in normalized_parts]
+            if len(part_numbers) != len(set(part_numbers)):
+                raise ValueError("Duplicate multipart part numbers")
+            payload["parts"] = normalized_parts
+        platform_request(
+            f"/api/cli/eval-runs/imports/{_safe_path(session_id)}/uploads/complete",
+            method="POST",
+            data=payload,
+            timeout=120.0 if parts is not None else 30.0,
+            credentials=credentials,
+            git_identity=git_identity,
+        )
+
+    def finalize_eval_run_import(
+        self,
+        session_id: str,
+        *,
+        credentials: Credentials | None = None,
+        git_identity: str,
+    ) -> EvalRunImportResult:
+        """Finalize an import after all declared files have been uploaded."""
+        result = platform_request(
+            f"/api/cli/eval-runs/imports/{_safe_path(session_id)}/finalize",
+            method="POST",
+            data={},
+            timeout=300.0,
+            credentials=credentials,
+            git_identity=git_identity,
+        )
+        return EvalRunImportResult.from_dict(result)
 
     def submit_benchmark_run(
         self,

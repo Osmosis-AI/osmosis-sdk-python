@@ -16,7 +16,7 @@ from osmosis_ai.cli.output import CommandResult
 
 app: typer.Typer = typer.Typer(
     help=(
-        "Manage evaluation runs (submit, list, info, download, stop) and"
+        "Manage evaluation runs (submit, run, upload, list, info, download, stop) and"
         " LLM-as-judge rubric scoring."
     ),
     no_args_is_help=True,
@@ -180,6 +180,11 @@ def eval_run(
         help="Stream supervisor and rollout-server log lines to the terminal.",
         rich_help_panel="Advanced",
     ),
+    upload: bool = typer.Option(
+        False,
+        "--upload",
+        help="Upload the completed local results to the platform.",
+    ),
 ) -> CommandResult:
     """Run an evaluation locally against this workspace's rollout server."""
     from osmosis_ai.platform.cli.eval_run import run as _run
@@ -197,7 +202,26 @@ def eval_run(
         yes=yes,
         rollout_port=rollout_port,
         verbose=verbose,
+        upload=upload,
     )
+
+
+@app.command("upload")
+def eval_upload(
+    run_dir: Path = typer.Argument(
+        ...,
+        exists=False,
+        file_okay=False,
+        dir_okay=True,
+        readable=False,
+        resolve_path=False,
+        help="Completed local evaluation run directory.",
+    ),
+) -> CommandResult:
+    """Upload a completed local evaluation run to the platform."""
+    from osmosis_ai.platform.cli.eval_upload import upload as _upload
+
+    return _upload(run_dir)
 
 
 @app.command("list")
