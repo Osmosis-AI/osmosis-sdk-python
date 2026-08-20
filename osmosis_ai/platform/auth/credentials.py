@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING, Any
 
 import keyring
 from keyring.backends.fail import Keyring as FailKeyring
-from keyring.errors import KeyringError, NoKeyringError, PasswordDeleteError
+from keyring.errors import NoKeyringError, PasswordDeleteError
 
 from osmosis_ai.cli.errors import CLIError
 
@@ -348,14 +348,14 @@ def _resolve_entry_token(
 
 def _keyring_set(account: str, token: str) -> bool:
     """Store *token* in the system keyring. Returns ``True`` on success."""
-    if isinstance(keyring.get_keyring(), FailKeyring):
-        return False
     try:
+        if isinstance(keyring.get_keyring(), FailKeyring):
+            return False
         keyring.set_password(KEYRING_SERVICE, account, token)
         return True
     except NoKeyringError:
         return False
-    except KeyringError as exc:
+    except Exception as exc:
         raise CLIError(
             "Could not save credentials in the system keyring. "
             "Unlock or repair the keyring, or use OSMOSIS_TOKEN for "
@@ -366,15 +366,17 @@ def _keyring_set(account: str, token: str) -> bool:
 
 def _keyring_get(account: str) -> str | None:
     """Retrieve a token from the system keyring."""
-    if isinstance(keyring.get_keyring(), FailKeyring):
-        raise CLIError(
-            "No system keyring is available. Use OSMOSIS_TOKEN for CI/CD or "
-            "configure a keyring backend for interactive login.",
-            code="KEYRING_UNAVAILABLE",
-        )
     try:
+        if isinstance(keyring.get_keyring(), FailKeyring):
+            raise CLIError(
+                "No system keyring is available. Use OSMOSIS_TOKEN for CI/CD or "
+                "configure a keyring backend for interactive login.",
+                code="KEYRING_UNAVAILABLE",
+            )
         return keyring.get_password(KEYRING_SERVICE, account)
-    except (NoKeyringError, KeyringError) as exc:
+    except CLIError:
+        raise
+    except Exception as exc:
         raise CLIError(
             "Could not read credentials from the system keyring. "
             "Unlock or repair the keyring and try again.",
@@ -384,15 +386,17 @@ def _keyring_get(account: str) -> str | None:
 
 def _keyring_delete(account: str) -> bool:
     """Delete a keyring token. A missing entry is already clean."""
-    if isinstance(keyring.get_keyring(), FailKeyring):
-        raise CLIError(
-            "No system keyring is available, so saved credentials could not "
-            "be removed. Configure or unlock the keyring and try again.",
-            code="KEYRING_UNAVAILABLE",
-        )
     try:
+        if isinstance(keyring.get_keyring(), FailKeyring):
+            raise CLIError(
+                "No system keyring is available, so saved credentials could not "
+                "be removed. Configure or unlock the keyring and try again.",
+                code="KEYRING_UNAVAILABLE",
+            )
         keyring.delete_password(KEYRING_SERVICE, account)
         return True
+    except CLIError:
+        raise
     except PasswordDeleteError:
         return True
     except Exception as exc:

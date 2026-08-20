@@ -839,6 +839,22 @@ def test_keyring_read_error_is_not_misreported_as_logged_out() -> None:
     assert "Unlock or repair" in str(exc_info.value)
 
 
+def test_keyring_read_wraps_non_keyring_backend_failure() -> None:
+    from osmosis_ai.platform.auth.credentials import _keyring_get
+
+    with (
+        patch("keyring.get_keyring", return_value=object()),
+        patch(
+            "keyring.get_password",
+            side_effect=RuntimeError("backend disconnected"),
+        ),
+    ):
+        with pytest.raises(CLIError) as exc_info:
+            _keyring_get("platform:abc")
+
+    assert exc_info.value.code == "KEYRING_UNAVAILABLE"
+
+
 def test_keyring_read_fails_without_a_backend() -> None:
     from keyring.backends.fail import Keyring as FailKeyring
 
@@ -878,6 +894,45 @@ def test_keyring_write_error_is_not_treated_as_missing_backend() -> None:
 
     assert exc_info.value.code == "KEYRING_UNAVAILABLE"
     assert "Unlock or repair" in str(exc_info.value)
+
+
+def test_keyring_write_wraps_non_keyring_backend_failure() -> None:
+    from osmosis_ai.platform.auth.credentials import _keyring_set
+
+    with (
+        patch("keyring.get_keyring", return_value=object()),
+        patch(
+            "keyring.set_password",
+            side_effect=RuntimeError("backend disconnected"),
+        ),
+    ):
+        with pytest.raises(CLIError) as exc_info:
+            _keyring_set("platform:abc", "token")
+
+    assert exc_info.value.code == "KEYRING_UNAVAILABLE"
+
+
+@pytest.mark.parametrize("operation", ["get", "set", "delete"])
+def test_keyring_operations_wrap_backend_discovery_failure(operation: str) -> None:
+    from osmosis_ai.platform.auth.credentials import (
+        _keyring_delete,
+        _keyring_get,
+        _keyring_set,
+    )
+
+    with patch(
+        "keyring.get_keyring",
+        side_effect=RuntimeError("backend discovery failed"),
+    ):
+        with pytest.raises(CLIError) as exc_info:
+            if operation == "get":
+                _keyring_get("platform:abc")
+            elif operation == "set":
+                _keyring_set("platform:abc", "token")
+            else:
+                _keyring_delete("platform:abc")
+
+    assert exc_info.value.code == "KEYRING_UNAVAILABLE"
 
 
 def test_delete_does_not_warn_when_the_token_lived_in_the_file(
