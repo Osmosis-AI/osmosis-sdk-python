@@ -208,10 +208,6 @@ def _finish_login(
         and not same_server_token
         else None
     )
-    cleanup_old_credentials = old_credentials is not None and (
-        old_credentials.is_expired() or same_server_token
-    )
-
     token_store = save_credentials(creds, cleanup_replaced=False)
 
     if old_credentials_to_revoke is not None:
@@ -221,14 +217,13 @@ def _finish_login(
                     verified_old = verify_token(old_credentials_to_revoke.access_token)
             except LoginError as exc:
                 if _is_auth_login_error(exc):
-                    cleanup_old_credentials = True
+                    old_credentials_to_revoke = None
                 else:
                     from osmosis_ai.cli.console import console
 
                     console.print_warning(
                         "The new login is active, but the previous session "
-                        "could not be checked or revoked. Its local keyring "
-                        "entry was kept.",
+                        "could not be checked or revoked.",
                         code="TOKEN_REVOKE_FAILED",
                     )
             else:
@@ -236,24 +231,21 @@ def _finish_login(
                     old_credentials_to_revoke, token_id=verified_old.token_id
                 )
                 if verified_old.token_id and verified_old.token_id == creds.token_id:
-                    cleanup_old_credentials = True
                     old_credentials_to_revoke = None
                 elif not verified_old.token_id:
                     from osmosis_ai.cli.console import console
 
                     console.print_warning(
                         "The new login is active, but the previous session "
-                        "did not expose a token ID and could not be revoked. "
-                        "Its local keyring entry was kept.",
+                        "did not expose a token ID and could not be revoked.",
                         code="TOKEN_REVOKE_FAILED",
                     )
 
         if old_credentials_to_revoke is not None and old_credentials_to_revoke.token_id:
             with output.status("Revoking old session..."):
-                revoked = revoke_cli_token(old_credentials_to_revoke)
-            cleanup_old_credentials = revoked
+                revoke_cli_token(old_credentials_to_revoke)
 
-    if cleanup_old_credentials and old_credentials is not None:
+    if old_credentials is not None:
         _cleanup_replaced_credentials(old_credentials, creds)
 
     return _login_operation_result(

@@ -89,7 +89,7 @@ def test_login_revokes_before_cleaning_up_old_keyring_token(monkeypatch) -> None
     assert calls == ["save", "revoke", "cleanup"]
 
 
-def test_login_keeps_old_keyring_token_when_server_revoke_fails(monkeypatch) -> None:
+def test_login_cleans_old_keyring_token_when_server_revoke_fails(monkeypatch) -> None:
     old_creds = _make_credentials(access_token="old", token_id="tok_old")
     new_creds = _make_credentials(access_token="new", token_id="tok_new")
     result = _make_login_result()
@@ -118,7 +118,7 @@ def test_login_keeps_old_keyring_token_when_server_revoke_fails(monkeypatch) -> 
 
     auth_module.login()
 
-    assert calls == ["save", "revoke"]
+    assert calls == ["save", "revoke", "cleanup"]
 
 
 def test_login_resolves_missing_old_token_id_before_revoke(monkeypatch) -> None:
@@ -165,7 +165,7 @@ def test_login_resolves_missing_old_token_id_before_revoke(monkeypatch) -> None:
 
     auth_module.login()
 
-    assert calls == ["save", "verify", "revoke"]
+    assert calls == ["save", "verify", "revoke", "cleanup"]
 
 
 def test_login_cleans_original_keyring_account_after_resolving_token_id(
@@ -225,7 +225,7 @@ def test_login_cleans_original_keyring_account_after_resolving_token_id(
     assert calls == ["save", "verify", "revoke", "cleanup"]
 
 
-def test_login_keeps_old_keyring_when_both_token_ids_are_missing(
+def test_login_cleans_old_keyring_when_both_token_ids_are_missing(
     monkeypatch,
 ) -> None:
     old_creds = _make_credentials(access_token="old", token_id=None)
@@ -256,11 +256,10 @@ def test_login_keeps_old_keyring_when_both_token_ids_are_missing(
         "osmosis_ai.platform.auth.platform_client.revoke_cli_token",
         lambda credentials: pytest.fail("a token without an ID cannot be revoked"),
     )
+    cleaned: list[tuple[Credentials, Credentials]] = []
     monkeypatch.setattr(
         "osmosis_ai.platform.auth.credentials._cleanup_replaced_credentials",
-        lambda old, current: pytest.fail(
-            "the old keyring entry must remain when revocation is impossible"
-        ),
+        lambda old, current: cleaned.append((old, current)) or True,
     )
     warnings: list[tuple[str, str | None]] = []
     monkeypatch.setattr(
@@ -273,10 +272,11 @@ def test_login_keeps_old_keyring_when_both_token_ids_are_missing(
     assert warnings == [
         (
             "The new login is active, but the previous session did not expose "
-            "a token ID and could not be revoked. Its local keyring entry was kept.",
+            "a token ID and could not be revoked.",
             "TOKEN_REVOKE_FAILED",
         )
     ]
+    assert cleaned == [(old_creds, new_creds)]
 
 
 def test_login_save_failure_does_not_revoke_old_token(monkeypatch) -> None:

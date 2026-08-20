@@ -110,7 +110,6 @@ def _load_env_file(env_file: Path, *, platform_overridden: bool = False) -> None
     from dotenv import dotenv_values, load_dotenv
 
     values = dotenv_values(env_file)
-    ambient_token = os.environ.get("OSMOSIS_TOKEN")
     auth_values = {
         name: value
         for name, value in values.items()
@@ -118,21 +117,24 @@ def _load_env_file(env_file: Path, *, platform_overridden: bool = False) -> None
         and isinstance(value, str)
         and not (platform_overridden and name == "OSMOSIS_PLATFORM_URL")
     }
-    if ambient_token and auth_values:
-        file_token_matches = auth_values.get("OSMOSIS_TOKEN") == ambient_token
-        existing_values_do_not_conflict = all(
-            _auth_value_matches(name, os.environ.get(name), value)
-            for name, value in auth_values.items()
-            if name != "OSMOSIS_TOKEN"
+    existing_auth_values = {
+        name: value
+        for name in _AUTH_PROFILE_ENV_VARS
+        if isinstance((value := os.environ.get(name)), str)
+        and not (platform_overridden and name == "OSMOSIS_PLATFORM_URL")
+    }
+    if existing_auth_values and auth_values:
+        safe_existing_profile = all(
+            name in auth_values and _auth_value_matches(name, value, auth_values[name])
+            for name, value in existing_auth_values.items()
         )
-        safe_existing_profile = file_token_matches and existing_values_do_not_conflict
         if not safe_existing_profile:
             from osmosis_ai.cli.errors import CLIError
 
             raise CLIError(
-                "OSMOSIS_TOKEN is already set, so a different auth profile "
+                "An Osmosis auth profile is already set, so a different auth profile "
                 f"from {env_file} cannot be merged with it. Unset the ambient "
-                "token or keep the complete auth profile in one source.",
+                "auth variables or keep the complete auth profile in one source.",
                 code="CONFLICT",
             )
     load_dotenv(env_file, override=False)

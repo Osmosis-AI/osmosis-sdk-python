@@ -118,6 +118,35 @@ def test_implicit_env_file_cannot_mix_with_an_unrelated_ambient_token(
     assert os.environ.get("OSMOSIS_PLATFORM_URL") is None
 
 
+@pytest.mark.parametrize(
+    ("ambient_name", "ambient_value"),
+    [
+        ("OSMOSIS_PLATFORM_URL", "https://platform.osmosis.ai"),
+        ("OSMOSIS_TOKEN_PLATFORM_URL", "https://platform.osmosis.ai"),
+    ],
+)
+def test_dotenv_token_cannot_merge_with_an_inherited_auth_profile_value(
+    _platform_env: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    ambient_name: str,
+    ambient_value: str,
+) -> None:
+    monkeypatch.setenv(ambient_name, ambient_value)
+    (_platform_env / ".env").write_text(
+        "OSMOSIS_TOKEN=dotenv-token\n",
+        encoding="utf-8",
+    )
+
+    rc = cli.main(["--json", "auth", "whoami"])
+
+    error = json.loads(capsys.readouterr().err)["error"]
+    assert rc == 1
+    assert error["code"] == "CONFLICT"
+    assert "complete auth profile" in error["message"]
+    assert os.environ.get("OSMOSIS_TOKEN") is None
+
+
 def test_uv_preloaded_url_only_env_cannot_mix_with_an_ambient_token(
     _platform_env: Path,
     monkeypatch: pytest.MonkeyPatch,

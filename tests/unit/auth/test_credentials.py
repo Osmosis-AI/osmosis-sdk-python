@@ -1191,6 +1191,47 @@ def test_save_metadata_failure_preserves_old_token_and_removes_new_token(
     )
 
 
+def test_save_metadata_failure_preserves_original_error_when_rollback_fails(
+    tmp_path, monkeypatch
+) -> None:
+    creds_file = tmp_path / "creds.json"
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.credentials.CREDENTIALS_FILE", creds_file
+    )
+    warnings: list[tuple[str, str]] = []
+
+    with (
+        patch(
+            "osmosis_ai.platform.auth.credentials._keyring_set",
+            return_value=True,
+        ),
+        patch(
+            "osmosis_ai.platform.auth.credentials._keyring_delete",
+            side_effect=CLIError("keyring locked", code="KEYRING_UNAVAILABLE"),
+        ),
+        patch(
+            "osmosis_ai.platform.auth.credentials.atomic_write_json",
+            side_effect=OSError("disk full"),
+        ),
+        patch(
+            "osmosis_ai.platform.auth.credentials._warn",
+            side_effect=lambda message, *, code: warnings.append((message, code)),
+        ),
+    ):
+        from osmosis_ai.platform.auth.credentials import save_credentials
+
+        with pytest.raises(OSError, match="disk full"):
+            save_credentials(_make_credentials(token_id="tok_new"))
+
+    assert warnings == [
+        (
+            "Credential metadata could not be saved, and the new keyring "
+            "entry could not be rolled back.",
+            "KEYRING_CLEANUP_FAILED",
+        )
+    ]
+
+
 def test_save_non_default_platform_preserves_legacy_default_keyring(
     tmp_path, monkeypatch
 ) -> None:

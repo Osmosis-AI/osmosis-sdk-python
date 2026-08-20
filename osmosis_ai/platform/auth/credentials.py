@@ -560,7 +560,16 @@ def save_credentials(credentials: Credentials, *, cleanup_replaced: bool = True)
         atomic_write_json(CREDENTIALS_FILE, registry, mode=0o600)
     except Exception:
         if keyring_account not in old_keyring_accounts:
-            _keyring_delete(keyring_account)
+            try:
+                cleaned = _keyring_delete(keyring_account)
+            except CLIError:
+                cleaned = False
+            if not cleaned:
+                _warn(
+                    "Credential metadata could not be saved, and the new "
+                    "keyring entry could not be rolled back.",
+                    code="KEYRING_CLEANUP_FAILED",
+                )
         raise
     if cleanup_replaced:
         try:
