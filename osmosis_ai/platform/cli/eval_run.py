@@ -350,7 +350,10 @@ def run(
         nonlocal imported
         from shlex import quote
 
-        from osmosis_ai.eval.local.upload import build_eval_upload_plan
+        from osmosis_ai.eval.local.upload import (
+            LocalEvalUploadError,
+            build_eval_upload_plan,
+        )
         from osmosis_ai.platform.cli.eval_upload import upload_plan
 
         retry = f"osmosis eval upload {quote(str(summary.run_dir))}"
@@ -363,17 +366,30 @@ def run(
                 f"Local evaluation results are complete at {summary.run_dir}, but "
                 f"the platform upload was interrupted.\nRetry with: {retry}"
             ) from exc
-        except Exception as exc:
+        except (AuthenticationExpiredError, PlatformAPIError) as exc:
             message = (
                 f"Local evaluation results are complete at {summary.run_dir}, but "
                 f"the platform upload failed: {exc}\nRetry with: {retry}"
             )
-            if isinstance(exc, (AuthenticationExpiredError, PlatformAPIError)):
-                classified = classify_error(exc)
-                raise CLIError(
-                    message, code=classified.code, details=classified.details
-                ) from exc
-            raise CLIError(message) from exc
+            classified = classify_error(exc)
+            raise CLIError(
+                message, code=classified.code, details=classified.details
+            ) from exc
+        except LocalEvalUploadError as exc:
+            raise CLIError(
+                f"Local evaluation results are complete at {summary.run_dir}, but "
+                f"cannot be uploaded: {exc}"
+            ) from exc
+        except (OSError, RuntimeError, ValueError) as exc:
+            raise CLIError(
+                f"Local evaluation results are complete at {summary.run_dir}, but "
+                f"the local evaluation upload failed: {exc}\nRetry with: {retry}"
+            ) from exc
+        except Exception as exc:
+            raise CLIError(
+                f"Local evaluation results are complete at {summary.run_dir}, but "
+                f"the upload failed: {exc}\nRetry with: {retry}"
+            ) from exc
 
     try:
         summary = asyncio.run(
@@ -587,9 +603,11 @@ def _result(
             f"Resume: osmosis eval run <config> --name {summary.run_name}{upload_flag}"
         )
     if summary.failed:
+        upload_flag = " --upload" if upload_requested else ""
         next_steps.append(
             "Retry failures under the same name: "
-            f"osmosis eval run <config> --name {summary.run_name} --retry-failed"
+            f"osmosis eval run <config> --name {summary.run_name} "
+            f"--retry-failed{upload_flag}"
         )
     if imported is not None:
         imported_name = imported.eval_run_name or summary.run_name

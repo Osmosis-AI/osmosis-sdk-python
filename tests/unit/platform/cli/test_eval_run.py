@@ -497,7 +497,41 @@ def test_upload_failure_says_local_results_are_complete_and_gives_retry_command(
         _run(workspace, upload=True)
 
     assert f"Local evaluation results are complete at {run_dir}" in raised.value.message
+    assert "local evaluation upload failed: offline" in raised.value.message
     assert f"osmosis eval upload {run_dir}" in raised.value.message
+    assert "platform upload failed" not in raised.value.message
+
+
+def test_upload_plan_error_reports_local_problem_without_retry_guidance(
+    workspace: Path,
+    captured_runner: type[_CapturedRunner],
+    console_capture: StringIO,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import osmosis_ai.eval.local.upload as local_upload_module
+
+    original_run = _CapturedRunner.run
+
+    async def run_with_callback(self: Any, *, after_finalize: Any) -> Any:
+        summary = await original_run(self)
+        after_finalize(summary)
+        return summary
+
+    monkeypatch.setattr(_CapturedRunner, "run", run_with_callback)
+    monkeypatch.setattr(
+        local_upload_module,
+        "build_eval_upload_plan",
+        lambda _run_dir: (_ for _ in ()).throw(
+            local_upload_module.LocalEvalUploadError("index.jsonl is invalid")
+        ),
+    )
+
+    with pytest.raises(CLIError) as raised:
+        _run(workspace, upload=True)
+
+    assert "cannot be uploaded: index.jsonl is invalid" in raised.value.message
+    assert "Retry with:" not in raised.value.message
+    assert "platform upload failed" not in raised.value.message
 
 
 def test_upload_platform_error_keeps_auth_code_and_retry_context(
@@ -582,7 +616,7 @@ def test_an_incomplete_upload_run_reports_skipped_upload_and_resumes_with_upload
     assert "Upload skipped" in result.message
     assert "upload" not in result.resource
     assert any("--name run-1 --upload" in step for step in result.display_next_steps)
-    assert any("--retry-failed" in step for step in result.display_next_steps)
+    assert any("--retry-failed --upload" in step for step in result.display_next_steps)
     assert result.resource["failed_rows"][0]["error_type"] == "grader_timeout"
     printed = console_capture.getvalue()
     assert "row 1 (source 4) run 0" in printed
