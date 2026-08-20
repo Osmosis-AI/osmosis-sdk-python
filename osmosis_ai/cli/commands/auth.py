@@ -58,11 +58,10 @@ def _print_login_success(result: CommandResult) -> None:
 
 @app.command("login")
 def login(
-    force: bool = typer.Option(
-        False, "-f", "--force", help="Force re-login, clearing existing credentials."
-    ),
     token: str | None = typer.Option(
-        None, "--token", help="Authenticate with a personal access token (for CI/CD)."
+        None,
+        "--token",
+        help="Authenticate and save a personal access token.",
     ),
 ) -> CommandResult:
     """Authenticate with Osmosis AI."""
@@ -77,7 +76,7 @@ def login(
             console.print()
             console.print("  Osmosis AI", style="bold magenta")
             console.print()
-    result = _login(force=force, token=token)
+    result = _login(token=token)
     _print_login_success(result)
     return result
 

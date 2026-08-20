@@ -82,6 +82,44 @@ def get_platform_url() -> str:
     )
 
 
+def validate_env_token_platform(token: str | None = None) -> None:
+    """Require an environment token to be bound to its target platform.
+
+    Existing production automation remains compatible without an explicit
+    binding. Non-production tokens must set ``OSMOSIS_TOKEN_PLATFORM_URL`` so
+    a PAT cannot be sent to a platform selected independently.
+    """
+    env_token = os.environ.get("OSMOSIS_TOKEN")
+    if not env_token or (token is not None and token != env_token):
+        return
+
+    platform_url = get_platform_url()
+    raw_token_platform = os.environ.get("OSMOSIS_TOKEN_PLATFORM_URL")
+    if raw_token_platform:
+        token_platform_url = normalize_platform_url(raw_token_platform)
+        if token_platform_url != platform_url:
+            raise CLIError(
+                "OSMOSIS_TOKEN is bound to "
+                f"{token_platform_url}, but the active platform is {platform_url}. "
+                "Refusing to send the token to a different platform.",
+                code="ENV_TOKEN_PLATFORM_MISMATCH",
+                details={
+                    "platform_url": platform_url,
+                    "token_platform_url": token_platform_url,
+                },
+            )
+        return
+
+    default_platform_url = normalize_platform_url(DEFAULT_PLATFORM_URL)
+    if platform_url != default_platform_url:
+        raise CLIError(
+            "OSMOSIS_TOKEN must be bound to this non-production platform. "
+            f"Set OSMOSIS_TOKEN_PLATFORM_URL={platform_url}.",
+            code="ENV_TOKEN_PLATFORM_REQUIRED",
+            details={"platform_url": platform_url},
+        )
+
+
 # Configuration directory and credentials file
 CONFIG_DIR = Path.home() / ".config" / "osmosis"
 CREDENTIALS_FILE = CONFIG_DIR / "credentials.json"

@@ -41,14 +41,3 @@ def test_reset_session_deletes_credentials_and_legacy_config(
 
     assert calls == ["delete_credentials"]
     assert not config_file.exists()
-
-
-def test_clear_all_local_data_delegates_to_session_reset(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    calls: list[str] = []
-    monkeypatch.setattr(local_config, "reset_session", lambda: calls.append("reset"))
-
-    local_config.clear_all_local_data()
-
-    assert calls == ["reset"]

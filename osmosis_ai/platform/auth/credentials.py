@@ -4,13 +4,10 @@ Supports three token sources with descending priority:
 
     1. ``OSMOSIS_TOKEN`` environment variable  (CI / headless)
     2. System keyring  (macOS Keychain, GNOME Keyring, …)
-    3. Platform-scoped plain-text JSON file
-       (``~/.config/osmosis/credentials.json``)
+    3. Legacy platform-scoped plain-text JSON files
 
-When *saving*, the module tries the keyring first.  If successful the
-JSON metadata file is written **without** the token.  If the keyring is
-unavailable the token is stored in the JSON file and a warning is
-emitted so the user knows the secret is on disk in clear text.
+New credentials are saved only to the system keyring. Existing file-backed
+credentials remain readable so upgrading does not force a new login.
 """
 
 from __future__ import annotations
@@ -24,7 +21,9 @@ from typing import TYPE_CHECKING, Any
 
 import keyring
 from keyring.backends.fail import Keyring as FailKeyring
-from keyring.errors import NoKeyringError, PasswordDeleteError
+from keyring.errors import KeyringError, NoKeyringError, PasswordDeleteError
+
+from osmosis_ai.cli.errors import CLIError
 
 from .config import (
     CREDENTIALS_FILE,
@@ -32,6 +31,7 @@ from .config import (
     DEFAULT_PLATFORM_URL,
     get_platform_url,
     normalize_platform_url,
+    validate_env_token_platform,
 )
 from .fileutil import atomic_write_json
 
@@ -67,11 +67,116 @@ def _warn(message: str, *, code: str) -> None:
     console.print_warning(message, code=code)
 
 
+def _read_metadata() -> dict[str, Any] | None:
+    """Read credential metadata without treating corruption as logout."""
+    try:
+        with open(CREDENTIALS_FILE, encoding="utf-8") as f:
+            data = json.load(f)
+    except FileNotFoundError:
+        return None
+    except (json.JSONDecodeError, UnicodeError) as exc:
+        raise CLIError(
+            "Credential metadata is invalid and was left unchanged. "
+            f"Repair or move {CREDENTIALS_FILE}, then try again.",
+            code="CREDENTIALS_PARSE_FAILED",
+        ) from exc
+    except OSError as exc:
+        raise CLIError(
+            "Could not read credential metadata. Check permissions for "
+            f"{CREDENTIALS_FILE}.",
+            code="CREDENTIALS_UNAVAILABLE",
+        ) from exc
+
+    if not isinstance(data, dict):
+        raise CLIError(
+            "Credential metadata is invalid and was left unchanged. "
+            f"Repair or move {CREDENTIALS_FILE}, then try again.",
+            code="CREDENTIALS_PARSE_FAILED",
+        )
+    if data.get("version") != CREDENTIALS_VERSION:
+        raise CLIError(
+            "Credential metadata uses an unsupported format and was left "
+            f"unchanged: {CREDENTIALS_FILE}.",
+            code="CREDENTIALS_VERSION_CHANGED",
+            details={"version": data.get("version")},
+        )
+    _validate_metadata(data)
+    return data
+
+
+def _metadata_parse_error() -> CLIError:
+    return CLIError(
+        "Credential metadata is invalid and was left unchanged. "
+        f"Repair or move {CREDENTIALS_FILE}, then try again.",
+        code="CREDENTIALS_PARSE_FAILED",
+    )
+
+
+def _validate_entry(entry: dict[str, Any]) -> None:
+    token_store = entry.get("token_store", TOKEN_STORE_FILE)
+    if not isinstance(token_store, str) or token_store not in {
+        TOKEN_STORE_FILE,
+        TOKEN_STORE_KEYRING,
+    }:
+        raise _metadata_parse_error()
+
+    platform_url = entry.get("platform_url")
+    if platform_url is not None and (
+        not isinstance(platform_url, str) or not platform_url.strip()
+    ):
+        raise _metadata_parse_error()
+
+    keyring_account = entry.get("keyring_account")
+    if keyring_account is not None and not isinstance(keyring_account, str):
+        raise _metadata_parse_error()
+
+
+def _validate_metadata(data: dict[str, Any]) -> None:
+    """Validate fields that storage logic interprets before any mutation."""
+    if "platforms" not in data:
+        _validate_entry(data)
+        return
+
+    platforms = data["platforms"]
+    if not isinstance(platforms, dict):
+        raise _metadata_parse_error()
+
+    normalized_platforms: set[str] = set()
+    for raw_platform_url, entry in platforms.items():
+        if (
+            not isinstance(raw_platform_url, str)
+            or not raw_platform_url.strip()
+            or not isinstance(entry, dict)
+        ):
+            raise _metadata_parse_error()
+        _validate_entry(entry)
+        candidate = entry.get("platform_url") or raw_platform_url
+        try:
+            normalized_key = normalize_platform_url(raw_platform_url)
+            normalized_url = normalize_platform_url(candidate)
+        except CLIError as exc:
+            raise _metadata_parse_error() from exc
+        if normalized_url != normalized_key:
+            raise _metadata_parse_error()
+        if normalized_url in normalized_platforms:
+            raise _metadata_parse_error()
+        normalized_platforms.add(normalized_url)
+
+
 def keyring_account_for_platform(platform_url: str | None = None) -> str:
-    """Return the keyring account for a platform-scoped CLI token."""
+    """Return the stable keyring-account prefix for a platform."""
     normalized_url = normalize_platform_url(platform_url or get_platform_url())
     digest = sha256(normalized_url.encode("utf-8")).hexdigest()[:24]
     return f"{KEYRING_ACCOUNT_PREFIX}{digest}"
+
+
+def _keyring_account_for_credentials(
+    credentials: Credentials, platform_url: str
+) -> str:
+    """Return a platform-scoped account unique to this token identity."""
+    token_identity = credentials.token_id or credentials.access_token
+    digest = sha256(token_identity.encode("utf-8")).hexdigest()[:24]
+    return f"{keyring_account_for_platform(platform_url)}:{digest}"
 
 
 def _default_platform_url() -> str:
@@ -93,7 +198,19 @@ def _dedupe(values: list[str]) -> list[str]:
 
 
 def _is_platform_registry(data: dict[str, Any]) -> bool:
-    return isinstance(data.get("platforms"), dict)
+    return "platforms" in data
+
+
+def _platform_entry_key(metadata: dict[str, Any], platform_url: str) -> str | None:
+    if not _is_platform_registry(metadata):
+        return None
+
+    normalized_url = normalize_platform_url(platform_url)
+    for raw_platform_url, entry in metadata["platforms"].items():
+        candidate = entry.get("platform_url") or raw_platform_url
+        if normalize_platform_url(candidate) == normalized_url:
+            return raw_platform_url
+    return None
 
 
 def _legacy_entry_from_metadata(data: dict[str, Any]) -> dict[str, Any]:
@@ -119,17 +236,8 @@ def _registry_from_metadata(metadata: dict[str, Any] | None) -> dict[str, Any]:
         return registry
 
     if _is_platform_registry(metadata):
-        platforms = metadata.get("platforms", {})
-        for raw_platform_url, raw_entry in platforms.items():
-            if not isinstance(raw_entry, dict):
-                continue
-            platform_url = normalize_platform_url(
-                raw_entry.get("platform_url") or str(raw_platform_url)
-            )
-            entry = dict(raw_entry)
-            entry["platform_url"] = platform_url
-            registry["platforms"][platform_url] = entry
-
+        registry = dict(metadata)
+        registry["platforms"] = dict(metadata["platforms"])
         return registry
 
     default_platform_url = _default_platform_url()
@@ -145,7 +253,8 @@ def _entry_for_platform(
 
     normalized_url = normalize_platform_url(platform_url)
     if _is_platform_registry(metadata):
-        entry = metadata.get("platforms", {}).get(normalized_url)
+        key = _platform_entry_key(metadata, normalized_url)
+        entry = metadata["platforms"].get(key) if key is not None else None
         return entry if isinstance(entry, dict) else None
 
     if normalized_url == _default_platform_url():
@@ -159,25 +268,39 @@ def _entry_used_keyring(entry: dict[str, Any] | None) -> bool:
     return entry.get("token_store", TOKEN_STORE_FILE) == TOKEN_STORE_KEYRING
 
 
+def _is_platform_keyring_account(account: str, platform_url: str) -> bool:
+    prefix = keyring_account_for_platform(platform_url)
+    return account == prefix or account.startswith(f"{prefix}:")
+
+
 def _keyring_accounts_for_entry(
     entry: dict[str, Any] | None,
     platform_url: str,
 ) -> list[str]:
-    accounts = [keyring_account_for_platform(platform_url)]
-    if _is_default_platform_url(platform_url):
-        accounts.append(KEYRING_ACCOUNT)
-
+    platform_url = normalize_platform_url(platform_url)
+    is_default_platform = _is_default_platform_url(platform_url)
+    accounts: list[str] = []
     if entry is not None and _entry_used_keyring(entry):
         account = entry.get("keyring_account")
-        if isinstance(account, str):
-            accounts.append(account)
-        old_account = entry.get("user", {}).get("email", "")
-        if (
-            isinstance(old_account, str)
-            and old_account
-            and old_account != KEYRING_ACCOUNT
+        if isinstance(account, str) and (
+            _is_platform_keyring_account(account, platform_url)
+            or (is_default_platform and account == KEYRING_ACCOUNT)
         ):
-            accounts.append(old_account)
+            accounts.append(account)
+        if is_default_platform:
+            accounts.append(KEYRING_ACCOUNT)
+            user = entry.get("user")
+            old_account = user.get("email", "") if isinstance(user, dict) else ""
+            if (
+                isinstance(old_account, str)
+                and old_account
+                and old_account != KEYRING_ACCOUNT
+            ):
+                accounts.append(old_account)
+
+    accounts.append(keyring_account_for_platform(platform_url))
+    if is_default_platform:
+        accounts.append(KEYRING_ACCOUNT)
 
     return _dedupe(accounts)
 
@@ -186,12 +309,25 @@ def _cleanup_platform_keyring_entries(
     entry: dict[str, Any] | None,
     platform_url: str,
 ) -> bool:
+    if entry is not None and not _entry_used_keyring(entry):
+        return True
     cleaned = True
     for account in _keyring_accounts_for_entry(entry, platform_url):
         cleaned = _keyring_delete(account) and cleaned
-    # File-stored tokens still get a platform-account sweep as legacy hygiene;
-    # only a token believed to be in the keyring is worth reporting as left behind.
-    return cleaned if _entry_used_keyring(entry) else True
+    return cleaned
+
+
+def _cleanup_replaced_keyring_entries(
+    entry: dict[str, Any] | None,
+    platform_url: str,
+    current_account: str,
+) -> bool:
+    """Best-effort cleanup of legacy accounts after the new token is saved."""
+    cleaned = True
+    for account in _keyring_accounts_for_entry(entry, platform_url):
+        if account != current_account:
+            cleaned = _keyring_delete(account) and cleaned
+    return cleaned
 
 
 def _resolve_entry_token(
@@ -212,34 +348,59 @@ def _resolve_entry_token(
 
 def _keyring_set(account: str, token: str) -> bool:
     """Store *token* in the system keyring. Returns ``True`` on success."""
+    if isinstance(keyring.get_keyring(), FailKeyring):
+        return False
     try:
-        if isinstance(keyring.get_keyring(), FailKeyring):
-            return False
         keyring.set_password(KEYRING_SERVICE, account, token)
         return True
-    except Exception:
+    except NoKeyringError:
         return False
+    except KeyringError as exc:
+        raise CLIError(
+            "Could not save credentials in the system keyring. "
+            "Unlock or repair the keyring, or use OSMOSIS_TOKEN for "
+            "non-interactive authentication.",
+            code="KEYRING_UNAVAILABLE",
+        ) from exc
 
 
 def _keyring_get(account: str) -> str | None:
     """Retrieve a token from the system keyring."""
+    if isinstance(keyring.get_keyring(), FailKeyring):
+        raise CLIError(
+            "No system keyring is available. Use OSMOSIS_TOKEN for CI/CD or "
+            "configure a keyring backend for interactive login.",
+            code="KEYRING_UNAVAILABLE",
+        )
     try:
         return keyring.get_password(KEYRING_SERVICE, account)
-    except Exception:
-        return None
+    except (NoKeyringError, KeyringError) as exc:
+        raise CLIError(
+            "Could not read credentials from the system keyring. "
+            "Unlock or repair the keyring and try again.",
+            code="KEYRING_UNAVAILABLE",
+        ) from exc
 
 
 def _keyring_delete(account: str) -> bool:
-    """Delete a keyring token. Missing entry or absent backend is success."""
+    """Delete a keyring token. A missing entry is already clean."""
+    if isinstance(keyring.get_keyring(), FailKeyring):
+        raise CLIError(
+            "No system keyring is available, so saved credentials could not "
+            "be removed. Configure or unlock the keyring and try again.",
+            code="KEYRING_UNAVAILABLE",
+        )
     try:
-        if isinstance(keyring.get_keyring(), FailKeyring):
-            return True
         keyring.delete_password(KEYRING_SERVICE, account)
         return True
-    except (PasswordDeleteError, NoKeyringError):
+    except PasswordDeleteError:
         return True
-    except Exception:
-        return False
+    except Exception as exc:
+        raise CLIError(
+            "Could not remove saved credentials from the system keyring. "
+            "Unlock or repair the keyring and try again.",
+            code="KEYRING_UNAVAILABLE",
+        ) from exc
 
 
 # ---------------------------------------------------------------------------
@@ -325,61 +486,102 @@ class Credentials:
         return datetime.now(UTC) >= self.expires_at.astimezone(UTC)
 
 
+def _cleanup_replaced_credentials(
+    old_credentials: Credentials,
+    current_credentials: Credentials,
+) -> bool:
+    """Remove the previous token's local keyring entries after revocation."""
+    platform_url = get_platform_url()
+    old_entry = old_credentials.to_dict()
+    old_entry.pop("access_token", None)
+    old_entry["token_store"] = TOKEN_STORE_KEYRING
+    old_entry["keyring_account"] = _keyring_account_for_credentials(
+        old_credentials, platform_url
+    )
+    current_account = _keyring_account_for_credentials(
+        current_credentials, platform_url
+    )
+
+    try:
+        cleaned = _cleanup_replaced_keyring_entries(
+            old_entry, platform_url, current_account
+        )
+    except CLIError:
+        cleaned = False
+    if not cleaned:
+        _warn(
+            "The new login is active, but an older local keyring entry could "
+            "not be removed.",
+            code="KEYRING_CLEANUP_FAILED",
+        )
+    return cleaned
+
+
 # ---------------------------------------------------------------------------
 # Save / Load / Delete
 # ---------------------------------------------------------------------------
 
 
-def save_credentials(credentials: Credentials) -> str:
+def save_credentials(credentials: Credentials, *, cleanup_replaced: bool = True) -> str:
     """Save user credentials.
 
-    Tries the system keyring first; falls back to plain-text JSON.
-    Always cleans up previous keyring entries for the active platform to avoid
-    orphaned tokens (e.g. when re-logging, switching accounts, or falling back
-    to file storage).
+    The token is written to the platform-scoped system-keyring account before
+    metadata or legacy entries are changed, so a failed save leaves the
+    previous login usable.
 
     Returns:
-        The storage backend used: ``"keyring"`` or ``"file"``.
+        The storage backend used: ``"keyring"``.
     """
     platform_url = get_platform_url()
-    old_metadata: dict | None = None
-    try:
-        with open(CREDENTIALS_FILE, encoding="utf-8") as f:
-            old_metadata = json.load(f)
-    except (OSError, json.JSONDecodeError, ValueError):
-        pass
-
+    old_metadata = _read_metadata()
     registry = _registry_from_metadata(old_metadata)
-    old_entry = registry["platforms"].get(platform_url)
-    _cleanup_platform_keyring_entries(old_entry, platform_url)
+    old_key = _platform_entry_key(registry, platform_url)
+    old_entry = registry["platforms"].get(old_key) if old_key is not None else None
 
     data = credentials.to_dict()
     data["platform_url"] = platform_url
 
-    # Try keyring first
-    keyring_account = keyring_account_for_platform(platform_url)
-    if _keyring_set(keyring_account, credentials.access_token):
-        data.pop("access_token", None)
-        data["token_store"] = TOKEN_STORE_KEYRING
-        data["keyring_account"] = keyring_account
-        registry["platforms"][platform_url] = data
-        atomic_write_json(CREDENTIALS_FILE, registry, mode=0o600)
-        return TOKEN_STORE_KEYRING
+    keyring_account = _keyring_account_for_credentials(credentials, platform_url)
+    old_keyring_accounts = set(_keyring_accounts_for_entry(old_entry, platform_url))
+    if not _keyring_set(keyring_account, credentials.access_token):
+        raise CLIError(
+            "No system keyring is available. Set OSMOSIS_TOKEN for CI/CD or "
+            "other non-interactive environments.",
+            code="KEYRING_UNAVAILABLE",
+        )
 
-    # Fallback: store everything in the JSON file
-    data["token_store"] = TOKEN_STORE_FILE
-    data.pop("keyring_account", None)
+    data.pop("access_token", None)
+    data["token_store"] = TOKEN_STORE_KEYRING
+    data["keyring_account"] = keyring_account
+    if old_key is not None and old_key != platform_url:
+        del registry["platforms"][old_key]
     registry["platforms"][platform_url] = data
-    atomic_write_json(CREDENTIALS_FILE, registry, mode=0o600)
-    _warn(
-        f"Keyring unavailable — token stored in plain text at {CREDENTIALS_FILE}",
-        code="KEYRING_UNAVAILABLE",
-    )
-    return TOKEN_STORE_FILE
+    try:
+        atomic_write_json(CREDENTIALS_FILE, registry, mode=0o600)
+    except Exception:
+        if keyring_account not in old_keyring_accounts:
+            _keyring_delete(keyring_account)
+        raise
+    if cleanup_replaced:
+        try:
+            cleaned = _cleanup_replaced_keyring_entries(
+                old_entry,
+                platform_url,
+                keyring_account,
+            )
+        except CLIError:
+            cleaned = False
+        if not cleaned:
+            _warn(
+                "Credentials were saved, but an older local keyring entry "
+                "could not be removed.",
+                code="KEYRING_CLEANUP_FAILED",
+            )
+    return TOKEN_STORE_KEYRING
 
 
 def load_credentials(*, include_env: bool = True) -> Credentials | None:
-    """Load credentials with priority: env var → keyring → plain-text file.
+    """Load credentials with priority: env var → keyring → legacy file.
 
     Args:
         include_env: When ``False``, skip ``OSMOSIS_TOKEN`` and load only
@@ -391,6 +593,7 @@ def load_credentials(*, include_env: bool = True) -> Credentials | None:
     # 1. Environment variable
     env_token = os.environ.get("OSMOSIS_TOKEN") if include_env else None
     if env_token:
+        validate_env_token_platform(env_token)
         return Credentials(
             access_token=env_token,
             token_type="Bearer",
@@ -403,25 +606,8 @@ def load_credentials(*, include_env: bool = True) -> Credentials | None:
     platform_url = get_platform_url()
 
     # 2. Load metadata file
-    try:
-        with open(CREDENTIALS_FILE, encoding="utf-8") as f:
-            data = json.load(f)
-    except FileNotFoundError:
-        return None
-    except (json.JSONDecodeError, KeyError, ValueError) as exc:
-        _warn(
-            f"Could not parse credentials file ({type(exc).__name__}); "
-            "run 'osmosis auth login' to re-authenticate.",
-            code="CREDENTIALS_PARSE_FAILED",
-        )
-        return None
-
-    if data.get("version") != CREDENTIALS_VERSION:
-        _warn(
-            "Credentials format has changed. "
-            "Please run 'osmosis auth login' to re-authenticate.",
-            code="CREDENTIALS_VERSION_CHANGED",
-        )
+    data = _read_metadata()
+    if data is None:
         return None
 
     entry = _entry_for_platform(data, platform_url)
@@ -444,70 +630,45 @@ def load_credentials(*, include_env: bool = True) -> Credentials | None:
     try:
         return Credentials.from_dict(credential_data)
     except (KeyError, ValueError) as exc:
-        _warn(
-            f"Could not parse credentials ({type(exc).__name__}); "
-            "run 'osmosis auth login' to re-authenticate.",
+        raise CLIError(
+            "Credential metadata for the current platform is invalid and was "
+            "left unchanged. Repair or remove the affected entry, then try again.",
             code="CREDENTIALS_PARSE_FAILED",
-        )
-        return None
+        ) from exc
 
 
 def delete_credentials() -> bool:
     """Delete credentials for the current platform.
 
     Legacy single-platform files are treated as credentials for the default
-    production platform.  A corrupt metadata file is still removed because it
-    cannot be safely merged with platform-scoped entries.
+    production platform. Corrupt or unknown metadata is preserved so logout
+    cannot destroy entries belonging to another platform.
     """
     platform_url = get_platform_url()
-    metadata_missing = False
-    metadata_corrupt = False
-    old_metadata: dict[str, Any] | None = None
-    try:
-        with open(CREDENTIALS_FILE, encoding="utf-8") as f:
-            old_metadata = json.load(f)
-    except FileNotFoundError:
-        metadata_missing = True
-    except (OSError, json.JSONDecodeError, ValueError):
-        metadata_corrupt = True
-
+    old_metadata = _read_metadata()
     old_entry = (
         _entry_for_platform(old_metadata, platform_url)
         if isinstance(old_metadata, dict)
         else None
     )
     keyring_cleaned = _cleanup_platform_keyring_entries(old_entry, platform_url)
-
     if not keyring_cleaned:
-        _warn(
-            "Could not remove token from system keyring. "
-            "You may want to remove it manually.",
+        raise CLIError(
+            "Could not remove token from the system keyring. Credential "
+            "metadata was left unchanged so logout can be retried.",
             code="KEYRING_CLEANUP_FAILED",
         )
 
-    if metadata_missing:
+    if old_metadata is None:
         return False
-
-    if metadata_corrupt or not isinstance(old_metadata, dict):
-        try:
-            CREDENTIALS_FILE.unlink()
-            return True
-        except FileNotFoundError:
-            return False
-
-    if old_metadata.get("version") != CREDENTIALS_VERSION:
-        try:
-            CREDENTIALS_FILE.unlink()
-            return True
-        except FileNotFoundError:
-            return False
 
     if _is_platform_registry(old_metadata):
         registry = _registry_from_metadata(old_metadata)
-        if platform_url not in registry["platforms"]:
+        platform_key = _platform_entry_key(registry, platform_url)
+        if platform_key is None:
             return False
 
-        del registry["platforms"][platform_url]
+        del registry["platforms"][platform_key]
         if registry["platforms"]:
             atomic_write_json(CREDENTIALS_FILE, registry, mode=0o600)
             return True
@@ -538,21 +699,26 @@ def get_valid_credentials() -> Credentials | None:
     return credentials
 
 
-def get_credential_store() -> str | None:
+def get_credential_store(*, include_env: bool = True) -> str | None:
     """Return the active storage backend.
+
+    Args:
+        include_env: When ``False``, report only credentials persisted by the
+            CLI for the active platform.
 
     Returns:
         ``"env"`` if ``OSMOSIS_TOKEN`` is set, ``"keyring"`` or ``"file"``
         based on the metadata file, or ``None`` if not logged in.
     """
-    if os.environ.get("OSMOSIS_TOKEN"):
+    env_token = os.environ.get("OSMOSIS_TOKEN") if include_env else None
+    if env_token:
+        validate_env_token_platform(env_token)
         return TOKEN_STORE_ENV
-    try:
-        with open(CREDENTIALS_FILE, encoding="utf-8") as f:
-            data = json.load(f)
-        entry = _entry_for_platform(data, get_platform_url())
-        if entry is None:
-            return None
-        return entry.get("token_store", TOKEN_STORE_FILE)
-    except Exception:
+
+    data = _read_metadata()
+    if data is None:
         return None
+    entry = _entry_for_platform(data, get_platform_url())
+    if entry is None:
+        return None
+    return entry.get("token_store", TOKEN_STORE_FILE)

@@ -1,4 +1,4 @@
-"""HTTP client for Osmosis Platform API with automatic 401 handling."""
+"""HTTP client for Osmosis Platform API."""
 
 from __future__ import annotations
 
@@ -21,9 +21,8 @@ from osmosis_ai.platform.constants import (
     MSG_SESSION_EXPIRED,
 )
 
-from .config import get_platform_url
+from .config import get_platform_url, validate_env_token_platform
 from .credentials import load_credentials
-from .local_config import reset_session
 
 if TYPE_CHECKING:
     from .credentials import Credentials
@@ -362,13 +361,13 @@ def revoke_cli_token(credentials: Credentials) -> bool:
     Returns True if revoked (or already expired/revoked), False on error.
     The caller should still delete local credentials regardless.
 
-    Uses a direct HTTP call instead of ``platform_request`` to avoid its
-    automatic 401 handler, which would call ``reset_session()`` and nuke
-    local workspace state — an unwanted side-effect during login/logout.
-    A 401 here simply means the token is already gone, which is success.
+    Uses a direct HTTP call because a 401 here means the token is already gone,
+    which is success rather than an authentication failure for the caller.
     """
     if not credentials.token_id:
         return False
+    if _credentials_match_env_token(credentials):
+        validate_env_token_platform(credentials.access_token)
 
     url = f"{get_platform_url()}/api/cli/tokens/{credentials.token_id}"
     request = Request(
@@ -402,7 +401,6 @@ def _raise_for_http_error(
     *,
     using_env_token: bool,
     git_identity: str | None,
-    cleanup_on_401: bool = True,
 ) -> NoReturn:
     """Translate a platform ``HTTPError`` into the appropriate SDK exception.
 
@@ -416,8 +414,6 @@ def _raise_for_http_error(
         error_code = error_body.get("code")
         if not isinstance(error_code, str):
             error_code = None
-        if cleanup_on_401 and not using_env_token:
-            reset_session()
         raise AuthenticationExpiredError(
             _auth_error_message(error_code, using_env_token=using_env_token),
             code=error_code,
@@ -514,11 +510,8 @@ def platform_request(
     credentials: Credentials | None = None,
     git_identity: str | None = None,
     require_git_repo: bool = True,
-    cleanup_on_401: bool = True,
 ) -> dict[str, Any]:
     """Make an authenticated request to the Osmosis Platform API.
-
-    Automatically handles 401 errors by deleting local credentials.
 
     Args:
         endpoint: API endpoint (e.g., "/api/cli/verify")
@@ -532,17 +525,11 @@ def platform_request(
             when require_git_repo is True.
         require_git_repo: If True, requires a Git repository context and adds
             X-Osmosis-Git header. If False, omits repository scope.
-        cleanup_on_401: If True (default), a 401 response triggers
-            ``reset_session()`` which deletes credentials and local config.
-            Set to False for non-critical calls (e.g. post-login validation)
-            where a transient 401 should not wipe freshly saved state.
-
     Returns:
         Parsed JSON response
 
     Raises:
-        AuthenticationExpiredError: If 401 received (credentials auto-deleted
-            when cleanup_on_401 is True)
+        AuthenticationExpiredError: If 401 received
         PlatformAPIError: For other API errors
     """
     _reject_reserved_headers(headers)
@@ -552,6 +539,8 @@ def platform_request(
     if credentials is None:
         raise CLIError(MSG_NOT_LOGGED_IN, code="AUTH_REQUIRED")
     using_env_token = _credentials_match_env_token(credentials)
+    if using_env_token:
+        validate_env_token_platform(credentials.access_token)
 
     url = f"{get_platform_url()}{endpoint}"
 
@@ -585,7 +574,6 @@ def platform_request(
             e,
             using_env_token=using_env_token,
             git_identity=git_identity,
-            cleanup_on_401=cleanup_on_401,
         )
     except URLError as e:
         raise PlatformAPIError(f"Connection error: {e.reason}") from e
@@ -651,6 +639,8 @@ def platform_stream(
     if credentials is None:
         raise CLIError(MSG_NOT_LOGGED_IN, code="AUTH_REQUIRED")
     using_env_token = _credentials_match_env_token(credentials)
+    if using_env_token:
+        validate_env_token_platform(credentials.access_token)
 
     url = f"{get_platform_url()}{endpoint}"
     req_headers = cli_request_headers(token=credentials.access_token)

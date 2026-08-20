@@ -1,8 +1,10 @@
 """Osmosis AI CLI — built with Typer."""
 
 import difflib
+import os
 import sys
 import warnings
+from pathlib import Path
 
 import typer
 import typer.core
@@ -80,6 +82,69 @@ app: typer.Typer = typer.Typer(
     suggest_commands=False,
 )
 
+_AUTH_PROFILE_ENV_VARS = {
+    "OSMOSIS_PLATFORM_URL",
+    "OSMOSIS_TOKEN",
+    "OSMOSIS_TOKEN_PLATFORM_URL",
+}
+_PLATFORM_URL_ENV_VARS = {
+    "OSMOSIS_PLATFORM_URL",
+    "OSMOSIS_TOKEN_PLATFORM_URL",
+}
+
+
+def _auth_value_matches(name: str, existing: str | None, dotenv_value: str) -> bool:
+    """Return whether an existing auth value matches its dotenv value."""
+    if existing is None:
+        return True
+    if name not in _PLATFORM_URL_ENV_VARS:
+        return existing == dotenv_value
+
+    from osmosis_ai.platform.auth.config import normalize_platform_url
+
+    return normalize_platform_url(existing) == normalize_platform_url(dotenv_value)
+
+
+def _load_env_file(env_file: Path, *, platform_overridden: bool = False) -> None:
+    """Load a dotenv file without combining unrelated auth profiles."""
+    from dotenv import dotenv_values, load_dotenv
+
+    values = dotenv_values(env_file)
+    ambient_token = os.environ.get("OSMOSIS_TOKEN")
+    auth_values = {
+        name: value
+        for name, value in values.items()
+        if name in _AUTH_PROFILE_ENV_VARS
+        and isinstance(value, str)
+        and not (platform_overridden and name == "OSMOSIS_PLATFORM_URL")
+    }
+    if ambient_token and auth_values:
+        file_token_matches = auth_values.get("OSMOSIS_TOKEN") == ambient_token
+        existing_values_do_not_conflict = all(
+            _auth_value_matches(name, os.environ.get(name), value)
+            for name, value in auth_values.items()
+            if name != "OSMOSIS_TOKEN"
+        )
+        safe_existing_profile = file_token_matches and existing_values_do_not_conflict
+        if not safe_existing_profile:
+            from osmosis_ai.cli.errors import CLIError
+
+            raise CLIError(
+                "OSMOSIS_TOKEN is already set, so a different auth profile "
+                f"from {env_file} cannot be merged with it. Unset the ambient "
+                "token or keep the complete auth profile in one source.",
+                code="CONFLICT",
+            )
+    load_dotenv(env_file, override=False)
+
+
+def _find_env_file() -> Path | None:
+    """Find the nearest .env from the current directory upward."""
+    from dotenv import find_dotenv
+
+    discovered = find_dotenv(usecwd=True)
+    return Path(discovered) if discovered else None
+
 
 def _emit_version() -> None:
     typer.echo(f"{package_name} {PACKAGE_VERSION}")
@@ -105,6 +170,21 @@ def _callback(
         "--plain",
         help="Emit low-noise text for shell pipelines.",
     ),
+    env_file: Path | None = typer.Option(
+        None,
+        "--env-file",
+        envvar="OSMOSIS_ENV_FILE",
+        exists=True,
+        dir_okay=False,
+        readable=True,
+        resolve_path=True,
+        help="Load environment variables from this dotenv file.",
+    ),
+    platform: str | None = typer.Option(
+        None,
+        "--platform",
+        help="Platform base URL for this command.",
+    ),
 ) -> None:
     """Osmosis AI CLI.
 
@@ -125,9 +205,15 @@ def _callback(
     )
     install_output_context(ctx, output)
     ctx.call_on_close(verify_output_emitted)
-    from dotenv import find_dotenv, load_dotenv
 
-    load_dotenv(find_dotenv(usecwd=True))
+    selected_env_file = env_file or _find_env_file()
+    if selected_env_file is not None:
+        _load_env_file(
+            selected_env_file,
+            platform_overridden=platform is not None,
+        )
+    if platform is not None:
+        os.environ["OSMOSIS_PLATFORM_URL"] = platform
     _refuse_insecure_platform_url()
 
 
@@ -135,14 +221,12 @@ _registered = False
 
 
 def _refuse_insecure_platform_url() -> None:
-    """Fail closed on non-HTTPS non-loopback platform URLs after dotenv.
+    """Fail closed on non-HTTPS non-loopback platform URLs.
 
-    A cwd ``.env`` can point ``OSMOSIS_PLATFORM_URL`` at http:// while
-    ``OSMOSIS_TOKEN`` is already exported. Opt in with
+    Explicit environment configuration can point ``OSMOSIS_PLATFORM_URL`` at
+    http:// while ``OSMOSIS_TOKEN`` is already exported. Opt in with
     ``OSMOSIS_ALLOW_INSECURE_PLATFORM_URL=1``.
     """
-    import os
-
     if os.environ.get("OSMOSIS_PLATFORM_URL") is None:
         return
 
