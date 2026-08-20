@@ -6,6 +6,7 @@ for multipart, unified retry via _http_put_with_backoff.
 
 from __future__ import annotations
 
+import os
 import sys
 import time
 from collections.abc import Callable
@@ -258,30 +259,39 @@ def upload_file_simple(
     Raises:
         RuntimeError: If upload fails after retries.
     """
-    info = upload_info
-    if info.presigned_url is None:
-        raise RuntimeError("UploadInfo missing presigned_url for simple upload")
-
-    file_size = file_path.stat().st_size
-    url = info.presigned_url
-    _require_https(url, "Simple upload presigned URL")
-
-    headers = dict(info.upload_headers or {})
-    # S3 presigned PUT requires Content-Length (does not support chunked encoding)
-    headers["Content-Length"] = str(file_size)
-
     with open(file_path, "rb") as f:
-        content: Any = f
-        if progress_callback:
-            content = _ProgressReader(f, file_size, progress_callback)
-        _http_put_with_backoff(
-            url,
-            data=content,
-            headers=headers,
-            timeout=SIMPLE_UPLOAD_TIMEOUT,
+        _upload_fileobj_simple(
+            f,
+            os.fstat(f.fileno()).st_size,
+            upload_info,
+            progress_callback,
         )
 
-    # Ensure progress shows 100% on success
+
+def _upload_fileobj_simple(
+    fileobj: IO[bytes],
+    file_size: int,
+    upload_info: UploadInfo,
+    progress_callback: ProgressCallback | None = None,
+) -> None:
+    """Upload an already-open file without reopening its filesystem path."""
+    if upload_info.presigned_url is None:
+        raise RuntimeError("UploadInfo missing presigned_url for simple upload")
+
+    url = upload_info.presigned_url
+    _require_https(url, "Simple upload presigned URL")
+    headers = dict(upload_info.upload_headers or {})
+    headers["Content-Length"] = str(file_size)
+    fileobj.seek(0)
+    content: Any = fileobj
+    if progress_callback:
+        content = _ProgressReader(fileobj, file_size, progress_callback)
+    _http_put_with_backoff(
+        url,
+        data=content,
+        headers=headers,
+        timeout=SIMPLE_UPLOAD_TIMEOUT,
+    )
     if progress_callback:
         progress_callback(file_size, file_size)
 
@@ -309,11 +319,26 @@ def upload_file_multipart(
     Raises:
         RuntimeError: If any part fails.
     """
+    with open(file_path, "rb") as f:
+        return _upload_fileobj_multipart(
+            f,
+            os.fstat(f.fileno()).st_size,
+            upload_info,
+            progress_callback,
+        )
+
+
+def _upload_fileobj_multipart(
+    fileobj: IO[bytes],
+    file_size: int,
+    upload_info: UploadInfo,
+    progress_callback: ProgressCallback | None = None,
+) -> list[dict[str, Any]]:
+    """Upload an already-open file without reopening its filesystem path."""
     info = upload_info
     if not info.presigned_urls or not info.total_parts:
         raise RuntimeError("UploadInfo missing multipart fields")
 
-    file_size = file_path.stat().st_size
     if not info.part_size:
         raise RuntimeError(
             "UploadInfo missing part_size for multipart upload; "
@@ -382,12 +407,9 @@ def upload_file_multipart(
     completed_parts: list[dict] = []
     bytes_uploaded = 0
 
-    with (
-        open(file_path, "rb") as f,
-        httpx.Client(
-            timeout=httpx.Timeout(PART_UPLOAD_TIMEOUT, connect=30.0)
-        ) as client,
-    ):
+    with httpx.Client(
+        timeout=httpx.Timeout(PART_UPLOAD_TIMEOUT, connect=30.0)
+    ) as client:
         for i in range(info.total_parts):
             part_number = i + 1
             offset = i * part_size
@@ -399,7 +421,7 @@ def upload_file_multipart(
                     f"but the local part is {size} bytes"
                 )
 
-            with SliceFileObj(f, seek_from=offset, read_limit=size) as slice_obj:
+            with SliceFileObj(fileobj, seek_from=offset, read_limit=size) as slice_obj:
                 resp = _http_put_with_backoff(
                     url,
                     data=slice_obj,

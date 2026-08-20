@@ -10,11 +10,14 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import os
 import re
 import stat
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from typing import Any, TypeGuard
+from typing import IO, Any, TypeGuard
 
 from osmosis_ai.eval.local.results import atif_rollout_identity
 from osmosis_ai.rollout.trajectory.atif import Trajectory
@@ -46,9 +49,29 @@ class EvalUploadFile:
     source: Path
     size: int
     sha256: str
+    device: int
+    inode: int
+    modified_ns: int
+    changed_ns: int
 
     def to_request(self) -> dict[str, Any]:
         return {"path": self.path, "size": self.size, "sha256": self.sha256}
+
+    @contextmanager
+    def open_verified(self) -> Iterator[IO[bytes]]:
+        """Open the exact regular file identity captured by the upload plan."""
+        with _open_regular_file(self.source, where=self.path) as (handle, opened):
+            if _stat_signature(opened) != (
+                self.device,
+                self.inode,
+                self.size,
+                self.modified_ns,
+                self.changed_ns,
+            ):
+                raise LocalEvalUploadError(
+                    f"{self.path} changed after the upload plan was built; retry"
+                )
+            yield handle
 
 
 @dataclass(frozen=True)
@@ -92,19 +115,60 @@ def _string(value: Any, *, where: str) -> str:
     return value
 
 
-def _regular_file(path: Path, *, where: str) -> None:
+def _stat_signature(value: os.stat_result) -> tuple[int, int, int, int, int]:
+    return (
+        value.st_dev,
+        value.st_ino,
+        value.st_size,
+        value.st_mtime_ns,
+        value.st_ctime_ns,
+    )
+
+
+@contextmanager
+def _open_regular_file(
+    path: Path, *, where: str
+) -> Iterator[tuple[IO[bytes], os.stat_result]]:
+    """Open one stable regular file without trusting a path after validation."""
     try:
-        mode = path.lstat().st_mode
+        named_before = path.lstat()
     except OSError as exc:
         raise LocalEvalUploadError(f"{where} is missing or unreadable: {exc}") from exc
-    if not stat.S_ISREG(mode):
+    if not stat.S_ISREG(named_before.st_mode):
         raise LocalEvalUploadError(f"{where} must be a regular, non-symlink file")
+
+    try:
+        handle = path.open("rb")
+    except OSError as exc:
+        raise LocalEvalUploadError(f"{where} is unreadable: {exc}") from exc
+    try:
+        opened = os.fstat(handle.fileno())
+        if not stat.S_ISREG(opened.st_mode) or _stat_signature(
+            named_before
+        ) != _stat_signature(opened):
+            raise LocalEvalUploadError(f"{where} changed while being opened; retry")
+        yield handle, opened
+        opened_after = os.fstat(handle.fileno())
+        try:
+            named_after = path.lstat()
+        except OSError as exc:
+            raise LocalEvalUploadError(
+                f"{where} changed while being read; retry"
+            ) from exc
+        if (
+            not stat.S_ISREG(named_after.st_mode)
+            or _stat_signature(opened) != _stat_signature(opened_after)
+            or _stat_signature(opened_after) != _stat_signature(named_after)
+        ):
+            raise LocalEvalUploadError(f"{where} changed while being read; retry")
+    finally:
+        handle.close()
 
 
 def _read_bytes(path: Path, *, where: str) -> bytes:
-    _regular_file(path, where=where)
     try:
-        return path.read_bytes()
+        with _open_regular_file(path, where=where) as (handle, _opened):
+            return handle.read()
     except OSError as exc:
         raise LocalEvalUploadError(f"{where} is unreadable: {exc}") from exc
 
@@ -119,29 +183,22 @@ def _json_object(path: Path, *, where: str) -> dict[str, Any]:
 
 
 def _hash_file(path: Path, *, relative: str) -> EvalUploadFile:
-    _regular_file(path, where=relative)
-    before = path.stat()
     digest = hashlib.sha256()
     try:
-        with path.open("rb") as handle:
+        with _open_regular_file(path, where=relative) as (handle, opened):
             while chunk := handle.read(_HASH_CHUNK_SIZE):
                 digest.update(chunk)
     except OSError as exc:
         raise LocalEvalUploadError(f"{relative} is unreadable: {exc}") from exc
-    after = path.stat()
-    if (
-        before.st_size != after.st_size
-        or before.st_mtime_ns != after.st_mtime_ns
-        or before.st_ino != after.st_ino
-    ):
-        raise LocalEvalUploadError(
-            f"{relative} changed while the upload plan was being built; retry"
-        )
     return EvalUploadFile(
         path=relative,
         source=path,
-        size=after.st_size,
+        size=opened.st_size,
         sha256=digest.hexdigest(),
+        device=opened.st_dev,
+        inode=opened.st_ino,
+        modified_ns=opened.st_mtime_ns,
+        changed_ns=opened.st_ctime_ns,
     )
 
 
@@ -497,6 +554,10 @@ def build_eval_upload_plan(run_dir: Path) -> EvalUploadPlan:
         for relative in sorted(selected)
     )
     provenance_source = manifest.get("provenance")
+    if provenance_source is not None and not isinstance(provenance_source, dict):
+        raise LocalEvalUploadError(
+            "manifest.json provenance must be a JSON object when present"
+        )
     provenance_object = provenance_source if isinstance(provenance_source, dict) else {}
     provenance: dict[str, Any] = {}
     for key in _PROVENANCE_KEYS:

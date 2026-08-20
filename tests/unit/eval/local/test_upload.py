@@ -11,6 +11,7 @@ import pytest
 
 from osmosis_ai.eval.local.upload import (
     LocalEvalUploadError,
+    _hash_file,
     _validate_upload_path,
     build_eval_upload_plan,
 )
@@ -298,6 +299,58 @@ def test_oversized_integer_pass_threshold_is_a_validation_error(
     _write_json(metrics_path, metrics)
     with pytest.raises(LocalEvalUploadError, match="finite number"):
         build_eval_upload_plan(run_dir)
+
+
+@pytest.mark.parametrize("provenance", ["not-an-object", ["not", "an", "object"]])
+def test_manifest_provenance_must_be_an_object_when_present(
+    tmp_path: Path, provenance: Any
+) -> None:
+    run_dir = _run_dir(tmp_path, trajectory=False)
+    manifest_path = run_dir / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["provenance"] = provenance
+    _write_json(manifest_path, manifest)
+
+    with pytest.raises(LocalEvalUploadError, match="provenance must be a JSON object"):
+        build_eval_upload_plan(run_dir)
+
+
+def test_hash_rejects_symlink_swapped_in_while_opening(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "selected.txt"
+    outside = tmp_path / "outside.txt"
+    source.write_bytes(b"selected")
+    outside.write_bytes(b"outside secret")
+    original_open = Path.open
+    swapped = False
+
+    def swap_before_open(path: Path, *args: Any, **kwargs: Any) -> Any:
+        nonlocal swapped
+        if path == source and not swapped:
+            swapped = True
+            source.unlink()
+            source.symlink_to(outside)
+        return original_open(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", swap_before_open)
+
+    with pytest.raises(LocalEvalUploadError, match="changed while being opened"):
+        _hash_file(source, relative="selected.txt")
+
+
+def test_upload_file_rejects_path_replaced_after_planning(tmp_path: Path) -> None:
+    source = tmp_path / "selected.txt"
+    outside = tmp_path / "outside.txt"
+    source.write_bytes(b"selected")
+    outside.write_bytes(b"outside secret")
+    planned = _hash_file(source, relative="selected.txt")
+    source.unlink()
+    source.symlink_to(outside)
+
+    with pytest.raises(LocalEvalUploadError, match="regular, non-symlink"):
+        with planned.open_verified():
+            pytest.fail("replaced upload path was opened")
 
 
 def test_trajectory_identity_must_match_index_rollout_id(tmp_path: Path) -> None:

@@ -24,11 +24,16 @@ def _local_file(tmp_path: Path, name: str, body: bytes) -> EvalUploadFile:
     path = tmp_path / name
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(body)
+    identity = path.stat()
     return EvalUploadFile(
         path=name,
         source=path,
         size=len(body),
         sha256=hashlib.sha256(body).hexdigest(),
+        device=identity.st_dev,
+        inode=identity.st_ino,
+        modified_ns=identity.st_mtime_ns,
+        changed_ns=identity.st_ctime_ns,
     )
 
 
@@ -114,10 +119,10 @@ def test_server_uploaded_files_are_skipped_and_missing_files_complete(
         ) -> EvalRunImportResult:
             return _result(files, finalized=True)
 
-    uploaded: list[Path] = []
+    uploaded: list[bytes] = []
     monkeypatch.setattr(
-        "osmosis_ai.platform.api.upload.upload_file_simple",
-        lambda path, _upload: uploaded.append(path),
+        "osmosis_ai.platform.api.upload._upload_fileobj_simple",
+        lambda handle, _size, _upload: uploaded.append(handle.read()),
     )
     context = SimpleNamespace(
         credentials=object(),
@@ -129,7 +134,7 @@ def test_server_uploaded_files_are_skipped_and_missing_files_complete(
     result = upload_plan(plan, context=context, client=FakeClient())  # type: ignore[arg-type]
 
     assert result.status == "finalized"
-    assert uploaded == [files[1].source]
+    assert uploaded == [b'{"total_runs":1}\n']
     assert FakeClient.completed == [("progress.json", None)]
 
 

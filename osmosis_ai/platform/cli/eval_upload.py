@@ -82,15 +82,16 @@ def _upload_one(
     context: GitWorkspaceDirectoryContext,
 ) -> None:
     from osmosis_ai.platform.api.upload import (
-        upload_file_multipart,
-        upload_file_simple,
+        _upload_fileobj_multipart,
+        _upload_fileobj_simple,
     )
 
-    if upload.method == "multipart":
-        parts = upload_file_multipart(file.source, upload)
-    else:
-        upload_file_simple(file.source, upload)
-        parts = None
+    with file.open_verified() as handle:
+        if upload.method == "multipart":
+            parts = _upload_fileobj_multipart(handle, file.size, upload)
+        else:
+            _upload_fileobj_simple(handle, file.size, upload)
+            parts = None
     client.complete_eval_run_import_upload(
         session_id,
         path=file.path,
