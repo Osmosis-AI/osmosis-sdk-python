@@ -261,12 +261,15 @@ def run(
     # ``or 1.0`` would turn a configured 0.0 -- "every graded row passes" -- into
     # the default, so the fallback has to test for absence, not falsiness.
     pass_threshold = _numeric(evaluation.get("pass_threshold"), field="pass_threshold")
+    n = _integer(evaluation.get("n"), field="n")
+    if n is not None and n <= 0:
+        raise CLIError(f"evaluation.n must be a positive integer, got {n!r}")
     spec = EvalRunSpec(
         rollout_name=config.experiment_rollout,
         entrypoint=config.experiment_entrypoint,
         model_path=config.experiment_model_path,
         dataset_name=config.experiment_dataset,
-        n=_integer(evaluation.get("n"), field="n") or 1,
+        n=1 if n is None else n,
         batch_size=_integer(evaluation.get("batch_size"), field="batch_size"),
         pass_threshold=1.0 if pass_threshold is None else pass_threshold,
         agent_timeout_sec=_numeric(

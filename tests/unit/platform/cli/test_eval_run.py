@@ -372,6 +372,16 @@ def test_a_non_finite_pass_threshold_is_a_cli_error(
         _run(workspace)
 
 
+@pytest.mark.parametrize("value", ["0", "-1"])
+def test_a_nonpositive_n_is_a_cli_error(
+    workspace: Path, console_capture: StringIO, value: str
+) -> None:
+    config = workspace / "configs" / "eval" / "echo.toml"
+    config.write_text(EVAL_CONFIG.replace("n = 2", f"n = {value}"), encoding="utf-8")
+    with pytest.raises(CLIError, match=r"evaluation\.n must be a positive integer"):
+        _run(workspace)
+
+
 @pytest.mark.parametrize(
     ("field", "value", "match"),
     [
