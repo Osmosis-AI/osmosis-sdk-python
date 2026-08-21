@@ -421,7 +421,7 @@ def test_logout_json_with_yes_removes_persistent_login(monkeypatch, capsys) -> N
     assert payload["resource"]["effective_source"] is None
 
 
-def test_logout_removes_metadata_when_keyring_is_unavailable(
+def test_logout_reports_failure_when_keyring_is_unavailable(
     monkeypatch, capsys
 ) -> None:
     monkeypatch.delenv("OSMOSIS_TOKEN", raising=False)
@@ -436,22 +436,22 @@ def test_logout_removes_metadata_when_keyring_is_unavailable(
         ),
     )
     reset_kwargs: list[dict[str, bool]] = []
+
+    def fail_reset(**kwargs) -> None:
+        reset_kwargs.append(kwargs)
+        raise CLIError("keyring locked", code="KEYRING_UNAVAILABLE")
+
     monkeypatch.setattr(
         "osmosis_ai.platform.auth.local_config.reset_session",
-        lambda **kwargs: reset_kwargs.append(kwargs),
+        fail_reset,
     )
 
     exit_code = cli.main(["--json", "auth", "logout", "--yes"])
 
-    payload = json.loads(capsys.readouterr().out)
-    assert exit_code == 0
-    assert payload["status"] == "success"
-    assert reset_kwargs == [
-        {
-            "recover_invalid_credentials": True,
-            "tolerate_keyring_unavailable": True,
-        }
-    ]
+    envelope = json.loads(capsys.readouterr().err)
+    assert exit_code == 1
+    assert envelope["error"]["code"] == "KEYRING_UNAVAILABLE"
+    assert reset_kwargs == [{"recover_invalid_credentials": True}]
 
 
 def test_logout_with_env_token_only_does_not_reset_session(monkeypatch, capsys) -> None:

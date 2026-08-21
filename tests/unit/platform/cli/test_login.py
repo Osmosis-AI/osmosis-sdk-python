@@ -380,6 +380,21 @@ def test_device_login_stops_before_minting_without_keyring(monkeypatch) -> None:
     assert exc_info.value.code == "KEYRING_UNAVAILABLE"
 
 
+def test_token_login_stops_before_verifying_without_keyring(monkeypatch) -> None:
+    from keyring.backends.fail import Keyring as FailKeyring
+
+    monkeypatch.setattr("keyring.get_keyring", lambda: FailKeyring())
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.verify_token",
+        lambda token: pytest.fail("token must not be verified without a keyring"),
+    )
+
+    with pytest.raises(CLIError) as exc_info:
+        auth_module._login_with_token(token="token")
+
+    assert exc_info.value.code == "KEYRING_UNAVAILABLE"
+
+
 def test_device_login_loads_persistent_credentials_without_env(monkeypatch) -> None:
     calls: list[bool] = []
     new_creds = _make_credentials(token_id="tok_new")

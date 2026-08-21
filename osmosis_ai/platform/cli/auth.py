@@ -310,10 +310,14 @@ def save_device_credentials_or_revoke(
 def _login_with_token(*, token: str) -> OperationResult:
     """Verify and persist an explicit token, returning structured output."""
     from osmosis_ai.platform.auth import load_credentials, verify_token
-    from osmosis_ai.platform.auth.credentials import Credentials
+    from osmosis_ai.platform.auth.credentials import (
+        Credentials,
+        ensure_keyring_available,
+    )
     from osmosis_ai.platform.auth.flow import LoginResult
 
     output = get_output_context()
+    ensure_keyring_available()
     try:
         old_credentials = load_credentials(include_env=False)
     except CLIError as exc:
@@ -469,10 +473,7 @@ def logout(*, skip_confirm: bool = False) -> OperationResult:
         with output.status("Revoking session..."):
             revoked = revoke_cli_token(credentials)
 
-    reset_session(
-        recover_invalid_credentials=True,
-        tolerate_keyring_unavailable=True,
-    )
+    reset_session(recover_invalid_credentials=True)
     effective_source = "environment" if env_token_set else None
 
     return OperationResult(
