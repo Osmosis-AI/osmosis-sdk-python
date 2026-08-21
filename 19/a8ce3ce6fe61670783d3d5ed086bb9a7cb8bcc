@@ -1,0 +1,36 @@
+tests/unit/eval/local/test_run_name.py
+  s_fa8b1c96091352::t_237c58150e4789 1-17
+tests/unit/eval/local/test_runner_units.py
+  s_fa8b1c96091352::t_bad9c9bd80617a 12
+  s_fa8b1c96091352::t_97a704e3644c3a 28,260,262-268
+  s_fa8b1c96091352::t_237c58150e4789 261
+  s_fa8b1c96091352::t_0f183ce4ae11ae 256
+osmosis_ai/cli/commands/eval.py
+  s_fa8b1c96091352::t_97a704e3644c3a 128
+tests/unit/eval/local/test_runner_e2e.py
+  s_fa8b1c96091352::t_bad9c9bd80617a 12,453
+osmosis_ai/eval/local/runner.py
+  s_fa8b1c96091352::t_0dd5e783f1ef03 51,312
+  s_fa8b1c96091352::t_97a704e3644c3a 309-311,313-315,597-598
+docs/eval-run-local.md
+  s_fa8b1c96091352::t_8741d80dd01265 95
+  s_fa8b1c96091352::t_97a704e3644c3a 64
+osmosis_ai/eval/local/run_name.py
+  s_fa8b1c96091352::t_0dd5e783f1ef03 1-101
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "19a8ce3ce6fe61670783d3d5ed086bb9a7cb8bcc",
+  "prompts": {},
+  "sessions": {
+    "s_fa8b1c96091352": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a026a1-f462-7ed3-9033-db94678aac57",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}
