@@ -85,7 +85,6 @@ async def main() -> int:
         rollout_dir=Path(rollout_dir),
         output_root=Path(output_root),
         hooks=Hooks(),
-        config_stem="echo-eval",
     )
     try:
         summary = await runner.run()

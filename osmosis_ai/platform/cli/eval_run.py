@@ -340,7 +340,6 @@ def run(
         output_root=output_root,
         hooks=hooks,
         provenance=_provenance(workspace_directory, spec, advanced=advanced),
-        config_stem=resolved_config_path.stem,
     )
 
     _print_plan(spec, dataset=dataset, selection=selection, output_root=output_root)

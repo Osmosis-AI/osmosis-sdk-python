@@ -61,7 +61,7 @@ osmosis eval upload .osmosis/evals/my-local-run
 
 | Flag | Meaning |
 |---|---|
-| `--name` | Stable run name. Re-running the same name resumes. Omit for a one-off run with a generated name. |
+| `--name` | Stable run name. Re-running the same name resumes. Omit for a one-off run with a cloud-style `adjective-animal-number` name. |
 | `--output`, `-o` | Run output root. Default `.osmosis/evals/`. |
 | `--dataset-file` | Local dataset file instead of the platform dataset. |
 | `--secrets-file` | Dotenv file supplying `[secrets]` values; `-` reads stdin. Values are never written to disk. |
@@ -92,7 +92,7 @@ A plain run narrates itself: the plan table (the same one `eval submit` prints) 
 │ Work Items   │ 60                │
 │ Output       │ .osmosis/evals    │
 ╰──────────────┴───────────────────╯
-→ echo-eval-7f3a2b: 60 of 60 work items pending
+→ brave-falcon-42: 60 of 60 work items pending
 60 rollouts x model openai/gpt-5-mini — continue? [y/N] y
 → checking model openai/gpt-5-mini
 → syncing rollout dependencies (echo)
