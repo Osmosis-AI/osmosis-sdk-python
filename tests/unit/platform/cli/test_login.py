@@ -83,7 +83,7 @@ def test_login_revokes_before_cleaning_up_old_keyring_token(monkeypatch) -> None
     )
     monkeypatch.setattr(
         "osmosis_ai.platform.auth.platform_client.revoke_cli_token",
-        lambda credentials: calls.append("revoke") or True,
+        lambda credentials, **kwargs: calls.append("revoke") or True,
     )
     monkeypatch.setattr(
         "osmosis_ai.platform.auth.credentials._cleanup_replaced_credentials",
@@ -309,7 +309,7 @@ def test_device_login_save_failure_revokes_new_token(monkeypatch) -> None:
     )
     monkeypatch.setattr(
         "osmosis_ai.platform.auth.platform_client.revoke_cli_token",
-        lambda credentials: calls.append("revoke") or True,
+        lambda credentials, **kwargs: calls.append("revoke") or True,
     )
     monkeypatch.setattr(
         "osmosis_ai.platform.auth.credentials._cleanup_replaced_credentials",
@@ -320,6 +320,48 @@ def test_device_login_save_failure_revokes_new_token(monkeypatch) -> None:
         auth_module.login()
 
     assert calls == ["save", "revoke"]
+
+
+@pytest.mark.parametrize(
+    "revoke_outcome",
+    [False, OSError("network unavailable")],
+    ids=["returns-false", "raises"],
+)
+def test_device_login_save_failure_warns_when_revoke_fails(
+    monkeypatch, revoke_outcome
+) -> None:
+    credentials = _make_credentials(access_token="new", token_id="tok_new")
+
+    def fail_save(_credentials: Credentials, **kwargs) -> str:
+        raise OSError("disk full")
+
+    def fail_revoke(_credentials: Credentials, **kwargs) -> bool:
+        assert kwargs == {"warn_on_failure": False}
+        if isinstance(revoke_outcome, Exception):
+            raise revoke_outcome
+        return revoke_outcome
+
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.credentials.save_credentials", fail_save
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.platform_client.revoke_cli_token", fail_revoke
+    )
+    warnings: list[tuple[str, str | None]] = []
+    monkeypatch.setattr(
+        "osmosis_ai.cli.console.console.print_warning",
+        lambda message, **kwargs: warnings.append((message, kwargs.get("code"))),
+    )
+
+    with pytest.raises(OSError, match="disk full"):
+        auth_module.save_device_credentials_or_revoke(credentials)
+
+    assert warnings == [
+        (
+            "The new device-login token could not be saved or revoked.",
+            "TOKEN_REVOKE_FAILED",
+        )
+    ]
 
 
 def test_device_login_stops_before_minting_without_keyring(monkeypatch) -> None:
@@ -440,8 +482,8 @@ def test_whoami_prints_local_identity_outside_workspace_directory(monkeypatch) -
         ),
     )
     monkeypatch.setattr(
-        "osmosis_ai.platform.cli.workspace_directory_contract.resolve_workspace_directory_from_cwd",
-        lambda: (_ for _ in ()).throw(CLIError("not in workspace directory")),
+        "osmosis_ai.platform.cli.workspace_directory_context.resolve_optional_git_identity",
+        lambda: None,
     )
 
     result = auth_module.whoami()

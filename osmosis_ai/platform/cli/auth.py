@@ -187,10 +187,7 @@ def _finish_login(
     Imports stay inside the body: callers patch the source modules, and
     hoisting them would also undo the deferred-import CLI startup work.
     """
-    from osmosis_ai.platform.auth.credentials import (
-        _cleanup_replaced_credentials,
-        save_credentials,
-    )
+    from osmosis_ai.platform.auth.credentials import _cleanup_replaced_credentials
     from osmosis_ai.platform.auth.flow import LoginError, verify_token
     from osmosis_ai.platform.auth.platform_client import revoke_cli_token
 
@@ -212,25 +209,20 @@ def _finish_login(
         and not same_server_token
         else None
     )
-    try:
+    if source == "device":
+        token_store = save_device_credentials_or_revoke(
+            creds,
+            output=output,
+            cleanup_replaced=False,
+        )
+    else:
+        from osmosis_ai.platform.auth.credentials import save_credentials
+
         token_store = save_credentials(
             creds,
             cleanup_replaced=False,
             recover_invalid_metadata=True,
         )
-    except Exception:
-        if source == "device":
-            try:
-                with output.status("Revoking new session..."):
-                    revoke_cli_token(creds)
-            except Exception:
-                from osmosis_ai.cli.console import console
-
-                console.print_warning(
-                    "The new device-login token could not be saved or revoked.",
-                    code="TOKEN_REVOKE_FAILED",
-                )
-        raise
 
     if old_credentials_to_revoke is not None:
         if not old_credentials_to_revoke.token_id:
@@ -278,6 +270,41 @@ def _finish_login(
         saved=True,
         token_store=token_store,
     )
+
+
+def save_device_credentials_or_revoke(
+    credentials: Any,
+    *,
+    output: Any | None = None,
+    cleanup_replaced: bool = True,
+) -> str:
+    """Persist a new device-login token or revoke it before re-raising."""
+    from osmosis_ai.cli.console import console
+    from osmosis_ai.platform.auth.credentials import save_credentials
+    from osmosis_ai.platform.auth.platform_client import revoke_cli_token
+
+    try:
+        return save_credentials(
+            credentials,
+            cleanup_replaced=cleanup_replaced,
+            recover_invalid_metadata=True,
+        )
+    except Exception:
+        revoked = False
+        try:
+            if output is None:
+                revoked = revoke_cli_token(credentials, warn_on_failure=False)
+            else:
+                with output.status("Revoking new session..."):
+                    revoked = revoke_cli_token(credentials, warn_on_failure=False)
+        except Exception:
+            revoked = False
+        if not revoked:
+            console.print_warning(
+                "The new device-login token could not be saved or revoked.",
+                code="TOKEN_REVOKE_FAILED",
+            )
+        raise
 
 
 def _login_with_token(*, token: str) -> OperationResult:
@@ -620,4 +647,4 @@ def whoami() -> DetailResult:
     return DetailResult(title="Account", data=data, fields=fields)
 
 
-__all__ = ["login", "logout", "whoami"]
+__all__ = ["login", "logout", "save_device_credentials_or_revoke", "whoami"]

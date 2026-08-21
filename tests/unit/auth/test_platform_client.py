@@ -1175,7 +1175,7 @@ class TestRevokeCLIToken:
         assert revoke_cli_token(creds) is False
 
     @patch("osmosis_ai.platform.auth.platform_client.urlopen")
-    def test_env_token_platform_is_validated_before_revocation(
+    def test_env_token_platform_is_not_validated_during_revocation(
         self, mock_urlopen: MagicMock, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setenv("OSMOSIS_TOKEN", "env-token")
@@ -1185,12 +1185,13 @@ class TestRevokeCLIToken:
         monkeypatch.delenv("OSMOSIS_TOKEN_PLATFORM_URL", raising=False)
         credentials = _make_credentials(access_token="env-token")
         credentials.token_id = "tok_env"
+        mock_response = MagicMock()
+        mock_response.__enter__ = MagicMock(return_value=mock_response)
+        mock_response.__exit__ = MagicMock(return_value=False)
+        mock_urlopen.return_value = mock_response
 
-        with pytest.raises(CLIError) as exc_info:
-            revoke_cli_token(credentials)
-
-        assert exc_info.value.code == "ENV_TOKEN_PLATFORM_REQUIRED"
-        mock_urlopen.assert_not_called()
+        assert revoke_cli_token(credentials) is True
+        mock_urlopen.assert_called_once()
 
     @patch("osmosis_ai.platform.auth.platform_client.urlopen")
     def test_returns_true_on_successful_revocation(

@@ -755,14 +755,19 @@ def test_delete_file_only(tmp_path, monkeypatch) -> None:
     data["token_store"] = TOKEN_STORE_FILE
     creds_file.write_text(json.dumps(data))
 
+    deleted_accounts: list[str] = []
     with patch(
-        "osmosis_ai.platform.auth.credentials._keyring_delete", return_value=True
+        "osmosis_ai.platform.auth.credentials._keyring_delete",
+        side_effect=lambda account: deleted_accounts.append(account) or True,
     ):
         from osmosis_ai.platform.auth.credentials import delete_credentials
 
         assert delete_credentials() is True
 
     assert not creds_file.exists()
+    assert keyring_account_for_platform(DEFAULT_PLATFORM) in deleted_accounts
+    assert KEYRING_ACCOUNT in deleted_accounts
+    assert "user@example.com" in deleted_accounts
 
 
 # ---------------------------------------------------------------------------

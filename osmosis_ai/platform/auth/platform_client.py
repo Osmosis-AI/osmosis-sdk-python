@@ -175,7 +175,11 @@ def upgrade_required_message(body: Any) -> tuple[str, dict[str, Any] | None]:
     return message, version_signal
 
 
-def cli_request_headers(*, token: str | None = None) -> dict[str, str]:
+def cli_request_headers(
+    *,
+    token: str | None = None,
+    validate_token_platform: bool = True,
+) -> dict[str, str]:
     """Build the base headers every CLI -> Platform request shares.
 
     Always advertises the installed CLI version via ``X-Osmosis-CLI-Version`` so
@@ -183,7 +187,7 @@ def cli_request_headers(*, token: str | None = None) -> dict[str, str]:
     ``Authorization`` header when a token is supplied. Centralizing this keeps the
     version stamp in exactly one place across the handshake and API calls.
     """
-    if token is not None:
+    if token is not None and validate_token_platform:
         validate_env_token_platform(token)
 
     headers = {
@@ -358,7 +362,11 @@ def _renamed_github_repo_guidance(git_identity: str | None) -> str | None:
     )
 
 
-def revoke_cli_token(credentials: Credentials) -> bool:
+def revoke_cli_token(
+    credentials: Credentials,
+    *,
+    warn_on_failure: bool = True,
+) -> bool:
     """Best-effort server-side revocation of a CLI token.
 
     Returns True if revoked (or already expired/revoked), False on error.
@@ -373,7 +381,10 @@ def revoke_cli_token(credentials: Credentials) -> bool:
     url = f"{get_platform_url()}/api/cli/tokens/{credentials.token_id}"
     request = Request(
         url,
-        headers=cli_request_headers(token=credentials.access_token),
+        headers=cli_request_headers(
+            token=credentials.access_token,
+            validate_token_platform=False,
+        ),
         method="DELETE",
     )
 
@@ -387,10 +398,11 @@ def revoke_cli_token(credentials: Credentials) -> bool:
         # Route through print_warning (not a raw stderr write) so this best-effort
         # warning pauses any active "Revoking session..." spinner instead of
         # gluing onto it, and stays output-mode aware (structured in JSON mode).
-        console.print_warning(
-            f"Failed to revoke CLI token server-side: HTTP {e.code}",
-            code="TOKEN_REVOKE_FAILED",
-        )
+        if warn_on_failure:
+            console.print_warning(
+                f"Failed to revoke CLI token server-side: HTTP {e.code}",
+                code="TOKEN_REVOKE_FAILED",
+            )
         return False
     except (URLError, OSError):
         # Network errors are not critical for best-effort revocation.

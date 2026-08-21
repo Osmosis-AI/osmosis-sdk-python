@@ -339,16 +339,16 @@ def _keyring_accounts_for_entry(
             or (is_default_platform and account == KEYRING_ACCOUNT)
         ):
             accounts.append(account)
-        if is_default_platform:
-            accounts.append(KEYRING_ACCOUNT)
-            user = entry.get("user")
-            old_account = user.get("email", "") if isinstance(user, dict) else ""
-            if (
-                isinstance(old_account, str)
-                and old_account
-                and old_account != KEYRING_ACCOUNT
-            ):
-                accounts.append(old_account)
+
+    if entry is not None and is_default_platform:
+        user = entry.get("user")
+        old_account = user.get("email", "") if isinstance(user, dict) else ""
+        if (
+            isinstance(old_account, str)
+            and old_account
+            and old_account != KEYRING_ACCOUNT
+        ):
+            accounts.append(old_account)
 
     accounts.append(keyring_account_for_platform(platform_url))
     if is_default_platform:
@@ -363,8 +363,6 @@ def _cleanup_platform_keyring_entries(
     *,
     tolerate_unavailable: bool = False,
 ) -> bool:
-    if entry is not None and not _entry_used_keyring(entry):
-        return True
     cleaned = True
     for account in _keyring_accounts_for_entry(entry, platform_url):
         try:
@@ -753,23 +751,26 @@ def delete_credentials(
         if isinstance(old_metadata, dict)
         else None
     )
+    file_backed_entry = old_entry is not None and not _entry_used_keyring(old_entry)
+    tolerate_cleanup_failure = tolerate_keyring_unavailable or file_backed_entry
     keyring_cleaned = _cleanup_platform_keyring_entries(
         old_entry,
         platform_url,
-        tolerate_unavailable=tolerate_keyring_unavailable,
+        tolerate_unavailable=tolerate_cleanup_failure,
     )
     if not keyring_cleaned:
-        if not tolerate_keyring_unavailable:
+        if not tolerate_cleanup_failure:
             raise CLIError(
                 "Could not remove token from the system keyring. Credential "
                 "metadata was left unchanged so logout can be retried.",
                 code="KEYRING_CLEANUP_FAILED",
             )
-        _warn(
-            "Saved credential metadata was removed, but the system keyring "
-            "entry could not be verified or deleted on this host.",
-            code="KEYRING_CLEANUP_FAILED",
-        )
+        if not file_backed_entry:
+            _warn(
+                "Saved credential metadata was removed, but the system keyring "
+                "entry could not be verified or deleted on this host.",
+                code="KEYRING_CLEANUP_FAILED",
+            )
 
     if old_metadata is None:
         return False
