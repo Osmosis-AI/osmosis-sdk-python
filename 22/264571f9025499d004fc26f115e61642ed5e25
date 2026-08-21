@@ -1,0 +1,19 @@
+tests/unit/cli/test_auth_login_json.py
+  s_c218f533796b36::t_33f0488c520a73 40-41
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "22264571f9025499d004fc26f115e61642ed5e25",
+  "prompts": {},
+  "sessions": {
+    "s_c218f533796b36": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "3c6227be-543e-4fda-ab98-8f2d47c5e459",
+        "model": "claude-fable-5"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}
