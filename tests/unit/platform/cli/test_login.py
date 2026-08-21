@@ -127,6 +127,45 @@ def test_login_cleans_old_keyring_token_when_server_revoke_fails(monkeypatch) ->
     assert calls == ["save", "revoke", "cleanup"]
 
 
+def test_login_cleans_old_keyring_token_when_server_revoke_raises(
+    monkeypatch,
+) -> None:
+    old_creds = _make_credentials(access_token="old", token_id="tok_old")
+    new_creds = _make_credentials(access_token="new", token_id="tok_new")
+    result = _make_login_result()
+    calls: list[str] = []
+
+    monkeypatch.delenv("OSMOSIS_TOKEN", raising=False)
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.load_credentials",
+        lambda *, include_env=False: old_creds,
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.device_login", lambda: (result, new_creds)
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.credentials.save_credentials",
+        lambda credentials, **kwargs: calls.append("save") or "keyring",
+    )
+
+    def raise_revoke(_credentials: Credentials) -> bool:
+        calls.append("revoke")
+        raise OSError("network failure")
+
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.platform_client.revoke_cli_token", raise_revoke
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.credentials._cleanup_replaced_credentials",
+        lambda old, current: calls.append("cleanup") or True,
+    )
+
+    with pytest.raises(OSError, match="network failure"):
+        auth_module.login()
+
+    assert calls == ["save", "revoke", "cleanup"]
+
+
 def test_login_resolves_missing_old_token_id_before_revoke(monkeypatch) -> None:
     old_creds = _make_credentials(access_token="old", token_id=None)
     new_creds = _make_credentials(access_token="new", token_id="tok_new")
