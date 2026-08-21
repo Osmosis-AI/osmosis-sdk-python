@@ -1,4 +1,4 @@
-"""HTTP client for Osmosis Platform API with automatic 401 handling."""
+"""HTTP client for Osmosis Platform API."""
 
 from __future__ import annotations
 
@@ -21,9 +21,8 @@ from osmosis_ai.platform.constants import (
     MSG_SESSION_EXPIRED,
 )
 
-from .config import get_platform_url
+from .config import get_platform_url, validate_env_token_platform
 from .credentials import load_credentials
-from .local_config import reset_session
 
 if TYPE_CHECKING:
     from .credentials import Credentials
@@ -176,7 +175,11 @@ def upgrade_required_message(body: Any) -> tuple[str, dict[str, Any] | None]:
     return message, version_signal
 
 
-def cli_request_headers(*, token: str | None = None) -> dict[str, str]:
+def cli_request_headers(
+    *,
+    token: str | None = None,
+    validate_token_platform: bool = True,
+) -> dict[str, str]:
     """Build the base headers every CLI -> Platform request shares.
 
     Always advertises the installed CLI version via ``X-Osmosis-CLI-Version`` so
@@ -184,6 +187,9 @@ def cli_request_headers(*, token: str | None = None) -> dict[str, str]:
     ``Authorization`` header when a token is supplied. Centralizing this keeps the
     version stamp in exactly one place across the handshake and API calls.
     """
+    if token is not None and validate_token_platform:
+        validate_env_token_platform(token)
+
     headers = {
         "Content-Type": "application/json",
         "User-Agent": f"osmosis-cli/{PACKAGE_VERSION}",
@@ -356,16 +362,18 @@ def _renamed_github_repo_guidance(git_identity: str | None) -> str | None:
     )
 
 
-def revoke_cli_token(credentials: Credentials) -> bool:
+def revoke_cli_token(
+    credentials: Credentials,
+    *,
+    warn_on_failure: bool = True,
+) -> bool:
     """Best-effort server-side revocation of a CLI token.
 
     Returns True if revoked (or already expired/revoked), False on error.
     The caller should still delete local credentials regardless.
 
-    Uses a direct HTTP call instead of ``platform_request`` to avoid its
-    automatic 401 handler, which would call ``reset_session()`` and nuke
-    local workspace state — an unwanted side-effect during login/logout.
-    A 401 here simply means the token is already gone, which is success.
+    Uses a direct HTTP call because a 401 here means the token is already gone,
+    which is success rather than an authentication failure for the caller.
     """
     if not credentials.token_id:
         return False
@@ -373,7 +381,10 @@ def revoke_cli_token(credentials: Credentials) -> bool:
     url = f"{get_platform_url()}/api/cli/tokens/{credentials.token_id}"
     request = Request(
         url,
-        headers=cli_request_headers(token=credentials.access_token),
+        headers=cli_request_headers(
+            token=credentials.access_token,
+            validate_token_platform=False,
+        ),
         method="DELETE",
     )
 
@@ -387,10 +398,11 @@ def revoke_cli_token(credentials: Credentials) -> bool:
         # Route through print_warning (not a raw stderr write) so this best-effort
         # warning pauses any active "Revoking session..." spinner instead of
         # gluing onto it, and stays output-mode aware (structured in JSON mode).
-        console.print_warning(
-            f"Failed to revoke CLI token server-side: HTTP {e.code}",
-            code="TOKEN_REVOKE_FAILED",
-        )
+        if warn_on_failure:
+            console.print_warning(
+                f"Failed to revoke CLI token server-side: HTTP {e.code}",
+                code="TOKEN_REVOKE_FAILED",
+            )
         return False
     except (URLError, OSError):
         # Network errors are not critical for best-effort revocation.
@@ -402,7 +414,6 @@ def _raise_for_http_error(
     *,
     using_env_token: bool,
     git_identity: str | None,
-    cleanup_on_401: bool = True,
 ) -> NoReturn:
     """Translate a platform ``HTTPError`` into the appropriate SDK exception.
 
@@ -416,8 +427,6 @@ def _raise_for_http_error(
         error_code = error_body.get("code")
         if not isinstance(error_code, str):
             error_code = None
-        if cleanup_on_401 and not using_env_token:
-            reset_session()
         raise AuthenticationExpiredError(
             _auth_error_message(error_code, using_env_token=using_env_token),
             code=error_code,
@@ -514,11 +523,8 @@ def platform_request(
     credentials: Credentials | None = None,
     git_identity: str | None = None,
     require_git_repo: bool = True,
-    cleanup_on_401: bool = True,
 ) -> dict[str, Any]:
     """Make an authenticated request to the Osmosis Platform API.
-
-    Automatically handles 401 errors by deleting local credentials.
 
     Args:
         endpoint: API endpoint (e.g., "/api/cli/verify")
@@ -532,17 +538,11 @@ def platform_request(
             when require_git_repo is True.
         require_git_repo: If True, requires a Git repository context and adds
             X-Osmosis-Git header. If False, omits repository scope.
-        cleanup_on_401: If True (default), a 401 response triggers
-            ``reset_session()`` which deletes credentials and local config.
-            Set to False for non-critical calls (e.g. post-login validation)
-            where a transient 401 should not wipe freshly saved state.
-
     Returns:
         Parsed JSON response
 
     Raises:
-        AuthenticationExpiredError: If 401 received (credentials auto-deleted
-            when cleanup_on_401 is True)
+        AuthenticationExpiredError: If 401 received
         PlatformAPIError: For other API errors
     """
     _reject_reserved_headers(headers)
@@ -585,7 +585,6 @@ def platform_request(
             e,
             using_env_token=using_env_token,
             git_identity=git_identity,
-            cleanup_on_401=cleanup_on_401,
         )
     except URLError as e:
         raise PlatformAPIError(f"Connection error: {e.reason}") from e

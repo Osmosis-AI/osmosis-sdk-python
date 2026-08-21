@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import contextlib
 import os
+from dataclasses import replace
 from typing import Any
 
 from osmosis_ai.cli.errors import CLIError
@@ -23,6 +23,10 @@ _AUTH_LOGIN_ERROR_CODES = {
     "TOKEN_REVOKED",
     "UNKNOWN_AUTH_ERROR",
 }
+_RECOVERABLE_CREDENTIAL_METADATA_CODES = {
+    "CREDENTIALS_PARSE_FAILED",
+    "CREDENTIALS_VERSION_CHANGED",
+}
 _PLATFORM_CREATE_REPO_STEP = (
     "Create or open a workspace in the Osmosis Platform, then clone the repository "
     "created there."
@@ -38,7 +42,6 @@ def _login_operation_result(
     source: str,
     saved: bool,
     token_store: str | None = None,
-    local_data_cleared: bool = False,
 ) -> OperationResult:
     """Build the structured login result."""
     from osmosis_ai.platform.auth.config import get_platform_url
@@ -55,8 +58,6 @@ def _login_operation_result(
     }
     if token_store is not None:
         resource["token_store"] = token_store
-    if local_data_cleared:
-        resource["local_data_cleared"] = True
 
     next_steps: list[str] = []
     next_steps_structured: list[dict[str, Any]] = []
@@ -174,51 +175,101 @@ def _finish_login(
     creds: Any,
     old_credentials: Any | None,
     result: Any,
-    force: bool,
     source: str,
     output: Any,
 ) -> OperationResult:
     """Replace the stored session with *creds* and report the outcome.
 
     Shared by the token and device-code paths, which differ only in how they
-    obtain *creds*. Wipes local data when the user changed or --force was
-    passed, restores the previous credentials if the save then fails, and
-    revokes the old CLI token when it is still live and distinct.
+    obtain *creds*. Saves the replacement before revoking the old CLI token,
+    so a failed local save leaves the previous login usable.
 
     Imports stay inside the body: callers patch the source modules, and
     hoisting them would also undo the deferred-import CLI startup work.
     """
-    from osmosis_ai.platform.auth.credentials import save_credentials
-    from osmosis_ai.platform.auth.local_config import clear_all_local_data
+    from osmosis_ai.platform.auth.credentials import _cleanup_replaced_credentials
+    from osmosis_ai.platform.auth.flow import LoginError, verify_token
     from osmosis_ai.platform.auth.platform_client import revoke_cli_token
 
-    local_data_cleared = bool(
-        force or (old_credentials and old_credentials.user.id != creds.user.id)
+    same_server_token = bool(
+        old_credentials is not None
+        and (
+            old_credentials.access_token == creds.access_token
+            or (
+                old_credentials.token_id
+                and creds.token_id
+                and old_credentials.token_id == creds.token_id
+            )
+        )
     )
     old_credentials_to_revoke = (
         old_credentials
         if old_credentials is not None
         and not old_credentials.is_expired()
-        and old_credentials.token_id
-        and old_credentials.token_id != creds.token_id
+        and not same_server_token
         else None
     )
-
-    if local_data_cleared:
-        clear_all_local_data()
-        try:
-            token_store = save_credentials(creds)
-        except Exception:
-            if old_credentials is not None:
-                with contextlib.suppress(Exception):
-                    save_credentials(old_credentials)
-            raise
+    if source == "device":
+        token_store = save_device_credentials_or_revoke(
+            creds,
+            output=output,
+            cleanup_replaced=False,
+        )
     else:
-        token_store = save_credentials(creds)
+        from osmosis_ai.platform.auth.credentials import save_credentials
 
-    if old_credentials_to_revoke is not None:
-        with output.status("Revoking old session..."):
-            revoke_cli_token(old_credentials_to_revoke)
+        token_store = save_credentials(
+            creds,
+            cleanup_replaced=False,
+            recover_invalid_metadata=True,
+        )
+
+    try:
+        if old_credentials_to_revoke is not None:
+            if not old_credentials_to_revoke.token_id:
+                try:
+                    with output.status("Resolving old session..."):
+                        verified_old = verify_token(
+                            old_credentials_to_revoke.access_token
+                        )
+                except LoginError as exc:
+                    if _is_auth_login_error(exc):
+                        old_credentials_to_revoke = None
+                    else:
+                        from osmosis_ai.cli.console import console
+
+                        console.print_warning(
+                            "The new login is active, but the previous session "
+                            "could not be checked or revoked.",
+                            code="TOKEN_REVOKE_FAILED",
+                        )
+                else:
+                    old_credentials_to_revoke = replace(
+                        old_credentials_to_revoke, token_id=verified_old.token_id
+                    )
+                    if (
+                        verified_old.token_id
+                        and verified_old.token_id == creds.token_id
+                    ):
+                        old_credentials_to_revoke = None
+                    elif not verified_old.token_id:
+                        from osmosis_ai.cli.console import console
+
+                        console.print_warning(
+                            "The new login is active, but the previous session "
+                            "did not expose a token ID and could not be revoked.",
+                            code="TOKEN_REVOKE_FAILED",
+                        )
+
+            if (
+                old_credentials_to_revoke is not None
+                and old_credentials_to_revoke.token_id
+            ):
+                with output.status("Revoking old session..."):
+                    revoke_cli_token(old_credentials_to_revoke)
+    finally:
+        if old_credentials is not None:
+            _cleanup_replaced_credentials(old_credentials, creds)
 
     return _login_operation_result(
         email=result.user.email,
@@ -227,18 +278,61 @@ def _finish_login(
         source=source,
         saved=True,
         token_store=token_store,
-        local_data_cleared=local_data_cleared,
     )
 
 
-def _login_with_token(*, token: str, force: bool) -> OperationResult:
+def save_device_credentials_or_revoke(
+    credentials: Any,
+    *,
+    output: Any | None = None,
+    cleanup_replaced: bool = True,
+) -> str:
+    """Persist a new device-login token or revoke it before re-raising."""
+    from osmosis_ai.cli.console import console
+    from osmosis_ai.platform.auth.credentials import save_credentials
+    from osmosis_ai.platform.auth.platform_client import revoke_cli_token
+
+    try:
+        return save_credentials(
+            credentials,
+            cleanup_replaced=cleanup_replaced,
+            recover_invalid_metadata=True,
+        )
+    except Exception:
+        revoked = False
+        try:
+            if output is None:
+                revoked = revoke_cli_token(credentials, warn_on_failure=False)
+            else:
+                with output.status("Revoking new session..."):
+                    revoked = revoke_cli_token(credentials, warn_on_failure=False)
+        except Exception:
+            revoked = False
+        if not revoked:
+            console.print_warning(
+                "The new device-login token could not be saved or revoked.",
+                code="TOKEN_REVOKE_FAILED",
+            )
+        raise
+
+
+def _login_with_token(*, token: str) -> OperationResult:
     """Verify and persist an explicit token, returning structured output."""
     from osmosis_ai.platform.auth import load_credentials, verify_token
-    from osmosis_ai.platform.auth.credentials import Credentials
+    from osmosis_ai.platform.auth.credentials import (
+        Credentials,
+        ensure_keyring_available,
+    )
     from osmosis_ai.platform.auth.flow import LoginResult
 
     output = get_output_context()
-    old_credentials = load_credentials(include_env=False)
+    ensure_keyring_available()
+    try:
+        old_credentials = load_credentials(include_env=False)
+    except CLIError as exc:
+        if exc.code not in _RECOVERABLE_CREDENTIAL_METADATA_CODES:
+            raise
+        old_credentials = None
 
     with output.status("Verifying token..."):
         verified = verify_token(token)
@@ -249,81 +343,58 @@ def _login_with_token(*, token: str, force: bool) -> OperationResult:
         creds=creds,
         old_credentials=old_credentials,
         result=result,
-        force=force,
         source="token",
         output=output,
     )
 
 
-def _login_with_env_token(*, env_token: str) -> OperationResult:
-    """Verify OSMOSIS_TOKEN without mutating local credential/session state."""
-    from osmosis_ai.platform.auth.config import get_platform_url
-
-    output = get_output_context()
-    with output.status("Verifying environment token..."):
-        verified = _verify_env_token(env_token)
-
-    return OperationResult(
-        operation="auth.login",
-        status="success",
-        resource={
-            "email": verified.user.email,
-            "name": verified.user.name,
-            "expires_at": verified.expires_at.isoformat(),
-            "platform_url": get_platform_url(),
-            "workspace": None,
-            "source": "environment",
-            "verified": True,
-            "saved": False,
-        },
-        message=f"Verified OSMOSIS_TOKEN for {verified.user.email}.",
-        display_next_steps=[
-            "OSMOSIS_TOKEN was not saved to local credentials.",
-            "Unset OSMOSIS_TOKEN to use interactive device login.",
-        ],
-        next_steps_structured=[
-            {"action": "unset_env", "name": "OSMOSIS_TOKEN"},
-        ],
-    )
-
-
-def _login_with_device_flow(*, force: bool) -> OperationResult:
+def _login_with_device_flow() -> OperationResult:
     """Interactive device-code login. Caller must have already gated on interactivity."""
     from osmosis_ai.platform.auth import device_login, load_credentials
+    from osmosis_ai.platform.auth.credentials import ensure_keyring_available
 
     output = get_output_context()
-    old_credentials = load_credentials()
+    ensure_keyring_available()
+    try:
+        old_credentials = load_credentials(include_env=False)
+    except CLIError as exc:
+        if exc.code not in _RECOVERABLE_CREDENTIAL_METADATA_CODES:
+            raise
+        old_credentials = None
     result, creds = device_login()
 
     return _finish_login(
         creds=creds,
         old_credentials=old_credentials,
         result=result,
-        force=force,
         source="device",
         output=output,
     )
 
 
-def login(*, force: bool = False, token: str | None = None) -> OperationResult:
+def login(*, token: str | None = None) -> OperationResult:
     """Authenticate with Osmosis AI."""
     from osmosis_ai.platform.auth import LoginError
 
     try:
         if token is not None:
-            return _login_with_token(token=token, force=force)
+            return _login_with_token(token=token)
 
-        env_token = os.environ.get("OSMOSIS_TOKEN")
-        if env_token:
-            return _login_with_env_token(env_token=env_token)
+        if os.environ.get("OSMOSIS_TOKEN"):
+            raise CLIError(
+                "OSMOSIS_TOKEN is already active for this process. "
+                "Skip 'auth login' for CI/CD, or unset it before logging in.",
+                code="CONFLICT",
+            )
 
         output = get_output_context()
         if output.format is not OutputFormat.rich:
             raise CLIError(
-                "Login is interactive in this mode. Pass --token or set OSMOSIS_TOKEN.",
+                "Login is interactive in this mode. Pass --token to persist a PAT; "
+                "for CI/CD, set OSMOSIS_TOKEN and skip 'auth login'.",
                 code="INTERACTIVE_REQUIRED",
             )
-        return _login_with_device_flow(force=force)
+        return _login_with_device_flow()
     except LoginError as exc:
         raise _cli_error_from_login_error(exc) from exc
 
@@ -331,16 +402,31 @@ def login(*, force: bool = False, token: str | None = None) -> OperationResult:
 def logout(*, skip_confirm: bool = False) -> OperationResult:
     """Logout from Osmosis AI CLI."""
     from osmosis_ai.cli.prompts import confirm
-    from osmosis_ai.platform.auth import load_credentials
+    from osmosis_ai.platform.auth import get_credential_store, load_credentials
     from osmosis_ai.platform.auth.config import get_platform_url
     from osmosis_ai.platform.auth.local_config import reset_session
     from osmosis_ai.platform.auth.platform_client import revoke_cli_token
 
     output = get_output_context()
-    credentials = load_credentials(include_env=False)
     env_token_set = bool(os.environ.get("OSMOSIS_TOKEN"))
+    try:
+        persistent_store = get_credential_store(include_env=False)
+        credentials = (
+            load_credentials(include_env=False)
+            if persistent_store is not None
+            else None
+        )
+    except CLIError as exc:
+        if exc.code in _RECOVERABLE_CREDENTIAL_METADATA_CODES:
+            persistent_store = "unknown"
+            credentials = None
+        elif exc.code == "KEYRING_UNAVAILABLE":
+            persistent_store = "keyring"
+            credentials = None
+        else:
+            raise
 
-    if credentials is None:
+    if persistent_store is None:
         if env_token_set:
             return OperationResult(
                 operation="auth.logout",
@@ -348,6 +434,8 @@ def logout(*, skip_confirm: bool = False) -> OperationResult:
                 resource={
                     "logged_in": True,
                     "env_token_set": True,
+                    "persistent_login": False,
+                    "effective_source": "environment",
                     "platform_url": get_platform_url(),
                 },
                 message="OSMOSIS_TOKEN is set. Run 'unset OSMOSIS_TOKEN' to logout.",
@@ -358,7 +446,12 @@ def logout(*, skip_confirm: bool = False) -> OperationResult:
         return OperationResult(
             operation="auth.logout",
             status="noop",
-            resource={"logged_in": False, "platform_url": get_platform_url()},
+            resource={
+                "logged_in": False,
+                "persistent_login": False,
+                "effective_source": None,
+                "platform_url": get_platform_url(),
+            },
             message="Not logged in.",
         )
 
@@ -373,27 +466,41 @@ def logout(*, skip_confirm: bool = False) -> OperationResult:
             return OperationResult(
                 operation="auth.logout",
                 status="cancelled",
-                resource={"logged_in": True, "platform_url": get_platform_url()},
+                resource={
+                    "logged_in": True,
+                    "persistent_login": True,
+                    "effective_source": (
+                        "environment" if env_token_set else persistent_store
+                    ),
+                    "platform_url": get_platform_url(),
+                },
                 message="Cancelled.",
             )
 
     revoked = False
-    if not credentials.is_expired():
+    if credentials is not None and not credentials.is_expired():
         with output.status("Revoking session..."):
             revoked = revoke_cli_token(credentials)
 
-    reset_session()
+    reset_session(recover_invalid_credentials=True)
+    effective_source = "environment" if env_token_set else None
 
     return OperationResult(
         operation="auth.logout",
         status="success",
         resource={
-            "logged_in": False,
+            "logged_in": env_token_set,
             "revoked": revoked,
             "env_token_set": env_token_set,
+            "persistent_login": False,
+            "effective_source": effective_source,
             "platform_url": get_platform_url(),
         },
-        message="Logged out successfully.",
+        message=(
+            "Saved login removed; OSMOSIS_TOKEN is still active."
+            if env_token_set
+            else "Logged out successfully."
+        ),
         display_next_steps=(
             ["Unset OSMOSIS_TOKEN to fully logout."] if env_token_set else []
         ),
@@ -410,6 +517,7 @@ def whoami() -> DetailResult:
         AuthenticationExpiredError,
         Credentials,
         LoginError,
+        get_credential_store,
         load_credentials,
         verify_token,
     )
@@ -422,6 +530,9 @@ def whoami() -> DetailResult:
     output = get_output_context()
     env_token = os.environ.get("OSMOSIS_TOKEN")
     source = "environment" if env_token else "credentials"
+    persistent_store = None
+    persistent_login = False
+    effective_source = "environment" if env_token else None
     git_identity = resolve_optional_git_identity()
 
     if env_token:
@@ -436,10 +547,18 @@ def whoami() -> DetailResult:
         except LoginError as exc:
             raise _cli_error_from_login_error(exc) from exc
         credentials = Credentials.from_verify_result(env_token, verified)
+        try:
+            persistent_store = get_credential_store(include_env=False)
+        except CLIError:
+            persistent_store = None
+        persistent_login = persistent_store is not None
     else:
+        persistent_store = get_credential_store(include_env=False)
         credentials = load_credentials()
         if credentials is None:
             raise CLIError(MSG_NOT_LOGGED_IN, code="AUTH_REQUIRED")
+        persistent_login = True
+        effective_source = persistent_store or "credentials"
         if credentials.is_expired():
             raise AuthenticationExpiredError()
         access_token = credentials.access_token
@@ -485,6 +604,8 @@ def whoami() -> DetailResult:
         "expires_at": credentials.expires_at.isoformat(),
         "platform_url": get_platform_url(),
         "source": source,
+        "effective_source": effective_source,
+        "persistent_login": persistent_login,
     }
     if credentials.token_id:
         account["token_id"] = credentials.token_id
@@ -495,6 +616,8 @@ def whoami() -> DetailResult:
         "expires_at": credentials.expires_at.isoformat(),
         "platform_url": get_platform_url(),
         "source": source,
+        "effective_source": effective_source,
+        "persistent_login": persistent_login,
         "workspace": workspace,
     }
 
@@ -518,7 +641,15 @@ def whoami() -> DetailResult:
                 DetailField(label="Role", value=console.format_text(workspace["role"]))
             )
     fields.append(DetailField(label="Platform", value=get_platform_url()))
-    fields.append(DetailField(label="Auth Source", value=source))
+    fields.append(DetailField(label="Auth Source", value=effective_source or source))
+    fields.append(
+        DetailField(
+            label="Saved Login",
+            value=(
+                f"yes ({persistent_store})" if persistent_store is not None else "no"
+            ),
+        )
+    )
     fields.append(
         DetailField(label="Expires", value=credentials.expires_at.strftime("%Y-%m-%d"))
     )
@@ -526,4 +657,4 @@ def whoami() -> DetailResult:
     return DetailResult(title="Account", data=data, fields=fields)
 
 
-__all__ = ["login", "logout", "whoami"]
+__all__ = ["login", "logout", "save_device_credentials_or_revoke", "whoami"]

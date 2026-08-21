@@ -301,6 +301,17 @@ def test_command_path_falls_back_to_argv_when_no_context(monkeypatch) -> None:
 
 
 @pytest.mark.parametrize(
+    "argv",
+    [
+        ["--platform", "https://example.invalid", "--json", "auth", "whoami"],
+        ["--env-file", "dev.env", "--json", "auth", "whoami"],
+    ],
+)
+def test_command_path_skips_value_taking_root_options(argv: list[str]) -> None:
+    assert command_path_for_error(None, argv=argv) == "auth whoami"
+
+
+@pytest.mark.parametrize(
     ("argv", "expected"),
     [
         (

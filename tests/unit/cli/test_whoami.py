@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from osmosis_ai.cli import main as cli
+from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.platform.auth.credentials import Credentials, UserInfo
 from osmosis_ai.platform.auth.flow import VerifiedWorkspace, VerifyResult
 
@@ -26,6 +27,14 @@ def fake_credentials() -> Credentials:
     )
 
 
+@pytest.fixture(autouse=True)
+def _no_persistent_login(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.get_credential_store",
+        lambda *, include_env=False: None,
+    )
+
+
 def _patch_auth(
     monkeypatch,
     creds: Credentials | None,
@@ -33,6 +42,10 @@ def _patch_auth(
     workspace: VerifiedWorkspace | None = None,
 ) -> list[dict[str, str | None]]:
     verify_calls: list[dict[str, str | None]] = []
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.get_credential_store",
+        lambda *, include_env=False: "keyring" if creds is not None else None,
+    )
     monkeypatch.setattr("osmosis_ai.platform.auth.load_credentials", lambda: creds)
     if creds is not None:
         verified = VerifyResult(
@@ -116,7 +129,11 @@ def test_whoami_json_outside_linked_project_has_no_workspace(
     _assert_no_workspace_context(data)
     assert data["account"]["email"] == "brian@example.com"
     assert data["account"]["source"] == "credentials"
+    assert data["account"]["effective_source"] == "keyring"
+    assert data["account"]["persistent_login"] is True
     assert data["source"] == "credentials"
+    assert data["effective_source"] == "keyring"
+    assert data["persistent_login"] is True
     assert "expires_at" in data
 
 
@@ -187,8 +204,67 @@ def test_whoami_json_with_env_token_uses_verified_identity(
     _assert_no_workspace_context(data)
     assert data["account"]["email"] == "env@example.com"
     assert data["account"]["source"] == "environment"
+    assert data["account"]["effective_source"] == "environment"
+    assert data["account"]["persistent_login"] is False
     assert data["source"] == "environment"
+    assert data["effective_source"] == "environment"
+    assert data["persistent_login"] is False
     assert verify_calls == ["env-token"]
+
+
+def test_whoami_env_token_reports_shadowed_persistent_login(
+    monkeypatch, capsys, tmp_path, fake_verify_result
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("OSMOSIS_TOKEN", "env-token")
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.get_credential_store",
+        lambda *, include_env=False: "keyring",
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.verify_token",
+        lambda token, git_identity=None: fake_verify_result,
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.load_credentials",
+        lambda: pytest.fail("environment auth must remain the effective source"),
+    )
+
+    exit_code = cli.main(["--json", "auth", "whoami"])
+
+    data = json.loads(capsys.readouterr().out)["data"]
+    assert exit_code == 0
+    assert data["effective_source"] == "environment"
+    assert data["persistent_login"] is True
+    assert data["account"]["persistent_login"] is True
+
+
+def test_whoami_env_token_ignores_unreadable_persistent_metadata(
+    monkeypatch, capsys, tmp_path, fake_verify_result
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("OSMOSIS_TOKEN", "env-token")
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.get_credential_store",
+        lambda *, include_env=False: (_ for _ in ()).throw(
+            CLIError("metadata unreadable", code="CREDENTIALS_UNAVAILABLE")
+        ),
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.verify_token",
+        lambda token, git_identity=None: fake_verify_result,
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.load_credentials",
+        lambda: pytest.fail("environment auth must remain effective"),
+    )
+
+    exit_code = cli.main(["--json", "auth", "whoami"])
+
+    data = json.loads(capsys.readouterr().out)["data"]
+    assert exit_code == 0
+    assert data["effective_source"] == "environment"
+    assert data["persistent_login"] is False
 
 
 def test_whoami_json_with_env_token_ignores_cached_workspace_resolution(

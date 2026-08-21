@@ -14,19 +14,20 @@ def _clear_legacy_config_file() -> None:
         CONFIG_FILE.unlink()
 
 
-def clear_all_local_data() -> None:
-    """Clear local CLI credentials and non-workspace-directory runtime state."""
-    reset_session()
-
-
-def reset_session() -> None:
+def reset_session(
+    *,
+    recover_invalid_credentials: bool = False,
+    tolerate_keyring_unavailable: bool = False,
+) -> None:
     """Complete current-platform session teardown: credentials and legacy config.
 
-    Single entry point for all "end session" paths (logout, login --force,
-    401 expiry, user identity change) to ensure no stale auth-local state
-    remains for the active platform.
+    Logout is the only automatic caller; request failures never mutate stored
+    credentials.
     """
     from .credentials import delete_credentials
 
-    delete_credentials()
+    delete_credentials(
+        recover_invalid_metadata=recover_invalid_credentials,
+        tolerate_keyring_unavailable=tolerate_keyring_unavailable,
+    )
     _clear_legacy_config_file()

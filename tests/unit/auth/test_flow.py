@@ -12,6 +12,7 @@ from urllib.error import HTTPError, URLError
 
 import pytest
 
+from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.consts import PACKAGE_VERSION
 from osmosis_ai.platform.auth.credentials import UserInfo
 from osmosis_ai.platform.auth.flow import (
@@ -179,6 +180,26 @@ class TestVerifyAndGetUserInfo:
 
         request_obj = open_mock.call_args[0][0]
         assert request_obj.full_url == expected_url
+
+    def test_env_token_platform_is_validated_before_verification_request(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("OSMOSIS_TOKEN", "test-token")
+        monkeypatch.setenv(
+            "OSMOSIS_PLATFORM_URL", "https://platform-staging.osmosis.ai"
+        )
+        monkeypatch.delenv("OSMOSIS_TOKEN_PLATFORM_URL", raising=False)
+
+        with patch(
+            "osmosis_ai.platform.auth.flow.urlopen",
+            side_effect=lambda *args, **kwargs: pytest.fail(
+                "unbound environment token must not reach the network"
+            ),
+        ):
+            with pytest.raises(CLIError) as exc_info:
+                verify_token("test-token")
+
+        assert exc_info.value.code == "ENV_TOKEN_PLATFORM_REQUIRED"
 
     def test_verification_with_no_expires_at_defaults_to_90_days(self) -> None:
         body = _make_verify_response(expires_at=None)

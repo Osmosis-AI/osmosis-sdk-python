@@ -215,6 +215,25 @@ class TestPlatformRequest:
         assert request_obj.full_url == expected_url
 
     @patch("osmosis_ai.platform.auth.platform_client.urlopen")
+    def test_env_token_platform_is_validated_before_api_request(
+        self, mock_urlopen: MagicMock, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("OSMOSIS_TOKEN", "env-token")
+        monkeypatch.setenv(
+            "OSMOSIS_PLATFORM_URL", "https://platform-staging.osmosis.ai"
+        )
+        monkeypatch.delenv("OSMOSIS_TOKEN_PLATFORM_URL", raising=False)
+        credentials = _make_credentials(access_token="env-token")
+
+        with pytest.raises(CLIError) as exc_info:
+            platform_request(
+                "/api/test", credentials=credentials, git_identity="git_test"
+            )
+
+        assert exc_info.value.code == "ENV_TOKEN_PLATFORM_REQUIRED"
+        mock_urlopen.assert_not_called()
+
+    @patch("osmosis_ai.platform.auth.platform_client.urlopen")
     def test_sets_required_headers(self, mock_urlopen: MagicMock) -> None:
         """Verify Authorization, Content-Type, and User-Agent headers are set."""
         mock_urlopen.return_value = _make_http_response({"ok": True})
@@ -455,38 +474,16 @@ class TestPlatformRequest:
     # HTTP Error Handling
     # -------------------------------------------------------------------------
 
-    @patch("osmosis_ai.platform.auth.platform_client.reset_session")
     @patch("osmosis_ai.platform.auth.platform_client.urlopen")
-    def test_401_triggers_cleanup_and_raises(
-        self, mock_urlopen: MagicMock, mock_reset: MagicMock
+    def test_401_raises_without_mutating_credentials(
+        self, mock_urlopen: MagicMock
     ) -> None:
-        """Verify 401 response triggers session reset and raises."""
+        """A failed request must not own or delete persistent auth state."""
         mock_urlopen.side_effect = _make_http_error(401, "Unauthorized")
         creds = _make_credentials()
 
         with pytest.raises(AuthenticationExpiredError, match="session has expired"):
             platform_request("/api/test", credentials=creds, git_identity="git_test")
-
-        mock_reset.assert_called_once()
-
-    @patch("osmosis_ai.platform.auth.platform_client.reset_session")
-    @patch("osmosis_ai.platform.auth.platform_client.urlopen")
-    def test_401_with_cleanup_disabled_skips_reset(
-        self, mock_urlopen: MagicMock, mock_reset: MagicMock
-    ) -> None:
-        """Verify 401 with cleanup_on_401=False raises without calling reset_session."""
-        mock_urlopen.side_effect = _make_http_error(401, "Unauthorized")
-        creds = _make_credentials()
-
-        with pytest.raises(AuthenticationExpiredError, match="session has expired"):
-            platform_request(
-                "/api/test",
-                credentials=creds,
-                git_identity="git_test",
-                cleanup_on_401=False,
-            )
-
-        mock_reset.assert_not_called()
 
     def test_401_with_env_token_skips_cleanup_and_mentions_unset(
         self, monkeypatch: pytest.MonkeyPatch
@@ -495,16 +492,9 @@ class TestPlatformRequest:
         monkeypatch.setenv("OSMOSIS_TOKEN", "env-token")
         creds = _make_credentials(access_token="env-token")
 
-        with (
-            patch(
-                "osmosis_ai.platform.auth.platform_client.urlopen",
-                side_effect=_make_http_error(
-                    401, json.dumps({"code": "TOKEN_EXPIRED"})
-                ),
-            ),
-            patch(
-                "osmosis_ai.platform.auth.platform_client.reset_session"
-            ) as mock_reset,
+        with patch(
+            "osmosis_ai.platform.auth.platform_client.urlopen",
+            side_effect=_make_http_error(401, json.dumps({"code": "TOKEN_EXPIRED"})),
         ):
             with pytest.raises(AuthenticationExpiredError) as exc_info:
                 platform_request(
@@ -513,7 +503,6 @@ class TestPlatformRequest:
 
         assert "OSMOSIS_TOKEN environment variable has expired" in str(exc_info.value)
         assert "unset OSMOSIS_TOKEN" in str(exc_info.value)
-        mock_reset.assert_not_called()
 
     @patch("osmosis_ai.platform.auth.platform_client.urlopen")
     def test_426_raises_upgrade_required_with_platform_message(
@@ -1186,6 +1175,25 @@ class TestRevokeCLIToken:
         assert revoke_cli_token(creds) is False
 
     @patch("osmosis_ai.platform.auth.platform_client.urlopen")
+    def test_env_token_platform_is_not_validated_during_revocation(
+        self, mock_urlopen: MagicMock, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("OSMOSIS_TOKEN", "env-token")
+        monkeypatch.setenv(
+            "OSMOSIS_PLATFORM_URL", "https://platform-staging.osmosis.ai"
+        )
+        monkeypatch.delenv("OSMOSIS_TOKEN_PLATFORM_URL", raising=False)
+        credentials = _make_credentials(access_token="env-token")
+        credentials.token_id = "tok_env"
+        mock_response = MagicMock()
+        mock_response.__enter__ = MagicMock(return_value=mock_response)
+        mock_response.__exit__ = MagicMock(return_value=False)
+        mock_urlopen.return_value = mock_response
+
+        assert revoke_cli_token(credentials) is True
+        mock_urlopen.assert_called_once()
+
+    @patch("osmosis_ai.platform.auth.platform_client.urlopen")
     def test_returns_true_on_successful_revocation(
         self, mock_urlopen: MagicMock
     ) -> None:
@@ -1271,6 +1279,29 @@ class TestPlatformStream:
         list(platform_stream("/api/stream", require_git_repo=False))
 
         mock_load.assert_called_once()
+
+    @patch("osmosis_ai.platform.auth.platform_client.urlopen")
+    def test_env_token_platform_is_validated_before_streaming(
+        self, mock_urlopen: MagicMock, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("OSMOSIS_TOKEN", "env-token")
+        monkeypatch.setenv(
+            "OSMOSIS_PLATFORM_URL", "https://platform-staging.osmosis.ai"
+        )
+        monkeypatch.delenv("OSMOSIS_TOKEN_PLATFORM_URL", raising=False)
+        credentials = _make_credentials(access_token="env-token")
+
+        with pytest.raises(CLIError) as exc_info:
+            list(
+                platform_stream(
+                    "/api/stream",
+                    credentials=credentials,
+                    require_git_repo=False,
+                )
+            )
+
+        assert exc_info.value.code == "ENV_TOKEN_PLATFORM_REQUIRED"
+        mock_urlopen.assert_not_called()
 
     @patch("osmosis_ai.platform.auth.platform_client.urlopen")
     def test_yields_parsed_events(self, mock_urlopen: MagicMock) -> None:

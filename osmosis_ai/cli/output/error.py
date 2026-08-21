@@ -123,12 +123,16 @@ def emit_internal_debug(exc: BaseException, classified: CLIError | None = None) 
 
 def _argv_command_path(argv: list[str]) -> str:
     skip_flags = {"--json", "--plain", "--version", "-V", "--help", "-h"}
+    value_options = {"--env-file", "--platform"}
     tokens: list[str] = []
     i = 0
     while i < len(argv):
         token = argv[i]
         if token in skip_flags:
             i += 1
+            continue
+        if token in value_options:
+            i += 2
             continue
         if token.startswith("-"):
             i += 1
