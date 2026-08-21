@@ -125,7 +125,7 @@ def eval_run(
         "--name",
         help=(
             "Stable run name. Re-running the same name resumes pending work. "
-            "Omit to create a one-off run with a generated name."
+            "Omit to create a one-off run with a cloud-style generated name."
         ),
     ),
     output: str | None = typer.Option(

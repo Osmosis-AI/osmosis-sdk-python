@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from pathlib import Path
 from typing import Any
 
@@ -449,7 +450,7 @@ async def test_an_unnamed_run_gets_a_generated_directory(
     harness: RunnerHarness,
 ) -> None:
     summary = await harness.runner(options=LocalEvalOptions()).run()
-    assert summary.run_name.startswith("echo-eval-")
+    assert re.fullmatch(r"[a-z]+-[a-z]+-\d{1,2}", summary.run_name)
     assert summary.run_dir.name == summary.run_name
     assert (summary.run_dir / "index.jsonl").is_file()
 

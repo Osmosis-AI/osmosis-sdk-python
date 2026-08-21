@@ -18,7 +18,6 @@ async def test_after_finalize_runs_under_the_same_run_lock(
     runner = LocalEvalRunner.__new__(LocalEvalRunner)
     runner._options = SimpleNamespace(name="run-1")  # type: ignore[attr-defined]
     runner._output_root = tmp_path  # type: ignore[attr-defined]
-    runner._config_stem = "eval"  # type: ignore[attr-defined]
     summary = RunSummary(
         run_dir=tmp_path / "run-1",
         local_run_id="a" * 32,

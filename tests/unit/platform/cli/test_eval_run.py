@@ -270,13 +270,6 @@ def test_the_rollout_dir_is_resolved_under_the_workspace(
     assert captured_runner.calls[0]["rollout_dir"] == workspace / "rollouts" / ROLLOUT
 
 
-def test_the_config_stem_seeds_a_generated_run_name(
-    workspace: Path, captured_runner: type[_CapturedRunner], console_capture: StringIO
-) -> None:
-    _run(workspace)
-    assert captured_runner.calls[0]["config_stem"] == "echo"
-
-
 # --------------------------------------------------------------------------- #
 # Errors and UX
 # --------------------------------------------------------------------------- #
