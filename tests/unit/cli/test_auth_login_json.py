@@ -37,6 +37,8 @@ def _auth_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
         "osmosis_ai.platform.auth.get_credential_store",
         lambda *, include_env=True: None,
     )
+    # Exercise login behavior independently of the host keyring backend.
+    monkeypatch.setattr("keyring.get_keyring", lambda: object())
 
 
 def _credentials(
