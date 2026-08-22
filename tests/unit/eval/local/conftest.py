@@ -206,7 +206,6 @@ class RunnerHarness:
             rollout_dir=self.rollout_dir,
             output_root=self.output_root,
             hooks=hooks or self.hooks,
-            config_stem="echo-eval",
         )
 
     def run_dir(self, name: str = "run-1") -> Path:

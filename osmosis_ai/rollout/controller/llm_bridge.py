@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import secrets
 import time
 from collections.abc import AsyncIterator
@@ -25,6 +26,10 @@ from contextlib import suppress
 from typing import Any
 
 from osmosis_ai._imports import raise_optional_dependency_error
+from osmosis_ai.rollout.controller.openai_responses import (
+    build_responses_kwargs,
+    to_chat_response,
+)
 
 try:
     from fastapi import APIRouter, Depends, HTTPException, Request
@@ -88,10 +93,19 @@ def _usage_payload(response: Any) -> dict[str, int] | None:
     usage = _getattr_or_key(response, "usage")
     if usage is None:
         return None
+    prompt_tokens = _getattr_or_key(usage, "prompt_tokens")
+    if prompt_tokens is None:
+        prompt_tokens = _getattr_or_key(usage, "input_tokens", 0)
+    completion_tokens = _getattr_or_key(usage, "completion_tokens")
+    if completion_tokens is None:
+        completion_tokens = _getattr_or_key(usage, "output_tokens", 0)
+    total_tokens = _getattr_or_key(usage, "total_tokens")
+    if total_tokens is None:
+        total_tokens = int(prompt_tokens or 0) + int(completion_tokens or 0)
     return {
-        "prompt_tokens": int(_getattr_or_key(usage, "prompt_tokens", 0) or 0),
-        "completion_tokens": int(_getattr_or_key(usage, "completion_tokens", 0) or 0),
-        "total_tokens": int(_getattr_or_key(usage, "total_tokens", 0) or 0),
+        "prompt_tokens": int(prompt_tokens or 0),
+        "completion_tokens": int(completion_tokens or 0),
+        "total_tokens": int(total_tokens or 0),
     }
 
 
@@ -113,15 +127,19 @@ def _plain_data(value: Any) -> Any:
     return value
 
 
-def _message_content(choice: Any) -> tuple[str, Any]:
+def _message_fields(choice: Any) -> tuple[str, Any, Any]:
     message = _getattr_or_key(choice, "message")
     if message is None:
         delta = _getattr_or_key(choice, "delta", {})
-        return str(_getattr_or_key(delta, "content", "") or ""), _getattr_or_key(
-            delta, "tool_calls"
+        return (
+            str(_getattr_or_key(delta, "content", "") or ""),
+            _getattr_or_key(delta, "tool_calls"),
+            _getattr_or_key(delta, "refusal"),
         )
-    return str(_getattr_or_key(message, "content", "") or ""), _getattr_or_key(
-        message, "tool_calls"
+    return (
+        str(_getattr_or_key(message, "content", "") or ""),
+        _getattr_or_key(message, "tool_calls"),
+        _getattr_or_key(message, "refusal"),
     )
 
 
@@ -143,13 +161,15 @@ def _model_response_to_payload(
 ) -> dict[str, Any]:
     choices: list[dict[str, Any]] = []
     for index, choice in enumerate(_getattr_or_key(response, "choices", []) or []):
-        content, tool_calls = _message_content(choice)
+        content, tool_calls, refusal = _message_fields(choice)
         finish_reason = _getattr_or_key(choice, "finish_reason", "stop")
         choice_index = int(_getattr_or_key(choice, "index", index) or index)
         if stream:
             delta: dict[str, Any] = {"content": content}
             if tool_calls:
                 delta["tool_calls"] = _stream_tool_calls_payload(tool_calls)
+            if refusal is not None:
+                delta["refusal"] = str(refusal)
             choices.append(
                 {
                     "index": choice_index,
@@ -161,6 +181,8 @@ def _model_response_to_payload(
             message: dict[str, Any] = {"role": "assistant", "content": content}
             if tool_calls:
                 message["tool_calls"] = _plain_data(tool_calls)
+            if refusal is not None:
+                message["refusal"] = str(refusal)
             choices.append(
                 {
                     "index": choice_index,
@@ -214,6 +236,25 @@ class LiteLLMBridge:
                 kwargs[key] = body[key]
         return kwargs
 
+    def _uses_responses_api(self, litellm: Any) -> bool:
+        if not self.model.startswith("openai/"):
+            return False
+        return not (
+            self._api_base
+            or os.environ.get("OPENAI_BASE_URL")
+            or os.environ.get("OPENAI_API_BASE")
+            or getattr(litellm, "api_base", None)
+        )
+
+    async def _provider_complete(self, body: dict[str, Any], *, litellm: Any) -> Any:
+        if self._uses_responses_api(litellm):
+            kwargs = build_responses_kwargs(
+                body, model=self.model, api_key=self._api_key
+            )
+            response = await litellm.aresponses(**kwargs)
+            return to_chat_response(response)
+        return await litellm.acompletion(**self._build_kwargs(body))
+
     async def preflight_check(self) -> None:
         """One-shot completion probe; raises on persistent config problems."""
         litellm = _get_litellm()
@@ -227,10 +268,12 @@ class LiteLLMBridge:
                 f"Received: {self.model!r}. Details: {msg}"
             ) from exc
         try:
-            await litellm.acompletion(
-                **self._build_kwargs(
-                    {"messages": [{"role": "user", "content": "hi"}], "max_tokens": 256}
-                )
+            await self._provider_complete(
+                {
+                    "messages": [{"role": "user", "content": "hi"}],
+                    "max_tokens": 256,
+                },
+                litellm=litellm,
             )
         except Exception as exc:
             ename = type(exc).__name__
@@ -242,7 +285,7 @@ class LiteLLMBridge:
 
     async def complete(self, body: dict[str, Any], *, rollout_id: str) -> Any:
         litellm = _get_litellm()
-        response = await litellm.acompletion(**self._build_kwargs(body))
+        response = await self._provider_complete(body, litellm=litellm)
         usage = _usage_payload(response)
         if usage:
             self._tokens[rollout_id] = (

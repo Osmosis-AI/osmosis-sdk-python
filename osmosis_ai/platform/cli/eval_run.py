@@ -12,6 +12,7 @@ import math
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
+from shlex import quote
 from typing import Any
 
 from osmosis_ai.cli.console import console
@@ -340,7 +341,6 @@ def run(
         output_root=output_root,
         hooks=hooks,
         provenance=_provenance(workspace_directory, spec, advanced=advanced),
-        config_stem=resolved_config_path.stem,
     )
 
     _print_plan(spec, dataset=dataset, selection=selection, output_root=output_root)
@@ -348,7 +348,6 @@ def run(
 
     def _upload_completed(summary: Any) -> None:
         nonlocal imported
-        from shlex import quote
 
         from osmosis_ai.eval.local.upload import (
             LocalEvalUploadError,
@@ -357,7 +356,7 @@ def run(
         from osmosis_ai.platform.cli.eval_upload import upload_plan
 
         hooks.display.close()
-        retry = f"osmosis eval upload {quote(str(summary.run_dir))}"
+        retry = _upload_command(summary.run_dir)
         try:
             imported = upload_plan(
                 build_eval_upload_plan(summary.run_dir), context=context
@@ -552,6 +551,10 @@ def _print_failures(summary: Any) -> None:
         )
 
 
+def _upload_command(run_dir: Path) -> str:
+    return f"osmosis eval upload {quote(str(run_dir))}"
+
+
 def _result(
     summary: Any,
     *,
@@ -620,6 +623,8 @@ def _result(
             if imported.platform_url
             else f"Inspect the imported run: osmosis eval info {imported_name}"
         )
+    elif not incomplete:
+        next_steps.append(f"Upload: {_upload_command(summary.run_dir)}")
     message = (
         f"Evaluation run {'interrupted' if incomplete else 'finished'}: "
         f"{summary.run_dir}"

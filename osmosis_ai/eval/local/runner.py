@@ -48,6 +48,7 @@ from osmosis_ai.eval.local.results import (
     read_valid_trajectory,
     select_attempts,
 )
+from osmosis_ai.eval.local.run_name import generate_run_name
 from osmosis_ai.eval.local.state import (
     DATASET_NORMALIZATION_VERSION,
     JOURNAL_FILENAME,
@@ -62,7 +63,6 @@ from osmosis_ai.eval.local.state import (
     TerminalStatus,
     WorkKey,
     archive_run_directory,
-    digest_of,
     terminate_process_group,
     utc_now,
     validate_run_name,
@@ -306,18 +306,13 @@ def build_run_inputs(
     }
 
 
-def generated_run_name(
-    config_stem: str, inputs_digest: str, *, now: str | None = None
-) -> str:
-    """``<config-stem>-<timestamp>-<short-fingerprint>`` for an unnamed run (§4.4)."""
-    stamp = now or time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
-    safe_stem = (
-        "".join(
-            char if char.isalnum() or char in "._-" else "-" for char in config_stem
-        ).strip("-._")
-        or "eval"
-    )
-    return validate_run_name(f"{safe_stem}-{stamp}-{inputs_digest[:8]}")
+def _available_generated_run_name(output_root: Path) -> str:
+    """Generate a cloud-style name that has no existing local run directory."""
+    for _ in range(100):
+        candidate = generate_run_name()
+        if not (output_root / candidate).exists():
+            return candidate
+    raise LocalEvalError("could not generate an unused local evaluation run name")
 
 
 def changed_input_keys(
@@ -562,7 +557,6 @@ class LocalEvalRunner:
         output_root: Path,
         hooks: RunnerHooks,
         provenance: Mapping[str, Any] | None = None,
-        config_stem: str = "eval",
     ) -> None:
         self._spec = spec
         self._options = options
@@ -572,7 +566,6 @@ class LocalEvalRunner:
         self._output_root = output_root
         self._hooks = hooks
         self._provenance = dict(provenance or {})
-        self._config_stem = config_stem
 
         self._run_dir: Path | None = None
         self._log: RunLog | None = None
@@ -601,8 +594,8 @@ class LocalEvalRunner:
         self, *, after_finalize: Callable[[RunSummary], None] | None = None
     ) -> RunSummary:
         """Execute, finalize, then optionally act while still holding the lock."""
-        run_name = self._options.name or generated_run_name(
-            self._config_stem, self._pending_inputs_digest()
+        run_name = self._options.name or _available_generated_run_name(
+            self._output_root
         )
         validate_run_name(run_name)
         lock_path = self._output_root / LOCKS_DIRNAME / f"{run_name}.lock"
@@ -619,9 +612,6 @@ class LocalEvalRunner:
     # ------------------------------------------------------------------ #
     # Startup
     # ------------------------------------------------------------------ #
-
-    def _pending_inputs_digest(self) -> str:
-        return digest_of(self._build_inputs())
 
     def _build_inputs(self) -> dict[str, Any]:
         return build_run_inputs(
