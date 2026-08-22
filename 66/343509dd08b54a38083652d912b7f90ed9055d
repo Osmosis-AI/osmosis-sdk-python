@@ -1,0 +1,30 @@
+osmosis_ai/rollout/controller/llm_bridge.py
+  s_fa8b1c96091352::t_eb111045e5d17b 29-32,243-247
+  s_fa8b1c96091352::t_f44bf9be93522c 21,231-240,242
+  s_fa8b1c96091352::t_e30d3f7432217b 241
+  s_fa8b1c96091352::t_68faa055833ae4 96-104,106-108,248-249,263-268,280
+osmosis_ai/rollout/controller/openai_responses.py
+  s_fa8b1c96091352::t_eb111045e5d17b 1-182
+tests/unit/rollout/controller/test_llm_bridge.py
+  s_fa8b1c96091352::t_07863fa7daae75 55-79,87,89,94-98,100,103,117-122,153,165,184,196,214,226,237,248,305,471,484-486
+  s_fa8b1c96091352::t_ca1798d925301a 314-387,393-457
+  s_fa8b1c96091352::t_e30d3f7432217b 388-392
+tests/unit/eval/local/test_runner_e2e.py
+  s_fa8b1c96091352::t_43af9453bb913e 564-567,569-572
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "66343509dd08b54a38083652d912b7f90ed9055d",
+  "prompts": {},
+  "sessions": {
+    "s_fa8b1c96091352": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a026a1-f462-7ed3-9033-db94678aac57",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": null
+    }
+  }
+}
