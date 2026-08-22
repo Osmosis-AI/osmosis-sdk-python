@@ -587,16 +587,16 @@ async def test_a_process_wide_admission_fault_halts_and_the_rows_resume(
     async def failing(self: Any, init: Any) -> None:
         raise admission_fault
 
-    monkeypatch.setattr(HttpRolloutDriver, "_admit", failing)
-    hooks = RecordingHooks()
-    summary = await harness.runner(hooks=hooks).run()
+    with monkeypatch.context() as admission_patch:
+        admission_patch.setattr(HttpRolloutDriver, "_admit", failing)
+        hooks = RecordingHooks()
+        summary = await harness.runner(hooks=hooks).run()
 
-    assert summary.failed == 0
-    assert harness.journal_lines() == []
-    assert summary.cancelled is True
-    assert any("stopping dispatch" in note for note in hooks.notes)
+        assert summary.failed == 0
+        assert harness.journal_lines() == []
+        assert summary.cancelled is True
+        assert any("stopping dispatch" in note for note in hooks.notes)
 
-    monkeypatch.undo()
     resumed = await harness.runner().run()
     assert resumed.succeeded == 4
 
