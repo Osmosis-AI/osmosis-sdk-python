@@ -22,6 +22,59 @@ def _compact_json(data: Any) -> str:
     return json.dumps(data, separators=(",", ":"))
 
 
+def _convert_content(content: Any, *, role: Any) -> Any:
+    if not isinstance(content, list):
+        return content
+
+    converted: list[Any] = []
+    for part in content:
+        if not isinstance(part, dict):
+            converted.append(part)
+            continue
+
+        part_type = part.get("type")
+        if part_type == "text":
+            converted.append(
+                {
+                    "type": "output_text" if role == "assistant" else "input_text",
+                    "text": part.get("text", ""),
+                }
+            )
+        elif part_type == "image_url":
+            image_url = part.get("image_url")
+            if isinstance(image_url, dict):
+                converted.append(
+                    {
+                        "type": "input_image",
+                        "image_url": image_url.get("url"),
+                        "detail": image_url.get("detail", "auto"),
+                    }
+                )
+            else:
+                converted.append(
+                    {
+                        "type": "input_image",
+                        "image_url": image_url,
+                        "detail": "auto",
+                    }
+                )
+        elif part_type == "file" and isinstance(part.get("file"), dict):
+            file = part["file"]
+            converted.append(
+                {
+                    "type": "input_file",
+                    **{
+                        key: file[key]
+                        for key in ("file_id", "file_data", "filename")
+                        if key in file
+                    },
+                }
+            )
+        else:
+            converted.append(part)
+    return converted
+
+
 def _convert_messages(messages: Any) -> list[Any]:
     if not isinstance(messages, list):
         return []
@@ -33,8 +86,8 @@ def _convert_messages(messages: Any) -> list[Any]:
 
         role = message.get("role")
         if role == "tool":
-            output = message.get("content", "")
-            if not isinstance(output, str):
+            output = _convert_content(message.get("content", ""), role=role)
+            if not isinstance(output, (str, list)):
                 output = _compact_json(output)
             items.append(
                 {
@@ -48,7 +101,9 @@ def _convert_messages(messages: Any) -> list[Any]:
         tool_calls = message.get("tool_calls")
         content = message.get("content")
         if content not in (None, ""):
-            items.append({"role": role, "content": content})
+            items.append(
+                {"role": role, "content": _convert_content(content, role=role)}
+            )
         elif not tool_calls:
             items.append({"role": role, "content": ""})
 
@@ -115,6 +170,7 @@ def build_responses_kwargs(
 def to_chat_response(response: Any) -> dict[str, Any]:
     """Adapt a native Responses result to a Chat Completions response."""
     text_parts: list[str] = []
+    refusal_parts: list[str] = []
     tool_calls: list[dict[str, Any]] = []
 
     for item in _field(response, "output", []) or []:
@@ -123,6 +179,8 @@ def to_chat_response(response: Any) -> dict[str, Any]:
             for content in _field(item, "content", []) or []:
                 if _field(content, "type") == "output_text":
                     text_parts.append(str(_field(content, "text", "") or ""))
+                elif _field(content, "type") == "refusal":
+                    refusal_parts.append(str(_field(content, "refusal", "") or ""))
         elif item_type == "function_call":
             call_id = _field(item, "call_id") or _field(item, "id")
             tool_calls.append(
@@ -142,6 +200,8 @@ def to_chat_response(response: Any) -> dict[str, Any]:
     }
     if tool_calls:
         message["tool_calls"] = tool_calls
+    if refusal_parts:
+        message["refusal"] = "".join(refusal_parts)
 
     finish_reason = "tool_calls" if tool_calls else "stop"
     incomplete_details = _field(response, "incomplete_details")

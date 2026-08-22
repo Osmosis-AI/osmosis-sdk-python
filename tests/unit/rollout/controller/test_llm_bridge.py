@@ -415,6 +415,111 @@ async def test_official_openai_uses_responses_api_with_tools(
     assert bridge.collect_tokens(ROLLOUT_ID) == 5
 
 
+async def test_official_openai_converts_chat_content_blocks(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
+    monkeypatch.delenv("OPENAI_API_BASE", raising=False)
+    fake = _FakeLiteLLM()
+    _install(monkeypatch, fake)
+    bridge = LiteLLMBridge(model="openai/gpt-test")
+    messages = [
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "Look at these."},
+                {
+                    "type": "image_url",
+                    "image_url": {
+                        "url": "data:image/png;base64,aGVsbG8=",
+                        "detail": "low",
+                    },
+                },
+                {
+                    "type": "file",
+                    "file": {
+                        "file_data": "data:text/plain;base64,aGVsbG8=",
+                        "filename": "hello.txt",
+                    },
+                },
+            ],
+        },
+        {
+            "role": "assistant",
+            "content": [{"type": "text", "text": "Calling the tool."}],
+        },
+        {
+            "role": "tool",
+            "tool_call_id": "call_1",
+            "content": [{"type": "text", "text": "done"}],
+        },
+    ]
+
+    await bridge.complete({"messages": messages}, rollout_id=ROLLOUT_ID)
+
+    (kwargs,) = fake.responses_kwargs
+    assert kwargs["input"] == [
+        {
+            "role": "user",
+            "content": [
+                {"type": "input_text", "text": "Look at these."},
+                {
+                    "type": "input_image",
+                    "image_url": "data:image/png;base64,aGVsbG8=",
+                    "detail": "low",
+                },
+                {
+                    "type": "input_file",
+                    "file_data": "data:text/plain;base64,aGVsbG8=",
+                    "filename": "hello.txt",
+                },
+            ],
+        },
+        {
+            "role": "assistant",
+            "content": [{"type": "output_text", "text": "Calling the tool."}],
+        },
+        {
+            "type": "function_call_output",
+            "call_id": "call_1",
+            "output": [{"type": "input_text", "text": "done"}],
+        },
+    ]
+
+
+async def test_official_openai_preserves_refusal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
+    monkeypatch.delenv("OPENAI_API_BASE", raising=False)
+    fake = _FakeLiteLLM(
+        responses_response=_responses_response(
+            output=[
+                {
+                    "type": "message",
+                    "content": [
+                        {"type": "refusal", "refusal": "I cannot help with that."}
+                    ],
+                }
+            ]
+        )
+    )
+    _install(monkeypatch, fake)
+    bridge = LiteLLMBridge(model="openai/gpt-test")
+
+    async with _client(bridge) as client:
+        response = await client.post(_url(), json=_body(), headers=_auth())
+        streamed = await client.post(_url(), json=_body(stream=True), headers=_auth())
+
+    assert response.status_code == 200
+    assert response.json()["choices"][0]["message"] == {
+        "role": "assistant",
+        "content": "",
+        "refusal": "I cannot help with that.",
+    }
+    assert '"refusal":"I cannot help with that."' in streamed.text
+
+
 @pytest.mark.parametrize(
     ("api_base", "env_name"),
     [
