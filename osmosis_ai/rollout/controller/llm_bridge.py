@@ -127,15 +127,19 @@ def _plain_data(value: Any) -> Any:
     return value
 
 
-def _message_content(choice: Any) -> tuple[str, Any]:
+def _message_fields(choice: Any) -> tuple[str, Any, Any]:
     message = _getattr_or_key(choice, "message")
     if message is None:
         delta = _getattr_or_key(choice, "delta", {})
-        return str(_getattr_or_key(delta, "content", "") or ""), _getattr_or_key(
-            delta, "tool_calls"
+        return (
+            str(_getattr_or_key(delta, "content", "") or ""),
+            _getattr_or_key(delta, "tool_calls"),
+            _getattr_or_key(delta, "refusal"),
         )
-    return str(_getattr_or_key(message, "content", "") or ""), _getattr_or_key(
-        message, "tool_calls"
+    return (
+        str(_getattr_or_key(message, "content", "") or ""),
+        _getattr_or_key(message, "tool_calls"),
+        _getattr_or_key(message, "refusal"),
     )
 
 
@@ -157,13 +161,15 @@ def _model_response_to_payload(
 ) -> dict[str, Any]:
     choices: list[dict[str, Any]] = []
     for index, choice in enumerate(_getattr_or_key(response, "choices", []) or []):
-        content, tool_calls = _message_content(choice)
+        content, tool_calls, refusal = _message_fields(choice)
         finish_reason = _getattr_or_key(choice, "finish_reason", "stop")
         choice_index = int(_getattr_or_key(choice, "index", index) or index)
         if stream:
             delta: dict[str, Any] = {"content": content}
             if tool_calls:
                 delta["tool_calls"] = _stream_tool_calls_payload(tool_calls)
+            if refusal is not None:
+                delta["refusal"] = str(refusal)
             choices.append(
                 {
                     "index": choice_index,
@@ -175,6 +181,8 @@ def _model_response_to_payload(
             message: dict[str, Any] = {"role": "assistant", "content": content}
             if tool_calls:
                 message["tool_calls"] = _plain_data(tool_calls)
+            if refusal is not None:
+                message["refusal"] = str(refusal)
             choices.append(
                 {
                     "index": choice_index,
