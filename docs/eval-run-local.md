@@ -108,7 +108,7 @@ The bar needs a terminal. Redirected output gets one printed line per completed 
 
 `--verbose` replaces the milestone lines with the full log stream — `logs.txt` line for line, rollout-server output included. The plan table, the progress display, and the results table stay.
 
-The run ends with a results table: work items by outcome, pass rate against the threshold, reward statistics, pass@k for multi-attempt runs, tokens, duration, and the output directory. Every number in it is read straight from what `metrics.json` holds — nothing is recomputed for display, so the terminal and the file cannot disagree. Durations use the same formatter as `osmosis eval info`, so a local run and a cloud run of the same evaluation read alike.
+The run ends with a results table: work items by outcome, pass rate against the threshold, reward statistics, pass@k for multi-attempt runs, tokens, duration, and the output directory. Every number in it is read straight from what `metrics.json` holds — nothing is recomputed for display, so the terminal and the file cannot disagree. Durations use the same formatter as `osmosis eval info`, so a local run and a cloud run of the same evaluation read alike. A completed run that was not uploaded with `--upload` then prints a copyable `osmosis eval upload <run-directory>` command.
 
 ## Output layout
 
