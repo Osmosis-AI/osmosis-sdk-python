@@ -56,11 +56,14 @@ def _responses_response(
     *,
     output: list[dict[str, Any]] | None = None,
     total_tokens: int = 5,
+    status: str = "completed",
+    incomplete_reason: str | None = None,
+    error: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    return {
+    response = {
         "id": "resp-test",
         "created_at": 1700000000,
-        "status": "completed",
+        "status": status,
         "output": output
         if output is not None
         else [
@@ -75,6 +78,11 @@ def _responses_response(
             "total_tokens": total_tokens,
         },
     }
+    if incomplete_reason is not None:
+        response["incomplete_details"] = {"reason": incomplete_reason}
+    if error is not None:
+        response["error"] = error
+    return response
 
 
 class _FakeLiteLLM:
@@ -485,6 +493,102 @@ async def test_official_openai_converts_chat_content_blocks(
             "output": [{"type": "input_text", "text": "done"}],
         },
     ]
+
+
+async def test_official_openai_forwards_modern_chat_controls(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
+    monkeypatch.delenv("OPENAI_API_BASE", raising=False)
+    fake = _FakeLiteLLM()
+    _install(monkeypatch, fake)
+    bridge = LiteLLMBridge(model="openai/gpt-test")
+
+    await bridge.complete(
+        _body(
+            max_completion_tokens=64,
+            max_tokens=128,
+            tool_choice={"type": "function", "function": {"name": "multiply"}},
+            parallel_tool_calls=False,
+        ),
+        rollout_id=ROLLOUT_ID,
+    )
+
+    (kwargs,) = fake.responses_kwargs
+    assert kwargs["max_output_tokens"] == 64
+    assert kwargs["tool_choice"] == {"type": "function", "name": "multiply"}
+    assert kwargs["parallel_tool_calls"] is False
+
+
+@pytest.mark.parametrize(
+    ("reason", "finish_reason"),
+    [
+        ("max_output_tokens", "length"),
+        ("content_filter", "content_filter"),
+    ],
+)
+async def test_official_openai_maps_incomplete_status(
+    monkeypatch: pytest.MonkeyPatch,
+    reason: str,
+    finish_reason: str,
+) -> None:
+    monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
+    monkeypatch.delenv("OPENAI_API_BASE", raising=False)
+    fake = _FakeLiteLLM(
+        responses_response=_responses_response(
+            status="incomplete",
+            incomplete_reason=reason,
+        )
+    )
+    _install(monkeypatch, fake)
+    bridge = LiteLLMBridge(model="openai/gpt-test")
+
+    async with _client(bridge) as client:
+        response = await client.post(_url(), json=_body(), headers=_auth())
+
+    assert response.status_code == 200
+    assert response.json()["choices"][0]["finish_reason"] == finish_reason
+
+
+@pytest.mark.parametrize(
+    ("status", "incomplete_reason", "error", "expected_detail"),
+    [
+        (
+            "failed",
+            None,
+            {"code": "invalid_prompt", "message": "Prompt rejected."},
+            "invalid_prompt: Prompt rejected.",
+        ),
+        ("cancelled", None, None, "unsuccessful status 'cancelled'"),
+        ("in_progress", None, None, "unsuccessful status 'in_progress'"),
+        ("queued", None, None, "unsuccessful status 'queued'"),
+        ("incomplete", "future_reason", None, "unknown reason 'future_reason'"),
+    ],
+)
+async def test_official_openai_rejects_unsuccessful_status(
+    monkeypatch: pytest.MonkeyPatch,
+    status: str,
+    incomplete_reason: str | None,
+    error: dict[str, Any] | None,
+    expected_detail: str,
+) -> None:
+    monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
+    monkeypatch.delenv("OPENAI_API_BASE", raising=False)
+    fake = _FakeLiteLLM(
+        responses_response=_responses_response(
+            status=status,
+            incomplete_reason=incomplete_reason,
+            error=error,
+        )
+    )
+    _install(monkeypatch, fake)
+    bridge = LiteLLMBridge(model="openai/gpt-test")
+
+    async with _client(bridge) as client:
+        response = await client.post(_url(), json=_body(), headers=_auth())
+
+    assert response.status_code == 502
+    assert expected_detail in response.json()["detail"]
 
 
 async def test_official_openai_preserves_refusal(

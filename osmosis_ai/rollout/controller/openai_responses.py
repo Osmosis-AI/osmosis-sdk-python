@@ -146,6 +146,19 @@ def _convert_tools(tools: Any) -> list[Any] | None:
     return converted
 
 
+def _convert_tool_choice(tool_choice: Any) -> Any:
+    if (
+        isinstance(tool_choice, dict)
+        and tool_choice.get("type") == "function"
+        and isinstance(tool_choice.get("function"), dict)
+    ):
+        return {
+            "type": "function",
+            "name": tool_choice["function"].get("name", ""),
+        }
+    return tool_choice
+
+
 def build_responses_kwargs(
     body: dict[str, Any], *, model: str, api_key: str | None
 ) -> dict[str, Any]:
@@ -156,11 +169,15 @@ def build_responses_kwargs(
     }
     if api_key:
         kwargs["api_key"] = api_key
-    if "max_tokens" in body:
+    if "max_completion_tokens" in body:
+        kwargs["max_output_tokens"] = body["max_completion_tokens"]
+    elif "max_tokens" in body:
         kwargs["max_output_tokens"] = body["max_tokens"]
-    for key in ("temperature", "top_p"):
+    for key in ("temperature", "top_p", "parallel_tool_calls"):
         if key in body:
             kwargs[key] = body[key]
+    if "tool_choice" in body:
+        kwargs["tool_choice"] = _convert_tool_choice(body["tool_choice"])
     tools = _convert_tools(body.get("tools"))
     if tools is not None:
         kwargs["tools"] = tools
@@ -169,6 +186,25 @@ def build_responses_kwargs(
 
 def to_chat_response(response: Any) -> dict[str, Any]:
     """Adapt a native Responses result to a Chat Completions response."""
+    status = _field(response, "status")
+    incomplete_details = _field(response, "incomplete_details")
+    incomplete_reason = _field(incomplete_details, "reason")
+    if status == "incomplete":
+        if incomplete_reason not in {"max_output_tokens", "content_filter"}:
+            raise RuntimeError(
+                "OpenAI Responses API returned an incomplete response "
+                f"with unknown reason {incomplete_reason!r}"
+            )
+    elif status != "completed":
+        error = _field(response, "error")
+        error_code = _field(error, "code")
+        error_message = _field(error, "message")
+        detail = ": ".join(str(value) for value in (error_code, error_message) if value)
+        suffix = f": {detail}" if detail else ""
+        raise RuntimeError(
+            f"OpenAI Responses API returned unsuccessful status {status!r}{suffix}"
+        )
+
     text_parts: list[str] = []
     refusal_parts: list[str] = []
     tool_calls: list[dict[str, Any]] = []
@@ -204,12 +240,10 @@ def to_chat_response(response: Any) -> dict[str, Any]:
         message["refusal"] = "".join(refusal_parts)
 
     finish_reason = "tool_calls" if tool_calls else "stop"
-    incomplete_details = _field(response, "incomplete_details")
-    if (
-        _field(response, "status") == "incomplete"
-        and _field(incomplete_details, "reason") == "max_output_tokens"
-    ):
-        finish_reason = "length"
+    if status == "incomplete":
+        finish_reason = (
+            "length" if incomplete_reason == "max_output_tokens" else "content_filter"
+        )
 
     adapted: dict[str, Any] = {
         "id": _field(response, "id", "chatcmpl-eval"),
