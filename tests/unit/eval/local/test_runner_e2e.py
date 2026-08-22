@@ -561,16 +561,16 @@ async def test_a_5xx_admission_halts_instead_of_failing_the_rows(
 ) -> None:
     # A misbehaving or restarting server says nothing about the rows it refused,
     # so they must stay pending rather than earn a durable failed record.
-    _refuse_admission(monkeypatch, 503)
-    hooks = RecordingHooks()
-    summary = await harness.runner(hooks=hooks).run()
+    with monkeypatch.context() as admission_patch:
+        _refuse_admission(admission_patch, 503)
+        hooks = RecordingHooks()
+        summary = await harness.runner(hooks=hooks).run()
 
-    assert summary.failed == 0
-    assert harness.journal_lines() == []
-    assert summary.cancelled is True
-    assert any("stopping dispatch" in note for note in hooks.notes)
+        assert summary.failed == 0
+        assert harness.journal_lines() == []
+        assert summary.cancelled is True
+        assert any("stopping dispatch" in note for note in hooks.notes)
 
-    monkeypatch.undo()
     resumed = await harness.runner().run()
     assert resumed.succeeded == 4
 
