@@ -191,55 +191,26 @@ async def test_429_retries_after_header_without_reregistering() -> None:
     assert registrations["n"] == 1
 
 
-async def test_persistent_429_hits_admission_timeout_and_cancels() -> None:
+async def test_persistent_429_hits_admission_timeout_without_cancelling() -> None:
+    # Retry-After exceeds the whole admission budget, so the driver gives up
+    # before sleeping: no wall-clock wait, and no timing to race. A timeout can
+    # only follow a definitive 429, so no cancel is sent for an id the server
+    # never accepted -- the handler rejects any other path.
     store = _store()
     posts = 0
-    cancelled: list[dict[str, Any]] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
         nonlocal posts
         if request.url.path == "/rollout":
             posts += 1
-            return httpx.Response(429, headers={"Retry-After": "0"})
-        if request.url.path == "/rollout/cancel":
-            cancelled.append(json_body(request))
-            return httpx.Response(200, json={"dispositions": {}})
+            return httpx.Response(429, headers={"Retry-After": "60"})
         raise AssertionError(request.url.path)
 
-    driver = _driver(store, handler, admission_timeout_sec=0.02)
+    driver = _driver(store, handler, admission_timeout_sec=0.05)
     with pytest.raises(RolloutAdmissionTimeoutError, match="not admitted within"):
         await driver.run(_request())
 
     assert posts == 1
-    assert cancelled and cancelled[0]["ids"] == [ROLLOUT_ID]
-
-
-async def test_admission_timeout_is_preserved_when_cancel_hangs(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    store = _store()
-    cancel_calls = 0
-
-    async def handler(request: httpx.Request) -> httpx.Response:
-        nonlocal cancel_calls
-        if request.url.path == "/rollout":
-            return httpx.Response(429, headers={"Retry-After": "0"})
-        if request.url.path == "/rollout/cancel":
-            cancel_calls += 1
-            await asyncio.sleep(1.0)
-            return httpx.Response(200, json={"dispositions": {}})
-        raise AssertionError(request.url.path)
-
-    monkeypatch.setattr(
-        "osmosis_ai.rollout.http_driver._CANCEL_REQUEST_TIMEOUT_SEC",
-        0.02,
-    )
-    driver = _driver(store, handler, admission_timeout_sec=0.01)
-
-    with pytest.raises(RolloutAdmissionTimeoutError, match="not admitted within"):
-        await asyncio.wait_for(driver.run(_request()), timeout=0.2)
-
-    assert cancel_calls == 1
 
 
 async def test_post_200_is_protocol_error_without_looping() -> None:

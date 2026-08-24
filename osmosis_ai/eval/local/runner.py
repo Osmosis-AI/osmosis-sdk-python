@@ -796,6 +796,7 @@ class LocalEvalRunner:
                 base_url = await self._start_rollout_server(
                     secrets=secrets, client=client
                 )
+                concurrency = await self._resolve_concurrency(client, base_url)
                 item_deadline = self._callback_deadline()
                 driver = HttpRolloutDriver(
                     rollout_base_url=base_url,
@@ -806,10 +807,13 @@ class LocalEvalRunner:
                     chat_api_key=bridge_token,
                     controller_api_key=controller_token,
                     http_client=client,
-                    admission_timeout_sec=item_deadline,
+                    # Admission waits are queue waits: an item may legitimately
+                    # sit behind every other in-flight item, so its budget is
+                    # one item deadline per worker. Beyond that the server is
+                    # wedged, not busy, and the run halts with work pending.
+                    admission_timeout_sec=item_deadline * concurrency,
                     callback_timeout_sec=item_deadline,
                 )
-                concurrency = await self._resolve_concurrency(client, base_url)
                 self._stage(
                     "schedule",
                     f"running {len(pending)} work items, up to {concurrency} in flight",
@@ -1380,6 +1384,10 @@ class LocalEvalRunner:
                 env=env,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.STDOUT,
+                # Known limitation: as its own session leader the server
+                # survives a SIGKILLed supervisor, and no pgid is recorded for
+                # a later invocation to reap -- resume starts a fresh server on
+                # a fresh port instead.
                 start_new_session=True,
             )
             self._child = child

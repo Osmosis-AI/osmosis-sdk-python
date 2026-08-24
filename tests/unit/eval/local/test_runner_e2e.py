@@ -574,6 +574,36 @@ async def test_a_5xx_admission_halts_instead_of_failing_the_rows(
     assert resumed.succeeded == 4
 
 
+async def test_an_admission_timeout_halts_and_the_rows_resume(
+    harness: RunnerHarness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Backpressure that outlives the admission budget means the server is
+    # wedged: rows stay pending rather than earning terminal records, and a
+    # later invocation picks them up.
+    from osmosis_ai.rollout.http_driver import (
+        HttpRolloutDriver,
+        RolloutAdmissionTimeoutError,
+    )
+
+    async def backpressured(self: Any, init: Any) -> None:
+        raise RolloutAdmissionTimeoutError(
+            "rollout was not admitted within 1.0 seconds"
+        )
+
+    monkeypatch.setattr(HttpRolloutDriver, "_admit", backpressured)
+    hooks = RecordingHooks()
+    summary = await harness.runner(hooks=hooks).run()
+
+    assert summary.failed == 0
+    assert harness.journal_lines() == []
+    assert summary.cancelled is True
+    assert any("stopping dispatch" in note for note in hooks.notes)
+
+    monkeypatch.undo()
+    resumed = await harness.runner().run()
+    assert resumed.succeeded == 4
+
+
 async def test_a_4xx_admission_is_a_terminal_row_failure(
     harness: RunnerHarness, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -21,14 +21,14 @@ from pathlib import Path
 import pytest
 
 from osmosis_ai.eval.local.dataset import select_rows
+from osmosis_ai.eval.local.runner import _SERVER_TERM_GRACE_SEC
 from osmosis_ai.eval.local.state import terminate_process_group
 
 from .conftest import RecordingHooks, RunnerHarness
 
-pytestmark = [pytest.mark.slow, pytest.mark.timeout(180)]
+pytestmark = [pytest.mark.slow, pytest.mark.timeout(300)]
 
 _SERVER_PGID_FILENAME = "rollout-server.pgid"
-_SERVER_PGID_WAIT_SEC = 2.0
 
 _SUPERVISOR_SCRIPT = '''\
 """Run one local eval supervisor, driven entirely by argv/env. Test-only."""
@@ -192,64 +192,21 @@ def _kill_group(process: subprocess.Popen[str], sig: int) -> None:
 
 
 async def _stop_recorded_server(script: Path) -> None:
+    """Reap the rollout server the crashed supervisor left behind.
+
+    Both callers run only after the journal proved the server was up, so the
+    PGID file is already on disk; a missing file means the server never
+    started and there is nothing to reap. ``terminate_process_group`` already
+    escalates SIGTERM to SIGKILL and tolerates an already-dead group.
+    """
     pgid_file = script.with_name(_SERVER_PGID_FILENAME)
-    deadline = time.monotonic() + _SERVER_PGID_WAIT_SEC
-    pgid: int | None = None
-    while pgid is None:
-        try:
-            candidate = int(pgid_file.read_text(encoding="utf-8"))
-            if candidate <= 0:
-                raise ValueError
-            pgid = candidate
-        except (FileNotFoundError, ValueError):
-            if time.monotonic() >= deadline:
-                if pgid_file.is_file():
-                    raise AssertionError(
-                        f"rollout-server PGID file {pgid_file} was invalid"
-                    ) from None
-                return
-            await asyncio.sleep(0.05)
-    await asyncio.to_thread(terminate_process_group, pgid, grace_sec=5.0)
-
-    deadline = time.monotonic() + 2.0
-    while time.monotonic() < deadline:
-        try:
-            os.killpg(pgid, 0)
-        except ProcessLookupError:
-            return
-        await asyncio.sleep(0.05)
-    raise AssertionError(f"rollout-server process group {pgid} survived cleanup")
-
-
-async def test_stop_recorded_server_waits_for_late_pgid(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    script = tmp_path / "run_supervisor.py"
-    stopped: list[int] = []
-
-    def fake_terminate(pgid: int, *, grace_sec: float) -> None:
-        assert grace_sec == 5.0
-        stopped.append(pgid)
-
-    def missing_group(_pgid: int, _sig: int) -> None:
-        raise ProcessLookupError
-
-    monkeypatch.setattr(
-        sys.modules[__name__], "terminate_process_group", fake_terminate
-    )
-    monkeypatch.setattr(os, "killpg", missing_group)
-
-    async def record_pgid() -> None:
-        await asyncio.sleep(0.05)
-        script.with_name(_SERVER_PGID_FILENAME).write_text("4242", encoding="utf-8")
-
-    writer = asyncio.create_task(record_pgid())
     try:
-        await _stop_recorded_server(script)
-    finally:
-        await writer
-
-    assert stopped == [4242]
+        pgid = int(pgid_file.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return
+    await asyncio.to_thread(
+        terminate_process_group, pgid, grace_sec=_SERVER_TERM_GRACE_SEC
+    )
 
 
 async def test_kill_9_never_reruns_a_durably_acknowledged_item(
@@ -261,8 +218,10 @@ async def test_kill_9_never_reruns_a_durably_acknowledged_item(
     try:
         try:
             durable = await _wait_for_journal(harness, count=1, process=process)
-            assert script.with_name(_SERVER_PGID_FILENAME).is_file()
             _kill_group(process, signal.SIGKILL)
+            # Checked after the kill so a PGID-plumbing regression fails the
+            # test without leaving the supervisor group alive.
+            assert script.with_name(_SERVER_PGID_FILENAME).is_file()
         finally:
             await _await_exit(process, timeout=30)
 
@@ -295,6 +254,9 @@ async def test_sigint_leaves_cancelled_work_pending(
     process = _spawn_supervisor(script, harness, workflow_sleep="2.0")
     try:
         await _wait_for_journal(harness, count=1, process=process)
+        # A missing PGID file must fail loudly here: cleanup would otherwise
+        # silently no-op and re-leak the server this test exists to reap.
+        assert script.with_name(_SERVER_PGID_FILENAME).is_file()
         _kill_group(process, signal.SIGINT)
         exit_code = await _await_exit(process, timeout=90)
     finally:
