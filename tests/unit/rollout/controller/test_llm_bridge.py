@@ -31,6 +31,27 @@ class InternalServerError(Exception):
     pass
 
 
+class BadRequestError(Exception):
+    def __init__(
+        self,
+        *,
+        param: str,
+        message: str = "Unsupported parameter",
+        error_type: str = "invalid_request_error",
+    ) -> None:
+        super().__init__(message)
+        self.status_code = 400
+        self.llm_provider = "openai"
+        self.type = error_type
+        self.param = param
+        self.body = {
+            "message": message,
+            "type": error_type,
+            "param": param,
+            "code": None,
+        }
+
+
 def _response(
     content: str = "hello",
     *,
@@ -88,6 +109,8 @@ def _responses_response(
 class _FakeLiteLLM:
     """Duck-typed litellm module: records calls, returns or raises."""
 
+    BadRequestError = BadRequestError
+
     def __init__(
         self,
         *,
@@ -95,6 +118,7 @@ class _FakeLiteLLM:
         responses_response: dict[str, Any] | None = None,
         completion_error: Exception | None = None,
         responses_error: Exception | None = None,
+        responses_errors: list[Exception] | None = None,
         provider_error: Exception | None = None,
         unsupported_openai_params: set[str] | None = None,
     ) -> None:
@@ -107,6 +131,7 @@ class _FakeLiteLLM:
         )
         self._completion_error = completion_error
         self._responses_error = responses_error
+        self._responses_errors = list(responses_errors or [])
         self._provider_error = provider_error
         self._unsupported_openai_params = unsupported_openai_params or set()
         self.completion_kwargs: list[dict[str, Any]] = []
@@ -127,6 +152,8 @@ class _FakeLiteLLM:
 
     async def aresponses(self, **kwargs: Any) -> dict[str, Any]:
         self.responses_kwargs.append(kwargs)
+        if self._responses_errors:
+            raise self._responses_errors.pop(0)
         if self._responses_error is not None:
             raise self._responses_error
         return self._responses_response
@@ -469,6 +496,69 @@ async def test_official_openai_drops_unsupported_sampling_params(
     (kwargs,) = fake.responses_kwargs
     assert kwargs["temperature"] == 1.0
     assert "top_p" not in kwargs
+
+
+async def test_official_openai_recovers_from_stale_sampling_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
+    monkeypatch.delenv("OPENAI_API_BASE", raising=False)
+    fake = _FakeLiteLLM(
+        responses_errors=[
+            BadRequestError(
+                param="top_p",
+                message=(
+                    "Unsupported parameter: 'top_p' is not supported with this model."
+                ),
+            )
+        ]
+    )
+    _install(monkeypatch, fake)
+    bridge = LiteLLMBridge(model="openai/gpt-5.6-luna")
+
+    async with _client(bridge) as client:
+        recovered = await client.post(
+            _url(),
+            json=_body(temperature=1.0, top_p=0.9),
+            headers=_auth(),
+        )
+        cached = await client.post(
+            _url(),
+            json=_body(temperature=1.0, top_p=0.9),
+            headers=_auth(),
+        )
+
+    assert recovered.status_code == 200
+    assert cached.status_code == 200
+    first, retry, later = fake.responses_kwargs
+    assert first["top_p"] == 0.9
+    assert "top_p" not in retry
+    assert "top_p" not in later
+    assert retry["temperature"] == later["temperature"] == 1.0
+
+
+async def test_official_openai_does_not_retry_other_bad_requests(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
+    monkeypatch.delenv("OPENAI_API_BASE", raising=False)
+    fake = _FakeLiteLLM(
+        responses_error=BadRequestError(
+            param="top_p",
+            message="Invalid value for 'top_p': expected a number between 0 and 1.",
+        )
+    )
+    _install(monkeypatch, fake)
+
+    async with _client(LiteLLMBridge(model="openai/gpt-test")) as client:
+        response = await client.post(
+            _url(),
+            json=_body(top_p=2.0),
+            headers=_auth(),
+        )
+
+    assert response.status_code == 502
+    assert len(fake.responses_kwargs) == 1
 
 
 async def test_official_openai_converts_chat_content_blocks(

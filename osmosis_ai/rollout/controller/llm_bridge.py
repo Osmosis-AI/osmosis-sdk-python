@@ -46,7 +46,8 @@ from osmosis_ai.rollout.utils.identifiers import is_single_path_segment
 logger: logging.Logger = logging.getLogger(__name__)
 
 # Request fields forwarded to litellm; everything else the client sends is
-# dropped (litellm's drop_params handles provider-side incompatibilities).
+# dropped. LiteLLM handles known provider incompatibilities, while the Responses
+# path below learns from a provider rejection when its model metadata is stale.
 _LITELLM_CONSUMED_FIELDS = frozenset(
     {"messages", "temperature", "top_p", "max_tokens", "tools"}
 )
@@ -88,6 +89,31 @@ def _getattr_or_key(obj: Any, name: str, default: Any = None) -> Any:
     if isinstance(obj, dict):
         return obj.get(name, default)
     return getattr(obj, name, default)
+
+
+def _unsupported_openai_sampling_param(exc: Exception, *, litellm: Any) -> str | None:
+    """Return a rejected sampling parameter from a structured OpenAI 400."""
+    bad_request_error = getattr(litellm, "BadRequestError", None)
+    if not isinstance(bad_request_error, type) or not isinstance(
+        exc, bad_request_error
+    ):
+        return None
+    if (
+        getattr(exc, "status_code", None) != 400
+        or getattr(exc, "llm_provider", None) != "openai"
+        or getattr(exc, "type", None) != "invalid_request_error"
+    ):
+        return None
+
+    message = _getattr_or_key(getattr(exc, "body", None), "message", "")
+    param = getattr(exc, "param", None)
+    if (
+        not isinstance(message, str)
+        or "unsupported parameter" not in message.lower()
+        or param not in _OPENAI_SAMPLING_FIELDS
+    ):
+        return None
+    return param
 
 
 def _usage_payload(response: Any) -> dict[str, int] | None:
@@ -221,6 +247,7 @@ class LiteLLMBridge:
         self._api_key = api_key
         self._api_base = api_base
         self._tokens: dict[str, int] = {}
+        self._rejected_openai_sampling_params: set[str] = set()
 
     def _build_kwargs(self, body: dict[str, Any]) -> dict[str, Any]:
         kwargs: dict[str, Any] = {
@@ -260,7 +287,9 @@ class LiteLLMBridge:
             drop_params=True,
             **requested,
         )
-        unsupported = requested.keys() - supported.keys()
+        unsupported = (requested.keys() - supported.keys()) | (
+            requested.keys() & self._rejected_openai_sampling_params
+        )
         if not unsupported:
             return body
 
@@ -276,8 +305,23 @@ class LiteLLMBridge:
                 model=self.model,
                 api_key=self._api_key,
             )
-            response = await litellm.aresponses(**kwargs)
-            return to_chat_response(response)
+            # Each retry removes one of the two whitelisted sampling fields.
+            # Repeated or unrelated bad requests are re-raised immediately.
+            while True:
+                try:
+                    response = await litellm.aresponses(**kwargs)
+                    return to_chat_response(response)
+                except Exception as exc:
+                    param = _unsupported_openai_sampling_param(exc, litellm=litellm)
+                    if param is None or param not in kwargs:
+                        raise
+                    self._rejected_openai_sampling_params.add(param)
+                    kwargs.pop(param)
+                    logger.info(
+                        "Retrying model %s without unsupported parameter %s",
+                        self.model,
+                        param,
+                    )
         return await litellm.acompletion(**self._build_kwargs(body))
 
     async def preflight_check(self) -> None:
