@@ -860,6 +860,31 @@ async def test_preflight_raises_on_fatal_and_tolerates_rate_limit(
     await bridge.preflight_check()
 
 
+async def test_preflight_probes_official_openai_through_responses(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
+    monkeypatch.delenv("OPENAI_API_BASE", raising=False)
+    fake = _FakeLiteLLM()
+    _install(monkeypatch, fake)
+    await LiteLLMBridge(model="openai/gpt-test").preflight_check()
+    (kwargs,) = fake.responses_kwargs
+    assert fake.completion_kwargs == []
+    assert kwargs["max_output_tokens"] == 256
+
+    # The preflight error contract holds on the Responses path too: fatal
+    # config errors raise, rate limits and flaky upstreams are tolerated.
+    _install(monkeypatch, _FakeLiteLLM(responses_error=AuthenticationError("bad key")))
+    with pytest.raises(AuthenticationError):
+        await LiteLLMBridge(model="openai/gpt-test").preflight_check()
+
+    _install(monkeypatch, _FakeLiteLLM(responses_error=RateLimitError("slow down")))
+    await LiteLLMBridge(model="openai/gpt-test").preflight_check()
+
+    _install(monkeypatch, _FakeLiteLLM(responses_error=InternalServerError("flaky")))
+    await LiteLLMBridge(model="openai/gpt-test").preflight_check()
+
+
 async def test_bridge_router_requires_non_empty_token() -> None:
     with pytest.raises(ValueError, match="non-empty"):
         create_bridge_router(
