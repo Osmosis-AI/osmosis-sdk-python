@@ -50,6 +50,7 @@ logger: logging.Logger = logging.getLogger(__name__)
 _LITELLM_CONSUMED_FIELDS = frozenset(
     {"messages", "temperature", "top_p", "max_tokens", "tools"}
 )
+_OPENAI_SAMPLING_FIELDS = frozenset({"temperature", "top_p"})
 
 # The preflight probes once, so a 4xx client error there is a persistent
 # config/account problem, not a per-row fluke. Mid-run errors are not
@@ -246,10 +247,34 @@ class LiteLLMBridge:
             or getattr(litellm, "api_base", None)
         )
 
+    def _filter_responses_sampling_params(
+        self, body: dict[str, Any], *, litellm: Any
+    ) -> dict[str, Any]:
+        requested = {key: body[key] for key in _OPENAI_SAMPLING_FIELDS if key in body}
+        if not requested:
+            return body
+
+        supported = litellm.get_optional_params(
+            model=self.model,
+            custom_llm_provider="openai",
+            drop_params=True,
+            **requested,
+        )
+        unsupported = requested.keys() - supported.keys()
+        if not unsupported:
+            return body
+
+        filtered = dict(body)
+        for key in unsupported:
+            filtered.pop(key, None)
+        return filtered
+
     async def _provider_complete(self, body: dict[str, Any], *, litellm: Any) -> Any:
         if self._uses_responses_api(litellm):
             kwargs = build_responses_kwargs(
-                body, model=self.model, api_key=self._api_key
+                self._filter_responses_sampling_params(body, litellm=litellm),
+                model=self.model,
+                api_key=self._api_key,
             )
             response = await litellm.aresponses(**kwargs)
             return to_chat_response(response)

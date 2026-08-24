@@ -96,6 +96,7 @@ class _FakeLiteLLM:
         completion_error: Exception | None = None,
         responses_error: Exception | None = None,
         provider_error: Exception | None = None,
+        unsupported_openai_params: set[str] | None = None,
     ) -> None:
         self.suppress_debug_info = False
         self._response = response if response is not None else _response()
@@ -107,8 +108,10 @@ class _FakeLiteLLM:
         self._completion_error = completion_error
         self._responses_error = responses_error
         self._provider_error = provider_error
+        self._unsupported_openai_params = unsupported_openai_params or set()
         self.completion_kwargs: list[dict[str, Any]] = []
         self.responses_kwargs: list[dict[str, Any]] = []
+        self.optional_param_calls: list[dict[str, Any]] = []
         self.provider_calls: list[dict[str, Any]] = []
 
     def get_llm_provider(self, *, model: str, api_base: str | None = None) -> None:
@@ -127,6 +130,20 @@ class _FakeLiteLLM:
         if self._responses_error is not None:
             raise self._responses_error
         return self._responses_response
+
+    def get_optional_params(self, **kwargs: Any) -> dict[str, Any]:
+        self.optional_param_calls.append(kwargs)
+        return {
+            key: value
+            for key, value in kwargs.items()
+            if key
+            not in {
+                "model",
+                "custom_llm_provider",
+                "drop_params",
+                *self._unsupported_openai_params,
+            }
+        }
 
 
 def _install(monkeypatch: pytest.MonkeyPatch, fake: _FakeLiteLLM) -> None:
@@ -421,6 +438,37 @@ async def test_official_openai_uses_responses_api_with_tools(
         "total_tokens": 5,
     }
     assert bridge.collect_tokens(ROLLOUT_ID) == 5
+
+
+async def test_official_openai_drops_unsupported_sampling_params(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
+    monkeypatch.delenv("OPENAI_API_BASE", raising=False)
+    fake = _FakeLiteLLM(unsupported_openai_params={"top_p"})
+    _install(monkeypatch, fake)
+
+    bridge = LiteLLMBridge(model="openai/gpt-5-mini")
+    async with _client(bridge) as client:
+        resp = await client.post(
+            _url(),
+            json=_body(temperature=1.0, top_p=0.9),
+            headers=_auth(),
+        )
+
+    assert resp.status_code == 200
+    assert fake.optional_param_calls == [
+        {
+            "model": "openai/gpt-5-mini",
+            "custom_llm_provider": "openai",
+            "drop_params": True,
+            "temperature": 1.0,
+            "top_p": 0.9,
+        }
+    ]
+    (kwargs,) = fake.responses_kwargs
+    assert kwargs["temperature"] == 1.0
+    assert "top_p" not in kwargs
 
 
 async def test_official_openai_converts_chat_content_blocks(
