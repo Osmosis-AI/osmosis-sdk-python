@@ -21,10 +21,14 @@ from pathlib import Path
 import pytest
 
 from osmosis_ai.eval.local.dataset import select_rows
+from osmosis_ai.eval.local.runner import _SERVER_TERM_GRACE_SEC
+from osmosis_ai.eval.local.state import terminate_process_group
 
 from .conftest import RecordingHooks, RunnerHarness
 
-pytestmark = pytest.mark.slow
+pytestmark = [pytest.mark.slow, pytest.mark.timeout(300)]
+
+_SERVER_PGID_FILENAME = "rollout-server.pgid"
 
 _SUPERVISOR_SCRIPT = '''\
 """Run one local eval supervisor, driven entirely by argv/env. Test-only."""
@@ -109,6 +113,7 @@ def _spawn_supervisor(
     # the spawned supervisor resolves the same upstream the in-process one does.
     env = {
         **os.environ,
+        "OSMOSIS_TEST_SERVER_PGID_FILE": str(script.with_name(_SERVER_PGID_FILENAME)),
         "OSMOSIS_TEST_WORKFLOW_SLEEP": workflow_sleep,
         "PYTHONUNBUFFERED": "1",
     }
@@ -186,6 +191,24 @@ def _kill_group(process: subprocess.Popen[str], sig: int) -> None:
     os.killpg(os.getpgid(process.pid), sig)
 
 
+async def _stop_recorded_server(script: Path) -> None:
+    """Reap the rollout server the crashed supervisor left behind.
+
+    Both callers run only after the journal proved the server was up, so the
+    PGID file is already on disk; a missing file means the server never
+    started and there is nothing to reap. ``terminate_process_group`` already
+    escalates SIGTERM to SIGKILL and tolerates an already-dead group.
+    """
+    pgid_file = script.with_name(_SERVER_PGID_FILENAME)
+    try:
+        pgid = int(pgid_file.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return
+    await asyncio.to_thread(
+        terminate_process_group, pgid, grace_sec=_SERVER_TERM_GRACE_SEC
+    )
+
+
 async def test_kill_9_never_reruns_a_durably_acknowledged_item(
     tmp_path: Path, harness: RunnerHarness
 ) -> None:
@@ -193,29 +216,35 @@ async def test_kill_9_never_reruns_a_durably_acknowledged_item(
     # One worker and a slow workflow, so exactly the first item lands durably.
     process = _spawn_supervisor(script, harness, workflow_sleep="1.5")
     try:
-        durable = await _wait_for_journal(harness, count=1, process=process)
-        _kill_group(process, signal.SIGKILL)
+        try:
+            durable = await _wait_for_journal(harness, count=1, process=process)
+            _kill_group(process, signal.SIGKILL)
+            # Checked after the kill so a PGID-plumbing regression fails the
+            # test without leaving the supervisor group alive.
+            assert script.with_name(_SERVER_PGID_FILENAME).is_file()
+        finally:
+            await _await_exit(process, timeout=30)
+
+        survivors = _journal_records(harness)
+        assert len(survivors) >= 1
+        committed = {(r["row_index"], r["run_index"]) for r in survivors}
+        committed_ids = {r["rollout_id"] for r in survivors}
+        assert (durable[0]["row_index"], durable[0]["run_index"]) in committed
+
+        # Resume on a fresh ephemeral port without depending on the server that
+        # survived the supervisor crash.
+        hooks = RecordingHooks()
+        summary = await harness.runner(hooks=hooks).run()
+
+        assert summary.dispatched == 4 - len(survivors)
+        assert summary.resumed == len(survivors)
+        assert summary.succeeded + summary.failed + summary.skipped == 4
+        # Every previously committed attempt keeps its original rollout id: it was
+        # never re-executed.
+        final_ids = {row["rollout_id"] for row in harness.index_rows()}
+        assert committed_ids <= final_ids
     finally:
-        await _await_exit(process, timeout=30)
-
-    survivors = _journal_records(harness)
-    assert len(survivors) >= 1
-    committed = {(r["row_index"], r["run_index"]) for r in survivors}
-    committed_ids = {r["rollout_id"] for r in survivors}
-    assert (durable[0]["row_index"], durable[0]["run_index"]) in committed
-
-    # Resume in-process, on a fresh ephemeral port: the killed supervisor left
-    # its rollout server alive, and the resume must not depend on that corpse.
-    hooks = RecordingHooks()
-    summary = await harness.runner(hooks=hooks).run()
-
-    assert summary.dispatched == 4 - len(survivors)
-    assert summary.resumed == len(survivors)
-    assert summary.succeeded + summary.failed + summary.skipped == 4
-    # Every previously committed attempt keeps its original rollout id: it was
-    # never re-executed.
-    final_ids = {row["rollout_id"] for row in harness.index_rows()}
-    assert committed_ids <= final_ids
+        await _stop_recorded_server(script)
 
 
 async def test_sigint_leaves_cancelled_work_pending(
@@ -225,12 +254,16 @@ async def test_sigint_leaves_cancelled_work_pending(
     process = _spawn_supervisor(script, harness, workflow_sleep="2.0")
     try:
         await _wait_for_journal(harness, count=1, process=process)
+        # A missing PGID file must fail loudly here: cleanup would otherwise
+        # silently no-op and re-leak the server this test exists to reap.
+        assert script.with_name(_SERVER_PGID_FILENAME).is_file()
         _kill_group(process, signal.SIGINT)
         exit_code = await _await_exit(process, timeout=90)
     finally:
         if process.poll() is None:
             _kill_group(process, signal.SIGKILL)
             await _await_exit(process, timeout=30)
+        await _stop_recorded_server(script)
 
     assert exit_code in (0, 130)
     committed = _journal_records(harness)

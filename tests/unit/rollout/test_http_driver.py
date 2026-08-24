@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
+from collections.abc import AsyncIterator
 from typing import Any
 from urllib.parse import quote
 
@@ -10,8 +12,12 @@ import httpx
 import pytest
 
 from osmosis_ai.rollout.controller.store import CallbackStore, TerminalCallbackResult
-from osmosis_ai.rollout.driver import RolloutRunRequest
-from osmosis_ai.rollout.http_driver import HttpRolloutDriver, RolloutProtocolError
+from osmosis_ai.rollout.driver import RolloutOutcome, RolloutRunRequest
+from osmosis_ai.rollout.http_driver import (
+    HttpRolloutDriver,
+    RolloutAdmissionTimeoutError,
+    RolloutProtocolError,
+)
 from osmosis_ai.rollout.types import (
     GraderCompleteRequest,
     GraderStatus,
@@ -22,6 +28,7 @@ from osmosis_ai.rollout.types import (
 
 ROLLOUT_ID = "f" * 32
 CHAT_BASE = "http://127.0.0.1:1/v1/rollouts"
+TEST_TIMEOUT_SEC = 2.0
 
 
 async def _commit(_result: TerminalCallbackResult) -> None:
@@ -62,6 +69,9 @@ def _driver(
     store: CallbackStore,
     handler: Any,
     *,
+    # Mirrors the class default so most tests cover the unbounded path;
+    # timeout-specific tests opt in explicitly.
+    admission_timeout_sec: float | None = None,
     callback_timeout_sec: float | None = 5.0,
     chat_api_key: str | None = "bridge-token",
 ) -> HttpRolloutDriver:
@@ -82,8 +92,24 @@ def _driver(
         chat_api_key=chat_api_key,
         controller_api_key="controller-key",
         http_client=http,
+        admission_timeout_sec=admission_timeout_sec,
         callback_timeout_sec=callback_timeout_sec,
     )
+
+
+@contextlib.asynccontextmanager
+async def _running(
+    driver: HttpRolloutDriver,
+) -> AsyncIterator[asyncio.Task[RolloutOutcome]]:
+    """Run the driver as a task that cannot outlive a failing test."""
+    task = asyncio.create_task(driver.run(_request()))
+    try:
+        yield task
+    finally:
+        if not task.done():
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
 
 
 async def test_202_admission_posts_init_and_returns_grader_outcome() -> None:
@@ -99,10 +125,10 @@ async def test_202_admission_posts_init_and_returns_grader_outcome() -> None:
         raise AssertionError(f"unexpected {request.method} {request.url}")
 
     driver = _driver(store, handler)
-    run_task = asyncio.create_task(driver.run(_request()))
-    await admitted.wait()
-    await store.handle_grader(ROLLOUT_ID, _grader())
-    outcome = await run_task
+    async with _running(driver) as run_task:
+        await asyncio.wait_for(admitted.wait(), timeout=TEST_TIMEOUT_SEC)
+        await store.handle_grader(ROLLOUT_ID, _grader())
+        outcome = await asyncio.wait_for(run_task, timeout=TEST_TIMEOUT_SEC)
 
     assert outcome.status == RolloutStatus.SUCCESS
     assert outcome.sample is not None
@@ -141,10 +167,10 @@ async def test_absent_chat_api_key_is_sent_as_null() -> None:
         raise AssertionError(f"unexpected {request.method} {request.url}")
 
     driver = _driver(store, handler, chat_api_key=None)
-    run_task = asyncio.create_task(driver.run(_request()))
-    await admitted.wait()
-    await store.handle_grader(ROLLOUT_ID, _grader())
-    await run_task
+    async with _running(driver) as run_task:
+        await asyncio.wait_for(admitted.wait(), timeout=TEST_TIMEOUT_SEC)
+        await store.handle_grader(ROLLOUT_ID, _grader())
+        await asyncio.wait_for(run_task, timeout=TEST_TIMEOUT_SEC)
 
     assert posted[0]["llm_api_key"] is None
 
@@ -175,13 +201,35 @@ async def test_429_retries_after_header_without_reregistering() -> None:
         raise AssertionError(request.url.path)
 
     driver = _driver(store, handler)
-    run_task = asyncio.create_task(driver.run(_request()))
-    await admitted.wait()
-    await store.handle_grader(ROLLOUT_ID, _grader())
-    outcome = await run_task
+    async with _running(driver) as run_task:
+        await asyncio.wait_for(admitted.wait(), timeout=TEST_TIMEOUT_SEC)
+        await store.handle_grader(ROLLOUT_ID, _grader())
+        outcome = await asyncio.wait_for(run_task, timeout=TEST_TIMEOUT_SEC)
     assert outcome.status == RolloutStatus.SUCCESS
     assert posts == 2
     assert registrations["n"] == 1
+
+
+async def test_persistent_429_hits_admission_timeout_without_cancelling() -> None:
+    # Retry-After exceeds the whole admission budget, so the driver gives up
+    # before sleeping: no wall-clock wait, and no timing to race. A timeout can
+    # only follow a definitive 429, so no cancel is sent for an id the server
+    # never accepted -- the handler rejects any other path.
+    store = _store()
+    posts = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal posts
+        if request.url.path == "/rollout":
+            posts += 1
+            return httpx.Response(429, headers={"Retry-After": "60"})
+        raise AssertionError(request.url.path)
+
+    driver = _driver(store, handler, admission_timeout_sec=0.05)
+    with pytest.raises(RolloutAdmissionTimeoutError, match="not admitted within"):
+        await asyncio.wait_for(driver.run(_request()), timeout=TEST_TIMEOUT_SEC)
+
+    assert posts == 1
 
 
 async def test_post_200_is_protocol_error_without_looping() -> None:
@@ -303,11 +351,11 @@ async def test_task_cancellation_reraises_cancelled_error() -> None:
         raise AssertionError(request.url.path)
 
     driver = _driver(store, handler)
-    task = asyncio.create_task(driver.run(_request()))
-    await admitted.wait()
-    task.cancel()
-    with pytest.raises(asyncio.CancelledError):
-        await task
+    async with _running(driver) as task:
+        await asyncio.wait_for(admitted.wait(), timeout=TEST_TIMEOUT_SEC)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(task, timeout=TEST_TIMEOUT_SEC)
     assert cancelled and cancelled[0]["ids"] == [ROLLOUT_ID]
     late_completion = await store.handle_completion(
         ROLLOUT_ID,

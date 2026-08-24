@@ -67,7 +67,10 @@ jobs:
 
   pytest:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    # Must exceed the suite's normal wall clock plus at least one per-test
+    # timeout (pytest.ini: 120s; crash-resume module: 300s), so a hung test is
+    # reported by pytest-timeout instead of an opaque job cancellation.
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:

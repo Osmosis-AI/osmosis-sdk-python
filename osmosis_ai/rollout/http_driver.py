@@ -31,10 +31,15 @@ logger: logging.Logger = logging.getLogger(__name__)
 
 # Bounds on a server-dictated Retry-After. The floor keeps a server that
 # answers 429 with "0" from turning the admission loop into a busy spin; the
-# ceiling keeps an outsized header from parking a rollout for hours, since the
-# backpressure wait is uninterruptible.
+# ceiling keeps an outsized header from parking a rollout for hours when no
+# admission budget is configured.
 _RETRY_AFTER_FLOOR_SEC = 0.05
 _MAX_RETRY_AFTER_SEC = 60.0
+_CANCEL_REQUEST_TIMEOUT_SEC = 5.0
+
+
+class RolloutAdmissionTimeoutError(TimeoutError):
+    """The rollout server stayed backpressured beyond the admission budget."""
 
 
 class RolloutProtocolError(RuntimeError):
@@ -77,6 +82,7 @@ class HttpRolloutDriver(RolloutDriver):
         chat_api_key: str | None,
         controller_api_key: str,
         http_client: httpx.AsyncClient | None = None,
+        admission_timeout_sec: float | None = None,
         callback_timeout_sec: float | None = None,
     ) -> None:
         # An empty key would admit rollouts whose callbacks the listener then
@@ -92,6 +98,7 @@ class HttpRolloutDriver(RolloutDriver):
         self._controller_api_key = controller_api_key
         self._owns_http = http_client is None
         self._http = http_client or httpx.AsyncClient()
+        self._admission_timeout_sec = admission_timeout_sec
         self._callback_timeout_sec = callback_timeout_sec
 
     async def aclose(self) -> None:
@@ -137,6 +144,10 @@ class HttpRolloutDriver(RolloutDriver):
 
     async def _admit(self, init: RolloutInitRequest) -> None:
         payload = init.model_dump(mode="json")
+        loop = asyncio.get_running_loop()
+        deadline: float | None = None
+        if self._admission_timeout_sec is not None:
+            deadline = loop.time() + self._admission_timeout_sec
         while True:
             response = await self._http.post(
                 f"{self._rollout_base_url}/rollout",
@@ -145,7 +156,16 @@ class HttpRolloutDriver(RolloutDriver):
             if response.status_code == 202:
                 return
             if response.status_code == 429:
-                await asyncio.sleep(_retry_after_seconds(response))
+                delay = _retry_after_seconds(response)
+                # The budget is checked between attempts, so a timeout can only
+                # follow a definitive 429: the server holds nothing for this
+                # rollout and no cancel or tombstone is owed.
+                if deadline is not None and loop.time() + delay > deadline:
+                    raise RolloutAdmissionTimeoutError(
+                        f"rollout {init.rollout_id} was not admitted within "
+                        f"{self._admission_timeout_sec} seconds"
+                    )
+                await asyncio.sleep(delay)
                 continue
             raise RolloutProtocolError(
                 f"POST /rollout returned {response.status_code}; "
@@ -180,6 +200,7 @@ class HttpRolloutDriver(RolloutDriver):
             response = await self._http.post(
                 f"{self._rollout_base_url}/rollout/cancel",
                 json=request.model_dump(mode="json"),
+                timeout=_CANCEL_REQUEST_TIMEOUT_SEC,
             )
         except httpx.RequestError:
             logger.warning(
@@ -255,5 +276,6 @@ def _outcome_from_terminal(terminal: TerminalCallbackResult) -> RolloutOutcome:
 
 __all__ = [
     "HttpRolloutDriver",
+    "RolloutAdmissionTimeoutError",
     "RolloutProtocolError",
 ]
