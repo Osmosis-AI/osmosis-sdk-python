@@ -101,15 +101,18 @@ def _unsupported_openai_sampling_param(exc: Exception, *, litellm: Any) -> str |
     if (
         getattr(exc, "status_code", None) != 400
         or getattr(exc, "llm_provider", None) != "openai"
-        or getattr(exc, "type", None) != "invalid_request_error"
     ):
         return None
 
-    message = _getattr_or_key(getattr(exc, "body", None), "message", "")
-    param = getattr(exc, "param", None)
+    body = getattr(exc, "body", None)
+    error = _getattr_or_key(body, "error", body)
+    message = _getattr_or_key(error, "message", "")
+    error_type = getattr(exc, "type", None) or _getattr_or_key(error, "type")
+    param = getattr(exc, "param", None) or _getattr_or_key(error, "param")
     if (
         not isinstance(message, str)
         or "unsupported parameter" not in message.lower()
+        or error_type != "invalid_request_error"
         or param not in _OPENAI_SAMPLING_FIELDS
     ):
         return None

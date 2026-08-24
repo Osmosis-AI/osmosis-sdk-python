@@ -38,18 +38,20 @@ class BadRequestError(Exception):
         param: str,
         message: str = "Unsupported parameter",
         error_type: str = "invalid_request_error",
+        nested: bool = False,
     ) -> None:
         super().__init__(message)
         self.status_code = 400
         self.llm_provider = "openai"
-        self.type = error_type
-        self.param = param
-        self.body = {
+        details = {
             "message": message,
             "type": error_type,
             "param": param,
             "code": None,
         }
+        self.type = None if nested else error_type
+        self.param = None if nested else param
+        self.body = {"error": details} if nested else details
 
 
 def _response(
@@ -510,6 +512,7 @@ async def test_official_openai_recovers_from_stale_sampling_metadata(
                 message=(
                     "Unsupported parameter: 'top_p' is not supported with this model."
                 ),
+                nested=True,
             )
         ]
     )
