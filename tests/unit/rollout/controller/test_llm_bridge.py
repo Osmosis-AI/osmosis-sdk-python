@@ -644,6 +644,29 @@ async def test_official_openai_converts_chat_content_blocks(
     ]
 
 
+async def test_official_openai_replays_a_prior_refusal_turn(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
+    monkeypatch.delenv("OPENAI_API_BASE", raising=False)
+    fake = _FakeLiteLLM()
+    _install(monkeypatch, fake)
+    bridge = LiteLLMBridge(model="openai/gpt-test")
+    messages = [
+        {"role": "user", "content": "Do the thing."},
+        {"role": "assistant", "content": None, "refusal": "I cannot help with that."},
+        {"role": "user", "content": "Then do a safer thing."},
+    ]
+
+    await bridge.complete({"messages": messages}, rollout_id=ROLLOUT_ID)
+
+    (kwargs,) = fake.responses_kwargs
+    assert kwargs["input"][1] == {
+        "role": "assistant",
+        "content": [{"type": "refusal", "refusal": "I cannot help with that."}],
+    }
+
+
 async def test_official_openai_forwards_modern_chat_controls(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

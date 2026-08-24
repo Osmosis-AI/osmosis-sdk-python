@@ -100,9 +100,16 @@ def _convert_messages(messages: Any) -> list[Any]:
 
         tool_calls = message.get("tool_calls")
         content = message.get("content")
+        refusal = message.get("refusal") if role == "assistant" else None
         if content not in (None, ""):
             items.append(
                 {"role": role, "content": _convert_content(content, role=role)}
+            )
+        elif isinstance(refusal, str) and refusal:
+            # A refused turn has null content; dropping the refusal here would
+            # replay the conversation with an empty assistant message.
+            items.append(
+                {"role": role, "content": [{"type": "refusal", "refusal": refusal}]}
             )
         elif not tool_calls:
             items.append({"role": role, "content": ""})

@@ -9,6 +9,7 @@ import tomllib
 from collections.abc import Iterator
 from io import StringIO
 from pathlib import Path
+from shlex import quote
 from types import SimpleNamespace
 from typing import Any
 
@@ -412,7 +413,7 @@ def test_a_complete_run_reports_success_with_the_output_path(
     assert result.resource["dataset_source"] == "explicit"
     assert result.resource["output_path"].endswith("run-1")
     assert result.display_next_steps == [
-        f"Upload: osmosis eval upload {workspace / '.osmosis/evals/run-1'}"
+        f"Upload: osmosis eval upload {quote(str(workspace / '.osmosis/evals/run-1'))}"
     ]
 
 
@@ -505,7 +506,7 @@ def test_upload_failure_says_local_results_are_complete_and_gives_retry_command(
 
     assert f"Local evaluation results are complete at {run_dir}" in raised.value.message
     assert "local evaluation upload failed: offline" in raised.value.message
-    assert f"osmosis eval upload {run_dir}" in raised.value.message
+    assert f"osmosis eval upload {quote(str(run_dir))}" in raised.value.message
     assert "platform upload failed" not in raised.value.message
 
 
@@ -620,7 +621,7 @@ def test_upload_platform_error_keeps_auth_code_and_retry_context(
     assert raised.value.code == CLIErrorCode.AUTH_REQUIRED
     assert raised.value.details["status_code"] == 401
     assert f"Local evaluation results are complete at {run_dir}" in raised.value.message
-    assert f"osmosis eval upload {run_dir}" in raised.value.message
+    assert f"osmosis eval upload {quote(str(run_dir))}" in raised.value.message
 
 
 def test_an_incomplete_upload_run_reports_skipped_upload_and_resumes_with_upload(
@@ -799,7 +800,7 @@ def test_plain_output_prints_the_upload_command_after_a_complete_run(
     captured = capsys.readouterr()
     assert exit_code == 0, captured.err
     assert (
-        f"Upload: osmosis eval upload {workspace / '.osmosis/evals/run-1'}"
+        f"Upload: osmosis eval upload {quote(str(workspace / '.osmosis/evals/run-1'))}"
         in captured.out
     )
 

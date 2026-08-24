@@ -333,7 +333,13 @@ def build_run_inputs(
 
 
 def _available_generated_run_name(output_root: Path) -> str:
-    """Generate a cloud-style name that has no existing local run directory."""
+    """Generate a cloud-style name that has no existing local run directory.
+
+    The existence check races with concurrent invocations, but the per-name
+    run lock is acquired before any directory is written: if two processes
+    ever pick the same name, the second fails its ``RunLock`` with a clear
+    error instead of sharing state.
+    """
     for _ in range(100):
         candidate = generate_run_name()
         if not (output_root / candidate).exists():
