@@ -18,6 +18,7 @@ This file records changes to `osmosis-ai`. For earlier versions, see [GitHub Rel
 
 ### Fixed
 
+- Local eval runs no longer leak the rollout server when the supervisor dies without cleanup (`kill -9`, OOM, a crashed terminal): the runner records the server's process group with an ownership proof in the run directory's `server.json`, and the next invocation for the run terminates the orphan only after re-verifying its pid and start time — a recycled pid is never signalled ([#323](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/323)).
 - Bounded rollout admission backpressure in local eval runs and added an opt-in `admission_timeout_sec` to `HttpRolloutDriver`, which now raises `RolloutAdmissionTimeoutError` instead of waiting indefinitely on a wedged rollout server ([#322](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/322)).
 - Restored `osmosis_ai.packaging.build_bundle(deps=...)` for bundle-time dependency overrides while preserving projects that declare dependencies dynamically.
 - Prevented `--json` and `--plain` submits from prompting for missing secrets, surfaced all missing names in `INTERACTIVE_REQUIRED` details, redacted supplied secrets from platform errors without losing specialized error codes, and restored rich login presentation ([#304](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/304)).
