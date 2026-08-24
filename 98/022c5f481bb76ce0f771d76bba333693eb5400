@@ -1,0 +1,25 @@
+tests/unit/rollout/test_http_driver.py
+  s_346ba7efe627df::t_124b1cc7fe2614 6-7,15
+  s_346ba7efe627df::t_21bf6cccd301d2 72-74
+  s_346ba7efe627df::t_89dfc254e72b36 100-114
+  s_346ba7efe627df::t_733a5405ff52f9 170-173
+  s_346ba7efe627df::t_a02c90f6e4461a 204-207
+  s_346ba7efe627df::t_9b828733874e8e 128-131
+  s_346ba7efe627df::t_10064fdc2fe528 354-358
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "98022c5f481bb76ce0f771d76bba333693eb5400",
+  "prompts": {},
+  "sessions": {
+    "s_346ba7efe627df": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "cd2d5c07-e354-458c-afc9-92a94fddc427",
+        "model": "claude-fable-5"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}
