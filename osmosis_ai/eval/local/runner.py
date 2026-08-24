@@ -1568,8 +1568,11 @@ class LocalEvalRunner:
                 )
         with contextlib.suppress(Exception):
             await child.wait()
-        # ``wait`` returning means the group leader is gone (SIGKILL is the
-        # escalation floor), so the ownership record has nothing left to name.
+        # The group leader is gone (SIGKILL is the escalation floor). A
+        # descendant that outlives a leader which died on its own is not
+        # covered: with the leader dead the group can no longer be
+        # ownership-verified, so neither this shutdown nor a later reap may
+        # signal it -- the record is cleared rather than kept as a dead claim.
         self._clear_server_state()
         if self._child_reader is not None:
             self._child_reader.cancel()

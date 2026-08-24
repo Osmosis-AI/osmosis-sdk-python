@@ -632,7 +632,7 @@ class ServerProcessState:
         extra cleanup, so nothing about it may stop a run."""
         try:
             payload = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
+        except (OSError, json.JSONDecodeError, UnicodeDecodeError):
             return None
         if not isinstance(payload, dict):
             return None

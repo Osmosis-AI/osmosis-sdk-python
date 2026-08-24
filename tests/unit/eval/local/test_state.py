@@ -419,6 +419,12 @@ def test_server_state_read_tolerates_garbage(tmp_path: Path, content: str) -> No
     assert ServerProcessState.read(tmp_path / "missing.json") is None
 
 
+def test_server_state_read_tolerates_invalid_utf8(tmp_path: Path) -> None:
+    path = tmp_path / "server.json"
+    path.write_bytes(b'\xff\xfe{"pid": 12}')
+    assert ServerProcessState.read(path) is None
+
+
 def test_reap_of_a_missing_record_is_a_no_op(tmp_path: Path) -> None:
     assert reap_orphan_server(tmp_path / "server.json", grace_sec=0.5) is None
 
