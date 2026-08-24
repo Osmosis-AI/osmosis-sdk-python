@@ -619,6 +619,9 @@ def _runner(
             self.stages.append(message)
 
         async def confirm_dispatch(self, *, pending: int, model_path: str) -> None: ...
+        async def confirm_new_run(self, *, run_name: str, total: int) -> bool:
+            return False
+
         def resolve_secrets(self, names: Any) -> dict[str, str]:
             return {}
 

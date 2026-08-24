@@ -126,6 +126,15 @@ class ResumeRefusedError(LocalEvalError):
     """A named run's resolved inputs changed, so resuming would mix versions."""
 
 
+class _NewRunRequested(Exception):
+    """Internal signal: the named run is complete and the user chose a new run.
+
+    An exception rather than a return value so it unwinds ``_run_locked``'s
+    ``finally`` blocks -- and the run lock itself, which is held per name --
+    before ``run()`` starts over under a generated name.
+    """
+
+
 # --------------------------------------------------------------------------- #
 # Inputs
 # --------------------------------------------------------------------------- #
@@ -194,6 +203,15 @@ class RunnerHooks(Protocol):
         terminal prompt library needs the supervisor's own event loop to render
         on. A synchronous implementation that starts a second loop would fail.
         """
+
+    async def confirm_new_run(self, *, run_name: str, total: int) -> bool:
+        """Named run already has every result. True starts a new generated-name
+        run alongside it; the complete run is never touched.
+
+        Answered interactively by the CLI; non-interactive sessions must return
+        False so a repeated command stays an idempotent no-op.
+        """
+        ...
 
     def resolve_secrets(self, names: Sequence[str]) -> dict[str, str]:
         """Resolve workflow-secret values. Called only when work is pending."""
@@ -575,6 +593,9 @@ class LocalEvalRunner:
         self._hooks = hooks
         self._provenance = dict(provenance or {})
 
+        # The name actually being run, once chosen -- generated names included.
+        # The CLI reads it to print an exact resume command on interrupt.
+        self.active_run_name: str | None = None
         self._run_dir: Path | None = None
         self._log: RunLog | None = None
         self._journal: TerminalJournal | None = None
@@ -606,6 +627,23 @@ class LocalEvalRunner:
             self._output_root
         )
         validate_run_name(run_name)
+        try:
+            return await self._run_named(run_name, after_finalize=after_finalize)
+        except _NewRunRequested:
+            new_name = _available_generated_run_name(self._output_root)
+            self._hooks.note(
+                f"{run_name} is complete and stays untouched; "
+                f"starting new run {new_name!r}"
+            )
+            return await self._run_named(new_name, after_finalize=after_finalize)
+
+    async def _run_named(
+        self,
+        run_name: str,
+        *,
+        after_finalize: Callable[[RunSummary], None] | None,
+    ) -> RunSummary:
+        self.active_run_name = run_name
         lock_path = self._output_root / LOCKS_DIRNAME / f"{run_name}.lock"
         with RunLock(lock_path):
             summary = await self._run_locked(run_name=run_name)
@@ -687,6 +725,12 @@ class LocalEvalRunner:
             self._refresh_snapshots()
             total = len(self._selection.rows) * max(1, self._spec.n)
             if not pending:
+                # Offering a new run only here -- never when work is
+                # pending -- keeps resume-after-interrupt untouched (§D2).
+                if total and await self._hooks.confirm_new_run(
+                    run_name=run_name, total=total
+                ):
+                    raise _NewRunRequested
                 self._stage(
                     "resume",
                     f"{run_name}: all {total} work items already have results",

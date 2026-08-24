@@ -22,7 +22,7 @@ from osmosis_ai.cli.output.context import get_output_context
 from osmosis_ai.cli.output.display import format_duration_ms
 from osmosis_ai.cli.output.error import classify_error
 from osmosis_ai.cli.paths import parse_cli_path
-from osmosis_ai.cli.prompts import require_confirmation_async
+from osmosis_ai.cli.prompts import confirm_async, require_confirmation_async
 from osmosis_ai.platform.auth.platform_client import (
     AuthenticationExpiredError,
     PlatformAPIError,
@@ -142,6 +142,23 @@ class _Hooks:
             f"{pending} rollouts x model {model_path} — continue?",
             yes=self.yes,
             default=False,
+        )
+
+    async def confirm_new_run(self, *, run_name: str, total: int) -> bool:
+        # Declining (and every non-interactive path, --yes included) keeps the
+        # idempotent no-op, so a scripted rerun never silently starts new work.
+        # Default yes: a new run touches nothing, and the cost confirmation
+        # still stands between the answer and any dispatch.
+        from osmosis_ai.cli.output.context import OutputFormat
+
+        output = get_output_context()
+        if self.yes or output.format is not OutputFormat.rich or not output.interactive:
+            return False
+        return bool(
+            await confirm_async(
+                f"run {run_name!r} already has all {total} results — start a new run?",
+                default=True,
+            )
         )
 
     def resolve_secrets(self, names: Sequence[str]) -> dict[str, str]:
@@ -401,8 +418,15 @@ def run(
     except (LocalEvalError, LocalEvalStateError) as exc:
         raise CLIError(str(exc)) from exc
     except KeyboardInterrupt:
+        started = runner.active_run_name
+        hint = (
+            "Resume the pending work items: "
+            f"osmosis eval run {quote(str(config_path))} --name {started}"
+            if started
+            else "Nothing was started."
+        )
         raise CLIError(
-            "Interrupted. Re-run the same command to resume the pending work items.",
+            f"Interrupted. {hint}",
             code=CLIErrorCode.VALIDATION,
         ) from None
     finally:
@@ -415,6 +439,7 @@ def run(
     return _result(
         summary,
         context=context,
+        config_path=config_path,
         dataset_source=dataset.source,
         imported=imported,
         upload_requested=upload,
@@ -559,6 +584,7 @@ def _result(
     summary: Any,
     *,
     context: Any,
+    config_path: Path,
     dataset_source: str,
     imported: Any | None = None,
     upload_requested: bool = False,
@@ -603,17 +629,28 @@ def _result(
     incomplete = summary.cancelled or (
         summary.succeeded + summary.failed + summary.skipped < summary.total_work_items
     )
+    noop = not incomplete and summary.dispatched == 0 and summary.total_work_items > 0
+    config_arg = quote(str(config_path))
     next_steps = []
+    if noop:
+        next_steps.append(
+            f"Start a new run alongside it: osmosis eval run {config_arg}"
+        )
+        next_steps.append(
+            "Re-run this name from scratch (archives its results): "
+            f"osmosis eval run {config_arg} --name {summary.run_name} --fresh"
+        )
     if incomplete:
         upload_flag = " --upload" if upload_requested else ""
         next_steps.append(
-            f"Resume: osmosis eval run <config> --name {summary.run_name}{upload_flag}"
+            f"Resume: osmosis eval run {config_arg} "
+            f"--name {summary.run_name}{upload_flag}"
         )
     if summary.failed:
         upload_flag = " --upload" if upload_requested else ""
         next_steps.append(
             "Retry failures under the same name: "
-            f"osmosis eval run <config> --name {summary.run_name} "
+            f"osmosis eval run {config_arg} --name {summary.run_name} "
             f"--retry-failed{upload_flag}"
         )
     if imported is not None:
@@ -625,10 +662,16 @@ def _result(
         )
     elif not incomplete:
         next_steps.append(f"Upload: {_upload_command(summary.run_dir)}")
-    message = (
-        f"Evaluation run {'interrupted' if incomplete else 'finished'}: "
-        f"{summary.run_dir}"
-    )
+    if noop:
+        message = (
+            f"Run {summary.run_name!r} was already complete; nothing ran: "
+            f"{summary.run_dir}"
+        )
+    else:
+        message = (
+            f"Evaluation run {'interrupted' if incomplete else 'finished'}: "
+            f"{summary.run_dir}"
+        )
     if incomplete and upload_requested:
         message += " Upload skipped because the local evaluation is incomplete."
     return OperationResult(

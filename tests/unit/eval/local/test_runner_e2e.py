@@ -171,6 +171,27 @@ async def test_a_second_run_of_the_same_name_dispatches_nothing(
     # No pending work means credentials and the subprocess are never needed.
     assert hooks.secret_requests == []
     assert all(row["resumed"] is True for row in harness.index_rows())
+    # The complete run offered a new run; declining kept the no-op.
+    assert hooks.new_run_prompts == [("run-1", 4)]
+
+
+async def test_accepting_the_new_run_prompt_starts_a_generated_name(
+    harness: RunnerHarness,
+) -> None:
+    await harness.runner().run()
+    journal_before = (harness.run_dir() / "events.jsonl").read_bytes()
+
+    hooks = RecordingHooks(accept_new_run=True)
+    summary = await harness.runner(hooks=hooks).run()
+
+    assert hooks.new_run_prompts == [("run-1", 4)]
+    assert summary.run_name != "run-1"
+    assert summary.dispatched == 4
+    assert summary.resumed == 0
+    # The complete run is left in place -- nothing archived, nothing rewritten.
+    assert (harness.run_dir() / "events.jsonl").read_bytes() == journal_before
+    assert not list(harness.output_root.glob("run-1.archive-*"))
+    assert len(harness.index_rows(summary.run_name)) == 4
 
 
 async def test_a_partial_journal_reruns_only_the_missing_items(

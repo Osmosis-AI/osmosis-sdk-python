@@ -41,7 +41,11 @@ class _RecordingLog:
 
 class _Hooks:
     def note(self, message: str) -> None: ...
+    def stage(self, message: str) -> None: ...
     async def confirm_dispatch(self, *, pending: int, model_path: str) -> None: ...
+    async def confirm_new_run(self, *, run_name: str, total: int) -> bool:
+        return False
+
     def resolve_secrets(self, names: Sequence[str]) -> dict[str, str]:
         return {}
 
