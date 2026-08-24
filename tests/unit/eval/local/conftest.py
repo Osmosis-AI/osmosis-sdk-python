@@ -108,6 +108,10 @@ backend = LocalBackend(workflow=EchoWorkflow, grader=MatchGrader)
 app = create_rollout_server(backend=backend)
 
 if __name__ == "__main__":
+    server_pgid_file = os.environ.get("OSMOSIS_TEST_SERVER_PGID_FILE")
+    if server_pgid_file:
+        with open(server_pgid_file, "w", encoding="utf-8") as handle:
+            handle.write(str(os.getpgrp()))
     uvicorn.run(
         app,
         host="127.0.0.1",

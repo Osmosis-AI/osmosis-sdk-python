@@ -35,6 +35,11 @@ logger: logging.Logger = logging.getLogger(__name__)
 # backpressure wait is uninterruptible.
 _RETRY_AFTER_FLOOR_SEC = 0.05
 _MAX_RETRY_AFTER_SEC = 60.0
+_DEFAULT_ADMISSION_TIMEOUT_SEC = 300.0
+
+
+class RolloutAdmissionTimeoutError(TimeoutError):
+    """The rollout server stayed backpressured beyond the admission budget."""
 
 
 class RolloutProtocolError(RuntimeError):
@@ -77,6 +82,7 @@ class HttpRolloutDriver(RolloutDriver):
         chat_api_key: str | None,
         controller_api_key: str,
         http_client: httpx.AsyncClient | None = None,
+        admission_timeout_sec: float | None = _DEFAULT_ADMISSION_TIMEOUT_SEC,
         callback_timeout_sec: float | None = None,
     ) -> None:
         # An empty key would admit rollouts whose callbacks the listener then
@@ -92,6 +98,7 @@ class HttpRolloutDriver(RolloutDriver):
         self._controller_api_key = controller_api_key
         self._owns_http = http_client is None
         self._http = http_client or httpx.AsyncClient()
+        self._admission_timeout_sec = admission_timeout_sec
         self._callback_timeout_sec = callback_timeout_sec
 
     async def aclose(self) -> None:
@@ -121,7 +128,17 @@ class HttpRolloutDriver(RolloutDriver):
                 grader_timeout_sec=request.grader_timeout_sec,
                 extra_fields=request.extra_fields,
             )
-            await self._admit(init)
+            try:
+                await asyncio.wait_for(
+                    self._admit(init),
+                    timeout=self._admission_timeout_sec,
+                )
+            except TimeoutError as exc:
+                await self._cancel_rollout(rollout_id)
+                raise RolloutAdmissionTimeoutError(
+                    f"rollout {rollout_id} was not admitted within "
+                    f"{self._admission_timeout_sec} seconds"
+                ) from exc
             terminal = await self._wait_for_terminal(rollout_id)
             return _outcome_from_terminal(terminal)
         except asyncio.CancelledError:
@@ -255,5 +272,6 @@ def _outcome_from_terminal(terminal: TerminalCallbackResult) -> RolloutOutcome:
 
 __all__ = [
     "HttpRolloutDriver",
+    "RolloutAdmissionTimeoutError",
     "RolloutProtocolError",
 ]

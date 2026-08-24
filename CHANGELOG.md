@@ -18,6 +18,7 @@ This file records changes to `osmosis-ai`. For earlier versions, see [GitHub Rel
 
 ### Fixed
 
+- Bounded rollout admission backpressure, prevented crash-recovery tests from leaking rollout-server processes, and added test timeouts for stalled suites.
 - Restored `osmosis_ai.packaging.build_bundle(deps=...)` for bundle-time dependency overrides while preserving projects that declare dependencies dynamically.
 - Prevented `--json` and `--plain` submits from prompting for missing secrets, surfaced all missing names in `INTERACTIVE_REQUIRED` details, redacted supplied secrets from platform errors without losing specialized error codes, and restored rich login presentation ([#304](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/304)).
 - Refused insecure non-loopback platform URLs unless explicitly allowed, kept insecure-URL warnings machine-readable, and preserved lazy CLI startup paths without loading authentication dependencies for shell-only usage errors ([#304](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/304)).

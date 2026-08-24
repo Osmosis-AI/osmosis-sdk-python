@@ -796,6 +796,7 @@ class LocalEvalRunner:
                 base_url = await self._start_rollout_server(
                     secrets=secrets, client=client
                 )
+                item_deadline = self._callback_deadline()
                 driver = HttpRolloutDriver(
                     rollout_base_url=base_url,
                     callback_store=store,
@@ -805,7 +806,8 @@ class LocalEvalRunner:
                     chat_api_key=bridge_token,
                     controller_api_key=controller_token,
                     http_client=client,
-                    callback_timeout_sec=self._callback_deadline(),
+                    admission_timeout_sec=item_deadline,
+                    callback_timeout_sec=item_deadline,
                 )
                 concurrency = await self._resolve_concurrency(client, base_url)
                 self._stage(
