@@ -1006,3 +1006,53 @@ async def test_a_missing_uv_is_reported_against_eval_run(
     async with httpx.AsyncClient() as client:
         with pytest.raises(LocalEvalError, match="uv is required to launch"):
             await runner._start_rollout_server(secrets={}, client=client)
+
+
+# --------------------------------------------------------------------------- #
+# Orphan-server ownership record
+# --------------------------------------------------------------------------- #
+
+
+async def test_a_spawned_server_is_recorded_and_a_stopped_one_is_cleared(
+    tmp_path: Path,
+) -> None:
+    from osmosis_ai.eval.local.state import SERVER_STATE_FILENAME, ServerProcessState
+
+    runner = _uv_runner(tmp_path)
+    child = await asyncio.create_subprocess_exec(
+        sys.executable,
+        "-c",
+        "import time; time.sleep(120)",
+        start_new_session=True,
+    )
+    try:
+        runner._record_server_state(child, instance_id="iid", port=4242)
+        state = ServerProcessState.read(runner._run_dir / SERVER_STATE_FILENAME)
+        assert state is not None
+        assert state.pid == child.pid
+        assert state.pgid == child.pid  # start_new_session makes it the leader
+        assert state.instance_id == "iid"
+        assert state.port == 4242
+        assert state.is_owner_alive()
+
+        runner._child = child
+        await runner._stop_rollout_server()
+        assert not (runner._run_dir / SERVER_STATE_FILENAME).exists()
+        assert not state.is_owner_alive()
+    finally:
+        if child.returncode is None:
+            child.kill()
+        with contextlib.suppress(Exception):
+            await child.wait()
+
+
+async def test_a_child_that_died_at_spawn_leaves_no_record(tmp_path: Path) -> None:
+    # There is no live group to reap later, and recording a reused pid here is
+    # exactly the misfire the ownership proof exists to prevent.
+    from osmosis_ai.eval.local.state import SERVER_STATE_FILENAME
+
+    runner = _uv_runner(tmp_path)
+    child = await asyncio.create_subprocess_exec(sys.executable, "-c", "")
+    await child.wait()
+    runner._record_server_state(child, instance_id="iid", port=4242)
+    assert not (runner._run_dir / SERVER_STATE_FILENAME).exists()

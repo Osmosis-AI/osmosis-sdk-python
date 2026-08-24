@@ -21,14 +21,15 @@ from pathlib import Path
 import pytest
 
 from osmosis_ai.eval.local.dataset import select_rows
-from osmosis_ai.eval.local.runner import _SERVER_TERM_GRACE_SEC
-from osmosis_ai.eval.local.state import terminate_process_group
+from osmosis_ai.eval.local.state import (
+    SERVER_STATE_FILENAME,
+    ServerProcessState,
+    terminate_process_group,
+)
 
 from .conftest import RecordingHooks, RunnerHarness
 
 pytestmark = [pytest.mark.slow, pytest.mark.timeout(300)]
-
-_SERVER_PGID_FILENAME = "rollout-server.pgid"
 
 _SUPERVISOR_SCRIPT = '''\
 """Run one local eval supervisor, driven entirely by argv/env. Test-only."""
@@ -113,7 +114,6 @@ def _spawn_supervisor(
     # the spawned supervisor resolves the same upstream the in-process one does.
     env = {
         **os.environ,
-        "OSMOSIS_TEST_SERVER_PGID_FILE": str(script.with_name(_SERVER_PGID_FILENAME)),
         "OSMOSIS_TEST_WORKFLOW_SLEEP": workflow_sleep,
         "PYTHONUNBUFFERED": "1",
     }
@@ -191,22 +191,17 @@ def _kill_group(process: subprocess.Popen[str], sig: int) -> None:
     os.killpg(os.getpgid(process.pid), sig)
 
 
-async def _stop_recorded_server(script: Path) -> None:
-    """Reap the rollout server the crashed supervisor left behind.
+async def _stop_recorded_server(harness: RunnerHarness) -> None:
+    """Reap a leftover rollout server via the supervisor's own ownership record.
 
-    Both callers run only after the journal proved the server was up, so the
-    PGID file is already on disk; a missing file means the server never
-    started and there is nothing to reap. ``terminate_process_group`` already
+    The same ``server.json`` mechanism the product uses: a missing or cleared
+    record means nothing survived, and a record that fails the pid/start-time
+    ownership proof is never signalled. ``terminate_process_group`` already
     escalates SIGTERM to SIGKILL and tolerates an already-dead group.
     """
-    pgid_file = script.with_name(_SERVER_PGID_FILENAME)
-    try:
-        pgid = int(pgid_file.read_text(encoding="utf-8"))
-    except FileNotFoundError:
-        return
-    await asyncio.to_thread(
-        terminate_process_group, pgid, grace_sec=_SERVER_TERM_GRACE_SEC
-    )
+    state = ServerProcessState.read(harness.run_dir() / SERVER_STATE_FILENAME)
+    if state is not None and state.is_owner_alive():
+        await asyncio.to_thread(terminate_process_group, state.pgid, grace_sec=5.0)
 
 
 async def test_kill_9_never_reruns_a_durably_acknowledged_item(
@@ -219,11 +214,16 @@ async def test_kill_9_never_reruns_a_durably_acknowledged_item(
         try:
             durable = await _wait_for_journal(harness, count=1, process=process)
             _kill_group(process, signal.SIGKILL)
-            # Checked after the kill so a PGID-plumbing regression fails the
-            # test without leaving the supervisor group alive.
-            assert script.with_name(_SERVER_PGID_FILENAME).is_file()
         finally:
             await _await_exit(process, timeout=30)
+
+        # The rollout server ran in its own session, so killing the
+        # supervisor's group orphaned it -- and left the ownership record
+        # behind for the resume. Checked after the kill so a recording
+        # regression fails the test without leaving the supervisor alive.
+        orphan = ServerProcessState.read(harness.run_dir() / SERVER_STATE_FILENAME)
+        assert orphan is not None
+        assert orphan.is_owner_alive()
 
         survivors = _journal_records(harness)
         assert len(survivors) >= 1
@@ -231,20 +231,31 @@ async def test_kill_9_never_reruns_a_durably_acknowledged_item(
         committed_ids = {r["rollout_id"] for r in survivors}
         assert (durable[0]["row_index"], durable[0]["run_index"]) in committed
 
-        # Resume on a fresh ephemeral port without depending on the server that
-        # survived the supervisor crash.
+        # Resume in-process, on a fresh ephemeral port: the resume must not
+        # depend on the orphaned server -- it must reap it.
         hooks = RecordingHooks()
         summary = await harness.runner(hooks=hooks).run()
 
         assert summary.dispatched == 4 - len(survivors)
         assert summary.resumed == len(survivors)
         assert summary.succeeded + summary.failed + summary.skipped == 4
-        # Every previously committed attempt keeps its original rollout id: it was
-        # never re-executed.
+        # Every previously committed attempt keeps its original rollout id: it
+        # was never re-executed.
         final_ids = {row["rollout_id"] for row in harness.index_rows()}
         assert committed_ids <= final_ids
+
+        # The resume reaped the orphan and its own clean shutdown left no
+        # record behind.
+        assert any("orphaned rollout server" in note for note in hooks.notes)
+        assert not (harness.run_dir() / SERVER_STATE_FILENAME).exists()
+        deadline = time.monotonic() + 10.0
+        while orphan.is_owner_alive() and time.monotonic() < deadline:
+            await asyncio.sleep(0.1)
+        assert not orphan.is_owner_alive()
     finally:
-        await _stop_recorded_server(script)
+        # Do not leak the orphan out of the suite when an assertion fails
+        # before the resume reaps it. Same record, same ownership proof.
+        await _stop_recorded_server(harness)
 
 
 async def test_sigint_leaves_cancelled_work_pending(
@@ -254,18 +265,21 @@ async def test_sigint_leaves_cancelled_work_pending(
     process = _spawn_supervisor(script, harness, workflow_sleep="2.0")
     try:
         await _wait_for_journal(harness, count=1, process=process)
-        # A missing PGID file must fail loudly here: cleanup would otherwise
-        # silently no-op and re-leak the server this test exists to reap.
-        assert script.with_name(_SERVER_PGID_FILENAME).is_file()
+        # A missing ownership record must fail loudly here: cleanup would
+        # otherwise silently no-op and re-leak the server on a test failure.
+        assert (harness.run_dir() / SERVER_STATE_FILENAME).is_file()
         _kill_group(process, signal.SIGINT)
         exit_code = await _await_exit(process, timeout=90)
     finally:
         if process.poll() is None:
             _kill_group(process, signal.SIGKILL)
             await _await_exit(process, timeout=30)
-        await _stop_recorded_server(script)
+        await _stop_recorded_server(harness)
 
     assert exit_code in (0, 130)
+    # A graceful shutdown stopped its own server and cleared the ownership
+    # record, so the next invocation has nothing to reap.
+    assert not (harness.run_dir() / SERVER_STATE_FILENAME).exists()
     committed = _journal_records(harness)
     # A cancelled attempt writes no terminal record, unlike Harbor's
     # CancelledError result which is then skipped as complete.

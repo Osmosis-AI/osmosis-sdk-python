@@ -1,6 +1,6 @@
 """Durable state for a local evaluation run: journal, manifest, and run lock.
 
-Three concepts, and deliberately no more (design ``local-eval-run-plan.md`` §9):
+Four concepts, and deliberately no more (design ``local-eval-run-plan.md`` §9):
 
 * ``manifest.json`` -- immutable resolved-input lock plus provenance. Written
   once at run creation and compared on resume, so a semantic change refuses
@@ -9,6 +9,9 @@ Three concepts, and deliberately no more (design ``local-eval-run-plan.md`` §9)
   per terminal attempt. The record is written in full, ``fsync``-ed, and only
   then may the terminal callback be acknowledged, so a durably acknowledged
   work item never runs again after ``kill -9``.
+* ``server.json`` -- the rollout-server ownership record. Present only while
+  a spawned server may be running; a record that survives a supervisor death
+  is how the next invocation finds -- and proves ownership of -- the orphan.
 * everything else -- projections, rebuilt from the journal and the artifact
   tree. They are never consulted to decide whether work reruns.
 
@@ -27,6 +30,7 @@ import hashlib
 import json
 import os
 import signal
+import subprocess
 import tempfile
 import time
 from collections.abc import Mapping
@@ -46,6 +50,7 @@ ROLLOUT_PROTOCOL_VERSION = "0.3"
 
 MANIFEST_FILENAME = "manifest.json"
 JOURNAL_FILENAME = "events.jsonl"
+SERVER_STATE_FILENAME = "server.json"
 LOCKS_DIRNAME = ".locks"
 
 #: ``index.jsonl`` status values the platform schema accepts (§2.2).
@@ -549,3 +554,136 @@ def terminate_process_group(
         time.sleep(poll_sec)
     with contextlib.suppress(ProcessLookupError, PermissionError):
         os.killpg(pgid, signal.SIGKILL)
+
+
+# --------------------------------------------------------------------------- #
+# Rollout-server ownership record
+# --------------------------------------------------------------------------- #
+
+
+def process_start_token(pid: int) -> str | None:
+    """Opaque token for when *pid* started; ``None`` when it cannot be read.
+
+    Equal tokens for the same pid mean the pid was not recycled in between,
+    which is what makes signalling a recorded process group safe. Linux reads
+    the kernel's exact starttime tick from ``/proc``; macOS has no ``/proc``,
+    so ``ps``'s second-resolution ``lstart`` stands in -- a recycled pid that
+    also lands on the same start second is not a realistic collision.
+    """
+    if pid <= 0:
+        return None
+    if os.path.isdir("/proc"):
+        try:
+            stat = Path(f"/proc/{pid}/stat").read_bytes()
+            # comm (field 2) may contain spaces and parentheses, so fields are
+            # only positional after the last ')'. starttime is field 22.
+            return stat[stat.rindex(b")") + 2 :].split()[19].decode("ascii")
+        except (OSError, ValueError, IndexError, UnicodeDecodeError):
+            return None
+    try:
+        result = subprocess.run(
+            ["ps", "-p", str(pid), "-o", "lstart="],
+            capture_output=True,
+            text=True,
+            timeout=5.0,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    token = result.stdout.strip()
+    return token if result.returncode == 0 and token else None
+
+
+@dataclass(frozen=True)
+class ServerProcessState:
+    """Identity of the spawned rollout-server process group, for orphan reaping.
+
+    Written right after the spawn and removed on clean shutdown, so a record
+    that survives names a server whose supervisor died without cleanup
+    (``kill -9``, OOM, a crashed terminal). ``pid`` plus ``start_token`` is
+    the ownership proof: a recycled pid or pgid cannot reproduce the original
+    start time, so a failed :meth:`is_owner_alive` means the group must not
+    be signalled.
+    """
+
+    pid: int
+    pgid: int
+    start_token: str
+    instance_id: str
+    port: int
+    created_at: str
+
+    def to_payload(self) -> dict[str, Any]:
+        return {
+            "pid": self.pid,
+            "pgid": self.pgid,
+            "start_token": self.start_token,
+            "instance_id": self.instance_id,
+            "port": self.port,
+            "created_at": self.created_at,
+        }
+
+    def write(self, path: Path) -> None:
+        atomic_write_json(path, self.to_payload())
+
+    @classmethod
+    def read(cls, path: Path) -> ServerProcessState | None:
+        """Read a record, or ``None``. Tolerant: this file only ever enables
+        extra cleanup, so nothing about it may stop a run."""
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+            return None
+        if not isinstance(payload, dict):
+            return None
+        pid = payload.get("pid")
+        pgid = payload.get("pgid")
+        start_token = payload.get("start_token")
+        if (
+            not isinstance(pid, int)
+            or isinstance(pid, bool)
+            or pid <= 0
+            or not isinstance(pgid, int)
+            or isinstance(pgid, bool)
+            or pgid <= 0
+            or not isinstance(start_token, str)
+            or not start_token
+        ):
+            return None
+        port = payload.get("port")
+        return cls(
+            pid=pid,
+            pgid=pgid,
+            start_token=start_token,
+            instance_id=str(payload.get("instance_id", "")),
+            port=port if isinstance(port, int) and not isinstance(port, bool) else 0,
+            created_at=str(payload.get("created_at", "")),
+        )
+
+    def is_owner_alive(self) -> bool:
+        """Whether *pid* is provably still the recorded process, in its group."""
+        if process_start_token(self.pid) != self.start_token:
+            return False
+        try:
+            return os.getpgid(self.pid) == self.pgid
+        except OSError:
+            return False
+
+
+def reap_orphan_server(path: Path, *, grace_sec: float) -> ServerProcessState | None:
+    """Terminate the server group recorded at *path* iff it is provably ours.
+
+    Returns the state that was terminated, else ``None``. The record is
+    removed in every case: after a kill its group is dead, and a record that
+    fails verification names a pid that is gone or recycled and will never
+    verify again. Blocking for up to *grace_sec*: call via
+    ``asyncio.to_thread`` from async code.
+    """
+    state = ServerProcessState.read(path)
+    reaped: ServerProcessState | None = None
+    if state is not None and state.is_owner_alive():
+        terminate_process_group(state.pgid, grace_sec=grace_sec)
+        reaped = state
+    with contextlib.suppress(OSError):
+        path.unlink(missing_ok=True)
+    return reaped

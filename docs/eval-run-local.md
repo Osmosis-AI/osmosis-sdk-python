@@ -116,6 +116,7 @@ The run ends with a results table: work items by outcome, pass rate against the 
 .osmosis/evals/<run-name>/
   manifest.json        # local provenance + the resolved-input lock (never uploaded)
   events.jsonl         # terminal-result journal — the resume authority
+  server.json          # rollout-server ownership record; present only while one may run
   logs.txt             # combined supervisor + rollout-server log, secrets redacted
   index.jsonl          # platform-shaped sample index
   progress.json        # {total_runs, sampled_rows, total_dataset_rows}
@@ -137,6 +138,8 @@ The run ends with a results table: work items by outcome, pass rate against the 
 Resume is **crash and interrupt recovery, not iteration recovery.**
 
 A work item is complete only when it has a durable terminal result. A result is durable once its journal record has been written and `fsync`-ed, which happens *before* the rollout server's callback is acknowledged — so a `kill -9` can never lose an acknowledged result, and can never skip an unacknowledged one. Ctrl-C cancels in-flight rollouts without writing a terminal record, so they simply run again next time.
+
+A `kill -9` normally does not leak the rollout server either. The supervisor records the server's process group, together with its pid and start time, in `server.json` at spawn, and removes the record on clean shutdown. The next invocation for the run — a plain resume, `--fresh`, even a refused resume — terminates the recorded group, but only after re-verifying that pid and start time still match: a record whose pid was recycled by an unrelated process is dropped, never signalled. Two narrow gaps remain, both resolved in favor of never signalling an unverified group: a kill that lands in the instant between the spawn and the record's write (or a record write that fails outright — the run warns and continues) leaves no record, and a group whose recorded leader died while a descendant survived can no longer be verified, so it is dropped rather than killed blind. A server that slips through either gap still needs manual cleanup.
 
 A named run is pinned to its resolved inputs: model, dataset bytes, selected rows, `n`, timeouts, pass threshold, rollout entrypoint, and a digest of the rollout's source files. The environment the dependency sync builds is not source: `.venv/`, `uv.lock`, and a build backend's `*.egg-info/` are excluded, so resolving dependencies never changes the digest of the project that owns them. Change any of the inputs and the run refuses to resume, naming the input group that changed:
 

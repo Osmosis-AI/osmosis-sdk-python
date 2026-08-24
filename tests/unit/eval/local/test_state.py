@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 import json
+import os
+import subprocess
+import sys
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -14,11 +18,14 @@ from osmosis_ai.eval.local.state import (
     RunLock,
     RunLockedError,
     RunManifest,
+    ServerProcessState,
     TerminalJournal,
     TerminalRecord,
     archive_run_directory,
     atomic_write_json,
     digest_of,
+    process_start_token,
+    reap_orphan_server,
     validate_run_name,
 )
 
@@ -329,3 +336,138 @@ def test_atomic_write_json_leaves_no_temp_files(tmp_path: Path) -> None:
 def test_atomic_write_json_refuses_non_finite_numbers(tmp_path: Path) -> None:
     with pytest.raises(ValueError):
         atomic_write_json(tmp_path / "metrics.json", {"reward": float("nan")})
+
+
+# --------------------------------------------------------------------------- #
+# Rollout-server ownership record
+# --------------------------------------------------------------------------- #
+
+
+@pytest.fixture
+def sleeper() -> Iterator[subprocess.Popen[bytes]]:
+    """A live process in its own group, like a spawned rollout server."""
+    process = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(120)"],
+        start_new_session=True,
+    )
+    try:
+        yield process
+    finally:
+        if process.poll() is None:
+            process.kill()
+        process.wait()
+
+
+def _state_for(
+    process: subprocess.Popen[bytes], **overrides: object
+) -> ServerProcessState:
+    token = process_start_token(process.pid)
+    assert token is not None
+    payload: dict[str, object] = {
+        "pid": process.pid,
+        "pgid": process.pid,
+        "start_token": token,
+        "instance_id": "iid",
+        "port": 4242,
+        "created_at": "2026-08-23T00:00:00Z",
+    }
+    payload.update(overrides)
+    return ServerProcessState(**payload)  # type: ignore[arg-type]
+
+
+def test_start_token_is_stable_for_a_live_process() -> None:
+    token = process_start_token(os.getpid())
+    assert token
+    assert process_start_token(os.getpid()) == token
+
+
+def test_start_token_is_none_for_dead_or_invalid_pids() -> None:
+    process = subprocess.Popen([sys.executable, "-c", ""])
+    process.wait()
+    assert process_start_token(process.pid) is None
+    assert process_start_token(0) is None
+    assert process_start_token(-1) is None
+
+
+def test_server_state_round_trips(
+    tmp_path: Path, sleeper: subprocess.Popen[bytes]
+) -> None:
+    path = tmp_path / "server.json"
+    state = _state_for(sleeper)
+    state.write(path)
+    assert ServerProcessState.read(path) == state
+    assert state.is_owner_alive()
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        "not json",
+        "[]",
+        '{"pid": "12", "pgid": 12, "start_token": "t"}',
+        '{"pid": 12, "pgid": 0, "start_token": "t"}',
+        '{"pid": 12, "pgid": 12, "start_token": ""}',
+        '{"pid": true, "pgid": 12, "start_token": "t"}',
+    ],
+)
+def test_server_state_read_tolerates_garbage(tmp_path: Path, content: str) -> None:
+    # The record only ever enables extra cleanup, so nothing about it may
+    # raise into a run.
+    path = tmp_path / "server.json"
+    path.write_text(content, encoding="utf-8")
+    assert ServerProcessState.read(path) is None
+    assert ServerProcessState.read(tmp_path / "missing.json") is None
+
+
+def test_server_state_read_tolerates_invalid_utf8(tmp_path: Path) -> None:
+    path = tmp_path / "server.json"
+    path.write_bytes(b'\xff\xfe{"pid": 12}')
+    assert ServerProcessState.read(path) is None
+
+
+def test_reap_of_a_missing_record_is_a_no_op(tmp_path: Path) -> None:
+    assert reap_orphan_server(tmp_path / "server.json", grace_sec=0.5) is None
+
+
+def test_reap_terminates_a_verified_orphan_group(
+    tmp_path: Path, sleeper: subprocess.Popen[bytes]
+) -> None:
+    path = tmp_path / "server.json"
+    state = _state_for(sleeper)
+    state.write(path)
+
+    assert reap_orphan_server(path, grace_sec=5.0) == state
+    assert not path.exists()
+    assert sleeper.wait(timeout=10) != 0
+
+
+def test_reap_never_kills_a_recycled_pid(
+    tmp_path: Path, sleeper: subprocess.Popen[bytes]
+) -> None:
+    # The sleeper stands in for an unrelated process that happens to hold the
+    # recorded pid/pgid today: its start token cannot match the recorded one.
+    path = tmp_path / "server.json"
+    _state_for(sleeper, start_token="a-start-time-from-another-life").write(path)
+
+    assert reap_orphan_server(path, grace_sec=0.5) is None
+    assert sleeper.poll() is None
+    # A record that failed verification can never verify again; it is dropped.
+    assert not path.exists()
+
+
+def test_reap_of_a_dead_pid_drops_the_record(tmp_path: Path) -> None:
+    process = subprocess.Popen([sys.executable, "-c", ""], start_new_session=True)
+    token = process_start_token(process.pid)
+    process.wait()
+    path = tmp_path / "server.json"
+    ServerProcessState(
+        pid=process.pid,
+        pgid=process.pid,
+        start_token=token or "gone-before-capture",
+        instance_id="iid",
+        port=4242,
+        created_at="2026-08-23T00:00:00Z",
+    ).write(path)
+
+    assert reap_orphan_server(path, grace_sec=0.5) is None
+    assert not path.exists()
