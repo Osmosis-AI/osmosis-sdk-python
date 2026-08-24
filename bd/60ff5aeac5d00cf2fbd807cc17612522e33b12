@@ -1,0 +1,29 @@
+tests/unit/rollout/test_http_driver.py
+  s_1be1206d6ad438::t_29de2d7647bf7f 217-244
+pytest.ini
+  s_1be1206d6ad438::t_29de2d7647bf7f 6
+osmosis_ai/rollout/http_driver.py
+  s_1be1206d6ad438::t_29de2d7647bf7f 39,198-209,211
+tests/unit/eval/local/conftest.py
+  s_1be1206d6ad438::t_29de2d7647bf7f 37-42
+tests/unit/eval/local/test_runner_crash_resume.py
+  s_1be1206d6ad438::t_29de2d7647bf7f 31,196
+  s_1be1206d6ad438::t_2f73662abec24c 197-208,210-211,224-252
+  s_1be1206d6ad438::t_80b7969a84a4e9 209
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "bd60ff5aeac5d00cf2fbd807cc17612522e33b12",
+  "prompts": {},
+  "sessions": {
+    "s_1be1206d6ad438": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0321c-682f-7542-8d88-df2ea83a7379",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}
