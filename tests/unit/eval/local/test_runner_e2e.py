@@ -17,6 +17,11 @@ import pytest
 from osmosis_ai.eval.local.dataset import select_rows
 from osmosis_ai.eval.local.runner import LocalEvalOptions, ResumeRefusedError
 from osmosis_ai.eval.local.state import TerminalJournal, TerminalRecord
+from osmosis_ai.rollout.http_driver import (
+    HttpRolloutDriver,
+    RolloutAdmissionTimeoutError,
+    RolloutProtocolError,
+)
 
 from .conftest import RecordingHooks, RunnerHarness
 
@@ -544,7 +549,6 @@ async def test_a_dead_rollout_server_halts_instead_of_waiting_out_deadlines(
 
 def _refuse_admission(monkeypatch: pytest.MonkeyPatch, status_code: int) -> None:
     """Refuse every admission the way a POST /rollout *status_code* would."""
-    from osmosis_ai.rollout.http_driver import HttpRolloutDriver, RolloutProtocolError
 
     async def refused(self: Any, init: Any) -> None:
         raise RolloutProtocolError(
@@ -555,42 +559,34 @@ def _refuse_admission(monkeypatch: pytest.MonkeyPatch, status_code: int) -> None
     monkeypatch.setattr(HttpRolloutDriver, "_admit", refused)
 
 
-async def test_a_5xx_admission_halts_instead_of_failing_the_rows(
-    harness: RunnerHarness, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize(
+    "admission_fault",
+    [
+        pytest.param(
+            RolloutProtocolError(
+                "POST /rollout returned 503; only 202 and 429 are accepted",
+                status_code=503,
+            ),
+            id="5xx",
+        ),
+        pytest.param(
+            RolloutAdmissionTimeoutError("rollout was not admitted within 1.0 seconds"),
+            id="admission-timeout",
+        ),
+    ],
+)
+async def test_a_process_wide_admission_fault_halts_and_the_rows_resume(
+    harness: RunnerHarness,
+    monkeypatch: pytest.MonkeyPatch,
+    admission_fault: Exception,
 ) -> None:
-    # A misbehaving or restarting server says nothing about the rows it refused,
-    # so they must stay pending rather than earn a durable failed record.
-    _refuse_admission(monkeypatch, 503)
-    hooks = RecordingHooks()
-    summary = await harness.runner(hooks=hooks).run()
+    # A restarting server or backpressure that outlives the admission budget
+    # says nothing about the rows themselves: they must stay pending rather
+    # than earn durable failed records, and a later invocation picks them up.
+    async def failing(self: Any, init: Any) -> None:
+        raise admission_fault
 
-    assert summary.failed == 0
-    assert harness.journal_lines() == []
-    assert summary.cancelled is True
-    assert any("stopping dispatch" in note for note in hooks.notes)
-
-    monkeypatch.undo()
-    resumed = await harness.runner().run()
-    assert resumed.succeeded == 4
-
-
-async def test_an_admission_timeout_halts_and_the_rows_resume(
-    harness: RunnerHarness, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    # Backpressure that outlives the admission budget means the server is
-    # wedged: rows stay pending rather than earning terminal records, and a
-    # later invocation picks them up.
-    from osmosis_ai.rollout.http_driver import (
-        HttpRolloutDriver,
-        RolloutAdmissionTimeoutError,
-    )
-
-    async def backpressured(self: Any, init: Any) -> None:
-        raise RolloutAdmissionTimeoutError(
-            "rollout was not admitted within 1.0 seconds"
-        )
-
-    monkeypatch.setattr(HttpRolloutDriver, "_admit", backpressured)
+    monkeypatch.setattr(HttpRolloutDriver, "_admit", failing)
     hooks = RecordingHooks()
     summary = await harness.runner(hooks=hooks).run()
 

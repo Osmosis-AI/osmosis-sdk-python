@@ -208,7 +208,7 @@ async def test_persistent_429_hits_admission_timeout_without_cancelling() -> Non
 
     driver = _driver(store, handler, admission_timeout_sec=0.05)
     with pytest.raises(RolloutAdmissionTimeoutError, match="not admitted within"):
-        await driver.run(_request())
+        await asyncio.wait_for(driver.run(_request()), timeout=TEST_TIMEOUT_SEC)
 
     assert posts == 1
 

@@ -75,7 +75,11 @@ from osmosis_ai.rollout.controller import (
     TerminalCallbackResult,
 )
 from osmosis_ai.rollout.driver import RolloutOutcome, RolloutRunRequest
-from osmosis_ai.rollout.http_driver import HttpRolloutDriver, RolloutProtocolError
+from osmosis_ai.rollout.http_driver import (
+    HttpRolloutDriver,
+    RolloutAdmissionTimeoutError,
+    RolloutProtocolError,
+)
 from osmosis_ai.rollout.types.protocol import GraderStatus
 from osmosis_ai.rollout.types.sample import RolloutStatus
 from osmosis_ai.source_scan import reject_directory_symlinks, source_digest
@@ -1127,6 +1131,12 @@ class LocalEvalRunner:
         )
         try:
             outcome = await driver.run(request)
+        except RolloutAdmissionTimeoutError:
+            # The timeout is proof the server never admitted this rollout --
+            # unlike other dispatch faults, there is nothing for cancellation
+            # settling to poll or warn about.
+            self._forget(rollout_id)
+            raise
         finally:
             self._dispatched += 1
         if outcome.status is RolloutStatus.CANCELLED:
