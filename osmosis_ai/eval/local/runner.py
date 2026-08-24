@@ -55,14 +55,18 @@ from osmosis_ai.eval.local.state import (
     LOCKS_DIRNAME,
     MANIFEST_FILENAME,
     ROLLOUT_PROTOCOL_VERSION,
+    SERVER_STATE_FILENAME,
     RunLock,
     RunManifest,
+    ServerProcessState,
     TerminalJournal,
     TerminalRecord,
     TerminalStatus,
     WorkKey,
     archive_run_directory,
     digest_of,
+    process_start_token,
+    reap_orphan_server,
     terminate_process_group,
     utc_now,
     validate_run_name,
@@ -656,6 +660,7 @@ class LocalEvalRunner:
     async def _run_locked(self, *, run_name: str) -> RunSummary:
         run_dir = self._output_root / run_name
         self._run_dir = run_dir
+        await self._reap_orphan_server(run_dir)
         inputs = self._build_inputs()
         manifest = self._open_or_create_run(run_dir, inputs=inputs, run_name=run_name)
         self._log = RunLog(
@@ -1304,6 +1309,70 @@ class LocalEvalRunner:
     # Rollout-server lifecycle
     # ------------------------------------------------------------------ #
 
+    async def _reap_orphan_server(self, run_dir: Path) -> None:
+        """Terminate a rollout server left behind by a supervisor that died
+        without cleanup (``kill -9``, OOM, a crashed terminal).
+
+        Runs under the run lock and before the manifest gate, so ``--fresh``
+        archiving the directory cannot orphan the record and even a refused
+        resume still cleans up. Ownership is proved from the record (pid plus
+        start token) before any signal is sent: a stale record whose pid or
+        pgid was recycled is dropped, never killed.
+        """
+        path = run_dir / SERVER_STATE_FILENAME
+        try:
+            reaped = await asyncio.to_thread(
+                reap_orphan_server, path, grace_sec=_SERVER_TERM_GRACE_SEC
+            )
+        except Exception as exc:  # cleanup is a safety net; never block the run
+            logger.warning("orphaned rollout-server cleanup failed: %s", exc)
+            return
+        if reaped is not None:
+            # The run log is not open yet, so the note is the record of this.
+            self._hooks.note(
+                "terminated an orphaned rollout server from a previous "
+                f"invocation (pid {reaped.pid}, port {reaped.port})"
+            )
+
+    def _record_server_state(
+        self, child: asyncio.subprocess.Process, *, instance_id: str, port: int
+    ) -> None:
+        """Persist the just-spawned server's identity for a later orphan reap.
+
+        Best-effort by design: the record only enables extra cleanup after a
+        supervisor death, so failing to write it must not fail the run. The
+        liveness re-check after reading the start token closes the spawn-time
+        race: while the child is un-reaped its pid cannot be recycled, so a
+        still-``None`` returncode proves the token belongs to our child.
+        """
+        assert self._run_dir is not None
+        token = process_start_token(child.pid)
+        if token is None or child.returncode is not None:
+            return
+        state = ServerProcessState(
+            pid=child.pid,
+            pgid=_process_group_of(child.pid),
+            start_token=token,
+            instance_id=instance_id,
+            port=port,
+            created_at=utc_now(),
+        )
+        try:
+            state.write(self._run_dir / SERVER_STATE_FILENAME)
+        except OSError as exc:
+            self._write_log(
+                "warning",
+                "server",
+                "could not record the server process for orphan cleanup",
+                error=str(exc),
+            )
+
+    def _clear_server_state(self) -> None:
+        if self._run_dir is None:
+            return
+        with contextlib.suppress(OSError):
+            (self._run_dir / SERVER_STATE_FILENAME).unlink(missing_ok=True)
+
     def _resolve_uv(self) -> str:
         try:
             return _uv_executable()
@@ -1394,13 +1463,12 @@ class LocalEvalRunner:
                 env=env,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.STDOUT,
-                # Known limitation: as its own session leader the server
-                # survives a SIGKILLed supervisor, and no pgid is recorded for
-                # a later invocation to reap -- resume starts a fresh server on
-                # a fresh port instead.
                 start_new_session=True,
             )
             self._child = child
+            # Recorded before the health wait: a supervisor killed mid-startup
+            # must still leave enough behind for the next invocation to reap.
+            self._record_server_state(child, instance_id=instance_id, port=port)
             self._child_reader = asyncio.create_task(self._tee_child_output(child))
             base_url = f"http://127.0.0.1:{port}"
             try:
@@ -1500,6 +1568,9 @@ class LocalEvalRunner:
                 )
         with contextlib.suppress(Exception):
             await child.wait()
+        # ``wait`` returning means the group leader is gone (SIGKILL is the
+        # escalation floor), so the ownership record has nothing left to name.
+        self._clear_server_state()
         if self._child_reader is not None:
             self._child_reader.cancel()
             with contextlib.suppress(asyncio.CancelledError, Exception):
