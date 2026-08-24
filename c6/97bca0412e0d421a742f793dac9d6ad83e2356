@@ -1,0 +1,41 @@
+osmosis_ai/rollout/http_driver.py
+  s_346ba7efe627df::t_35e22dd3711022 85
+  s_346ba7efe627df::t_ba1a7ed249d63e 147-150,159-168
+  s_346ba7efe627df::t_e5e2fd46bf0d4c 34-35
+  s_346ba7efe627df::t_81bbef0ec297f0 131
+  s_346ba7efe627df::t_02a0ceefbd0f78 200-202
+.github/workflows/tests.yml
+  s_346ba7efe627df::t_77a4d5223a08d3 70-73
+tests/unit/eval/local/conftest.py
+  s_346ba7efe627df::t_5208dd281ef786 111-116
+CHANGELOG.md
+  s_346ba7efe627df::t_09aba81dd76a33 21
+tests/unit/eval/local/test_runner_crash_resume.py
+  s_346ba7efe627df::t_0f1139a956be23 195,197-202,204-209
+  s_346ba7efe627df::t_8a932beaab8d82 257-259
+  s_346ba7efe627df::t_6e086548dbacae 24,29
+  s_346ba7efe627df::t_3ebb1b30e42c47 222-224
+osmosis_ai/eval/local/runner.py
+  s_346ba7efe627df::t_43fe44b419dc99 799,810-814
+  s_346ba7efe627df::t_e0f86aff090e66 1387-1390
+tests/unit/rollout/test_http_driver.py
+  s_346ba7efe627df::t_c3a2594f5c5613 194-198,206,209
+tests/unit/eval/local/test_runner_e2e.py
+  s_346ba7efe627df::t_a024aea3b6e6df 577-606
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "c697bca0412e0d421a742f793dac9d6ad83e2356",
+  "prompts": {},
+  "sessions": {
+    "s_346ba7efe627df": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "cd2d5c07-e354-458c-afc9-92a94fddc427",
+        "model": "claude-fable-5"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}
