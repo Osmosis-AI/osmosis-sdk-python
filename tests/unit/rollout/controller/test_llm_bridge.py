@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 import httpx
@@ -38,20 +39,27 @@ class BadRequestError(Exception):
         param: str,
         message: str = "Unsupported parameter",
         error_type: str = "invalid_request_error",
-        nested: bool = False,
+        lossy: bool = False,
     ) -> None:
-        super().__init__(message)
-        self.status_code = 400
-        self.llm_provider = "openai"
         details = {
             "message": message,
             "type": error_type,
             "param": param,
             "code": None,
         }
-        self.type = None if nested else error_type
-        self.param = None if nested else param
-        self.body = {"error": details} if nested else details
+        rendered_message = (
+            f"litellm.BadRequestError: OpenAIException - "
+            f"{json.dumps({'error': details})}"
+            if lossy
+            else message
+        )
+        super().__init__(rendered_message)
+        self.message = rendered_message
+        self.status_code = 400
+        self.llm_provider = "openai"
+        self.type = None if lossy else error_type
+        self.param = None if lossy else param
+        self.body = None if lossy else details
 
 
 def _response(
@@ -512,7 +520,7 @@ async def test_official_openai_recovers_from_stale_sampling_metadata(
                 message=(
                     "Unsupported parameter: 'top_p' is not supported with this model."
                 ),
-                nested=True,
+                lossy=True,
             )
         ]
     )

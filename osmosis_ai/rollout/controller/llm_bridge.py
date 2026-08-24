@@ -106,6 +106,18 @@ def _unsupported_openai_sampling_param(exc: Exception, *, litellm: Any) -> str |
 
     body = getattr(exc, "body", None)
     error = _getattr_or_key(body, "error", body)
+    if not isinstance(error, dict):
+        # LiteLLM's async Responses wrapper can remap the provider exception and
+        # retain the structured OpenAI error only as JSON after this marker.
+        raw_message = getattr(exc, "message", str(exc))
+        _, marker, encoded_error = raw_message.partition("OpenAIException - ")
+        if marker:
+            try:
+                decoded_error = json.loads(encoded_error)
+            except json.JSONDecodeError:
+                pass
+            else:
+                error = _getattr_or_key(decoded_error, "error", decoded_error)
     message = _getattr_or_key(error, "message", "")
     error_type = getattr(exc, "type", None) or _getattr_or_key(error, "type")
     param = getattr(exc, "param", None) or _getattr_or_key(error, "param")
