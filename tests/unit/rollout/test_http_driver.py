@@ -214,6 +214,34 @@ async def test_persistent_429_hits_admission_timeout_and_cancels() -> None:
     assert cancelled and cancelled[0]["ids"] == [ROLLOUT_ID]
 
 
+async def test_admission_timeout_is_preserved_when_cancel_hangs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = _store()
+    cancel_calls = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal cancel_calls
+        if request.url.path == "/rollout":
+            return httpx.Response(429, headers={"Retry-After": "0"})
+        if request.url.path == "/rollout/cancel":
+            cancel_calls += 1
+            await asyncio.sleep(1.0)
+            return httpx.Response(200, json={"dispositions": {}})
+        raise AssertionError(request.url.path)
+
+    monkeypatch.setattr(
+        "osmosis_ai.rollout.http_driver._CANCEL_REQUEST_TIMEOUT_SEC",
+        0.02,
+    )
+    driver = _driver(store, handler, admission_timeout_sec=0.01)
+
+    with pytest.raises(RolloutAdmissionTimeoutError, match="not admitted within"):
+        await asyncio.wait_for(driver.run(_request()), timeout=0.2)
+
+    assert cancel_calls == 1
+
+
 async def test_post_200_is_protocol_error_without_looping() -> None:
     store = _store()
     posts = 0

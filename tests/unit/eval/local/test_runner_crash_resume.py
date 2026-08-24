@@ -28,6 +28,7 @@ from .conftest import RecordingHooks, RunnerHarness
 pytestmark = [pytest.mark.slow, pytest.mark.timeout(180)]
 
 _SERVER_PGID_FILENAME = "rollout-server.pgid"
+_SERVER_PGID_WAIT_SEC = 2.0
 
 _SUPERVISOR_SCRIPT = '''\
 """Run one local eval supervisor, driven entirely by argv/env. Test-only."""
@@ -192,9 +193,22 @@ def _kill_group(process: subprocess.Popen[str], sig: int) -> None:
 
 async def _stop_recorded_server(script: Path) -> None:
     pgid_file = script.with_name(_SERVER_PGID_FILENAME)
-    if not pgid_file.is_file():
-        return
-    pgid = int(pgid_file.read_text(encoding="utf-8"))
+    deadline = time.monotonic() + _SERVER_PGID_WAIT_SEC
+    pgid: int | None = None
+    while pgid is None:
+        try:
+            candidate = int(pgid_file.read_text(encoding="utf-8"))
+            if candidate <= 0:
+                raise ValueError
+            pgid = candidate
+        except (FileNotFoundError, ValueError):
+            if time.monotonic() >= deadline:
+                if pgid_file.is_file():
+                    raise AssertionError(
+                        f"rollout-server PGID file {pgid_file} was invalid"
+                    ) from None
+                return
+            await asyncio.sleep(0.05)
     await asyncio.to_thread(terminate_process_group, pgid, grace_sec=5.0)
 
     deadline = time.monotonic() + 2.0
@@ -205,6 +219,37 @@ async def _stop_recorded_server(script: Path) -> None:
             return
         await asyncio.sleep(0.05)
     raise AssertionError(f"rollout-server process group {pgid} survived cleanup")
+
+
+async def test_stop_recorded_server_waits_for_late_pgid(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    script = tmp_path / "run_supervisor.py"
+    stopped: list[int] = []
+
+    def fake_terminate(pgid: int, *, grace_sec: float) -> None:
+        assert grace_sec == 5.0
+        stopped.append(pgid)
+
+    def missing_group(_pgid: int, _sig: int) -> None:
+        raise ProcessLookupError
+
+    monkeypatch.setattr(
+        sys.modules[__name__], "terminate_process_group", fake_terminate
+    )
+    monkeypatch.setattr(os, "killpg", missing_group)
+
+    async def record_pgid() -> None:
+        await asyncio.sleep(0.05)
+        script.with_name(_SERVER_PGID_FILENAME).write_text("4242", encoding="utf-8")
+
+    writer = asyncio.create_task(record_pgid())
+    try:
+        await _stop_recorded_server(script)
+    finally:
+        await writer
+
+    assert stopped == [4242]
 
 
 async def test_kill_9_never_reruns_a_durably_acknowledged_item(

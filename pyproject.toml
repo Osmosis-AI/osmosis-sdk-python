@@ -229,9 +229,6 @@ exclude_lines = [
     "if __name__ == .__main__.",
 ]
 
-[tool.pytest.ini_options]
-timeout = 120
-
 [tool.ruff]
 target-version = "py312"
 line-length = 88

@@ -36,6 +36,7 @@ logger: logging.Logger = logging.getLogger(__name__)
 _RETRY_AFTER_FLOOR_SEC = 0.05
 _MAX_RETRY_AFTER_SEC = 60.0
 _DEFAULT_ADMISSION_TIMEOUT_SEC = 300.0
+_CANCEL_REQUEST_TIMEOUT_SEC = 5.0
 
 
 class RolloutAdmissionTimeoutError(TimeoutError):
@@ -194,10 +195,20 @@ class HttpRolloutDriver(RolloutDriver):
     async def _cancel_rollout(self, rollout_id: str) -> dict[str, str]:
         request = CancelRolloutsRequest(ids=[rollout_id])
         try:
-            response = await self._http.post(
-                f"{self._rollout_base_url}/rollout/cancel",
-                json=request.model_dump(mode="json"),
+            response = await asyncio.wait_for(
+                self._http.post(
+                    f"{self._rollout_base_url}/rollout/cancel",
+                    json=request.model_dump(mode="json"),
+                ),
+                timeout=_CANCEL_REQUEST_TIMEOUT_SEC,
             )
+        except TimeoutError:
+            logger.warning(
+                "Timed out cancelling rollout %s after %s seconds",
+                rollout_id,
+                _CANCEL_REQUEST_TIMEOUT_SEC,
+            )
+            return {}
         except httpx.RequestError:
             logger.warning(
                 "Failed to cancel rollout %s",
