@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import secrets
 import time
 from collections.abc import AsyncIterator
@@ -25,6 +26,10 @@ from contextlib import suppress
 from typing import Any
 
 from osmosis_ai._imports import raise_optional_dependency_error
+from osmosis_ai.rollout.controller.openai_responses import (
+    build_responses_kwargs,
+    to_chat_response,
+)
 
 try:
     from fastapi import APIRouter, Depends, HTTPException, Request
@@ -41,10 +46,12 @@ from osmosis_ai.rollout.utils.identifiers import is_single_path_segment
 logger: logging.Logger = logging.getLogger(__name__)
 
 # Request fields forwarded to litellm; everything else the client sends is
-# dropped (litellm's drop_params handles provider-side incompatibilities).
+# dropped. LiteLLM handles known provider incompatibilities, while the Responses
+# path below learns from a provider rejection when its model metadata is stale.
 _LITELLM_CONSUMED_FIELDS = frozenset(
     {"messages", "temperature", "top_p", "max_tokens", "tools"}
 )
+_OPENAI_SAMPLING_FIELDS = frozenset({"temperature", "top_p"})
 
 # The preflight probes once, so a 4xx client error there is a persistent
 # config/account problem, not a per-row fluke. Mid-run errors are not
@@ -84,14 +91,63 @@ def _getattr_or_key(obj: Any, name: str, default: Any = None) -> Any:
     return getattr(obj, name, default)
 
 
+def _unsupported_openai_sampling_param(exc: Exception, *, litellm: Any) -> str | None:
+    """Return a rejected sampling parameter from a structured OpenAI 400."""
+    bad_request_error = getattr(litellm, "BadRequestError", None)
+    if not isinstance(bad_request_error, type) or not isinstance(
+        exc, bad_request_error
+    ):
+        return None
+    if (
+        getattr(exc, "status_code", None) != 400
+        or getattr(exc, "llm_provider", None) != "openai"
+    ):
+        return None
+
+    body = getattr(exc, "body", None)
+    error = _getattr_or_key(body, "error", body)
+    if not isinstance(error, dict):
+        # LiteLLM's async Responses wrapper can remap the provider exception and
+        # retain the structured OpenAI error only as JSON after this marker.
+        raw_message = getattr(exc, "message", str(exc))
+        _, marker, encoded_error = raw_message.partition("OpenAIException - ")
+        if marker:
+            try:
+                decoded_error = json.loads(encoded_error)
+            except json.JSONDecodeError:
+                pass
+            else:
+                error = _getattr_or_key(decoded_error, "error", decoded_error)
+    message = _getattr_or_key(error, "message", "")
+    error_type = getattr(exc, "type", None) or _getattr_or_key(error, "type")
+    param = getattr(exc, "param", None) or _getattr_or_key(error, "param")
+    if (
+        not isinstance(message, str)
+        or "unsupported parameter" not in message.lower()
+        or error_type != "invalid_request_error"
+        or param not in _OPENAI_SAMPLING_FIELDS
+    ):
+        return None
+    return param
+
+
 def _usage_payload(response: Any) -> dict[str, int] | None:
     usage = _getattr_or_key(response, "usage")
     if usage is None:
         return None
+    prompt_tokens = _getattr_or_key(usage, "prompt_tokens")
+    if prompt_tokens is None:
+        prompt_tokens = _getattr_or_key(usage, "input_tokens", 0)
+    completion_tokens = _getattr_or_key(usage, "completion_tokens")
+    if completion_tokens is None:
+        completion_tokens = _getattr_or_key(usage, "output_tokens", 0)
+    total_tokens = _getattr_or_key(usage, "total_tokens")
+    if total_tokens is None:
+        total_tokens = int(prompt_tokens or 0) + int(completion_tokens or 0)
     return {
-        "prompt_tokens": int(_getattr_or_key(usage, "prompt_tokens", 0) or 0),
-        "completion_tokens": int(_getattr_or_key(usage, "completion_tokens", 0) or 0),
-        "total_tokens": int(_getattr_or_key(usage, "total_tokens", 0) or 0),
+        "prompt_tokens": int(prompt_tokens or 0),
+        "completion_tokens": int(completion_tokens or 0),
+        "total_tokens": int(total_tokens or 0),
     }
 
 
@@ -113,15 +169,19 @@ def _plain_data(value: Any) -> Any:
     return value
 
 
-def _message_content(choice: Any) -> tuple[str, Any]:
+def _message_fields(choice: Any) -> tuple[str, Any, Any]:
     message = _getattr_or_key(choice, "message")
     if message is None:
         delta = _getattr_or_key(choice, "delta", {})
-        return str(_getattr_or_key(delta, "content", "") or ""), _getattr_or_key(
-            delta, "tool_calls"
+        return (
+            str(_getattr_or_key(delta, "content", "") or ""),
+            _getattr_or_key(delta, "tool_calls"),
+            _getattr_or_key(delta, "refusal"),
         )
-    return str(_getattr_or_key(message, "content", "") or ""), _getattr_or_key(
-        message, "tool_calls"
+    return (
+        str(_getattr_or_key(message, "content", "") or ""),
+        _getattr_or_key(message, "tool_calls"),
+        _getattr_or_key(message, "refusal"),
     )
 
 
@@ -143,13 +203,15 @@ def _model_response_to_payload(
 ) -> dict[str, Any]:
     choices: list[dict[str, Any]] = []
     for index, choice in enumerate(_getattr_or_key(response, "choices", []) or []):
-        content, tool_calls = _message_content(choice)
+        content, tool_calls, refusal = _message_fields(choice)
         finish_reason = _getattr_or_key(choice, "finish_reason", "stop")
         choice_index = int(_getattr_or_key(choice, "index", index) or index)
         if stream:
             delta: dict[str, Any] = {"content": content}
             if tool_calls:
                 delta["tool_calls"] = _stream_tool_calls_payload(tool_calls)
+            if refusal is not None:
+                delta["refusal"] = str(refusal)
             choices.append(
                 {
                     "index": choice_index,
@@ -161,6 +223,8 @@ def _model_response_to_payload(
             message: dict[str, Any] = {"role": "assistant", "content": content}
             if tool_calls:
                 message["tool_calls"] = _plain_data(tool_calls)
+            if refusal is not None:
+                message["refusal"] = str(refusal)
             choices.append(
                 {
                     "index": choice_index,
@@ -198,6 +262,7 @@ class LiteLLMBridge:
         self._api_key = api_key
         self._api_base = api_base
         self._tokens: dict[str, int] = {}
+        self._rejected_openai_sampling_params: set[str] = set()
 
     def _build_kwargs(self, body: dict[str, Any]) -> dict[str, Any]:
         kwargs: dict[str, Any] = {
@@ -214,6 +279,66 @@ class LiteLLMBridge:
                 kwargs[key] = body[key]
         return kwargs
 
+    def _uses_responses_api(self, litellm: Any) -> bool:
+        if not self.model.startswith("openai/"):
+            return False
+        return not (
+            self._api_base
+            or os.environ.get("OPENAI_BASE_URL")
+            or os.environ.get("OPENAI_API_BASE")
+            or getattr(litellm, "api_base", None)
+        )
+
+    def _filter_responses_sampling_params(
+        self, body: dict[str, Any], *, litellm: Any
+    ) -> dict[str, Any]:
+        requested = {key: body[key] for key in _OPENAI_SAMPLING_FIELDS if key in body}
+        if not requested:
+            return body
+
+        supported = litellm.get_optional_params(
+            model=self.model,
+            custom_llm_provider="openai",
+            drop_params=True,
+            **requested,
+        )
+        unsupported = (requested.keys() - supported.keys()) | (
+            requested.keys() & self._rejected_openai_sampling_params
+        )
+        if not unsupported:
+            return body
+
+        filtered = dict(body)
+        for key in unsupported:
+            filtered.pop(key, None)
+        return filtered
+
+    async def _provider_complete(self, body: dict[str, Any], *, litellm: Any) -> Any:
+        if self._uses_responses_api(litellm):
+            kwargs = build_responses_kwargs(
+                self._filter_responses_sampling_params(body, litellm=litellm),
+                model=self.model,
+                api_key=self._api_key,
+            )
+            # Each retry removes one of the two whitelisted sampling fields.
+            # Repeated or unrelated bad requests are re-raised immediately.
+            while True:
+                try:
+                    response = await litellm.aresponses(**kwargs)
+                    return to_chat_response(response)
+                except Exception as exc:
+                    param = _unsupported_openai_sampling_param(exc, litellm=litellm)
+                    if param is None or param not in kwargs:
+                        raise
+                    self._rejected_openai_sampling_params.add(param)
+                    kwargs.pop(param)
+                    logger.info(
+                        "Retrying model %s without unsupported parameter %s",
+                        self.model,
+                        param,
+                    )
+        return await litellm.acompletion(**self._build_kwargs(body))
+
     async def preflight_check(self) -> None:
         """One-shot completion probe; raises on persistent config problems."""
         litellm = _get_litellm()
@@ -227,10 +352,12 @@ class LiteLLMBridge:
                 f"Received: {self.model!r}. Details: {msg}"
             ) from exc
         try:
-            await litellm.acompletion(
-                **self._build_kwargs(
-                    {"messages": [{"role": "user", "content": "hi"}], "max_tokens": 256}
-                )
+            await self._provider_complete(
+                {
+                    "messages": [{"role": "user", "content": "hi"}],
+                    "max_tokens": 256,
+                },
+                litellm=litellm,
             )
         except Exception as exc:
             ename = type(exc).__name__
@@ -242,7 +369,7 @@ class LiteLLMBridge:
 
     async def complete(self, body: dict[str, Any], *, rollout_id: str) -> Any:
         litellm = _get_litellm()
-        response = await litellm.acompletion(**self._build_kwargs(body))
+        response = await self._provider_complete(body, litellm=litellm)
         usage = _usage_payload(response)
         if usage:
             self._tokens[rollout_id] = (

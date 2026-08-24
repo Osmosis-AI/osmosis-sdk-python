@@ -9,6 +9,7 @@ import os
 import sys
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 import httpx
 import pytest
@@ -24,12 +25,12 @@ from osmosis_ai.eval.local.runner import (
     EvalRunSpec,
     LocalEvalError,
     LocalEvalOptions,
+    _available_generated_run_name,
     _classify_terminal,
     build_run_inputs,
     build_subprocess_env,
     changed_input_keys,
     compute_source_digest,
-    generated_run_name,
     reserve_free_port,
 )
 from osmosis_ai.eval.local.state import digest_of
@@ -252,25 +253,19 @@ def test_identical_inputs_have_no_changed_keys(tmp_path: Path) -> None:
 
 
 # --------------------------------------------------------------------------- #
-# Generated run names (§4.4)
+# Generated run name availability
 # --------------------------------------------------------------------------- #
 
 
-def test_generated_name_carries_stem_stamp_and_fingerprint() -> None:
-    name = generated_run_name("my-eval", "abc123def456", now="20260814T010203Z")
-    assert name == "my-eval-20260814T010203Z-abc123de"
-
-
-def test_generated_name_sanitizes_an_unsafe_stem() -> None:
-    name = generated_run_name("my eval/v2", "abc123def456", now="20260814T010203Z")
-    assert "/" not in name
-    assert name.startswith("my-eval-v2-")
-
-
-def test_generated_name_survives_an_empty_stem() -> None:
-    assert generated_run_name("", "abc123def456", now="20260814T010203Z").startswith(
-        "eval-"
-    )
+@patch(
+    "osmosis_ai.eval.local.runner.generate_run_name",
+    side_effect=["brave-falcon-42", "calm-tiger-7"],
+)
+def test_generated_name_skips_an_existing_local_run(
+    _generate: Any, tmp_path: Path
+) -> None:
+    (tmp_path / "brave-falcon-42").mkdir()
+    assert _available_generated_run_name(tmp_path) == "calm-tiger-7"
 
 
 # --------------------------------------------------------------------------- #
@@ -624,6 +619,9 @@ def _runner(
             self.stages.append(message)
 
         async def confirm_dispatch(self, *, pending: int, model_path: str) -> None: ...
+        async def confirm_new_run(self, *, run_name: str, total: int) -> bool:
+            return False
+
         def resolve_secrets(self, names: Any) -> dict[str, str]:
             return {}
 

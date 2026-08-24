@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from pathlib import Path
 from typing import Any
 
@@ -170,6 +171,27 @@ async def test_a_second_run_of_the_same_name_dispatches_nothing(
     # No pending work means credentials and the subprocess are never needed.
     assert hooks.secret_requests == []
     assert all(row["resumed"] is True for row in harness.index_rows())
+    # The complete run offered a new run; declining kept the no-op.
+    assert hooks.new_run_prompts == [("run-1", 4)]
+
+
+async def test_accepting_the_new_run_prompt_starts_a_generated_name(
+    harness: RunnerHarness,
+) -> None:
+    await harness.runner().run()
+    journal_before = (harness.run_dir() / "events.jsonl").read_bytes()
+
+    hooks = RecordingHooks(accept_new_run=True)
+    summary = await harness.runner(hooks=hooks).run()
+
+    assert hooks.new_run_prompts == [("run-1", 4)]
+    assert summary.run_name != "run-1"
+    assert summary.dispatched == 4
+    assert summary.resumed == 0
+    # The complete run is left in place -- nothing archived, nothing rewritten.
+    assert (harness.run_dir() / "events.jsonl").read_bytes() == journal_before
+    assert not list(harness.output_root.glob("run-1.archive-*"))
+    assert len(harness.index_rows(summary.run_name)) == 4
 
 
 async def test_a_partial_journal_reruns_only_the_missing_items(
@@ -454,7 +476,7 @@ async def test_an_unnamed_run_gets_a_generated_directory(
     harness: RunnerHarness,
 ) -> None:
     summary = await harness.runner(options=LocalEvalOptions()).run()
-    assert summary.run_name.startswith("echo-eval-")
+    assert re.fullmatch(r"[a-z]+-[a-z]+-\d{1,2}", summary.run_name)
     assert summary.run_dir.name == summary.run_name
     assert (summary.run_dir / "index.jsonl").is_file()
 
@@ -586,16 +608,16 @@ async def test_a_process_wide_admission_fault_halts_and_the_rows_resume(
     async def failing(self: Any, init: Any) -> None:
         raise admission_fault
 
-    monkeypatch.setattr(HttpRolloutDriver, "_admit", failing)
-    hooks = RecordingHooks()
-    summary = await harness.runner(hooks=hooks).run()
+    with monkeypatch.context() as admission_patch:
+        admission_patch.setattr(HttpRolloutDriver, "_admit", failing)
+        hooks = RecordingHooks()
+        summary = await harness.runner(hooks=hooks).run()
 
-    assert summary.failed == 0
-    assert harness.journal_lines() == []
-    assert summary.cancelled is True
-    assert any("stopping dispatch" in note for note in hooks.notes)
+        assert summary.failed == 0
+        assert harness.journal_lines() == []
+        assert summary.cancelled is True
+        assert any("stopping dispatch" in note for note in hooks.notes)
 
-    monkeypatch.undo()
     resumed = await harness.runner().run()
     assert resumed.succeeded == 4
 

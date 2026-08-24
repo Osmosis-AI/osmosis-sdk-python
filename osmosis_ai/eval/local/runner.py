@@ -48,6 +48,7 @@ from osmosis_ai.eval.local.results import (
     read_valid_trajectory,
     select_attempts,
 )
+from osmosis_ai.eval.local.run_name import generate_run_name
 from osmosis_ai.eval.local.state import (
     DATASET_NORMALIZATION_VERSION,
     JOURNAL_FILENAME,
@@ -64,7 +65,6 @@ from osmosis_ai.eval.local.state import (
     TerminalStatus,
     WorkKey,
     archive_run_directory,
-    digest_of,
     process_start_token,
     reap_orphan_server,
     terminate_process_group,
@@ -124,6 +124,15 @@ class LocalEvalError(RuntimeError):
 
 class ResumeRefusedError(LocalEvalError):
     """A named run's resolved inputs changed, so resuming would mix versions."""
+
+
+class _NewRunRequested(Exception):
+    """Internal signal: the named run is complete and the user chose a new run.
+
+    An exception rather than a return value so it unwinds ``_run_locked``'s
+    ``finally`` blocks -- and the run lock itself, which is held per name --
+    before ``run()`` starts over under a generated name.
+    """
 
 
 # --------------------------------------------------------------------------- #
@@ -194,6 +203,15 @@ class RunnerHooks(Protocol):
         terminal prompt library needs the supervisor's own event loop to render
         on. A synchronous implementation that starts a second loop would fail.
         """
+
+    async def confirm_new_run(self, *, run_name: str, total: int) -> bool:
+        """Named run already has every result. True starts a new generated-name
+        run alongside it; the complete run is never touched.
+
+        Answered interactively by the CLI; non-interactive sessions must return
+        False so a repeated command stays an idempotent no-op.
+        """
+        ...
 
     def resolve_secrets(self, names: Sequence[str]) -> dict[str, str]:
         """Resolve workflow-secret values. Called only when work is pending."""
@@ -314,18 +332,19 @@ def build_run_inputs(
     }
 
 
-def generated_run_name(
-    config_stem: str, inputs_digest: str, *, now: str | None = None
-) -> str:
-    """``<config-stem>-<timestamp>-<short-fingerprint>`` for an unnamed run (§4.4)."""
-    stamp = now or time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
-    safe_stem = (
-        "".join(
-            char if char.isalnum() or char in "._-" else "-" for char in config_stem
-        ).strip("-._")
-        or "eval"
-    )
-    return validate_run_name(f"{safe_stem}-{stamp}-{inputs_digest[:8]}")
+def _available_generated_run_name(output_root: Path) -> str:
+    """Generate a cloud-style name that has no existing local run directory.
+
+    The existence check races with concurrent invocations, but the per-name
+    run lock is acquired before any directory is written: if two processes
+    ever pick the same name, the second fails its ``RunLock`` with a clear
+    error instead of sharing state.
+    """
+    for _ in range(100):
+        candidate = generate_run_name()
+        if not (output_root / candidate).exists():
+            return candidate
+    raise LocalEvalError("could not generate an unused local evaluation run name")
 
 
 def changed_input_keys(
@@ -570,7 +589,6 @@ class LocalEvalRunner:
         output_root: Path,
         hooks: RunnerHooks,
         provenance: Mapping[str, Any] | None = None,
-        config_stem: str = "eval",
     ) -> None:
         self._spec = spec
         self._options = options
@@ -580,8 +598,10 @@ class LocalEvalRunner:
         self._output_root = output_root
         self._hooks = hooks
         self._provenance = dict(provenance or {})
-        self._config_stem = config_stem
 
+        # The name actually being run, once chosen -- generated names included.
+        # The CLI reads it to print an exact resume command on interrupt.
+        self.active_run_name: str | None = None
         self._run_dir: Path | None = None
         self._log: RunLog | None = None
         self._journal: TerminalJournal | None = None
@@ -609,10 +629,27 @@ class LocalEvalRunner:
         self, *, after_finalize: Callable[[RunSummary], None] | None = None
     ) -> RunSummary:
         """Execute, finalize, then optionally act while still holding the lock."""
-        run_name = self._options.name or generated_run_name(
-            self._config_stem, self._pending_inputs_digest()
+        run_name = self._options.name or _available_generated_run_name(
+            self._output_root
         )
         validate_run_name(run_name)
+        try:
+            return await self._run_named(run_name, after_finalize=after_finalize)
+        except _NewRunRequested:
+            new_name = _available_generated_run_name(self._output_root)
+            self._hooks.note(
+                f"{run_name} is complete and stays untouched; "
+                f"starting new run {new_name!r}"
+            )
+            return await self._run_named(new_name, after_finalize=after_finalize)
+
+    async def _run_named(
+        self,
+        run_name: str,
+        *,
+        after_finalize: Callable[[RunSummary], None] | None,
+    ) -> RunSummary:
+        self.active_run_name = run_name
         lock_path = self._output_root / LOCKS_DIRNAME / f"{run_name}.lock"
         with RunLock(lock_path):
             summary = await self._run_locked(run_name=run_name)
@@ -627,9 +664,6 @@ class LocalEvalRunner:
     # ------------------------------------------------------------------ #
     # Startup
     # ------------------------------------------------------------------ #
-
-    def _pending_inputs_digest(self) -> str:
-        return digest_of(self._build_inputs())
 
     def _build_inputs(self) -> dict[str, Any]:
         return build_run_inputs(
@@ -697,6 +731,12 @@ class LocalEvalRunner:
             self._refresh_snapshots()
             total = len(self._selection.rows) * max(1, self._spec.n)
             if not pending:
+                # Offering a new run only here -- never when work is
+                # pending -- keeps resume-after-interrupt untouched (§D2).
+                if total and await self._hooks.confirm_new_run(
+                    run_name=run_name, total=total
+                ):
+                    raise _NewRunRequested
                 self._stage(
                     "resume",
                     f"{run_name}: all {total} work items already have results",

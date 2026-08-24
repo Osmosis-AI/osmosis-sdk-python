@@ -61,7 +61,7 @@ osmosis eval upload .osmosis/evals/my-local-run
 
 | Flag | Meaning |
 |---|---|
-| `--name` | Stable run name. Re-running the same name resumes. Omit for a one-off run with a generated name. |
+| `--name` | Stable run name. Re-running the same name resumes. Omit for a one-off run with a cloud-style `adjective-animal-number` name. |
 | `--output`, `-o` | Run output root. Default `.osmosis/evals/`. |
 | `--dataset-file` | Local dataset file instead of the platform dataset. |
 | `--secrets-file` | Dotenv file supplying `[secrets]` values; `-` reads stdin. Values are never written to disk. |
@@ -92,7 +92,7 @@ A plain run narrates itself: the plan table (the same one `eval submit` prints) 
 │ Work Items   │ 60                │
 │ Output       │ .osmosis/evals    │
 ╰──────────────┴───────────────────╯
-→ echo-eval-7f3a2b: 60 of 60 work items pending
+→ brave-falcon-42: 60 of 60 work items pending
 60 rollouts x model openai/gpt-5-mini — continue? [y/N] y
 → checking model openai/gpt-5-mini
 → syncing rollout dependencies (echo)
@@ -108,7 +108,7 @@ The bar needs a terminal. Redirected output gets one printed line per completed 
 
 `--verbose` replaces the milestone lines with the full log stream — `logs.txt` line for line, rollout-server output included. The plan table, the progress display, and the results table stay.
 
-The run ends with a results table: work items by outcome, pass rate against the threshold, reward statistics, pass@k for multi-attempt runs, tokens, duration, and the output directory. Every number in it is read straight from what `metrics.json` holds — nothing is recomputed for display, so the terminal and the file cannot disagree. Durations use the same formatter as `osmosis eval info`, so a local run and a cloud run of the same evaluation read alike.
+The run ends with a results table: work items by outcome, pass rate against the threshold, reward statistics, pass@k for multi-attempt runs, tokens, duration, and the output directory. Every number in it is read straight from what `metrics.json` holds — nothing is recomputed for display, so the terminal and the file cannot disagree. Durations use the same formatter as `osmosis eval info`, so a local run and a cloud run of the same evaluation read alike. A completed run that was not uploaded with `--upload` then prints a copyable `osmosis eval upload <run-directory>` command.
 
 ## Output layout
 

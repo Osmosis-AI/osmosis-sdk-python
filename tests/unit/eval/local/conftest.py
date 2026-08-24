@@ -135,6 +135,8 @@ class RecordingHooks:
     progress_snapshots: list[ProgressSnapshot] = field(default_factory=list)
     secret_requests: list[list[str]] = field(default_factory=list)
     refuse_confirmation: bool = False
+    accept_new_run: bool = False
+    new_run_prompts: list[tuple[str, int]] = field(default_factory=list)
 
     def note(self, message: str) -> None:
         self.notes.append(message)
@@ -146,6 +148,10 @@ class RecordingHooks:
         self.confirmations.append((pending, model_path))
         if self.refuse_confirmation:
             raise RuntimeError("dispatch declined")
+
+    async def confirm_new_run(self, *, run_name: str, total: int) -> bool:
+        self.new_run_prompts.append((run_name, total))
+        return self.accept_new_run
 
     def resolve_secrets(self, names: Sequence[str]) -> dict[str, str]:
         self.secret_requests.append(list(names))
@@ -206,7 +212,6 @@ class RunnerHarness:
             rollout_dir=self.rollout_dir,
             output_root=self.output_root,
             hooks=hooks or self.hooks,
-            config_stem="echo-eval",
         )
 
     def run_dir(self, name: str = "run-1") -> Path:

@@ -124,8 +124,8 @@ def eval_run(
         None,
         "--name",
         help=(
-            "Stable run name. Re-running the same name resumes pending work. "
-            "Omit to create a one-off run with a generated name."
+            "Run name. Every run gets a generated name by default; pass a "
+            "previous run's name to resume its pending work items."
         ),
     ),
     output: str | None = typer.Option(

@@ -53,6 +53,9 @@ class Hooks:
     async def confirm_dispatch(self, *, pending, model_path):
         print(f"PENDING {pending}", flush=True)
 
+    async def confirm_new_run(self, *, run_name, total):
+        return False
+
     def resolve_secrets(self, names):
         return {}
 
@@ -85,7 +88,6 @@ async def main() -> int:
         rollout_dir=Path(rollout_dir),
         output_root=Path(output_root),
         hooks=Hooks(),
-        config_stem="echo-eval",
     )
     try:
         summary = await runner.run()

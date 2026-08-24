@@ -9,6 +9,7 @@ import tomllib
 from collections.abc import Iterator
 from io import StringIO
 from pathlib import Path
+from shlex import quote
 from types import SimpleNamespace
 from typing import Any
 
@@ -270,13 +271,6 @@ def test_the_rollout_dir_is_resolved_under_the_workspace(
     assert captured_runner.calls[0]["rollout_dir"] == workspace / "rollouts" / ROLLOUT
 
 
-def test_the_config_stem_seeds_a_generated_run_name(
-    workspace: Path, captured_runner: type[_CapturedRunner], console_capture: StringIO
-) -> None:
-    _run(workspace)
-    assert captured_runner.calls[0]["config_stem"] == "echo"
-
-
 # --------------------------------------------------------------------------- #
 # Errors and UX
 # --------------------------------------------------------------------------- #
@@ -418,7 +412,9 @@ def test_a_complete_run_reports_success_with_the_output_path(
     assert result.resource["succeeded"] == 6
     assert result.resource["dataset_source"] == "explicit"
     assert result.resource["output_path"].endswith("run-1")
-    assert result.display_next_steps == []
+    assert result.display_next_steps == [
+        f"Upload: osmosis eval upload {quote(str(workspace / '.osmosis/evals/run-1'))}"
+    ]
 
 
 def test_upload_flag_uploads_after_finalize_and_surfaces_platform_url(
@@ -510,7 +506,7 @@ def test_upload_failure_says_local_results_are_complete_and_gives_retry_command(
 
     assert f"Local evaluation results are complete at {run_dir}" in raised.value.message
     assert "local evaluation upload failed: offline" in raised.value.message
-    assert f"osmosis eval upload {run_dir}" in raised.value.message
+    assert f"osmosis eval upload {quote(str(run_dir))}" in raised.value.message
     assert "platform upload failed" not in raised.value.message
 
 
@@ -625,7 +621,7 @@ def test_upload_platform_error_keeps_auth_code_and_retry_context(
     assert raised.value.code == CLIErrorCode.AUTH_REQUIRED
     assert raised.value.details["status_code"] == 401
     assert f"Local evaluation results are complete at {run_dir}" in raised.value.message
-    assert f"osmosis eval upload {run_dir}" in raised.value.message
+    assert f"osmosis eval upload {quote(str(run_dir))}" in raised.value.message
 
 
 def test_an_incomplete_upload_run_reports_skipped_upload_and_resumes_with_upload(
@@ -777,6 +773,36 @@ def test_the_json_envelope_carries_the_run_resource(
     assert envelope["resource"]["run_name"] == "run-1"
     assert envelope["resource"]["metrics"]["pass_rate"] == 1.0
     assert envelope["resource"]["duration_ms"] == 4200.0
+
+
+def test_plain_output_prints_the_upload_command_after_a_complete_run(
+    workspace: Path,
+    captured_runner: type[_CapturedRunner],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    import osmosis_ai.cli.main as cli
+
+    monkeypatch.chdir(workspace)
+    exit_code = cli.main(
+        [
+            "--plain",
+            "eval",
+            "run",
+            "configs/eval/echo.toml",
+            "--dataset-file",
+            "data/echo.jsonl",
+            "--name",
+            "run-1",
+            "--yes",
+        ]
+    )
+    captured = capsys.readouterr()
+    assert exit_code == 0, captured.err
+    assert (
+        f"Upload: osmosis eval upload {quote(str(workspace / '.osmosis/evals/run-1'))}"
+        in captured.out
+    )
 
 
 def test_the_command_is_registered_under_the_eval_group() -> None:
