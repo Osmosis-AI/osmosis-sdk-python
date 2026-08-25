@@ -16,7 +16,7 @@ Running a local eval also requires [uv](https://docs.astral.sh/uv/): it is what 
 
 `eval run` requires being logged in (`osmosis auth login`) and run from the workspace directory. All LLM traffic is served by an in-process LiteLLM bridge on your machine — the same design as the hosted eval controller — so `experiment.model_path` is a LiteLLM model id (`openai/gpt-5-mini`, `anthropic/claude-sonnet-4-6`, …) and provider credentials resolve exactly as LiteLLM resolves them anywhere: from the process environment (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, provider `*_API_BASE` overrides, …) or from `--secrets-file`. Local OpenAI-compatible endpoints (a laptop vLLM or Ollama) work through the corresponding LiteLLM provider id and its environment variables.
 
-Execution is local-only: the rollout entrypoint must build `LocalBackend`, or `HarborBackend` on Harbor's Docker environment (the host Docker runtime). Harbor's SkyPilot environment is not supported by `eval run`.
+Execution is local-only: the rollout entrypoint must build `LocalBackend`, or `HarborBackend` configured with `EnvironmentType.DOCKER` (the host Docker runtime). Docker is the only Harbor environment supported by `eval run`; if the entrypoint normally selects Daytona, SkyPilot, or another environment, temporarily change its `environment_config.type` to `EnvironmentType.DOCKER` before running and restore the usual environment afterward.
 
 ## The rollout environment
 
