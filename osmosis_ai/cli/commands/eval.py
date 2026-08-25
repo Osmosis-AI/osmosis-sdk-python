@@ -165,7 +165,10 @@ def eval_run(
     max_in_flight: int | None = typer.Option(
         None,
         "--max-in-flight",
-        help="Concurrent rollouts (default: evaluation.batch_size, then 1).",
+        help=(
+            "Concurrent rollouts (default: evaluation.batch_size, then backend "
+            "capacity, then 1)."
+        ),
     ),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt."),
     rollout_port: int | None = typer.Option(

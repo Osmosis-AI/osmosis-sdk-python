@@ -226,7 +226,7 @@ def test_extra_modules_table_matches_pyproject_extras() -> None:
     def declared_distributions(extra: str, seen: frozenset[str]) -> set[str]:
         """Third-party distributions an extra installs, self-references expanded.
 
-        An extra may pull another extra in as ``osmosis-ai[other]`` (``eval-run``
+        An extra may pull another extra in as ``osmosis-ai[other]`` (``eval``
         does this for ``server`` and ``parquet``), so those requirements resolve
         to the packages of the referenced extra instead of counting as a
         dependency themselves.
@@ -248,7 +248,7 @@ def test_extra_modules_table_matches_pyproject_extras() -> None:
         for extra, requirements in declared_extras.items()
         if extra != "full"  # full only aggregates osmosis-ai[...] self-references
     }
-    executable_only = {"harbor": {"uv"}, "eval-run": {"uv"}}
+    executable_only = {"harbor": {"uv"}, "eval": {"uv"}}
     assert set(EXTRA_MODULES) == set(checkable)
 
     for extra in checkable:
@@ -353,25 +353,25 @@ def test_extra_modules_table_matches_pyproject_extras() -> None:
             "osmosis_ai.rollout.controller.listener",
             "create_callback_app",
             "fastapi",
-            "eval-run",
+            "eval",
         ),
         (
             "osmosis_ai.rollout.controller",
             "LiteLLMBridge",
             "fastapi",
-            "eval-run",
+            "eval",
         ),
         (
             "osmosis_ai.rollout.controller.llm_bridge",
             "create_bridge_router",
             "fastapi",
-            "eval-run",
+            "eval",
         ),
         (
             "osmosis_ai.eval.local.runner",
             "LocalEvalRunner",
             "fastapi",
-            "eval-run",
+            "eval",
         ),
     ],
 )
@@ -432,12 +432,12 @@ def test_agent_integration_classes_use_canonical_module_paths() -> None:
 
 
 def test_local_eval_runner_imports_without_harbor_extra() -> None:
-    """`osmosis eval run` ships with `[eval-run]`, which does not carry harbor.
+    """`osmosis eval run` ships with `[eval]`, which does not carry harbor.
 
     The runner spawns the rollout server through uv, so it needs uv resolution
     -- but reaching it through `osmosis_ai.packaging`, whose platformdirs and
     toml imports ship with `[harbor]`, would break `eval run` at startup for an
-    `[eval-run]`-only install.
+    `[eval]`-only install.
     """
     result = _run_python(
         """
@@ -466,7 +466,7 @@ def test_local_eval_runner_imports_without_harbor_extra() -> None:
 
 
 def test_driver_core_imports_without_eval_run_extra() -> None:
-    """The localhost callback listener and the LiteLLM bridge need `[eval-run]`.
+    """The localhost callback listener and the LiteLLM bridge need `[eval]`.
 
     The store and the HTTP driver speak httpx and are part of the base install,
     so a bare environment must reach both of them.

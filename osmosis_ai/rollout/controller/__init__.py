@@ -1,7 +1,7 @@
 """Generic rollout callback controller primitives.
 
 Optional FastAPI/uvicorn symbols load on first access and require the
-``eval-run`` extra. ``CallbackStore`` is in-process only and has no extra.
+``eval`` extra. ``CallbackStore`` is in-process only and has no extra.
 """
 
 from typing import TYPE_CHECKING
@@ -48,7 +48,7 @@ def __getattr__(name: str) -> object:
     except ModuleNotFoundError as exc:
         raise_optional_dependency_error(
             exc,
-            extra="eval-run",
+            extra="eval",
             feature="Local evaluation",
         )
 

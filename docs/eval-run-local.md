@@ -5,12 +5,12 @@ Runs an evaluation on your machine against the rollout server in your own worksp
 ## Install
 
 ```bash
-pip install "osmosis-ai[eval-run]"
+pip install "osmosis-ai[eval]"
 ```
 
 That extra covers the supervisor process only — the CLI, CSV/JSONL/Parquet dataset readers, the localhost callback listener, and the in-process LiteLLM bridge. The rollout server's dependencies do **not** come from here: they are resolved from `rollouts/<name>/pyproject.toml`, which the `osmosis rollout init` scaffold already declares as `osmosis-ai[server]`. A Harbor rollout adds the `harbor` extra *there*, in its own `pyproject.toml`, not next to the CLI.
 
-Running a local eval also requires [uv](https://docs.astral.sh/uv/): it is what launches the rollout server in that environment. The `eval-run` extra installs it; a uv already on `PATH` works too.
+Running a local eval also requires [uv](https://docs.astral.sh/uv/): it is what launches the rollout server in that environment. The `eval` extra installs it; a uv already on `PATH` works too.
 
 ## Requirements
 
@@ -198,7 +198,6 @@ If a process-wide fault stops the run — the rollout server dies, the model pro
 ## Known limitations
 
 - Harbor containers reach the bridge via `host.docker.internal`, which the loopback rewrite applies on macOS only. On Linux Docker the container cannot reach a loopback-bound bridge yet, so Harbor rollouts that call the model are macOS-only for now; `LocalBackend` rollouts work everywhere.
-- A `kill -9` of the supervisor can leave one rollout server running; stop it with `pkill -f <entrypoint>`. Ctrl-C and normal exits clean up after themselves.
 - An in-sandbox LLM-judge grader works only if your Harbor environment already provides its own credentials: `GraderContext` carries no LLM endpoint.
 - `allowlist` egress is not yet validated end-to-end; it needs Linux Docker, or a macOS host whose Docker Desktop kernel has `CONFIG_NFT_FIB_INET` (see above).
 - Windows/WSL2 is out of scope and untested.

@@ -27,7 +27,7 @@ try:
 except ModuleNotFoundError as _exc:
     raise_optional_dependency_error(
         _exc,
-        extra="eval-run",
+        extra="eval",
         feature="Local evaluation",
     )
 
