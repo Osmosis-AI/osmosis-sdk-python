@@ -69,9 +69,9 @@ EXTRA_REQUIREMENTS: dict[str, set[str]] = {
     },
     "rubric": {"aiohttp", "click", "litellm", "orjson", "tqdm"},
     "parquet": {"pyarrow"},
-    # eval-run = osmosis-ai[server,parquet] self-reference + the in-process
+    # eval = osmosis-ai[server,parquet] self-reference + the in-process
     # LiteLLM bridge and the uv executable used to launch rollout environments.
-    "eval-run": {"litellm", "osmosis-ai", "uv"},
+    "eval": {"litellm", "osmosis-ai", "uv"},
     "full": {"osmosis-ai"},
 }
 
@@ -229,7 +229,7 @@ def _assert_extra_only_modules_absent() -> None:
                 "osmosis_ai.rollout.controller.listener",
                 "osmosis_ai.rollout.controller.llm_bridge",
             ):
-                assert 'pip install "osmosis-ai[eval-run]"' in str(error), str(error)
+                assert 'pip install "osmosis-ai[eval]"' in str(error), str(error)
             continue
         raise AssertionError(f"{module_name} imported without its extra")
 
@@ -354,7 +354,7 @@ SCENARIO_SMOKE: dict[str, Callable[[], None]] = {
     "harbor": _smoke_harbor,
     "rubric": _smoke_rubric,
     "parquet": _smoke_parquet,
-    "eval-run": _smoke_eval_run,
+    "eval": _smoke_eval_run,
 }
 
 SCENARIO_PRESENT: dict[str, set[str]] = {
@@ -365,7 +365,7 @@ SCENARIO_PRESENT: dict[str, set[str]] = {
     "harbor": {"dockerfile-parse", "harbor", "platformdirs", "toml", "uv"},
     "rubric": {"litellm", "orjson", "tqdm"},
     "parquet": {"pyarrow"},
-    "eval-run": {"fastapi", "litellm", "pyarrow", "uv", "uvicorn"},
+    "eval": {"fastapi", "litellm", "pyarrow", "uv", "uvicorn"},
     "full": {
         "fastapi",
         "dockerfile-parse",
@@ -462,7 +462,7 @@ SCENARIO_ABSENT: dict[str, set[str]] = {
     },
     # litellm transitively installs tqdm, so it cannot prove tqdm was
     # unselected here (same as every other litellm-carrying scenario).
-    "eval-run": {
+    "eval": {
         "dockerfile-parse",
         "harbor",
         "openai-agents",

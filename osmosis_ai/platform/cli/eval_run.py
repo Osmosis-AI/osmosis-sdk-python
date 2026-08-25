@@ -182,9 +182,9 @@ def _missing_extra_error(exc: ModuleNotFoundError) -> CLIError:
     # environment, so harbor never has to be importable in this process.
     return CLIError(
         "Local evaluation requires optional dependencies. Install them with "
-        '`pip install "osmosis-ai[eval-run]"`.',
+        '`pip install "osmosis-ai[eval]"`.',
         code=CLIErrorCode.VALIDATION,
-        details={"missing_module": exc.name, "extra": "eval-run"},
+        details={"missing_module": exc.name, "extra": "eval"},
     )
 
 

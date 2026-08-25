@@ -2,27 +2,30 @@
 
 This file records changes to `osmosis-ai`. For earlier versions, see [GitHub Releases](https://github.com/Osmosis-AI/osmosis-sdk-python/releases).
 
-## Unreleased
+## 0.3.1 - 2026-08-24
 
 ### Breaking Changes
 
-- Removed eight server-owned fields from the `osmosis_ai.platform.api.models` record types, which the package documents as a direct import path: `UploadInfo.s3_key` / `.upload_id`, `DatasetFile.df_stats` / `.organization_id`, `TrainingRunMetrics.training_run_id`, `EvalRunMetrics.eval_run_id`, `RolloutInfo.last_synced_at`, and `TrainingRunCheckpoints.training_run_id`. Nothing in the SDK read them. Reading one of these attributes out of tree now raises `AttributeError`, and the four that were required keys are no longer required, so `from_dict` accepts responses that omit them ([#315](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/315)).
-- Removed `ExecutionBackend.max_concurrency` and its `LocalBackend` override; nothing read it, and `/health` is the single capacity channel. Out-of-tree backends that override it keep working, but a `super().max_concurrency` call now raises `AttributeError` ([#315](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/315)).
-- Removed `PLATFORM_URL` from `osmosis_ai.platform.auth`. It was a snapshot frozen at import time, so it silently ignored `OSMOSIS_PLATFORM_URL` changes (including CLI-loaded `.env` files) that every request path honors; call `get_platform_url()` instead. Its removal also means importing `osmosis_ai.platform.auth` no longer raises on a malformed `OSMOSIS_PLATFORM_URL` — the URL is validated when first used ([#315](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/315)).
 - `RolloutDriver.run` now takes a single `RolloutRunRequest` argument; update custom drivers and callers to pass the request object ([#307](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/307)).
+- Removed `ExecutionBackend.max_concurrency` and the import-time `osmosis_ai.platform.auth.PLATFORM_URL`; use the rollout server's `/health` capacity and `get_platform_url()` for the active platform URL ([#315](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/315)).
+- Removed unused server-owned fields from the public API record types; stop reading `UploadInfo.s3_key` / `.upload_id`, `DatasetFile.df_stats` / `.organization_id`, `TrainingRunMetrics.training_run_id`, `EvalRunMetrics.eval_run_id`, `RolloutInfo.last_synced_at`, and `TrainingRunCheckpoints.training_run_id` ([#315](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/315)).
+
+### Added
+
+- Added crash-safe `osmosis eval run` through the new `eval` extra for local evaluation from the same TOML used by managed runs, with dataset slicing, resumable output, uv-managed rollout environments, Local and Harbor Docker backends, readable run names, official OpenAI Responses routing, bounded admission, and orphan-server cleanup ([#307](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/307), [#310](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/310), [#316](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/316), [#317](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/317), [#318](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/318), [#321](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/321), [#322](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/322), [#323](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/323)).
+- Added server-authoritative, idempotent `osmosis eval upload <run-dir>` and `eval run --upload` to import completed local runs without launching a managed evaluation ([#319](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/319), [#321](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/321)).
 
 ### Changed
 
-- Standardized the CLI machine contract: `--json` errors now contain `{code, message, details}` without `request_id`, command paths come from the live command registry, authentication/subscription/billing failures use dedicated codes, and non-finite values can no longer produce invalid JSON ([#304](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/304)).
-- CLI command handlers now return typed `CommandResult` values; failed upgrade, doctor, and rubric commands emit stderr errors, while machine-readable warnings use JSON Lines envelopes ([#304](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/304)).
+- Standardized the CLI machine contract so `--json` and `--plain` never prompt, JSON errors use stable `{code, message, details}` envelopes on stderr, machine-readable warnings use JSON Lines, and non-finite values cannot produce invalid JSON ([#304](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/304)).
+- Platform-scoped logins now persist in the operating-system keyring across directories and environments, keep credentials after HTTP 401 responses, and validate non-production environment tokens against `OSMOSIS_TOKEN_PLATFORM_URL` before network access ([#320](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/320)).
 
 ### Fixed
 
-- Local eval runs no longer leak the rollout server when the supervisor dies without cleanup (`kill -9`, OOM, a crashed terminal): the runner records the server's process group with an ownership proof in the run directory's `server.json`, and the next invocation for the run terminates the orphan only after re-verifying its pid and start time — a recycled pid is never signalled ([#323](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/323)).
-- Bounded rollout admission backpressure in local eval runs and added an opt-in `admission_timeout_sec` to `HttpRolloutDriver`, which now raises `RolloutAdmissionTimeoutError` instead of waiting indefinitely on a wedged rollout server ([#322](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/322)).
-- Restored `osmosis_ai.packaging.build_bundle(deps=...)` for bundle-time dependency overrides while preserving projects that declare dependencies dynamically.
-- Prevented `--json` and `--plain` submits from prompting for missing secrets, surfaced all missing names in `INTERACTIVE_REQUIRED` details, redacted supplied secrets from platform errors without losing specialized error codes, and restored rich login presentation ([#304](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/304)).
-- Refused insecure non-loopback platform URLs unless explicitly allowed, kept insecure-URL warnings machine-readable, and preserved lazy CLI startup paths without loading authentication dependencies for shell-only usage errors ([#304](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/304)).
+- Aligned Mini SWE-agent benchmark credential validation with the Platform while preserving Cursor CLI harness-key requirements ([#306](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/306)).
+- `osmosis dev server up` now prints the one-time API key returned by the Platform so the provisioned server can be used immediately ([#305](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/305)).
+
+[Full changelog](https://github.com/Osmosis-AI/osmosis-sdk-python/compare/v0.3.0...v0.3.1)
 
 ## 0.3.0 - 2026-08-11
 

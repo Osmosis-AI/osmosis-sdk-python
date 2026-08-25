@@ -26,7 +26,7 @@ Optional features use these canonical modules:
 | `harbor` | `from osmosis_ai.rollout.backend.harbor import HarborBackend, TaskMode` | Harbor execution backend |
 | `strands` | `from osmosis_ai.rollout.integrations.agents.strands import OsmosisStrandsAgent, OsmosisRolloutModel` | Strands integration |
 | `openai-agents` | `from osmosis_ai.rollout.integrations.agents.openai_agents import OsmosisAgent` | OpenAI Agents integration |
-| `eval-run` | `from osmosis_ai.rollout.controller import CallbackListener` | Localhost callback listener + in-process LiteLLM bridge. Install with `pip install "osmosis-ai[eval-run]"` (includes `[server]` and LiteLLM). `CallbackStore` and `HttpRolloutDriver` ship in the base install, but a local eval run needs the listener to receive callbacks and the bridge to serve model calls. |
+| `eval` | `from osmosis_ai.rollout.controller import CallbackListener` | Localhost callback listener + in-process LiteLLM bridge. Install with `pip install "osmosis-ai[eval]"` (includes `[server]` and LiteLLM). `CallbackStore` and `HttpRolloutDriver` ship in the base install, but a local eval run needs the listener to receive callbacks and the bridge to serve model calls. |
 
 The `Messages` return type is available from `osmosis_ai.rollout.types`.
 
