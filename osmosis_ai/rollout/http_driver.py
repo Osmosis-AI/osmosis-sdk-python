@@ -54,6 +54,23 @@ class RolloutProtocolError(RuntimeError):
         self.status_code: int = status_code
 
 
+class _BorrowedTransport(httpx.AsyncBaseTransport):
+    """Delegates to a caller-owned transport without ever closing it.
+
+    Each cancel POST runs in its own short-lived client, and closing an
+    ``httpx.AsyncClient`` also closes the transport it was handed — which
+    would break every cancellation after the first through a shared
+    ``cancel_transport``. The base class's ``aclose`` is already a no-op, so
+    only request handling is delegated.
+    """
+
+    def __init__(self, inner: httpx.AsyncBaseTransport) -> None:
+        self._inner = inner
+
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        return await self._inner.handle_async_request(request)
+
+
 def _retry_after_seconds(response: httpx.Response, default: float = 1.0) -> float:
     """Parse Retry-After into a finite, positive, bounded wait; else the default."""
     raw = response.headers.get("Retry-After")
@@ -214,7 +231,9 @@ class HttpRolloutDriver(RolloutDriver):
             # AsyncHTTPConnection Lock.acquire).
             async with httpx.AsyncClient(
                 timeout=_CANCEL_REQUEST_TIMEOUT_SEC,
-                transport=self._cancel_transport,
+                transport=_BorrowedTransport(self._cancel_transport)
+                if self._cancel_transport is not None
+                else None,
             ) as http:
                 response = await http.post(
                     f"{self._rollout_base_url}/rollout/cancel",

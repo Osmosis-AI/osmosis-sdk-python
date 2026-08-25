@@ -174,3 +174,14 @@ async def test_on_spawn_failure_does_not_break_start(
     tunnel = CloudflaredTunnel(local_url="http://127.0.0.1:1", on_spawn=explode)
     assert await tunnel.start() == FAKE_URL
     await tunnel.stop()
+
+
+async def test_spawn_failure_raises_tunnel_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # `which` succeeding does not make the spawn safe: the path can be gone
+    # (or not executable) by exec time, and the CLI owes the same guidance.
+    missing = tmp_path / "cloudflared"
+    monkeypatch.setattr(shutil, "which", lambda name: str(missing))
+    with pytest.raises(TunnelError, match="could not start cloudflared"):
+        await CloudflaredTunnel(local_url="http://127.0.0.1:1").start()

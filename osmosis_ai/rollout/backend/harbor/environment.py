@@ -65,9 +65,13 @@ def is_loopback_url(url: str) -> bool:
     import ipaddress
 
     try:
-        return ipaddress.ip_address(hostname).is_loopback
+        address = ipaddress.ip_address(hostname)
     except ValueError:
         return False
+    # An IPv4-mapped IPv6 form of a loopback address (::ffff:127.0.0.1) is
+    # still loopback, but ``is_loopback`` alone does not say so.
+    mapped = getattr(address, "ipv4_mapped", None)
+    return address.is_loopback or (mapped is not None and mapped.is_loopback)
 
 
 def sandbox_reaches_host_loopback(
@@ -101,12 +105,18 @@ def rewrite_url_for_docker(url: str) -> str:
         return url
     from urllib.parse import urlparse, urlunparse
 
+    # Any loopback form (127.0.0.0/8, ::1, IPv4-mapped) gets the rewrite, so
+    # the guard's "Docker on macOS reaches host loopback" answer stays true
+    # for every URL this predicate classifies as loopback. The netloc is
+    # rebuilt rather than substring-replaced because an IPv6 host carries
+    # brackets the replacement would have to strip.
+    if not is_loopback_url(url):
+        return url
     parsed = urlparse(url)
-    if parsed.hostname in ("localhost", "127.0.0.1"):
-        parsed = parsed._replace(
-            netloc=parsed.netloc.replace(parsed.hostname, "host.docker.internal")
-        )
-    return urlunparse(parsed)
+    netloc = "host.docker.internal"
+    if parsed.port is not None:
+        netloc = f"{netloc}:{parsed.port}"
+    return urlunparse(parsed._replace(netloc=netloc))
 
 
 def chat_endpoint_host(url: str) -> str | None:

@@ -300,6 +300,20 @@ def test_advertise_url_must_carry_a_host() -> None:
         eval_run_module.run(Path("unused.toml"), advertise_url="http://")
 
 
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://tunnel.example.com?token=x",
+        "https://tunnel.example.com/#fragment",
+    ],
+)
+def test_advertise_url_rejects_query_and_fragment(url: str) -> None:
+    # The rollout path is appended verbatim, so anything after a query or
+    # fragment delimiter would aim the sandbox at the wrong endpoint.
+    with pytest.raises(CLIError, match="query or fragment"):
+        eval_run_module.run(Path("unused.toml"), advertise_url=url)
+
+
 def test_follow_up_commands_carry_the_tunnel_flags(
     workspace: Path,
     captured_runner: type[_CapturedRunner],

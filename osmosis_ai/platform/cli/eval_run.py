@@ -257,10 +257,17 @@ def run(
         from urllib.parse import urlparse
 
         parsed = urlparse(advertise_url)
-        if parsed.scheme not in ("http", "https") or not parsed.hostname:
+        if (
+            parsed.scheme not in ("http", "https")
+            or not parsed.hostname
+            # The rollout path is appended verbatim, so a query or fragment
+            # would swallow it and aim the sandbox at the wrong endpoint.
+            or parsed.query
+            or parsed.fragment
+        ):
             raise CLIError(
-                "--advertise-url must be an http(s) base URL with a host, "
-                f"got {advertise_url!r}"
+                "--advertise-url must be an http(s) base URL with a host and "
+                f"no query or fragment, got {advertise_url!r}"
             )
         if listener_port is None:
             # An external tunnel forwards to a fixed local port; an ephemeral
@@ -275,7 +282,8 @@ def run(
         ):
             console.print_warning(
                 "--advertise-url uses plain http: the per-run bridge bearer "
-                "and all model traffic cross the network unencrypted."
+                "and all model traffic cross the network unencrypted.",
+                code="INSECURE_ADVERTISE_URL",
             )
     # Tunnel flags are runtime-only — deliberately never part of the manifest
     # — so every follow-up command that re-runs rollouts must carry them

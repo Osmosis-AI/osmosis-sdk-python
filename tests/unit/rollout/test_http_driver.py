@@ -390,3 +390,61 @@ def test_an_empty_controller_api_key_is_rejected_at_construction() -> None:
             chat_api_key=None,
             controller_api_key="  ",
         )
+
+
+async def test_shared_cancel_transport_survives_repeated_cancels() -> None:
+    """The per-cancel client must never close a caller-owned transport.
+
+    MockTransport tolerates aclose, so this stands in for the transports that
+    do not (ASGITransport): it fails any request after its first close.
+    """
+    cancel_posts = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal cancel_posts
+        if request.url.path == "/rollout" and request.method == "POST":
+            return httpx.Response(202, json={})
+        if request.url.path == "/rollout/cancel":
+            cancel_posts += 1
+            return httpx.Response(200, json={"dispositions": {}})
+        raise AssertionError(request.url.path)
+
+    class _CloseOnceTransport(httpx.AsyncBaseTransport):
+        def __init__(self) -> None:
+            self.closed = False
+            self._inner = httpx.MockTransport(handler)
+
+        async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+            assert not self.closed, "caller-owned cancel transport was closed"
+            return await self._inner.handle_async_request(request)
+
+        async def aclose(self) -> None:
+            self.closed = True
+
+    transport = _CloseOnceTransport()
+    store = _store()
+    http = httpx.AsyncClient(
+        transport=httpx.MockTransport(handler), base_url="http://rollout"
+    )
+    driver = HttpRolloutDriver(
+        rollout_base_url="http://rollout",
+        cancel_transport=transport,
+        callback_store=store,
+        completion_url_for=lambda rid: (
+            f"http://cb/v1/rollouts/{quote(rid, safe='')}/completion"
+        ),
+        grader_url_for=lambda rid: (
+            f"http://cb/v1/rollouts/{quote(rid, safe='')}/grader"
+        ),
+        chat_completions_url_for=lambda rid: f"{CHAT_BASE}/{quote(rid, safe='')}",
+        chat_api_key="bridge-token",
+        controller_api_key="controller-key",
+        http_client=http,
+        callback_timeout_sec=0.05,
+    )
+    first = await driver.run(_request())
+    second = await driver.run(_request(rollout_id="a" * 32))
+    assert first.error == "callback_timeout"
+    assert second.error == "callback_timeout"
+    assert cancel_posts == 2
+    assert not transport.closed

@@ -27,8 +27,6 @@ from osmosis_ai.eval.local.state import process_group_of, terminate_process_grou
 _URL_PATTERN = re.compile(r"https://[a-z0-9-]+\.trycloudflare\.com")
 _START_TIMEOUT_SEC = 30.0
 _PROBE_INTERVAL_SEC = 1.0
-# Connect-level failures (DNS refusals included) do not heal by waiting.
-_PROBE_CONNECT_FAILURE_LIMIT = 3
 _TERM_GRACE_SEC = 5.0
 
 _INSTALL_HINT = (
@@ -73,16 +71,22 @@ class CloudflaredTunnel:
         executable = shutil.which("cloudflared")
         if executable is None:
             raise TunnelError(_INSTALL_HINT)
-        process = await asyncio.create_subprocess_exec(
-            executable,
-            "tunnel",
-            "--url",
-            self._local_url,
-            "--no-autoupdate",
-            stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.PIPE,
-            start_new_session=True,
-        )
+        try:
+            process = await asyncio.create_subprocess_exec(
+                executable,
+                "tunnel",
+                "--url",
+                self._local_url,
+                "--no-autoupdate",
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.PIPE,
+                start_new_session=True,
+            )
+        except OSError as exc:
+            # `which` succeeding does not make the spawn safe (binary removed
+            # or not executable); keep every startup failure a TunnelError so
+            # the CLI reports the same guidance.
+            raise TunnelError(f"could not start cloudflared: {exc}") from exc
         self._process = process
         if self._on_spawn is not None:
             # Best-effort by design, like the server's ownership record: a
@@ -149,17 +153,18 @@ class CloudflaredTunnel:
         The listener serves no route at ``/``, so its 404 is the readiness
         proof; 5xx comes from the edge while the tunnel is still connecting.
 
-        Returns False when no HTTP response arrived at all: the host's own
-        DNS or egress may not resolve ``*.trycloudflare.com`` (Tailscale
-        MagicDNS and corporate filters both do this) even though the sandbox
-        resolves it independently — unverifiable is a warning, not an error.
-        Repeated connect-level failures short-circuit that verdict instead of
-        burning the whole budget, because NXDOMAIN does not become resolvable
-        by waiting. An edge that answers but keeps answering 5xx is a real
-        failure.
+        Every transport-level failure — connection refusals, DNS errors, and
+        connect timeouts alike — is retried until the deadline: a fresh
+        ``*.trycloudflare.com`` name can take longer than the startup budget
+        to propagate through some resolvers, so giving up early would misread
+        a routine propagation delay. Returns False when no HTTP response
+        arrived by the deadline: the host's own DNS or egress may never see
+        the edge at all (Tailscale MagicDNS and corporate filters both do
+        this) even though the sandbox resolves it independently —
+        unverifiable is a warning, not an error. An edge that answers but
+        keeps answering 5xx is a real failure.
         """
         saw_response = False
-        connect_failures = 0
         async with httpx.AsyncClient(timeout=5.0, follow_redirects=False) as client:
             while True:
                 process = self._process
@@ -170,10 +175,6 @@ class CloudflaredTunnel:
                     )
                 try:
                     response = await client.get(url)
-                except httpx.ConnectError:
-                    connect_failures += 1
-                    if connect_failures >= _PROBE_CONNECT_FAILURE_LIMIT:
-                        return False
                 except httpx.HTTPError:
                     pass
                 else:
