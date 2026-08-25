@@ -1,0 +1,37 @@
+tests/unit/eval/local/test_tunnel.py
+  ai_agent 177-187
+osmosis_ai/eval/local/tunnel.py
+  s_b7c314622f93f0::t_fb287dec50af71 156-165
+  s_b7c314622f93f0::t_7178311defbef7 74-89
+osmosis_ai/platform/cli/eval_run.py
+  s_b7c314622f93f0::t_f8f76b78367b4f 260-267,269-270
+  s_b7c314622f93f0::t_2ffa39d3c853e0 285-286
+tests/unit/rollout/test_http_driver.py
+  s_b7c314622f93f0::t_6ddf77b3f84d25 393-450
+tests/unit/rollout/test_harbor_environment.py
+  s_b7c314622f93f0::t_13f9e6b8a9d82e 44-86
+osmosis_ai/rollout/http_driver.py
+  s_b7c314622f93f0::t_0cc120e82896ff 57-73
+  s_b7c314622f93f0::t_4ebcc0a2da0a91 234-236
+tests/unit/platform/cli/test_eval_run.py
+  s_b7c314622f93f0::t_02eb940aa02927 303-316
+osmosis_ai/rollout/backend/harbor/environment.py
+  s_b7c314622f93f0::t_9561a23f47cace 68,71-74
+  s_b7c314622f93f0::t_97f29ab7757439 108-114,116-119
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "b023acc04b0aca2cd0771c647c0f45819570aede",
+  "prompts": {},
+  "sessions": {
+    "s_b7c314622f93f0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "94de7064-c205-406e-83ea-5e7f27095242",
+        "model": "claude-fable-5"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}
