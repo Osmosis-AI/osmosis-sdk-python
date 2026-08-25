@@ -743,9 +743,10 @@ class _FakeTunnel:
         self._returncode = returncode
         self._exited.set()
 
-    async def stop(self) -> None:
+    async def stop(self) -> bool:
         self.stopped = True
         self._exited.set()
+        return True
 
 
 async def test_tunnel_mode_runs_the_full_path_and_stops_the_tunnel(

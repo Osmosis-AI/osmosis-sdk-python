@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import os
 import re
 import shutil
 import time
@@ -61,6 +62,9 @@ class CloudflaredTunnel:
         self._on_spawn = on_spawn
         self._process: asyncio.subprocess.Process | None = None
         self._drain_task: asyncio.Task[None] | None = None
+        # True until a stop() attempt observes the child NOT exiting; a
+        # never-started tunnel has nothing running, so it starts confirmed.
+        self._stop_confirmed = True
         self.public_url: str | None = None
         # False when the readiness probe got no HTTP response at all — the
         # host's DNS/egress cannot see the edge, which says nothing about
@@ -75,6 +79,12 @@ class CloudflaredTunnel:
             process = await asyncio.create_subprocess_exec(
                 executable,
                 "tunnel",
+                # Quick tunnels are unsupported when a default config file
+                # (~/.cloudflared/config.yml, typically from a named-tunnel
+                # setup) exists; pinning an explicitly empty config keeps a
+                # user's named-tunnel installation from hijacking the run.
+                "--config",
+                os.devnull,
                 "--url",
                 self._local_url,
                 "--no-autoupdate",
@@ -199,7 +209,14 @@ class CloudflaredTunnel:
             return None
         return await process.wait()
 
-    async def stop(self) -> None:
+    async def stop(self) -> bool:
+        """Terminate the child; True iff it is confirmed exited.
+
+        False means the process may still be running (a termination or wait
+        failure), so the caller must keep its ownership record for a later
+        reap rather than assume the tunnel is gone. Repeated calls keep
+        returning the first call's verdict.
+        """
         process, self._process = self._process, None
         if process is not None and process.returncode is None:
             with contextlib.suppress(ProcessLookupError, PermissionError, OSError):
@@ -211,11 +228,13 @@ class CloudflaredTunnel:
         if process is not None:
             with contextlib.suppress(Exception):
                 await process.wait()
+            self._stop_confirmed = process.returncode is not None
         if self._drain_task is not None:
             self._drain_task.cancel()
             with contextlib.suppress(asyncio.CancelledError, Exception):
                 await self._drain_task
             self._drain_task = None
+        return self._stop_confirmed
 
 
 __all__ = ["CloudflaredTunnel", "TunnelError"]

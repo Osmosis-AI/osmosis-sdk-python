@@ -81,9 +81,9 @@ def _driver(
     )
     return HttpRolloutDriver(
         rollout_base_url="http://rollout",
-        # The cancel path deliberately builds a fresh client per call; route
-        # it through the same handler so tests observe cancel POSTs too.
-        cancel_transport=httpx.MockTransport(handler),
+        # No cancel_transport / fresh_cancel_client: cancels default to the
+        # caller's client, so every cancel here rides the same mock handler —
+        # the compatibility contract external custom-client callers rely on.
         callback_store=store,
         completion_url_for=lambda rid: (
             f"http://cb/v1/rollouts/{quote(rid, safe='')}/completion"
@@ -448,3 +448,40 @@ async def test_shared_cancel_transport_survives_repeated_cancels() -> None:
     assert second.error == "callback_timeout"
     assert cancel_posts == 2
     assert not transport.closed
+
+
+async def test_cancel_rides_the_custom_client_by_default() -> None:
+    """A caller-supplied client's transport must carry cancels unless the
+    caller opted into the fresh-client path — otherwise an ASGI/mock/mTLS
+    setup admits rollouts on one channel and cancels into the void."""
+    cancel_paths: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/rollout" and request.method == "POST":
+            return httpx.Response(202, json={})
+        if request.url.path == "/rollout/cancel":
+            cancel_paths.append(str(request.url))
+            return httpx.Response(200, json={"dispositions": {}})
+        raise AssertionError(request.url.path)
+
+    http = httpx.AsyncClient(
+        transport=httpx.MockTransport(handler), base_url="http://rollout"
+    )
+    driver = HttpRolloutDriver(
+        rollout_base_url="http://rollout",
+        callback_store=_store(),
+        completion_url_for=lambda rid: (
+            f"http://cb/v1/rollouts/{quote(rid, safe='')}/completion"
+        ),
+        grader_url_for=lambda rid: (
+            f"http://cb/v1/rollouts/{quote(rid, safe='')}/grader"
+        ),
+        chat_completions_url_for=lambda rid: f"{CHAT_BASE}/{quote(rid, safe='')}",
+        chat_api_key="bridge-token",
+        controller_api_key="controller-key",
+        http_client=http,
+        callback_timeout_sec=0.05,
+    )
+    outcome = await driver.run(_request())
+    assert outcome.error == "callback_timeout"
+    assert cancel_paths == ["http://rollout/rollout/cancel"]

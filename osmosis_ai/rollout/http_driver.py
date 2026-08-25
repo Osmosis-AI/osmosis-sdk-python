@@ -100,15 +100,21 @@ class HttpRolloutDriver(RolloutDriver):
         controller_api_key: str,
         http_client: httpx.AsyncClient | None = None,
         cancel_transport: httpx.AsyncBaseTransport | None = None,
+        fresh_cancel_client: bool = False,
         admission_timeout_sec: float | None = None,
         callback_timeout_sec: float | None = None,
     ) -> None:
-        # Cancellation deliberately does NOT reuse ``http_client``: its pool
-        # may hold connection locks the just-cancelled request never released
-        # (see _cancel_rollout), so cancel POSTs go through a fresh default
-        # client per call. A caller whose ``http_client`` carries a
-        # non-default channel — an ASGI/mock transport, proxy, or custom TLS —
-        # must pass ``cancel_transport`` so cancels reach the same place.
+        # Cancel routing. Default: cancels ride ``http_client`` like every
+        # other request, so a caller-supplied channel (ASGI/mock transport,
+        # proxy, custom TLS) keeps carrying them. ``fresh_cancel_client=True``
+        # sends each cancel through its own short-lived default-network
+        # client instead: cancellation usually runs right after the shared
+        # client's in-flight request was cancelled, and httpcore may not have
+        # released that connection's request lock — reusing the pool then
+        # deadlocks on a wait no httpx timeout covers (observed: every worker
+        # stuck in AsyncHTTPConnection Lock.acquire). ``cancel_transport``
+        # aims that per-cancel client at a caller-owned transport (tests) and
+        # implies the fresh-client path.
         #
         # An empty key would admit rollouts whose callbacks the listener then
         # rejects as unauthenticated — a hang, not an error. Refuse it here.
@@ -124,6 +130,7 @@ class HttpRolloutDriver(RolloutDriver):
         self._owns_http = http_client is None
         self._http = http_client or httpx.AsyncClient()
         self._cancel_transport = cancel_transport
+        self._fresh_cancel_client = fresh_cancel_client or cancel_transport is not None
         self._admission_timeout_sec = admission_timeout_sec
         self._callback_timeout_sec = callback_timeout_sec
 
@@ -223,21 +230,30 @@ class HttpRolloutDriver(RolloutDriver):
     async def _cancel_rollout(self, rollout_id: str) -> dict[str, str]:
         request = CancelRolloutsRequest(ids=[rollout_id])
         try:
-            # A fresh client, never self._http: this usually runs on the
-            # cancellation path, where the shared client's in-flight request
-            # was just cancelled and httpcore may not have released that
-            # connection's request lock. Reusing the pool then deadlocks on a
-            # wait no httpx timeout covers (observed: every worker stuck in
-            # AsyncHTTPConnection Lock.acquire).
-            async with httpx.AsyncClient(
-                timeout=_CANCEL_REQUEST_TIMEOUT_SEC,
-                transport=_BorrowedTransport(self._cancel_transport)
-                if self._cancel_transport is not None
-                else None,
-            ) as http:
-                response = await http.post(
+            if self._fresh_cancel_client:
+                # A fresh client per cancel (see __init__): the shared
+                # client's pool may hold the just-cancelled request's
+                # connection lock, and reusing it deadlocks on a wait no
+                # httpx timeout covers.
+                async with httpx.AsyncClient(
+                    timeout=_CANCEL_REQUEST_TIMEOUT_SEC,
+                    transport=_BorrowedTransport(self._cancel_transport)
+                    if self._cancel_transport is not None
+                    else None,
+                ) as http:
+                    response = await http.post(
+                        f"{self._rollout_base_url}/rollout/cancel",
+                        json=request.model_dump(mode="json"),
+                    )
+            else:
+                # Default: the cancel rides the caller's client, so a custom
+                # channel (ASGI/mock transport, proxy, mTLS) keeps carrying
+                # it instead of a default-network client that would miss the
+                # server entirely and silently leave the rollout running.
+                response = await self._http.post(
                     f"{self._rollout_base_url}/rollout/cancel",
                     json=request.model_dump(mode="json"),
+                    timeout=_CANCEL_REQUEST_TIMEOUT_SEC,
                 )
         except httpx.RequestError:
             logger.warning(

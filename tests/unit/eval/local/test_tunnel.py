@@ -185,3 +185,24 @@ async def test_spawn_failure_raises_tunnel_error(
     monkeypatch.setattr(shutil, "which", lambda name: str(missing))
     with pytest.raises(TunnelError, match="could not start cloudflared"):
         await CloudflaredTunnel(local_url="http://127.0.0.1:1").start()
+
+
+async def test_spawn_pins_an_empty_config_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Quick tunnels are unsupported when a default ~/.cloudflared config
+    # exists, so the argv must pin an explicitly empty one.
+    import os
+
+    script = _fake_cloudflared(
+        tmp_path,
+        f"echo \"ARGS:$@\" >&2\necho 'INF |  {FAKE_URL}  |' >&2\nexec sleep 60",
+    )
+    monkeypatch.setattr(shutil, "which", lambda name: str(script))
+    monkeypatch.setattr(CloudflaredTunnel, "_probe_ready", _no_probe)
+    lines: list[str] = []
+    tunnel = CloudflaredTunnel(local_url="http://127.0.0.1:1", on_log=lines.append)
+    await tunnel.start()
+    await tunnel.stop()
+    args_line = next(line for line in lines if line.startswith("ARGS:"))
+    assert f"--config {os.devnull}" in args_line

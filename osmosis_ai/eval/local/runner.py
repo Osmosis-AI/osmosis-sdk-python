@@ -893,6 +893,9 @@ class LocalEvalRunner:
                     chat_api_key=bridge_token,
                     controller_api_key=controller_token,
                     http_client=client,
+                    # The shared client's pool can hold a just-cancelled
+                    # request's connection lock; cancels must not ride it.
+                    fresh_cancel_client=True,
                     # Admission waits are queue waits: an item may legitimately
                     # sit behind every other in-flight item, so its budget is
                     # one item deadline per worker. Beyond that the server is
@@ -928,14 +931,16 @@ class LocalEvalRunner:
             ),
         )
         self._stage("tunnel", "starting cloudflared quick tunnel")
+        # Assigned before start(): a failing start() has already attempted its
+        # own stop, and _execute's finally funnels through _stop_tunnel, which
+        # clears the ownership record only when that stop confirmed the child
+        # exited — an unconfirmed child keeps its record for the next reap.
+        self._tunnel = tunnel
         try:
             public_url = await tunnel.start()
         except TunnelError as exc:
-            # start() already terminated the child; its record is now stale.
-            self._clear_tunnel_state()
             raise LocalEvalError(str(exc)) from exc
         listener.advertised_base_url = public_url
-        self._tunnel = tunnel
         if tunnel.verified:
             self._stage("tunnel", f"tunnel ready: {public_url}")
         else:
@@ -948,13 +953,24 @@ class LocalEvalRunner:
 
     async def _stop_tunnel(self) -> None:
         tunnel, self._tunnel = self._tunnel, None
-        if tunnel is not None:
-            with contextlib.suppress(Exception):
-                await tunnel.stop()
-        # Unconditional: every _execute exit path funnels here, and a record
-        # can exist even when self._tunnel was never assigned (a start() that
-        # spawned, recorded, then failed with a non-TunnelError).
-        self._clear_tunnel_state()
+        if tunnel is None:
+            return
+        confirmed = False
+        with contextlib.suppress(Exception):
+            confirmed = await tunnel.stop()
+        if confirmed:
+            self._clear_tunnel_state()
+            return
+        # The child may still be running (a termination or wait failure), and
+        # an orphaned quick tunnel keeps a live public URL forwarding to a
+        # local port a later run may reuse. The record is the next
+        # invocation's only safe handle on it, so it stays.
+        self._write_log(
+            "warning",
+            "tunnel",
+            "cloudflared may still be running; leaving its ownership record "
+            "for the next invocation to reap",
+        )
 
     def _record_tunnel_state(
         self, process: asyncio.subprocess.Process, *, port: int

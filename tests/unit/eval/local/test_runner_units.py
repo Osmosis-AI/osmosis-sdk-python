@@ -1101,8 +1101,8 @@ async def test_reap_terminates_an_orphaned_tunnel_record(tmp_path: Path) -> None
 async def test_tunnel_record_is_written_and_cleared_with_the_run(
     tmp_path: Path,
 ) -> None:
-    """_record_tunnel_state persists a verifiable record; _stop_tunnel clears
-    it even when no tunnel object was ever assigned."""
+    """_record_tunnel_state persists a verifiable record; a stop that
+    confirmed the child exited clears it."""
     import subprocess
 
     from osmosis_ai.eval.local.state import TUNNEL_STATE_FILENAME, ServerProcessState
@@ -1126,8 +1126,47 @@ async def test_tunnel_record_is_written_and_cleared_with_the_run(
         assert record.port == 8710
         assert record.is_owner_alive()
 
+        class _ConfirmedStopTunnel:
+            async def stop(self) -> bool:
+                return True
+
+        runner._tunnel = _ConfirmedStopTunnel()
         await runner._stop_tunnel()
         assert not (run_dir / TUNNEL_STATE_FILENAME).exists()
+    finally:
+        child.kill()
+        child.wait(timeout=10)
+
+
+async def test_unconfirmed_tunnel_stop_keeps_the_ownership_record(
+    tmp_path: Path,
+) -> None:
+    """A stop that cannot confirm the child exited must not discard the only
+    handle the next invocation has for reaping an orphaned public tunnel."""
+    import subprocess
+
+    from osmosis_ai.eval.local.state import TUNNEL_STATE_FILENAME
+
+    runner = _uv_runner(tmp_path)
+    run_dir = runner._run_dir
+    run_dir.mkdir(parents=True, exist_ok=True)
+
+    child = subprocess.Popen(["sleep", "60"], start_new_session=True)
+    try:
+
+        class _SpawnedProcess:
+            pid = child.pid
+            returncode: int | None = None
+
+        runner._record_tunnel_state(_SpawnedProcess(), port=8710)
+
+        class _UnconfirmedStopTunnel:
+            async def stop(self) -> bool:
+                return False
+
+        runner._tunnel = _UnconfirmedStopTunnel()
+        await runner._stop_tunnel()
+        assert (run_dir / TUNNEL_STATE_FILENAME).exists()
     finally:
         child.kill()
         child.wait(timeout=10)

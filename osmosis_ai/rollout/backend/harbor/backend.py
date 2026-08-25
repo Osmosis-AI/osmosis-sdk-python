@@ -346,6 +346,10 @@ class HarborBackend(ExecutionBackend):
                 url
                 and is_loopback_url(url)
                 and not sandbox_reaches_host_loopback(self.environment_config)
+                # The guard protects agents that will dial the URL; an agent
+                # wired to nothing (oracle) produces no model traffic, so an
+                # unreachable endpoint cannot hang it.
+                and not (self.native is not None and self.native.wiring == "none")
             ):
                 # Without this the sandbox dials an unreachable loopback and
                 # the rollout hangs silently until its timeout. Checked after
