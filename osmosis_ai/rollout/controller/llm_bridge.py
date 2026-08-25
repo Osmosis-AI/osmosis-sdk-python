@@ -71,6 +71,17 @@ _PREFLIGHT_FATAL_EXCEPTIONS = frozenset(
 
 _SSE_HEARTBEAT_INTERVAL_SEC = 15.0
 
+# Tunnel-mode keepalive for the non-stream path. Proxies in front of the
+# bridge enforce idle-read timeouts (cloudflared quick tunnels: 125s between
+# reads from origin), so a silently pending JSON response gets cut off at the
+# edge. Within the grace window the response keeps its clean status code;
+# past it the bridge commits 200 + application/json and trickles one
+# whitespace byte (legal leading JSON) per interval until the real body — or
+# an OpenAI-style error object, since the status line is already gone — is
+# ready.
+_NON_STREAM_GRACE_SEC = 90.0
+_NON_STREAM_KEEPALIVE_INTERVAL_SEC = 30.0
+
 
 def _get_litellm() -> Any:
     try:
@@ -385,11 +396,69 @@ class LiteLLMBridge:
         self._tokens.pop(rollout_id, None)
 
 
-def create_bridge_router(bridge: LiteLLMBridge, *, auth_token: str) -> APIRouter:
+async def _trickle_json_response(
+    task: asyncio.Task[Any], *, request_model: str
+) -> AsyncIterator[str]:
+    """Body of an already-committed 200 while the provider is still in flight.
+
+    A late upstream error can no longer change the status code, so it becomes
+    an OpenAI-style ``{"error": ...}`` object — the client surfaces it as a
+    parse/validation failure instead of a clean 502, which is the accepted
+    tunnel-mode trade-off.
+    """
+    try:
+        # The committed status line alone does not reset proxy idle-read
+        # timers; only body bytes do. Send one immediately so the gap between
+        # reads never exceeds the keepalive interval itself (the grace window
+        # already spent most of the edge's budget).
+        yield " "
+        while True:
+            # asyncio.wait, never wait_for: a provider that raises
+            # TimeoutError (== asyncio.TimeoutError since 3.11) must land in
+            # the terminal-error branch, not be mistaken for the keepalive
+            # timer — wait_for would spin on the completed task forever.
+            done, _ = await asyncio.wait(
+                {task}, timeout=_NON_STREAM_KEEPALIVE_INTERVAL_SEC
+            )
+            if not done:
+                yield " "
+                continue
+            try:
+                response = task.result()
+            except Exception as exc:
+                logger.warning("LLM bridge error: %s", exc)
+                yield _compact_json(
+                    {
+                        "error": {
+                            "message": f"{type(exc).__name__}: {exc}",
+                            "type": "bridge_error",
+                        }
+                    }
+                )
+                return
+            yield _compact_json(
+                _model_response_to_payload(
+                    response, request_model=request_model, stream=False
+                )
+            )
+            return
+    finally:
+        if not task.done():
+            task.cancel()
+            with suppress(asyncio.CancelledError):
+                await task
+
+
+def create_bridge_router(
+    bridge: LiteLLMBridge, *, auth_token: str, non_stream_keepalive: bool = False
+) -> APIRouter:
     """Chat-completions routes for :class:`LiteLLMBridge`.
 
     Mounted on the controller's callback app; guarded by its own bearer so the
     container-held credential cannot drive the callback surface.
+    ``non_stream_keepalive`` turns on the tunnel-mode keepalive for
+    non-streaming calls; pure-loopback runs leave it off and keep exact
+    current behavior.
     """
     if not auth_token or not auth_token.strip():
         raise ValueError("bridge auth_token must be a non-empty string")
@@ -434,9 +503,38 @@ def create_bridge_router(bridge: LiteLLMBridge, *, auth_token: str) -> APIRouter
         request_model = str(body.get("model") or bridge.model)
 
         if not is_stream:
+            if not non_stream_keepalive:
+                try:
+                    response = await _serve_completion(body, rollout_id)
+                except Exception as exc:
+                    logger.warning("LLM bridge error: %s", exc)
+                    return JSONResponse({"detail": str(exc)}, status_code=502)
+                return JSONResponse(
+                    _model_response_to_payload(
+                        response, request_model=request_model, stream=False
+                    )
+                )
+            task = asyncio.create_task(_serve_completion(body, rollout_id))
             try:
-                response = await _serve_completion(body, rollout_id)
+                # asyncio.wait, never wait_for: a provider raising
+                # TimeoutError must be a clean 502 below, not read as the
+                # grace timer expiring.
+                done, _ = await asyncio.wait({task}, timeout=_NON_STREAM_GRACE_SEC)
+            except asyncio.CancelledError:
+                task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await task
+                raise
+            if not done:
+                # Still in flight: commit 200 now and keep the connection warm.
+                return StreamingResponse(
+                    _trickle_json_response(task, request_model=request_model),
+                    media_type="application/json",
+                )
+            try:
+                response = task.result()
             except Exception as exc:
+                # Within the grace window errors keep their clean status code.
                 logger.warning("LLM bridge error: %s", exc)
                 return JSONResponse({"detail": str(exc)}, status_code=502)
             return JSONResponse(

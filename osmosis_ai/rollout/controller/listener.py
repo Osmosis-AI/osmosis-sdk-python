@@ -3,11 +3,15 @@
 The listener authenticates bearer tokens, checks that the URL-scoped rollout
 id matches the body, accepts only terminal callback statuses, and returns the
 store's acknowledgment only after a terminal commit hook has finished. It
-binds ``127.0.0.1`` on an ephemeral port; the bind is not configurable.
+always binds ``127.0.0.1``; the port is ephemeral by default and may be fixed
+so an externally-run tunnel can point at it.
 
 When local eval provides a :class:`~osmosis_ai.rollout.controller.llm_bridge.LiteLLMBridge`,
 its chat-completions routes mount on the same app under their own bearer —
 one process, one port, two credentials, mirroring the hosted eval controller.
+An ``advertised_base_url`` (a tunnel's public URL) replaces the loopback base
+in ``chat_completions_url()`` only: completion and grader callbacks come from
+the rollout server, a host process, and stay on loopback.
 """
 
 from __future__ import annotations
@@ -63,8 +67,9 @@ def _assert_non_empty_auth_token(auth_token: str) -> None:
 class LocalhostUvicornServer:
     """Bind a socket first, then serve. Never pick-free-close-bind."""
 
-    def __init__(self, app: Any) -> None:
+    def __init__(self, app: Any, *, port: int | None = None) -> None:
         self._app = app
+        self._port = port
         self._socket: socket.socket | None = None
         self._server: uvicorn.Server | None = None
         self._task: asyncio.Task[None] | None = None
@@ -81,7 +86,7 @@ class LocalhostUvicornServer:
             return self.base_url
         sock: socket.socket | None = None
         try:
-            sock = self._reserve_socket()
+            sock = self._reserve_socket(self._port)
             self._socket = sock
             host, port = sock.getsockname()[:2]
             self._base_url = f"http://{host}:{port}"
@@ -144,11 +149,11 @@ class LocalhostUvicornServer:
                 to_close.close()
 
     @staticmethod
-    def _reserve_socket() -> socket.socket:
+    def _reserve_socket(port: int | None = None) -> socket.socket:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
-            sock.bind(("127.0.0.1", 0))
+            sock.bind(("127.0.0.1", port or 0))
         except OSError:
             sock.close()
             raise
@@ -158,7 +163,10 @@ class LocalhostUvicornServer:
 def create_callback_app(store: CallbackStore, *, auth_token: str) -> FastAPI:
     """Build the FastAPI app that receives completion and grader callbacks."""
     _assert_non_empty_auth_token(auth_token)
-    app = FastAPI()
+    # No docs/openapi surface: a tunnel can expose this app to the internet,
+    # and FastAPI's defaults would hand out the full route list and callback
+    # body schemas unauthenticated.
+    app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
 
     async def require_auth(request: Request) -> None:
         header = request.headers.get("Authorization")
@@ -222,14 +230,26 @@ class CallbackListener:
         auth_token: str,
         bridge: LiteLLMBridge | None = None,
         bridge_token: str | None = None,
+        port: int | None = None,
+        advertised_base_url: str | None = None,
+        bridge_keepalive: bool = False,
     ) -> None:
         _assert_non_empty_auth_token(auth_token)
         app = create_callback_app(store, auth_token=auth_token)
         if bridge is not None:
             if bridge_token is None:
                 raise ValueError("bridge_token is required when a bridge is provided")
-            app.include_router(create_bridge_router(bridge, auth_token=bridge_token))
-        self._server = LocalhostUvicornServer(app)
+            app.include_router(
+                create_bridge_router(
+                    bridge,
+                    auth_token=bridge_token,
+                    non_stream_keepalive=bridge_keepalive,
+                )
+            )
+        # Writable after start: an auto-managed tunnel learns its public URL
+        # only once the listener is already serving.
+        self.advertised_base_url = advertised_base_url
+        self._server = LocalhostUvicornServer(app, port=port)
 
     @property
     def base_url(self) -> str:
@@ -247,10 +267,12 @@ class CallbackListener:
         """Per-rollout OpenAI-compatible api_base served by the mounted bridge.
 
         Clients append ``/chat/completions``; the URL itself must not include
-        that suffix.
+        that suffix. This is the only URL a sandbox ever dials, so it is the
+        only one ``advertised_base_url`` replaces.
         """
+        base = (self.advertised_base_url or self.base_url).rstrip("/")
         encoded = quote(rollout_id, safe="")
-        return f"{self.base_url}/v1/rollouts/{encoded}"
+        return f"{base}/v1/rollouts/{encoded}"
 
     async def start(self) -> str:
         return await self._server.start()

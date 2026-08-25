@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import errno
 import logging
 import os
 import signal
@@ -57,6 +56,7 @@ from osmosis_ai.eval.local.state import (
     MANIFEST_FILENAME,
     ROLLOUT_PROTOCOL_VERSION,
     SERVER_STATE_FILENAME,
+    TUNNEL_STATE_FILENAME,
     RunLock,
     RunManifest,
     ServerProcessState,
@@ -65,12 +65,14 @@ from osmosis_ai.eval.local.state import (
     TerminalStatus,
     WorkKey,
     archive_run_directory,
+    process_group_of,
     process_start_token,
     reap_orphan_server,
     terminate_process_group,
     utc_now,
     validate_run_name,
 )
+from osmosis_ai.eval.local.tunnel import CloudflaredTunnel, TunnelError
 from osmosis_ai.rollout.backend.harbor.diagnostics import REDACTED
 from osmosis_ai.rollout.controller import (
     CallbackListener,
@@ -174,6 +176,14 @@ class LocalEvalOptions:
     max_in_flight: int | None = None
     rollout_port: int | None = None
     verbose: bool = False
+    # Cloud-sandbox reachability (tunnel plan §5.2/§5.3). ``listener_port``
+    # fixes the controller listener's local port; ``advertise_url`` is a
+    # public base URL that already reaches it (a tunnel the user runs);
+    # ``tunnel`` auto-manages one ("cloudflared" is the only provider).
+    # Either of the last two also turns on the bridge's non-stream keepalive.
+    listener_port: int | None = None
+    advertise_url: str | None = None
+    tunnel: str | None = None
     # Test seam, not a CLI flag: the CLI always leaves this ``None``, which runs
     # the rollout server through uv so its dependencies resolve from
     # ``rollouts/<name>/pyproject.toml``. Tests set it to ``sys.executable`` so
@@ -614,6 +624,7 @@ class LocalEvalRunner:
         self._identity: RunIdentity | None = None
         self._child: asyncio.subprocess.Process | None = None
         self._child_reader: asyncio.Task[None] | None = None
+        self._tunnel: CloudflaredTunnel | None = None
         self._cancelled = asyncio.Event()
         self._halt_reason: str | None = None
         self._redactor = SecretRedactor()
@@ -827,18 +838,44 @@ class LocalEvalRunner:
         for name, value in secrets.items():
             os.environ.setdefault(name, value)
 
+        if self._options.tunnel not in (None, "cloudflared"):
+            raise LocalEvalError(
+                f"unsupported tunnel provider {self._options.tunnel!r}; "
+                "only 'cloudflared' is available"
+            )
         bridge = LiteLLMBridge(model=self._spec.model_path)
         self._bridge = bridge
+        advertise_url = self._options.advertise_url
         listener = CallbackListener(
             store,
             auth_token=controller_token,
             bridge=bridge,
             bridge_token=bridge_token,
+            port=self._options.listener_port,
+            advertised_base_url=advertise_url,
+            # Any non-loopback path may sit behind a proxy with idle-read
+            # timeouts, so the bridge keeps non-streaming responses warm.
+            bridge_keepalive=advertise_url is not None
+            or self._options.tunnel is not None,
         )
         cancelled = False
         try:
-            await listener.start()
+            try:
+                await listener.start()
+            except OSError as exc:
+                port = self._options.listener_port
+                raise LocalEvalError(
+                    "could not bind the callback listener on 127.0.0.1"
+                    f"{f':{port}' if port else ''}: {exc}"
+                ) from exc
             self._write_log("info", "listener", "callback listener started")
+            if self._options.tunnel is not None:
+                await self._start_tunnel(listener)
+            elif advertise_url is not None:
+                self._stage(
+                    "tunnel",
+                    f"advertising chat endpoint through {advertise_url}",
+                )
             self._stage("preflight", f"checking model {self._spec.model_path}")
             await self._model_preflight(bridge)
             async with httpx.AsyncClient() as client:
@@ -873,15 +910,94 @@ class LocalEvalRunner:
                 self._report_progress()
                 cancelled = await self._schedule(pending, driver, concurrency)
                 if cancelled:
-                    await self._settle_cancellations(client, base_url)
+                    await self._settle_cancellations(base_url)
         finally:
             await self._stop_rollout_server()
+            await self._stop_tunnel()
             with contextlib.suppress(Exception):
                 await listener.stop()
         return self._finalize(cancelled=cancelled)
 
+    async def _start_tunnel(self, listener: CallbackListener) -> None:
+        listener_port = int(listener.base_url.rsplit(":", 1)[1])
+        tunnel = CloudflaredTunnel(
+            local_url=listener.base_url,
+            on_log=lambda line: self._write_log("info", "cloudflared", line),
+            on_spawn=lambda process: self._record_tunnel_state(
+                process, port=listener_port
+            ),
+        )
+        self._stage("tunnel", "starting cloudflared quick tunnel")
+        try:
+            public_url = await tunnel.start()
+        except TunnelError as exc:
+            # start() already terminated the child; its record is now stale.
+            self._clear_tunnel_state()
+            raise LocalEvalError(str(exc)) from exc
+        listener.advertised_base_url = public_url
+        self._tunnel = tunnel
+        if tunnel.verified:
+            self._stage("tunnel", f"tunnel ready: {public_url}")
+        else:
+            self._stage(
+                "tunnel",
+                f"tunnel up at {public_url}, but this host cannot reach it "
+                "(local DNS/egress); sandboxes resolve it independently — "
+                "continuing",
+            )
+
+    async def _stop_tunnel(self) -> None:
+        tunnel, self._tunnel = self._tunnel, None
+        if tunnel is not None:
+            with contextlib.suppress(Exception):
+                await tunnel.stop()
+        # Unconditional: every _execute exit path funnels here, and a record
+        # can exist even when self._tunnel was never assigned (a start() that
+        # spawned, recorded, then failed with a non-TunnelError).
+        self._clear_tunnel_state()
+
+    def _record_tunnel_state(
+        self, process: asyncio.subprocess.Process, *, port: int
+    ) -> None:
+        """Persist the tunnel child's identity for a later orphan reap.
+
+        Same contract as :meth:`_record_server_state`: best-effort, ownership
+        proved by pid plus start token, liveness re-checked so a recycled pid
+        can never be recorded as ours.
+        """
+        assert self._run_dir is not None
+        token = process_start_token(process.pid)
+        if token is None or process.returncode is not None:
+            return
+        state = ServerProcessState(
+            pid=process.pid,
+            pgid=process_group_of(process.pid),
+            start_token=token,
+            instance_id="cloudflared",
+            port=port,
+            created_at=utc_now(),
+        )
+        try:
+            state.write(self._run_dir / TUNNEL_STATE_FILENAME)
+        except OSError as exc:
+            self._write_log(
+                "warning",
+                "tunnel",
+                "could not record the tunnel process for orphan cleanup",
+                error=str(exc),
+            )
+
+    def _clear_tunnel_state(self) -> None:
+        if self._run_dir is None:
+            return
+        with contextlib.suppress(OSError):
+            (self._run_dir / TUNNEL_STATE_FILENAME).unlink(missing_ok=True)
+
     async def _settle_cancellations(
-        self, client: httpx.AsyncClient, base_url: str
+        self,
+        base_url: str,
+        *,
+        http_transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         """Give the rollout server a bounded grace to unwind cancelled work (§8).
 
@@ -890,6 +1006,11 @@ class LocalEvalRunner:
         reaches its teardown -- a Harbor trial leaves its sandbox container
         running with nothing left to stop it. Polling per-rollout status is the
         signal that the backend's own cancellation handler has finished.
+
+        Polls through its own client, never the run's shared one: the workers
+        were just cancelled mid-request, which can leave the shared pool's
+        connection locks held (see HttpRolloutDriver._cancel_rollout) — a wait
+        no per-request timeout bounds.
         """
         rollout_ids = list(self._dispatch_context)
         if not rollout_ids:
@@ -899,15 +1020,16 @@ class LocalEvalRunner:
             f"waiting for {len(rollout_ids)} cancelled rollouts to unwind",
         )
         try:
-            observed = await asyncio.wait_for(
-                asyncio.gather(
-                    *(
-                        self._wait_settled(client, base_url, rollout_id)
-                        for rollout_id in rollout_ids
-                    )
-                ),
-                timeout=_CANCEL_SETTLE_SEC,
-            )
+            async with httpx.AsyncClient(transport=http_transport) as client:
+                observed = await asyncio.wait_for(
+                    asyncio.gather(
+                        *(
+                            self._wait_settled(client, base_url, rollout_id)
+                            for rollout_id in rollout_ids
+                        )
+                    ),
+                    timeout=_CANCEL_SETTLE_SEC,
+                )
         except TimeoutError:
             observed = None
         if observed is not None and all(observed):
@@ -1054,13 +1176,16 @@ class LocalEvalRunner:
             with contextlib.suppress(NotImplementedError, ValueError):
                 loop.add_signal_handler(sig, self._request_cancel, workers)
                 installed.append(sig)
-        watchdog = asyncio.create_task(self._watch_child(workers))
+        watchdogs = [asyncio.create_task(self._watch_child(workers))]
+        if self._tunnel is not None:
+            watchdogs.append(asyncio.create_task(self._watch_tunnel(workers)))
         try:
             results = await asyncio.gather(*workers, return_exceptions=True)
         finally:
-            watchdog.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await watchdog
+            for watchdog in watchdogs:
+                watchdog.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await watchdog
             for sig in installed:
                 with contextlib.suppress(NotImplementedError, ValueError):
                     loop.remove_signal_handler(sig)
@@ -1092,6 +1217,30 @@ class LocalEvalRunner:
             return
         self._halt_dispatch(
             f"the rollout server exited with code {returncode}; see {LOGS_FILENAME}",
+            returncode=returncode,
+        )
+        for worker in workers:
+            worker.cancel()
+
+    async def _watch_tunnel(self, workers: Sequence[asyncio.Task[None]]) -> None:
+        """Abort in-flight waits when the tunnel child dies (§5.3).
+
+        A quick tunnel holds a single edge connection, so the process can exit
+        mid-run; without this every sandboxed rollout would hang against a dead
+        URL until its deadline.
+        """
+        tunnel = self._tunnel
+        if tunnel is None:
+            return
+        returncode = await tunnel.wait()
+        if returncode is None:
+            # stop() already reaped the child: teardown, not a mid-run death.
+            return
+        if self._cancelled.is_set() or self._halt_reason is not None:
+            return
+        self._halt_dispatch(
+            f"the cloudflared tunnel exited with code {returncode}; sandboxes "
+            "can no longer reach the model bridge",
             returncode=returncode,
         )
         for worker in workers:
@@ -1350,29 +1499,36 @@ class LocalEvalRunner:
     # ------------------------------------------------------------------ #
 
     async def _reap_orphan_server(self, run_dir: Path) -> None:
-        """Terminate a rollout server left behind by a supervisor that died
-        without cleanup (``kill -9``, OOM, a crashed terminal).
+        """Terminate a rollout server (and cloudflared tunnel) left behind by
+        a supervisor that died without cleanup (``kill -9``, OOM, a crashed
+        terminal).
 
         Runs under the run lock and before the manifest gate, so ``--fresh``
         archiving the directory cannot orphan the record and even a refused
         resume still cleans up. Ownership is proved from the record (pid plus
         start token) before any signal is sent: a stale record whose pid or
-        pgid was recycled is dropped, never killed.
+        pgid was recycled is dropped, never killed. The tunnel matters as much
+        as the server: an orphaned quick tunnel keeps a live public URL
+        forwarding to a local port a later run may reuse.
         """
-        path = run_dir / SERVER_STATE_FILENAME
-        try:
-            reaped = await asyncio.to_thread(
-                reap_orphan_server, path, grace_sec=_SERVER_TERM_GRACE_SEC
-            )
-        except Exception as exc:  # cleanup is a safety net; never block the run
-            logger.warning("orphaned rollout-server cleanup failed: %s", exc)
-            return
-        if reaped is not None:
-            # The run log is not open yet, so the note is the record of this.
-            self._hooks.note(
-                "terminated an orphaned rollout server from a previous "
-                f"invocation (pid {reaped.pid}, port {reaped.port})"
-            )
+        for filename, label in (
+            (SERVER_STATE_FILENAME, "rollout server"),
+            (TUNNEL_STATE_FILENAME, "cloudflared tunnel"),
+        ):
+            path = run_dir / filename
+            try:
+                reaped = await asyncio.to_thread(
+                    reap_orphan_server, path, grace_sec=_SERVER_TERM_GRACE_SEC
+                )
+            except Exception as exc:  # cleanup is a safety net; never block the run
+                logger.warning("orphaned %s cleanup failed: %s", label, exc)
+                continue
+            if reaped is not None:
+                # The run log is not open yet, so the note is the record of this.
+                self._hooks.note(
+                    f"terminated an orphaned {label} from a previous "
+                    f"invocation (pid {reaped.pid}, port {reaped.port})"
+                )
 
     def _record_server_state(
         self, child: asyncio.subprocess.Process, *, instance_id: str, port: int
@@ -1391,7 +1547,7 @@ class LocalEvalRunner:
             return
         state = ServerProcessState(
             pid=child.pid,
-            pgid=_process_group_of(child.pid),
+            pgid=process_group_of(child.pid),
             start_token=token,
             instance_id=instance_id,
             port=port,
@@ -1448,7 +1604,7 @@ class LocalEvalRunner:
                 with contextlib.suppress(ProcessLookupError, PermissionError, OSError):
                     await asyncio.to_thread(
                         terminate_process_group,
-                        _process_group_of(child.pid),
+                        process_group_of(child.pid),
                         grace_sec=_SERVER_TERM_GRACE_SEC,
                     )
             with contextlib.suppress(Exception):
@@ -1603,7 +1759,7 @@ class LocalEvalRunner:
             with contextlib.suppress(ProcessLookupError, PermissionError, OSError):
                 await asyncio.to_thread(
                     terminate_process_group,
-                    _process_group_of(child.pid),
+                    process_group_of(child.pid),
                     grace_sec=_SERVER_TERM_GRACE_SEC,
                 )
         with contextlib.suppress(Exception):
@@ -1747,21 +1903,6 @@ class LocalEvalRunner:
             self._log.write(level, step, message, **details)
         elif level in ("warning", "error"):
             self._hooks.note(message)
-
-
-def _process_group_of(pid: int) -> int:
-    try:
-        return os.getpgid(pid)
-    except (ProcessLookupError, PermissionError, OSError) as exc:
-        if isinstance(exc, OSError) and exc.errno not in (
-            errno.ESRCH,
-            errno.EPERM,
-            errno.EINVAL,
-        ):
-            raise
-        # ``start_new_session=True`` makes the child its own group leader, so its
-        # pid is its pgid whenever the lookup itself is unavailable.
-        return pid
 
 
 def _classify_terminal(

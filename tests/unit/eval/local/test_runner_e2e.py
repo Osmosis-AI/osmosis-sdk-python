@@ -708,3 +708,95 @@ async def test_a_server_that_fails_startup_is_reported_immediately(
         await harness.runner().run()
     assert _time.monotonic() - started < 30
     assert harness.journal_lines() == []
+
+
+class _FakeTunnel:
+    """Stands in for CloudflaredTunnel: 'publishes' the listener's own URL.
+
+    The advertised URL equals the loopback URL, so the whole tunnel-mode
+    plumbing (bridge keepalive on, advertised chat base, watchdog, teardown)
+    runs against a reachable endpoint without any real tunnel.
+    """
+
+    instances: list[_FakeTunnel] = []
+
+    def __init__(self, *, local_url: str, **_hooks: Any) -> None:
+        import asyncio
+
+        self._local_url = local_url
+        self._exited = asyncio.Event()
+        self._returncode: int | None = None
+        self.stopped = False
+        self.public_url: str | None = None
+        self.verified = True
+        _FakeTunnel.instances.append(self)
+
+    async def start(self) -> str:
+        self.public_url = self._local_url
+        return self._local_url
+
+    async def wait(self) -> int | None:
+        await self._exited.wait()
+        return self._returncode
+
+    def die(self, returncode: int) -> None:
+        self._returncode = returncode
+        self._exited.set()
+
+    async def stop(self) -> None:
+        self.stopped = True
+        self._exited.set()
+
+
+async def test_tunnel_mode_runs_the_full_path_and_stops_the_tunnel(
+    harness: RunnerHarness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from osmosis_ai.eval.local import runner as runner_module
+
+    _FakeTunnel.instances.clear()
+    monkeypatch.setattr(runner_module, "CloudflaredTunnel", _FakeTunnel)
+    summary = await harness.runner(
+        options=LocalEvalOptions(name="run-1", tunnel="cloudflared")
+    ).run()
+    assert summary.succeeded == 4
+    (tunnel,) = _FakeTunnel.instances
+    assert tunnel.stopped
+    assert any("tunnel ready" in stage for stage in harness.hooks.stages)
+
+
+async def test_tunnel_death_halts_dispatch_and_leaves_work_pending(
+    harness: RunnerHarness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from osmosis_ai.eval.local import runner as runner_module
+
+    _FakeTunnel.instances.clear()
+
+    class _DyingTunnel(_FakeTunnel):
+        async def start(self) -> str:
+            url = await super().start()
+            self.die(1)
+            return url
+
+    monkeypatch.setattr(runner_module, "CloudflaredTunnel", _DyingTunnel)
+    # Slow rollouts guarantee the watchdog fires while work is in flight.
+    spec = harness.spec(env={"OSMOSIS_TEST_WORKFLOW_SLEEP": "30"})
+    summary = await harness.runner(
+        spec=spec,
+        options=LocalEvalOptions(name="run-1", tunnel="cloudflared"),
+    ).run()
+    assert summary.cancelled
+    assert summary.succeeded == 0
+    assert any("cloudflared tunnel exited" in note for note in harness.hooks.notes)
+    # Nothing was stamped failed: the items stay pending for a resume.
+    assert harness.journal_lines() == []
+
+
+async def test_unsupported_tunnel_provider_is_refused(
+    harness: RunnerHarness,
+) -> None:
+    from osmosis_ai.eval.local.runner import LocalEvalError
+
+    with pytest.raises(LocalEvalError, match="only 'cloudflared'"):
+        await harness.runner(
+            options=LocalEvalOptions(name="run-1", tunnel="ngrok")
+        ).run()

@@ -81,6 +81,9 @@ def _driver(
     )
     return HttpRolloutDriver(
         rollout_base_url="http://rollout",
+        # The cancel path deliberately builds a fresh client per call; route
+        # it through the same handler so tests observe cancel POSTs too.
+        cancel_transport=httpx.MockTransport(handler),
         callback_store=store,
         completion_url_for=lambda rid: (
             f"http://cb/v1/rollouts/{quote(rid, safe='')}/completion"

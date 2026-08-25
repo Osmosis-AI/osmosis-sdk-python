@@ -51,6 +51,51 @@ def apply_managed_skypilot_placement(
     return environment_config
 
 
+def is_loopback_url(url: str) -> bool:
+    """Whether the URL's host is reachable only from this machine."""
+    if not url:
+        return False
+    from urllib.parse import urlparse
+
+    hostname = urlparse(url).hostname
+    if hostname is None:
+        return False
+    if hostname == "localhost":
+        return True
+    import ipaddress
+
+    try:
+        return ipaddress.ip_address(hostname).is_loopback
+    except ValueError:
+        return False
+
+
+def sandbox_reaches_host_loopback(
+    environment_config: HarborEnvironmentConfig,
+) -> bool:
+    """Whether this trial runtime can dial the host's loopback interface.
+
+    An explicit allowlist, not "everything but cloud": every environment type
+    not named here gets the loopback guard, because a silently unreachable
+    chat endpoint hangs the rollout until its timeout.
+
+    * ``SINGULARITY`` shares the host network namespace, so 127.0.0.1 works.
+    * ``DOCKER`` works only through the macOS ``host.docker.internal``
+      rewrite; on Linux the rewrite is a no-op and loopback is unreachable
+      from a bridge network.
+    * ``type is None`` is an ``import_path`` custom environment — unknown
+      topology, most plausibly a bespoke local runner, so it is not blocked.
+    """
+    env_type = environment_config.type
+    if env_type is None:
+        return True
+    if env_type == EnvironmentType.SINGULARITY:
+        return True
+    if env_type == EnvironmentType.DOCKER:
+        return platform.system() == "Darwin"
+    return False
+
+
 def rewrite_url_for_docker(url: str) -> str:
     if platform.system() != "Darwin":
         return url

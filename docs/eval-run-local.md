@@ -16,7 +16,7 @@ Running a local eval also requires [uv](https://docs.astral.sh/uv/): it is what 
 
 `eval run` requires being logged in (`osmosis auth login`) and run from the workspace directory. All LLM traffic is served by an in-process LiteLLM bridge on your machine — the same design as the hosted eval controller — so `experiment.model_path` is a LiteLLM model id (`openai/gpt-5-mini`, `anthropic/claude-sonnet-4-6`, …) and provider credentials resolve exactly as LiteLLM resolves them anywhere: from the process environment (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, provider `*_API_BASE` overrides, …) or from `--secrets-file`. Local OpenAI-compatible endpoints (a laptop vLLM or Ollama) work through the corresponding LiteLLM provider id and its environment variables.
 
-Execution is local-only: the rollout entrypoint must build `LocalBackend`, or `HarborBackend` configured with `EnvironmentType.DOCKER` (the host Docker runtime). Docker is the only Harbor environment supported by `eval run`; if the entrypoint normally selects Daytona, SkyPilot, or another environment, temporarily change its `environment_config.type` to `EnvironmentType.DOCKER` before running and restore the usual environment afterward.
+The rollout entrypoint may build `LocalBackend`, `HarborBackend` with `EnvironmentType.DOCKER` (the host Docker runtime), or — with `--tunnel` or `--advertise-url` — a Harbor cloud environment (Daytona, SkyPilot, …). Cloud sandboxes have no route to your loopback interface, so the sandbox-facing model endpoint must be exposed through a tunnel; see [Cloud sandboxes](#cloud-sandboxes-tunnels). Without a tunnel flag, a cloud-environment rollout fails each work item with an error naming the fix instead of hanging.
 
 ## The rollout environment
 
@@ -70,9 +70,10 @@ osmosis eval upload .osmosis/evals/my-local-run
 | `--retry-failed` | Also re-run failed and skipped work items. Successes are kept. |
 | `--max-in-flight` | Concurrent rollouts. Default: `evaluation.batch_size`, then the backend's advertised capacity, then 1. |
 | `--yes`, `-y` | Skip the cost confirmation. |
+| `--tunnel` | Expose the model bridge through an auto-managed tunnel so cloud sandboxes can call back. Providers: `cloudflared`. |
 | `--upload` | Import completed results into the platform while the run lock is still held. |
 
-Advanced: `--rollout-port` pins the rollout-server port and `--verbose` streams log lines to the terminal. Before any dispatch the run makes one probe completion against the configured model, so a bad model id or key fails once, loudly, instead of failing every row.
+Advanced: `--rollout-port` pins the rollout-server port, `--listener-port` pins the controller listener's local port, `--advertise-url` names a public base URL that already reaches the listener (a tunnel you run yourself; mutually exclusive with `--tunnel`), and `--verbose` streams log lines to the terminal. Before any dispatch the run makes one probe completion against the configured model, so a bad model id or key fails once, loudly, instead of failing every row.
 
 There is deliberately **no** `[local]` or `[execution]` config section: everything that differs between a local and a cloud run is a CLI flag, so one TOML means the same thing to both commands.
 
@@ -117,6 +118,7 @@ The run ends with a results table: work items by outcome, pass rate against the 
   manifest.json        # local provenance + the resolved-input lock (never uploaded)
   events.jsonl         # terminal-result journal — the resume authority
   server.json          # rollout-server ownership record; present only while one may run
+  tunnel.json          # cloudflared ownership record; present only while a tunnel may run
   logs.txt             # combined supervisor + rollout-server log, secrets redacted
   index.jsonl          # platform-shaped sample index
   progress.json        # {total_runs, sampled_rows, total_dataset_rows}
@@ -139,7 +141,7 @@ Resume is **crash and interrupt recovery, not iteration recovery.**
 
 A work item is complete only when it has a durable terminal result. A result is durable once its journal record has been written and `fsync`-ed, which happens *before* the rollout server's callback is acknowledged — so a `kill -9` can never lose an acknowledged result, and can never skip an unacknowledged one. Ctrl-C cancels in-flight rollouts without writing a terminal record, so they simply run again next time.
 
-A `kill -9` normally does not leak the rollout server either. The supervisor records the server's process group, together with its pid and start time, in `server.json` at spawn, and removes the record on clean shutdown. The next invocation for the run — a plain resume, `--fresh`, even a refused resume — terminates the recorded group, but only after re-verifying that pid and start time still match: a record whose pid was recycled by an unrelated process is dropped, never signalled. Two narrow gaps remain, both resolved in favor of never signalling an unverified group: a kill that lands in the instant between the spawn and the record's write (or a record write that fails outright — the run warns and continues) leaves no record, and a group whose recorded leader died while a descendant survived can no longer be verified, so it is dropped rather than killed blind. A server that slips through either gap still needs manual cleanup.
+A `kill -9` normally does not leak the rollout server either. The supervisor records the server's process group, together with its pid and start time, in `server.json` at spawn, and removes the record on clean shutdown. A `--tunnel` run records its cloudflared child the same way in `tunnel.json` — an orphaned quick tunnel would otherwise keep a live public URL forwarding to a local port a later run may reuse — and the next invocation reaps both records under the same ownership proof. The next invocation for the run — a plain resume, `--fresh`, even a refused resume — terminates the recorded group, but only after re-verifying that pid and start time still match: a record whose pid was recycled by an unrelated process is dropped, never signalled. Two narrow gaps remain, both resolved in favor of never signalling an unverified group: a kill that lands in the instant between the spawn and the record's write (or a record write that fails outright — the run warns and continues) leaves no record, and a group whose recorded leader died while a descendant survived can no longer be verified, so it is dropped rather than killed blind. A server that slips through either gap still needs manual cleanup.
 
 A named run is pinned to its resolved inputs: model, dataset bytes, selected rows, `n`, timeouts, pass threshold, rollout entrypoint, and a digest of the rollout's source files. The environment the dependency sync builds is not source: `.venv/`, `uv.lock`, and a build backend's `*.egg-info/` are excluded, so resolving dependencies never changes the digest of the project that owns them. Change any of the inputs and the run refuses to resume, naming the input group that changed:
 
@@ -183,6 +185,36 @@ The two places Harbor takes run-specific allowlist entries resolve into independ
 
 **Per-trial logs.** Harbor writes its own `trial.log`, `agent/`, and `verifier/` output per trial, and removes the trial directory once a successful trial's artifacts are relocated. Those files are copied to `rollout_trials/<rollout-id>/logs/` first, so they outlive cleanup. They are copied *after* credential scrubbing, and they stay out of `artifacts/` because that tree is the one the platform enumerates and renders.
 
+## Cloud sandboxes (tunnels)
+
+A Harbor rollout whose `environment_config` selects a cloud environment (Daytona, SkyPilot, …) runs its sandbox off your machine, and that sandbox has no route to the bridge's loopback URL. Exactly one flow crosses that boundary — the sandbox's OpenAI-compatible chat traffic — so exposing local eval to cloud sandboxes means exposing exactly one HTTP surface: the bridge's per-rollout chat endpoint. Completion and grader callbacks come from the rollout server, a host process, and never leave your machine; neither do provider keys. The sandbox receives only the tunnel URL and the per-run bridge bearer.
+
+```bash
+osmosis eval run configs/eval/my-daytona-rollout.toml --tunnel cloudflared
+```
+
+`--tunnel cloudflared` starts a [Cloudflare quick tunnel](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/do-more-with-tunnels/trycloudflare/) as a child of the run: it requires the `cloudflared` binary on `PATH` (macOS: `brew install cloudflared`), needs no account, prints the `https://<random>.trycloudflare.com` URL as a run milestone, is readiness-probed through the edge before any dispatch, and is terminated with the run. If the tunnel process dies mid-run — quick tunnels hold a single edge connection — dispatch halts with a clear error and the unfinished work items stay pending for a resume, exactly like a rollout-server death.
+
+Tunnel mode also arms a bridge-side keepalive for non-streaming model calls: proxies enforce idle-read timeouts (cloudflared cuts a response that stays silent for ~125s), so after a 90s grace window the bridge commits `200` + `application/json` and trickles one whitespace byte every 30s until the real body is ready. Two consequences worth knowing: a provider error that occurs *after* the grace window can no longer change the status code and arrives as an OpenAI-style `{"error": ...}` body instead of a clean 502 — clients surface it as a parse/validation error — and streaming calls are unaffected (they already heartbeat). Loopback-only runs keep exact current behavior.
+
+Caveats of the quick-tunnel path:
+
+- **Terms of service.** Quick tunnels are Cloudflare's free "testing and development" tier — the same mechanism the Shopify CLI spawns on every `shopify app dev`. Fine for development-scale eval runs; not a production transport.
+- **Capacity.** The edge caps a tunnel at 200 in-flight requests (429 above); there is no SLA.
+- **Corporate networks.** `*.trycloudflare.com` has abuse history and is blocked by some corporate egress filters, EDR products, and filtering DNS resolvers (Tailscale MagicDNS setups included). The readiness probe runs from your machine, whose DNS says nothing about the sandbox's: when the probe gets no HTTP response at all, the run continues with a `tunnel up ... but this host cannot reach it` warning and lets the sandbox try. Only an edge that answers but keeps failing is treated as a dead tunnel. If the sandbox cannot reach it either, run your own tunnel and pass `--advertise-url`.
+
+`--advertise-url <base-url>` is the bring-your-own escape hatch: any HTTPS reverse proxy or tunnel (ngrok, an SSH forward on a VPS, a corporate ingress) that forwards to the listener works. It requires `--listener-port` — your tunnel needs a fixed local port to forward to. Start the tunnel yourself, then pass its public base URL:
+
+```bash
+osmosis eval run configs/eval/my-daytona-rollout.toml --listener-port 8710 --advertise-url https://eval.example.com
+```
+
+Only the sandbox-facing chat endpoint uses the advertised URL. The tunnel needs to pass POST bodies and, for streaming, server-sent events; the bridge keepalive (armed for `--advertise-url` too) covers proxies with idle-read timeouts.
+
+**What the tunnel exposes.** The listener serves no docs or OpenAPI surface, so a tunnel URL alone yields only 404s and 401s. Every route requires a bearer: the callback routes take the controller token, which never leaves your machine, and the chat route takes the per-run bridge token, which is exactly what the sandbox holds — so a compromised sandbox (or a leaked bridge token) can spend your provider credentials on arbitrary completions for the lifetime of the run, same as it already could over loopback; the tunnel widens where that token can be used from, not what it can do. Both tokens are 128-bit random values compared in constant time and rotate every run. Use `--tunnel`/`--advertise-url` for development-scale runs, not for anything you would leave running unattended against an expensive provider account.
+
+Tasks running `allowlist` egress need no extra configuration: the tunnel host is added to the sandbox's allowlist automatically, the same way the Docker loopback host is.
+
 ## Reading a failed run
 
 Failed rows are printed at the end with the directory that explains them:
@@ -197,7 +229,7 @@ If a process-wide fault stops the run — the rollout server dies, the model pro
 
 ## Known limitations
 
-- Harbor containers reach the bridge via `host.docker.internal`, which the loopback rewrite applies on macOS only. On Linux Docker the container cannot reach a loopback-bound bridge yet, so Harbor rollouts that call the model are macOS-only for now; `LocalBackend` rollouts work everywhere.
+- Harbor containers reach the bridge via `host.docker.internal`, which the loopback rewrite applies on macOS only. On Linux Docker the container cannot reach a loopback-bound bridge, so a model-calling Docker rollout there is refused with the same error as a cloud environment — run it with `--tunnel cloudflared` (or `--advertise-url`) until a Linux gateway rewrite exists. `LocalBackend` rollouts work everywhere.
 - An in-sandbox LLM-judge grader works only if your Harbor environment already provides its own credentials: `GraderContext` carries no LLM endpoint.
 - `allowlist` egress is not yet validated end-to-end; it needs Linux Docker, or a macOS host whose Docker Desktop kernel has `CONFIG_NFT_FIB_INET` (see above).
 - Windows/WSL2 is out of scope and untested.

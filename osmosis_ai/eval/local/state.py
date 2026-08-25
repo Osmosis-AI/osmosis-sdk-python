@@ -51,6 +51,7 @@ ROLLOUT_PROTOCOL_VERSION = "0.3"
 MANIFEST_FILENAME = "manifest.json"
 JOURNAL_FILENAME = "events.jsonl"
 SERVER_STATE_FILENAME = "server.json"
+TUNNEL_STATE_FILENAME = "tunnel.json"
 LOCKS_DIRNAME = ".locks"
 
 #: ``index.jsonl`` status values the platform schema accepts (§2.2).
@@ -531,6 +532,21 @@ class RunLock:
         self.release()
 
 
+def process_group_of(pid: int) -> int:
+    try:
+        return os.getpgid(pid)
+    except (ProcessLookupError, PermissionError, OSError) as exc:
+        if isinstance(exc, OSError) and exc.errno not in (
+            errno.ESRCH,
+            errno.EPERM,
+            errno.EINVAL,
+        ):
+            raise
+        # ``start_new_session=True`` makes the child its own group leader, so its
+        # pid is its pgid whenever the lookup itself is unavailable.
+        return pid
+
+
 def terminate_process_group(
     pgid: int, *, grace_sec: float, poll_sec: float = 0.05
 ) -> None:
@@ -671,13 +687,14 @@ class ServerProcessState:
 
 
 def reap_orphan_server(path: Path, *, grace_sec: float) -> ServerProcessState | None:
-    """Terminate the server group recorded at *path* iff it is provably ours.
+    """Terminate the process group recorded at *path* iff it is provably ours.
 
     Returns the state that was terminated, else ``None``. The record is
     removed in every case: after a kill its group is dead, and a record that
     fails verification names a pid that is gone or recycled and will never
     verify again. Blocking for up to *grace_sec*: call via
-    ``asyncio.to_thread`` from async code.
+    ``asyncio.to_thread`` from async code. The tunnel record
+    (``TUNNEL_STATE_FILENAME``) uses the same shape and the same reap.
     """
     state = ServerProcessState.read(path)
     reaped: ServerProcessState | None = None

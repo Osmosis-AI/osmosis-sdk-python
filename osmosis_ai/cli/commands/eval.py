@@ -171,10 +171,35 @@ def eval_run(
         ),
     ),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt."),
+    tunnel: str | None = typer.Option(
+        None,
+        "--tunnel",
+        help=(
+            "Expose the model bridge through an auto-managed tunnel so cloud "
+            "sandboxes (Daytona, SkyPilot, ...) can call back to this machine. "
+            "Providers: cloudflared."
+        ),
+    ),
     rollout_port: int | None = typer.Option(
         None,
         "--rollout-port",
         help="Fixed rollout-server port (default: an ephemeral port).",
+        rich_help_panel="Advanced",
+    ),
+    listener_port: int | None = typer.Option(
+        None,
+        "--listener-port",
+        help="Fixed local port for the controller listener (default: ephemeral).",
+        rich_help_panel="Advanced",
+    ),
+    advertise_url: str | None = typer.Option(
+        None,
+        "--advertise-url",
+        help=(
+            "Public base URL that already reaches the listener (a tunnel you "
+            "run yourself). Requires --listener-port; only the sandbox-facing "
+            "chat endpoint uses it."
+        ),
         rich_help_panel="Advanced",
     ),
     verbose: bool = typer.Option(
@@ -203,7 +228,10 @@ def eval_run(
         retry_failed=retry_failed,
         max_in_flight=max_in_flight,
         yes=yes,
+        tunnel=tunnel,
         rollout_port=rollout_port,
+        listener_port=listener_port,
+        advertise_url=advertise_url,
         verbose=verbose,
         upload=upload,
     )

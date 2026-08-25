@@ -975,7 +975,7 @@ async def test_a_cancelled_sync_terminates_and_reaps_the_uv_process_group(
         return child
 
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
-    monkeypatch.setattr(runner_module, "_process_group_of", lambda pid: pid)
+    monkeypatch.setattr(runner_module, "process_group_of", lambda pid: pid)
     monkeypatch.setattr(
         runner_module, "terminate_process_group", fake_terminate_process_group
     )
@@ -1054,3 +1054,80 @@ async def test_a_child_that_died_at_spawn_leaves_no_record(tmp_path: Path) -> No
     await child.wait()
     runner._record_server_state(child, instance_id="iid", port=4242)
     assert not (runner._run_dir / SERVER_STATE_FILENAME).exists()
+
+
+async def test_reap_terminates_an_orphaned_tunnel_record(tmp_path: Path) -> None:
+    import subprocess
+
+    from osmosis_ai.eval.local.state import (
+        TUNNEL_STATE_FILENAME,
+        ServerProcessState,
+        process_start_token,
+        utc_now,
+    )
+
+    runner = _runner(_spec(), tmp_path, options=LocalEvalOptions(name="run-1"))
+    notes: list[str] = []
+    runner._hooks.note = notes.append
+    run_dir = tmp_path / "evals" / "run-1"
+    run_dir.mkdir(parents=True)
+
+    # A real child in its own session stands in for the orphaned cloudflared:
+    # the reap must prove ownership (pid + start token) before signalling.
+    child = subprocess.Popen(["sleep", "60"], start_new_session=True)
+    try:
+        token = process_start_token(child.pid)
+        assert token is not None
+        ServerProcessState(
+            pid=child.pid,
+            pgid=child.pid,
+            start_token=token,
+            instance_id="cloudflared",
+            port=8710,
+            created_at=utc_now(),
+        ).write(run_dir / TUNNEL_STATE_FILENAME)
+
+        await runner._reap_orphan_server(run_dir)
+
+        assert not (run_dir / TUNNEL_STATE_FILENAME).exists()
+        assert any("orphaned cloudflared tunnel" in note for note in notes)
+        assert child.wait(timeout=10) != 0
+    finally:
+        if child.poll() is None:
+            child.kill()
+            child.wait(timeout=10)
+
+
+async def test_tunnel_record_is_written_and_cleared_with_the_run(
+    tmp_path: Path,
+) -> None:
+    """_record_tunnel_state persists a verifiable record; _stop_tunnel clears
+    it even when no tunnel object was ever assigned."""
+    import subprocess
+
+    from osmosis_ai.eval.local.state import TUNNEL_STATE_FILENAME, ServerProcessState
+
+    runner = _uv_runner(tmp_path)
+    run_dir = runner._run_dir
+    run_dir.mkdir(parents=True, exist_ok=True)
+
+    child = subprocess.Popen(["sleep", "60"], start_new_session=True)
+    try:
+
+        class _SpawnedProcess:
+            pid = child.pid
+            returncode: int | None = None
+
+        runner._record_tunnel_state(_SpawnedProcess(), port=8710)
+        record = ServerProcessState.read(run_dir / TUNNEL_STATE_FILENAME)
+        assert record is not None
+        assert record.pid == child.pid
+        assert record.instance_id == "cloudflared"
+        assert record.port == 8710
+        assert record.is_owner_alive()
+
+        await runner._stop_tunnel()
+        assert not (run_dir / TUNNEL_STATE_FILENAME).exists()
+    finally:
+        child.kill()
+        child.wait(timeout=10)
