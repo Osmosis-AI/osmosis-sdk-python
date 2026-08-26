@@ -113,7 +113,8 @@ def rewrite_url_for_docker(url: str) -> str:
     if not is_loopback_url(url):
         return url
     parsed = urlparse(url)
-    netloc = "host.docker.internal"
+    userinfo, separator, _ = parsed.netloc.rpartition("@")
+    netloc = f"{userinfo}{separator}host.docker.internal"
     if parsed.port is not None:
         netloc = f"{netloc}:{parsed.port}"
     return urlunparse(parsed._replace(netloc=netloc))

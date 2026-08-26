@@ -72,11 +72,16 @@ class TestLoopbackUrlClassification:
             "http://127.0.0.1:8080/v1",
             "http://localhost:8080/v1",
             "http://[::1]:8080/v1",
+            "http://[::ffff:127.0.0.1]:8080/v1",
         ):
             assert (
                 env_module.rewrite_url_for_docker(url)
                 == "http://host.docker.internal:8080/v1"
             ), url
+        assert (
+            env_module.rewrite_url_for_docker("http://user:pass@localhost:8080/v1")
+            == "http://user:pass@host.docker.internal:8080/v1"
+        )
 
     def test_macos_rewrite_leaves_public_hosts_alone(self, monkeypatch):
         from osmosis_ai.rollout.backend.harbor import environment as env_module
