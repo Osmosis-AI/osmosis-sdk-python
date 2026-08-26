@@ -34,6 +34,7 @@ from osmosis_ai.rollout.controller.openai_responses import (
 try:
     from fastapi import APIRouter, Depends, HTTPException, Request
     from fastapi.responses import JSONResponse, StreamingResponse
+    from starlette.background import BackgroundTask
 except ModuleNotFoundError as _exc:
     raise_optional_dependency_error(
         _exc,
@@ -443,10 +444,15 @@ async def _trickle_json_response(
             )
             return
     finally:
-        if not task.done():
-            task.cancel()
-            with suppress(asyncio.CancelledError):
-                await task
+        await _cancel_task(task)
+
+
+async def _cancel_task(task: asyncio.Task[Any]) -> None:
+    """Cancel and consume a provider task without masking response cleanup."""
+    if not task.done():
+        task.cancel()
+    with suppress(asyncio.CancelledError, Exception):
+        await task
 
 
 def create_bridge_router(
@@ -521,15 +527,14 @@ def create_bridge_router(
                 # grace timer expiring.
                 done, _ = await asyncio.wait({task}, timeout=_NON_STREAM_GRACE_SEC)
             except asyncio.CancelledError:
-                task.cancel()
-                with suppress(asyncio.CancelledError):
-                    await task
+                await _cancel_task(task)
                 raise
             if not done:
                 # Still in flight: commit 200 now and keep the connection warm.
                 return StreamingResponse(
                     _trickle_json_response(task, request_model=request_model),
                     media_type="application/json",
+                    background=BackgroundTask(_cancel_task, task),
                 )
             try:
                 response = task.result()
@@ -572,10 +577,7 @@ def create_bridge_router(
                 yield f"data: {_compact_json(payload)}\n\n"
                 yield "data: [DONE]\n\n"
             finally:
-                if not task.done():
-                    task.cancel()
-                    with suppress(asyncio.CancelledError):
-                        await task
+                await _cancel_task(task)
 
         return StreamingResponse(
             stream_events(),

@@ -7,6 +7,7 @@ teardown — without any network or the binary itself.
 
 from __future__ import annotations
 
+import asyncio
 import shutil
 import time
 from pathlib import Path
@@ -158,7 +159,7 @@ async def test_on_spawn_receives_the_child_process(
     await tunnel.stop()
 
 
-async def test_on_spawn_failure_does_not_break_start(
+async def test_on_spawn_failure_stops_child_and_fails_start(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     script = _fake_cloudflared(
@@ -167,13 +168,42 @@ async def test_on_spawn_failure_does_not_break_start(
     )
     monkeypatch.setattr(shutil, "which", lambda name: str(script))
     monkeypatch.setattr(CloudflaredTunnel, "_probe_ready", _no_probe)
+    spawned: list[asyncio.subprocess.Process] = []
 
-    def explode(process: object) -> None:
+    def explode(process: asyncio.subprocess.Process) -> None:
+        spawned.append(process)
         raise RuntimeError("disk full")
 
     tunnel = CloudflaredTunnel(local_url="http://127.0.0.1:1", on_spawn=explode)
-    assert await tunnel.start() == FAKE_URL
-    await tunnel.stop()
+    with pytest.raises(TunnelError, match="orphan cleanup"):
+        await tunnel.start()
+    assert spawned[0].returncode is not None
+
+
+async def test_interrupted_stop_never_claims_the_child_exited(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    script = _fake_cloudflared(
+        tmp_path,
+        f"echo 'INF |  {FAKE_URL}  |' >&2\nexec sleep 60",
+    )
+    monkeypatch.setattr(shutil, "which", lambda name: str(script))
+    monkeypatch.setattr(CloudflaredTunnel, "_probe_ready", _no_probe)
+    tunnel = CloudflaredTunnel(local_url="http://127.0.0.1:1")
+    await tunnel.start()
+    process = tunnel._process
+    assert process is not None
+
+    async def interrupted_to_thread(*args: object, **kwargs: object) -> None:
+        raise asyncio.CancelledError
+
+    monkeypatch.setattr(tunnel_module.asyncio, "to_thread", interrupted_to_thread)
+    with pytest.raises(asyncio.CancelledError):
+        await tunnel.stop()
+    assert await tunnel.stop() is False
+
+    process.kill()
+    await process.wait()
 
 
 async def test_spawn_failure_raises_tunnel_error(

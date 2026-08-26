@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from typing import Any
 
@@ -948,6 +949,57 @@ async def test_keepalive_slow_response_trickles_whitespace_then_json(
     payload = json.loads(resp.text)
     assert payload["choices"][0]["message"]["content"] == "hello"
     assert bridge.collect_tokens(ROLLOUT_ID) == 5
+
+
+async def test_keepalive_response_cleanup_cancels_an_unstarted_body(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from starlette.requests import Request
+
+    monkeypatch.setattr(llm_bridge, "_NON_STREAM_GRACE_SEC", 0.01)
+    bridge = LiteLLMBridge(model="anthropic/claude-test")
+    started = asyncio.Event()
+    cancelled = asyncio.Event()
+
+    async def never_complete(body: dict[str, Any], *, rollout_id: str) -> Any:
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            cancelled.set()
+            raise
+
+    monkeypatch.setattr(bridge, "complete", never_complete)
+    router = create_bridge_router(
+        bridge,
+        auth_token=BRIDGE_TOKEN,
+        non_stream_keepalive=True,
+    )
+    route = next(
+        route for route in router.routes if route.path.endswith("/chat/completions")
+    )
+    sent = False
+
+    async def receive() -> dict[str, Any]:
+        nonlocal sent
+        if not sent:
+            sent = True
+            return {
+                "type": "http.request",
+                "body": json.dumps(_body()).encode(),
+                "more_body": False,
+            }
+        return {"type": "http.disconnect"}
+
+    request = Request(
+        {"type": "http", "method": "POST", "path": _url(), "headers": []},
+        receive,
+    )
+    response = await route.endpoint(ROLLOUT_ID, request)
+    await started.wait()
+    assert response.background is not None
+    await response.background()
+    assert cancelled.is_set()
 
 
 async def test_keepalive_late_error_emits_openai_error_body(

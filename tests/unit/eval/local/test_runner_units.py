@@ -1044,6 +1044,36 @@ async def test_a_spawned_server_is_recorded_and_a_stopped_one_is_cleared(
             await child.wait()
 
 
+async def test_server_record_failure_is_fatal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from osmosis_ai.eval.local.state import ServerProcessState
+
+    runner = _uv_runner(tmp_path)
+    child = await asyncio.create_subprocess_exec(
+        sys.executable,
+        "-c",
+        "import time; time.sleep(120)",
+        start_new_session=True,
+    )
+
+    def fail_write(self: ServerProcessState, path: Path) -> None:
+        raise OSError("disk full")
+
+    monkeypatch.setattr(ServerProcessState, "write", fail_write)
+    try:
+        with pytest.raises(LocalEvalError, match="could not record"):
+            runner._record_server_state(child, instance_id="iid", port=4242)
+        runner._child = child
+        await runner._stop_rollout_server()
+        assert child.returncode is not None
+    finally:
+        if child.returncode is None:
+            child.kill()
+        with contextlib.suppress(Exception):
+            await child.wait()
+
+
 async def test_a_child_that_died_at_spawn_leaves_no_record(tmp_path: Path) -> None:
     # There is no live group to reap later, and recording a reused pid here is
     # exactly the misfire the ownership proof exists to prevent.
@@ -1054,6 +1084,58 @@ async def test_a_child_that_died_at_spawn_leaves_no_record(tmp_path: Path) -> No
     await child.wait()
     runner._record_server_state(child, instance_id="iid", port=4242)
     assert not (runner._run_dir / SERVER_STATE_FILENAME).exists()
+
+
+async def test_orphan_sweep_reaps_other_runs_but_skips_a_locked_run(
+    tmp_path: Path,
+) -> None:
+    import subprocess
+
+    from osmosis_ai.eval.local.state import (
+        LOCKS_DIRNAME,
+        SERVER_STATE_FILENAME,
+        RunLock,
+        ServerProcessState,
+        process_start_token,
+        utc_now,
+    )
+
+    output_root = tmp_path / "evals"
+    runner = _runner(_spec(), tmp_path, output_root=output_root)
+    orphan_dir = output_root / "old-run"
+    active_dir = output_root / "active-run"
+    orphan_dir.mkdir(parents=True)
+    active_dir.mkdir()
+    orphan = subprocess.Popen(["sleep", "60"], start_new_session=True)
+    active = subprocess.Popen(["sleep", "60"], start_new_session=True)
+
+    def record(run_dir: Path, child: subprocess.Popen[bytes]) -> None:
+        token = process_start_token(child.pid)
+        assert token is not None
+        ServerProcessState(
+            pid=child.pid,
+            pgid=child.pid,
+            start_token=token,
+            instance_id="test",
+            port=4242,
+            created_at=utc_now(),
+        ).write(run_dir / SERVER_STATE_FILENAME)
+
+    try:
+        record(orphan_dir, orphan)
+        record(active_dir, active)
+        with RunLock(output_root / LOCKS_DIRNAME / "active-run.lock"):
+            await runner._reap_orphan_runs()
+
+        assert orphan.wait(timeout=10) != 0
+        assert not (orphan_dir / SERVER_STATE_FILENAME).exists()
+        assert active.poll() is None
+        assert (active_dir / SERVER_STATE_FILENAME).exists()
+    finally:
+        for child in (orphan, active):
+            if child.poll() is None:
+                child.kill()
+            child.wait(timeout=10)
 
 
 async def test_reap_terminates_an_orphaned_tunnel_record(tmp_path: Path) -> None:

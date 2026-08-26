@@ -58,6 +58,7 @@ from osmosis_ai.eval.local.state import (
     SERVER_STATE_FILENAME,
     TUNNEL_STATE_FILENAME,
     RunLock,
+    RunLockedError,
     RunManifest,
     ServerProcessState,
     TerminalJournal,
@@ -640,6 +641,7 @@ class LocalEvalRunner:
         self, *, after_finalize: Callable[[RunSummary], None] | None = None
     ) -> RunSummary:
         """Execute, finalize, then optionally act while still holding the lock."""
+        await self._reap_orphan_runs()
         run_name = self._options.name or _available_generated_run_name(
             self._output_root
         )
@@ -977,14 +979,20 @@ class LocalEvalRunner:
     ) -> None:
         """Persist the tunnel child's identity for a later orphan reap.
 
-        Same contract as :meth:`_record_server_state`: best-effort, ownership
-        proved by pid plus start token, liveness re-checked so a recycled pid
-        can never be recorded as ours.
+        Same contract as :meth:`_record_server_state`: ownership is proved by
+        pid plus start token, and liveness is re-checked so a recycled pid can
+        never be recorded as ours.
         """
         assert self._run_dir is not None
-        token = process_start_token(process.pid)
-        if token is None or process.returncode is not None:
+        if process.returncode is not None:
             return
+        token = process_start_token(process.pid)
+        if process.returncode is not None:
+            return
+        if token is None:
+            raise LocalEvalError(
+                "could not identify the cloudflared process for orphan cleanup"
+            )
         state = ServerProcessState(
             pid=process.pid,
             pgid=process_group_of(process.pid),
@@ -993,15 +1001,7 @@ class LocalEvalRunner:
             port=port,
             created_at=utc_now(),
         )
-        try:
-            state.write(self._run_dir / TUNNEL_STATE_FILENAME)
-        except OSError as exc:
-            self._write_log(
-                "warning",
-                "tunnel",
-                "could not record the tunnel process for orphan cleanup",
-                error=str(exc),
-            )
+        state.write(self._run_dir / TUNNEL_STATE_FILENAME)
 
     def _clear_tunnel_state(self) -> None:
         if self._run_dir is None:
@@ -1514,6 +1514,24 @@ class LocalEvalRunner:
     # Rollout-server lifecycle
     # ------------------------------------------------------------------ #
 
+    async def _reap_orphan_runs(self) -> None:
+        """Reap recorded children from dead supervisors, regardless of run name."""
+        if not self._output_root.is_dir():
+            return
+        for run_dir in self._output_root.iterdir():
+            if not run_dir.is_dir() or not any(
+                (run_dir / filename).is_file()
+                for filename in (SERVER_STATE_FILENAME, TUNNEL_STATE_FILENAME)
+            ):
+                continue
+            try:
+                with RunLock(
+                    self._output_root / LOCKS_DIRNAME / f"{run_dir.name}.lock"
+                ):
+                    await self._reap_orphan_server(run_dir)
+            except RunLockedError:
+                continue
+
     async def _reap_orphan_server(self, run_dir: Path) -> None:
         """Terminate a rollout server (and cloudflared tunnel) left behind by
         a supervisor that died without cleanup (``kill -9``, OOM, a crashed
@@ -1551,16 +1569,21 @@ class LocalEvalRunner:
     ) -> None:
         """Persist the just-spawned server's identity for a later orphan reap.
 
-        Best-effort by design: the record only enables extra cleanup after a
-        supervisor death, so failing to write it must not fail the run. The
-        liveness re-check after reading the start token closes the spawn-time
-        race: while the child is un-reaped its pid cannot be recycled, so a
-        still-``None`` returncode proves the token belongs to our child.
+        The liveness re-check after reading the start token closes the
+        spawn-time race: while the child is un-reaped its pid cannot be
+        recycled, so a still-``None`` returncode proves the token belongs to
+        our child.
         """
         assert self._run_dir is not None
-        token = process_start_token(child.pid)
-        if token is None or child.returncode is not None:
+        if child.returncode is not None:
             return
+        token = process_start_token(child.pid)
+        if child.returncode is not None:
+            return
+        if token is None:
+            raise LocalEvalError(
+                "could not identify the rollout server process for orphan cleanup"
+            )
         state = ServerProcessState(
             pid=child.pid,
             pgid=process_group_of(child.pid),
@@ -1572,12 +1595,9 @@ class LocalEvalRunner:
         try:
             state.write(self._run_dir / SERVER_STATE_FILENAME)
         except OSError as exc:
-            self._write_log(
-                "warning",
-                "server",
-                "could not record the server process for orphan cleanup",
-                error=str(exc),
-            )
+            raise LocalEvalError(
+                f"could not record the rollout server process for orphan cleanup: {exc}"
+            ) from exc
 
     def _clear_server_state(self) -> None:
         if self._run_dir is None:

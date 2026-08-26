@@ -118,15 +118,18 @@ class CloudflaredTunnel:
             # the CLI reports the same guidance.
             raise TunnelError(f"could not start cloudflared: {exc}") from exc
         self._process = process
-        if self._on_spawn is not None:
-            # Best-effort by design, like the server's ownership record: a
-            # failed write must not fail the tunnel.
-            with contextlib.suppress(Exception):
-                self._on_spawn(process)
-        deadline = time.monotonic() + _START_TIMEOUT_SEC
-        url_future: asyncio.Future[str] = asyncio.get_running_loop().create_future()
-        self._drain_task = asyncio.create_task(self._drain(process, url_future))
+        self._stop_confirmed = False
         try:
+            if self._on_spawn is not None:
+                try:
+                    self._on_spawn(process)
+                except Exception as exc:
+                    raise TunnelError(
+                        f"could not record cloudflared for orphan cleanup: {exc}"
+                    ) from exc
+            deadline = time.monotonic() + _START_TIMEOUT_SEC
+            url_future: asyncio.Future[str] = asyncio.get_running_loop().create_future()
+            self._drain_task = asyncio.create_task(self._drain(process, url_future))
             try:
                 url = await asyncio.wait_for(
                     url_future, timeout=deadline - time.monotonic()
