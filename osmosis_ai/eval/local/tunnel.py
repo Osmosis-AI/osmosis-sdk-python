@@ -38,6 +38,26 @@ _INSTALL_HINT = (
     "--advertise-url instead."
 )
 
+_QUICK_TUNNEL_DOCS_URL = (
+    "https://developers.cloudflare.com/cloudflare-one/networks/connectors/"
+    "cloudflare-tunnel/do-more-with-tunnels/trycloudflare/"
+)
+
+# Cloudflare rate-limits quick-tunnel *creation* per source IP (measured:
+# ~20 tunnels inside 30 minutes tripped it for 25+ minutes; already-running
+# tunnels keep serving). cloudflared surfaces the 429 only as log lines and a
+# cryptic unmarshal error before exiting, so the lines are the signal.
+_RATE_LIMIT_MARKERS = (
+    "429 Too Many Requests",
+    "error code: 1015",
+    "failed to unmarshal quick Tunnel",
+)
+_RATE_LIMIT_HINT = (
+    "Cloudflare is rate-limiting quick-tunnel creation for this network "
+    "(HTTP 429). Wait a few minutes and retry, or run your own tunnel and "
+    f"pass --advertise-url. Quick-tunnel limits: {_QUICK_TUNNEL_DOCS_URL}"
+)
+
 
 class TunnelError(RuntimeError):
     """The tunnel could not be started."""
@@ -148,6 +168,10 @@ class CloudflaredTunnel:
                 match = _URL_PATTERN.search(text)
                 if match is not None:
                     url_future.set_result(match.group(0))
+                elif any(marker in text for marker in _RATE_LIMIT_MARKERS):
+                    # Known failure with a known cause: name it instead of
+                    # the generic exit-code message the child produces.
+                    url_future.set_exception(TunnelError(_RATE_LIMIT_HINT))
         if not url_future.done():
             returncode = await process.wait()
             url_future.set_exception(
@@ -197,7 +221,8 @@ class CloudflaredTunnel:
                             f"tunnel {url} did not become reachable within "
                             f"{_START_TIMEOUT_SEC:.0f}s. Some networks block "
                             "*.trycloudflare.com; if yours does, run your own "
-                            "tunnel and pass --advertise-url."
+                            "tunnel and pass --advertise-url. Quick-tunnel "
+                            f"docs: {_QUICK_TUNNEL_DOCS_URL}"
                         )
                     return False
                 await asyncio.sleep(_PROBE_INTERVAL_SEC)

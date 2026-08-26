@@ -206,3 +206,22 @@ async def test_spawn_pins_an_empty_config_file(
     await tunnel.stop()
     args_line = next(line for line in lines if line.startswith("ARGS:"))
     assert f"--config {os.devnull}" in args_line
+
+
+async def test_rate_limited_creation_names_the_cause_and_the_docs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The real failure shape measured against Cloudflare: cloudflared logs the
+    # 429 and exits non-zero without ever publishing a URL. The generic
+    # exit-code message would hide the known cause.
+    script = _fake_cloudflared(
+        tmp_path,
+        "echo 'ERR Error unmarshaling QuickTunnel response: error code: 1015"
+        ' error="invalid character" status_code="429 Too Many Requests"\' >&2\n'
+        "exit 1",
+    )
+    monkeypatch.setattr(shutil, "which", lambda name: str(script))
+    with pytest.raises(TunnelError, match="rate-limiting") as excinfo:
+        await CloudflaredTunnel(local_url="http://127.0.0.1:1").start()
+    assert "--advertise-url" in str(excinfo.value)
+    assert "developers.cloudflare.com" in str(excinfo.value)
