@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from typing import Any
 
@@ -183,13 +184,35 @@ class _FakeLiteLLM:
         }
 
 
+class _SlowLiteLLM(_FakeLiteLLM):
+    """Completes (or fails) only after a delay, to outlive the grace window."""
+
+    def __init__(self, *, delay: float, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self._delay = delay
+
+    async def acompletion(self, **kwargs: Any) -> dict[str, Any]:
+        import asyncio
+
+        await asyncio.sleep(self._delay)
+        return await super().acompletion(**kwargs)
+
+
 def _install(monkeypatch: pytest.MonkeyPatch, fake: _FakeLiteLLM) -> None:
     monkeypatch.setattr(llm_bridge, "_get_litellm", lambda: fake)
 
 
-def _client(bridge: LiteLLMBridge) -> httpx.AsyncClient:
+def _client(
+    bridge: LiteLLMBridge, *, non_stream_keepalive: bool = False
+) -> httpx.AsyncClient:
     app = FastAPI()
-    app.include_router(create_bridge_router(bridge, auth_token=BRIDGE_TOKEN))
+    app.include_router(
+        create_bridge_router(
+            bridge,
+            auth_token=BRIDGE_TOKEN,
+            non_stream_keepalive=non_stream_keepalive,
+        )
+    )
     return httpx.AsyncClient(
         transport=ASGITransport(app=app),
         base_url="http://127.0.0.1",
@@ -883,6 +906,168 @@ async def test_preflight_probes_official_openai_through_responses(
 
     _install(monkeypatch, _FakeLiteLLM(responses_error=InternalServerError("flaky")))
     await LiteLLMBridge(model="openai/gpt-test").preflight_check()
+
+
+async def test_keepalive_fast_response_keeps_clean_json(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install(monkeypatch, _FakeLiteLLM())
+    bridge = LiteLLMBridge(model="anthropic/claude-test")
+    async with _client(bridge, non_stream_keepalive=True) as client:
+        resp = await client.post(_url(), json=_body(), headers=_auth())
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["object"] == "chat.completion"
+    assert payload["choices"][0]["message"]["content"] == "hello"
+    assert bridge.collect_tokens(ROLLOUT_ID) == 5
+
+
+async def test_keepalive_fast_error_keeps_clean_502(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install(monkeypatch, _FakeLiteLLM(completion_error=InternalServerError("boom")))
+    bridge = LiteLLMBridge(model="anthropic/claude-test")
+    async with _client(bridge, non_stream_keepalive=True) as client:
+        resp = await client.post(_url(), json=_body(), headers=_auth())
+    assert resp.status_code == 502
+
+
+async def test_keepalive_slow_response_trickles_whitespace_then_json(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(llm_bridge, "_NON_STREAM_GRACE_SEC", 0.05)
+    monkeypatch.setattr(llm_bridge, "_NON_STREAM_KEEPALIVE_INTERVAL_SEC", 0.05)
+    _install(monkeypatch, _SlowLiteLLM(delay=0.3))
+    bridge = LiteLLMBridge(model="anthropic/claude-test")
+    async with _client(bridge, non_stream_keepalive=True) as client:
+        resp = await client.post(_url(), json=_body(), headers=_auth())
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("application/json")
+    # The keepalive bytes are leading whitespace, so the body is still one
+    # valid JSON document.
+    assert resp.text.startswith(" ")
+    payload = json.loads(resp.text)
+    assert payload["choices"][0]["message"]["content"] == "hello"
+    assert bridge.collect_tokens(ROLLOUT_ID) == 5
+
+
+async def test_keepalive_response_cleanup_cancels_an_unstarted_body(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from starlette.requests import Request
+
+    monkeypatch.setattr(llm_bridge, "_NON_STREAM_GRACE_SEC", 0.01)
+    bridge = LiteLLMBridge(model="anthropic/claude-test")
+    started = asyncio.Event()
+    cancelled = asyncio.Event()
+
+    async def never_complete(body: dict[str, Any], *, rollout_id: str) -> Any:
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            cancelled.set()
+            raise
+
+    monkeypatch.setattr(bridge, "complete", never_complete)
+    router = create_bridge_router(
+        bridge,
+        auth_token=BRIDGE_TOKEN,
+        non_stream_keepalive=True,
+    )
+    route = next(
+        route for route in router.routes if route.path.endswith("/chat/completions")
+    )
+    sent = False
+
+    async def receive() -> dict[str, Any]:
+        nonlocal sent
+        if not sent:
+            sent = True
+            return {
+                "type": "http.request",
+                "body": json.dumps(_body()).encode(),
+                "more_body": False,
+            }
+        return {"type": "http.disconnect"}
+
+    request = Request(
+        {"type": "http", "method": "POST", "path": _url(), "headers": []},
+        receive,
+    )
+    response = await route.endpoint(ROLLOUT_ID, request)
+    await started.wait()
+    assert response.background is not None
+    await response.background()
+    assert cancelled.is_set()
+
+
+async def test_keepalive_late_error_emits_openai_error_body(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(llm_bridge, "_NON_STREAM_GRACE_SEC", 0.05)
+    monkeypatch.setattr(llm_bridge, "_NON_STREAM_KEEPALIVE_INTERVAL_SEC", 0.05)
+    _install(
+        monkeypatch,
+        _SlowLiteLLM(delay=0.3, completion_error=InternalServerError("boom")),
+    )
+    bridge = LiteLLMBridge(model="anthropic/claude-test")
+    async with _client(bridge, non_stream_keepalive=True) as client:
+        resp = await client.post(_url(), json=_body(), headers=_auth())
+    # The 200 was already committed; the error can only ride in the body.
+    assert resp.status_code == 200
+    payload = json.loads(resp.text)
+    assert payload["error"]["type"] == "bridge_error"
+    assert "boom" in payload["error"]["message"]
+
+
+async def test_keepalive_provider_timeout_error_in_grace_is_clean_502(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # TimeoutError == asyncio.TimeoutError since 3.11: a provider raising it
+    # must never be mistaken for the grace timer expiring.
+    _install(monkeypatch, _FakeLiteLLM(completion_error=TimeoutError("provider")))
+    bridge = LiteLLMBridge(model="anthropic/claude-test")
+    async with _client(bridge, non_stream_keepalive=True) as client:
+        resp = await client.post(_url(), json=_body(), headers=_auth())
+    assert resp.status_code == 502
+
+
+async def test_keepalive_provider_timeout_error_past_grace_terminates_body(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # ...and past the grace window it must terminate the trickle with an
+    # error body instead of spinning whitespace forever.
+    monkeypatch.setattr(llm_bridge, "_NON_STREAM_GRACE_SEC", 0.05)
+    monkeypatch.setattr(llm_bridge, "_NON_STREAM_KEEPALIVE_INTERVAL_SEC", 0.05)
+    _install(
+        monkeypatch,
+        _SlowLiteLLM(delay=0.2, completion_error=TimeoutError("provider")),
+    )
+    bridge = LiteLLMBridge(model="anthropic/claude-test")
+    async with _client(bridge, non_stream_keepalive=True) as client:
+        resp = await client.post(_url(), json=_body(), headers=_auth())
+    assert resp.status_code == 200
+    payload = json.loads(resp.text)
+    assert payload["error"]["type"] == "bridge_error"
+
+
+async def test_keepalive_first_body_byte_is_immediate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Committed headers do not reset proxy idle-read timers; the first body
+    # byte must go out with the commit, not one keepalive interval later.
+    monkeypatch.setattr(llm_bridge, "_NON_STREAM_GRACE_SEC", 0.05)
+    monkeypatch.setattr(llm_bridge, "_NON_STREAM_KEEPALIVE_INTERVAL_SEC", 30.0)
+    _install(monkeypatch, _SlowLiteLLM(delay=0.2))
+    bridge = LiteLLMBridge(model="anthropic/claude-test")
+    async with _client(bridge, non_stream_keepalive=True) as client:
+        resp = await client.post(_url(), json=_body(), headers=_auth())
+    # One immediate whitespace byte, then the payload as soon as it is ready
+    # (asyncio.wait wakes on completion, not on the 30s interval).
+    assert resp.status_code == 200
+    assert resp.text.startswith(" ")
+    assert json.loads(resp.text)["choices"][0]["message"]["content"] == "hello"
 
 
 async def test_bridge_router_requires_non_empty_token() -> None:

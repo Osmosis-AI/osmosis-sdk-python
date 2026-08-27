@@ -231,12 +231,71 @@ def run(
     retry_failed: bool = False,
     max_in_flight: int | None = None,
     yes: bool = False,
+    tunnel: str | None = None,
     rollout_port: int | None = None,
+    listener_port: int | None = None,
+    advertise_url: str | None = None,
     verbose: bool = False,
     upload: bool = False,
 ) -> CommandResult:
     """Run an evaluation locally against the workspace's rollout server."""
     import asyncio
+
+    # Fail flag mistakes before the plan table and the cost confirmation.
+    if tunnel is not None and tunnel != "cloudflared":
+        raise CLIError(f"--tunnel supports only 'cloudflared', got {tunnel!r}")
+    if tunnel is not None and advertise_url is not None:
+        raise CLIError(
+            "--tunnel and --advertise-url are mutually exclusive: --tunnel "
+            "manages a tunnel for you, --advertise-url points at one you run."
+        )
+    if listener_port is not None and not 1 <= listener_port <= 65535:
+        raise CLIError(
+            f"--listener-port must be between 1 and 65535, got {listener_port}"
+        )
+    if advertise_url is not None:
+        from urllib.parse import urlparse
+
+        parsed = urlparse(advertise_url)
+        if (
+            parsed.scheme not in ("http", "https")
+            or not parsed.hostname
+            # The rollout path is appended verbatim, so a query or fragment
+            # would swallow it and aim the sandbox at the wrong endpoint.
+            or parsed.query
+            or parsed.fragment
+        ):
+            raise CLIError(
+                "--advertise-url must be an http(s) base URL with a host and "
+                f"no query or fragment, got {advertise_url!r}"
+            )
+        if listener_port is None:
+            # An external tunnel forwards to a fixed local port; an ephemeral
+            # listener bind would leave it nothing stable to target.
+            raise CLIError(
+                "--advertise-url requires --listener-port: your tunnel needs "
+                "a fixed local port to forward to."
+            )
+        if parsed.scheme == "http" and parsed.hostname not in (
+            "localhost",
+            "127.0.0.1",
+        ):
+            console.print_warning(
+                "--advertise-url uses plain http: the per-run bridge bearer "
+                "and all model traffic cross the network unencrypted.",
+                code="INSECURE_ADVERTISE_URL",
+            )
+    # Tunnel flags are runtime-only — deliberately never part of the manifest
+    # — so every follow-up command that re-runs rollouts must carry them
+    # explicitly: resuming a cloud-sandbox run without them would fail each
+    # pending item against the loopback guard.
+    rerun_flags = ""
+    if tunnel is not None:
+        rerun_flags += f" --tunnel {tunnel}"
+    if advertise_url is not None:
+        rerun_flags += f" --advertise-url {quote(advertise_url)}"
+    if listener_port is not None:
+        rerun_flags += f" --listener-port {listener_port}"
 
     try:
         from osmosis_ai.eval.local.dataset import (
@@ -351,6 +410,9 @@ def run(
             max_in_flight=max_in_flight,
             rollout_port=rollout_port,
             verbose=verbose,
+            listener_port=listener_port,
+            advertise_url=advertise_url,
+            tunnel=tunnel,
         ),
         dataset=dataset,
         selection=selection,
@@ -422,6 +484,7 @@ def run(
         hint = (
             "Resume the pending work items: "
             f"osmosis eval run {quote(str(config_path))} --name {started}"
+            f"{rerun_flags}"
             if started
             else "Nothing was started."
         )
@@ -443,6 +506,7 @@ def run(
         dataset_source=dataset.source,
         imported=imported,
         upload_requested=upload,
+        rerun_flags=rerun_flags,
     )
 
 
@@ -588,6 +652,7 @@ def _result(
     dataset_source: str,
     imported: Any | None = None,
     upload_requested: bool = False,
+    rerun_flags: str = "",
 ) -> OperationResult:
     resource: dict[str, Any] = {
         "run_name": summary.run_name,
@@ -634,24 +699,25 @@ def _result(
     next_steps = []
     if noop:
         next_steps.append(
-            f"Start a new run alongside it: osmosis eval run {config_arg}"
+            f"Start a new run alongside it: osmosis eval run {config_arg}{rerun_flags}"
         )
         next_steps.append(
             "Re-run this name from scratch (archives its results): "
             f"osmosis eval run {config_arg} --name {summary.run_name} --fresh"
+            f"{rerun_flags}"
         )
     if incomplete:
         upload_flag = " --upload" if upload_requested else ""
         next_steps.append(
             f"Resume: osmosis eval run {config_arg} "
-            f"--name {summary.run_name}{upload_flag}"
+            f"--name {summary.run_name}{upload_flag}{rerun_flags}"
         )
     if summary.failed:
         upload_flag = " --upload" if upload_requested else ""
         next_steps.append(
             "Retry failures under the same name: "
             f"osmosis eval run {config_arg} --name {summary.run_name} "
-            f"--retry-failed{upload_flag}"
+            f"--retry-failed{upload_flag}{rerun_flags}"
         )
     if imported is not None:
         imported_name = imported.eval_run_name or summary.run_name

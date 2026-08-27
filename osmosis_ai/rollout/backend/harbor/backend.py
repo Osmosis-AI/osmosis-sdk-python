@@ -67,8 +67,10 @@ from osmosis_ai.rollout.backend.harbor.diagnostics import (
 from osmosis_ai.rollout.backend.harbor.environment import (
     apply_chat_endpoint_egress,
     apply_managed_skypilot_placement,
+    is_loopback_url,
     load_task_network_config,
     rewrite_url_for_docker,
+    sandbox_reaches_host_loopback,
     uses_local_docker_runtime,
 )
 from osmosis_ai.rollout.backend.harbor.native_agents import (
@@ -340,6 +342,30 @@ class HarborBackend(ExecutionBackend):
             url = ctx.chat_completions_url or ""
             if url and uses_local_docker_runtime(self.environment_config):
                 url = rewrite_url_for_docker(url)
+            if (
+                url
+                and is_loopback_url(url)
+                and not sandbox_reaches_host_loopback(self.environment_config)
+                # The guard protects agents that will dial the URL; an agent
+                # wired to nothing (oracle) produces no model traffic, so an
+                # unreachable endpoint cannot hang it.
+                and not (self.native is not None and self.native.wiring == "none")
+            ):
+                # Without this the sandbox dials an unreachable loopback and
+                # the rollout hangs silently until its timeout. Checked after
+                # the Docker rewrite, so macOS Docker (rewritten to
+                # host.docker.internal) passes and Linux Docker (no-op
+                # rewrite) is refused instead of hanging.
+                env_type = self.environment_config.type
+                label = env_type.value if env_type is not None else "custom"
+                raise ValueError(
+                    f"rollout {request.id!r}: chat endpoint {url} is loopback-"
+                    f"only, and a {label!r} sandbox cannot reach this "
+                    "machine's loopback interface. Run `osmosis eval run` "
+                    "with --tunnel cloudflared (or --advertise-url), or "
+                    "switch the rollout's environment_config to a runtime "
+                    "that can (EnvironmentType.DOCKER on macOS)."
+                )
             container_input.chat_completions_url = url
             container_input.api_key = ctx.api_key
         return container_input

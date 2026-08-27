@@ -133,8 +133,9 @@ async def test_an_unreadable_status_is_never_reported_as_unwound(
     runner, log = _runner(tmp_path, ["id0", "id1"])
 
     started = time.monotonic()
-    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-        await runner._settle_cancellations(client, BASE_URL)
+    await runner._settle_cancellations(
+        BASE_URL, http_transport=httpx.MockTransport(handler)
+    )
 
     assert time.monotonic() - started < 5.0
     assert UNWOUND not in log.messages()
@@ -155,8 +156,9 @@ async def test_a_settled_rollout_stops_being_polled(
         status = "running" if running else "cancelled"
         return httpx.Response(200, json={"status": status})
 
-    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-        await runner._settle_cancellations(client, BASE_URL)
+    await runner._settle_cancellations(
+        BASE_URL, http_transport=httpx.MockTransport(handler)
+    )
 
     # Re-polling an id already seen terminal spends the grace on nothing.
     assert calls["settles-first"] == 1

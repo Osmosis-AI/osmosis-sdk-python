@@ -247,6 +247,116 @@ def test_runtime_flags_reach_the_options_object(
     assert options.verbose is True
 
 
+def test_tunnel_flags_reach_the_options_object(
+    workspace: Path, captured_runner: type[_CapturedRunner], console_capture: StringIO
+) -> None:
+    _run(workspace, tunnel="cloudflared", listener_port=9321)
+    options = captured_runner.calls[0]["options"]
+    assert options.tunnel == "cloudflared"
+    assert options.listener_port == 9321
+    assert options.advertise_url is None
+
+
+def test_advertise_url_reaches_the_options_object(
+    workspace: Path, captured_runner: type[_CapturedRunner], console_capture: StringIO
+) -> None:
+    _run(workspace, advertise_url="https://my-tunnel.example", listener_port=8710)
+    options = captured_runner.calls[0]["options"]
+    assert options.advertise_url == "https://my-tunnel.example"
+    assert options.listener_port == 8710
+    assert options.tunnel is None
+
+
+def test_advertise_url_requires_a_listener_port() -> None:
+    # An external tunnel forwards to a fixed local port; an ephemeral bind
+    # would leave it nothing stable to target.
+    with pytest.raises(CLIError, match="listener-port"):
+        eval_run_module.run(
+            Path("unused.toml"), advertise_url="https://my-tunnel.example"
+        )
+
+
+def test_unknown_tunnel_provider_fails_before_any_work() -> None:
+    with pytest.raises(CLIError, match="only 'cloudflared'"):
+        eval_run_module.run(Path("unused.toml"), tunnel="ngrok")
+
+
+def test_tunnel_and_advertise_url_are_mutually_exclusive() -> None:
+    with pytest.raises(CLIError, match="mutually exclusive"):
+        eval_run_module.run(
+            Path("unused.toml"),
+            tunnel="cloudflared",
+            advertise_url="https://my-tunnel.example",
+        )
+
+
+def test_advertise_url_must_be_http() -> None:
+    with pytest.raises(CLIError, match="http"):
+        eval_run_module.run(Path("unused.toml"), advertise_url="my-tunnel.example")
+
+
+def test_advertise_url_must_carry_a_host() -> None:
+    with pytest.raises(CLIError, match="host"):
+        eval_run_module.run(Path("unused.toml"), advertise_url="http://")
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://tunnel.example.com?token=x",
+        "https://tunnel.example.com/#fragment",
+    ],
+)
+def test_advertise_url_rejects_query_and_fragment(url: str) -> None:
+    # The rollout path is appended verbatim, so anything after a query or
+    # fragment delimiter would aim the sandbox at the wrong endpoint.
+    with pytest.raises(CLIError, match="query or fragment"):
+        eval_run_module.run(Path("unused.toml"), advertise_url=url)
+
+
+def test_follow_up_commands_carry_the_tunnel_flags(
+    workspace: Path,
+    captured_runner: type[_CapturedRunner],
+    console_capture: StringIO,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Tunnel flags are runtime-only and never land in the manifest, so a
+    # displayed Resume/Retry command without them would point every pending
+    # item at the loopback guard.
+    from osmosis_ai.eval.local.runner import RunSummary
+
+    async def partial_run(self: Any, **_kwargs: Any) -> RunSummary:
+        return RunSummary(
+            run_dir=self.kwargs["output_root"] / "run-1",
+            local_run_id="a" * 32,
+            run_name="run-1",
+            total_work_items=6,
+            dispatched=3,
+            succeeded=2,
+            failed=1,
+            skipped=0,
+            resumed=0,
+            cancelled=True,
+            duration_ms=1500.0,
+            metrics=_metrics(passed=1, scored=2),
+        )
+
+    monkeypatch.setattr(captured_runner, "run", partial_run)
+    result = _run(workspace, tunnel="cloudflared", listener_port=9321)
+    flags = " --tunnel cloudflared --listener-port 9321"
+    resume = next(s for s in result.display_next_steps if s.startswith("Resume:"))
+    retry = next(s for s in result.display_next_steps if "Retry failures" in s)
+    assert resume.endswith(flags)
+    assert retry.endswith(flags)
+
+
+def test_listener_port_must_be_a_real_port() -> None:
+    # 99999 would raise OverflowError from socket.bind, far past the friendly
+    # error paths.
+    with pytest.raises(CLIError, match="between 1 and 65535"):
+        eval_run_module.run(Path("unused.toml"), listener_port=99999)
+
+
 def test_the_default_output_root_is_the_workspace_evals_dir(
     workspace: Path, captured_runner: type[_CapturedRunner], console_capture: StringIO
 ) -> None:

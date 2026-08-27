@@ -2448,3 +2448,147 @@ class TestBundleSampleBoundary:
 
         assert outcome.status == RolloutStatus.SUCCESS
         assert outcome.sample.remove_sample is True
+
+
+class TestLoopbackChatGuard:
+    """A loopback chat URL must never be injected into an off-host sandbox."""
+
+    def backend_for(self, bundle, template_task, env_type):
+        from harbor.models.trial.config import (
+            EnvironmentConfig as HarborEnvironmentConfig,
+        )
+
+        return HarborBackend(
+            orchestrator=TrialQueue(n_concurrent=1),
+            tasks_dir=template_task,
+            bundle=bundle,
+            environment_config=HarborEnvironmentConfig(type=env_type),
+        )
+
+    def test_loopback_url_with_cloud_environment_is_refused(
+        self, bundle, template_task
+    ):
+        from harbor.models.environment_type import EnvironmentType
+
+        from osmosis_ai.rollout.context import RolloutContext
+
+        backend = self.backend_for(bundle, template_task, EnvironmentType.DAYTONA)
+        with RolloutContext(
+            chat_completions_url="http://127.0.0.1:5555/v1/rollouts/r1",
+            api_key="k",
+            rollout_id="r1",
+        ):
+            with pytest.raises(ValueError, match="--tunnel cloudflared"):
+                backend.build_input(request_for([{"role": "user", "content": "x"}]))
+
+    def test_oracle_with_cloud_environment_needs_no_tunnel(self, template_task):
+        # Oracle is wired to nothing and produces no model traffic, so an
+        # unreachable loopback endpoint cannot hang it — the guard must not
+        # demand a tunnel from the one agent that never dials the URL.
+        from harbor.models.environment_type import EnvironmentType
+        from harbor.models.trial.config import (
+            EnvironmentConfig as HarborEnvironmentConfig,
+        )
+
+        from osmosis_ai.rollout.context import RolloutContext
+
+        backend = HarborBackend(
+            orchestrator=TrialQueue(n_concurrent=1),
+            tasks_dir=template_task,
+            agent="oracle",
+            environment_config=HarborEnvironmentConfig(type=EnvironmentType.DAYTONA),
+        )
+        with RolloutContext(
+            chat_completions_url="http://127.0.0.1:5555/v1/rollouts/r1",
+            api_key="k",
+            rollout_id="r1",
+        ):
+            container_input = backend.build_input(
+                request_for([{"role": "user", "content": "x"}])
+            )
+        assert (
+            container_input.chat_completions_url
+            == "http://127.0.0.1:5555/v1/rollouts/r1"
+        )
+
+    def test_public_url_with_cloud_environment_passes_through(
+        self, bundle, template_task
+    ):
+        from harbor.models.environment_type import EnvironmentType
+
+        from osmosis_ai.rollout.context import RolloutContext
+
+        backend = self.backend_for(bundle, template_task, EnvironmentType.DAYTONA)
+        url = "https://fake-name.trycloudflare.com/v1/rollouts/r1"
+        with RolloutContext(chat_completions_url=url, api_key="k", rollout_id="r1"):
+            container_input = backend.build_input(
+                request_for([{"role": "user", "content": "x"}])
+            )
+        assert container_input.chat_completions_url == url
+
+    def test_docker_on_macos_rewrites_loopback(
+        self, bundle, template_task, monkeypatch
+    ):
+        from harbor.models.environment_type import EnvironmentType
+
+        from osmosis_ai.rollout.backend.harbor import environment as env_module
+        from osmosis_ai.rollout.context import RolloutContext
+
+        monkeypatch.setattr(env_module.platform, "system", lambda: "Darwin")
+        backend = self.backend_for(bundle, template_task, EnvironmentType.DOCKER)
+        with RolloutContext(
+            chat_completions_url="http://127.0.0.1:5555/v1/rollouts/r1",
+            api_key="k",
+            rollout_id="r1",
+        ):
+            container_input = backend.build_input(
+                request_for([{"role": "user", "content": "x"}])
+            )
+        assert "host.docker.internal" in container_input.chat_completions_url
+
+    def test_docker_on_linux_is_refused_instead_of_hanging(
+        self, bundle, template_task, monkeypatch
+    ):
+        from harbor.models.environment_type import EnvironmentType
+
+        from osmosis_ai.rollout.backend.harbor import environment as env_module
+        from osmosis_ai.rollout.context import RolloutContext
+
+        # No loopback rewrite exists off macOS, so the container would dial
+        # an unreachable 127.0.0.1 and hang silently until its timeout.
+        monkeypatch.setattr(env_module.platform, "system", lambda: "Linux")
+        backend = self.backend_for(bundle, template_task, EnvironmentType.DOCKER)
+        with RolloutContext(
+            chat_completions_url="http://127.0.0.1:5555/v1/rollouts/r1",
+            api_key="k",
+            rollout_id="r1",
+        ):
+            with pytest.raises(ValueError, match="--tunnel cloudflared"):
+                backend.build_input(request_for([{"role": "user", "content": "x"}]))
+
+    def test_singularity_shares_the_host_network_and_keeps_loopback(
+        self, bundle, template_task
+    ):
+        from harbor.models.environment_type import EnvironmentType
+
+        from osmosis_ai.rollout.context import RolloutContext
+
+        backend = self.backend_for(bundle, template_task, EnvironmentType.SINGULARITY)
+        url = "http://127.0.0.1:5555/v1/rollouts/r1"
+        with RolloutContext(chat_completions_url=url, api_key="k", rollout_id="r1"):
+            container_input = backend.build_input(
+                request_for([{"role": "user", "content": "x"}])
+            )
+        assert container_input.chat_completions_url == url
+
+    def test_missing_chat_url_is_not_guarded(self, bundle, template_task):
+        from harbor.models.environment_type import EnvironmentType
+
+        from osmosis_ai.rollout.context import RolloutContext
+
+        backend = self.backend_for(bundle, template_task, EnvironmentType.DAYTONA)
+        with RolloutContext(api_key="k", rollout_id="r1"):
+            container_input = backend.build_input(
+                request_for([{"role": "user", "content": "x"}])
+            )
+        assert container_input.chat_completions_url == ""

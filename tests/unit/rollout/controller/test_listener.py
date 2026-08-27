@@ -238,6 +238,56 @@ async def test_callback_urls_encode_rollout_ids() -> None:
         )
 
 
+async def test_no_docs_or_openapi_surface_is_served() -> None:
+    """A tunnel can expose this app to the internet; FastAPI's default
+    docs/openapi routes would hand out the route list unauthenticated."""
+    store = CallbackStore(on_terminal_commit=_passthrough_commit)
+    async with await _client(store) as client:
+        for path in ("/docs", "/redoc", "/openapi.json"):
+            assert (await client.get(path)).status_code == 404, path
+
+
+async def test_fixed_port_binds_exactly_and_conflicts_loudly() -> None:
+    store = CallbackStore(on_terminal_commit=_passthrough_commit)
+    listener = CallbackListener(store, auth_token=TOKEN)
+    async with listener:
+        port = int(listener.base_url.rsplit(":", 1)[1])
+        conflicting = CallbackListener(store, auth_token=TOKEN, port=port)
+        with pytest.raises(OSError):
+            await conflicting.start()
+    fixed = CallbackListener(store, auth_token=TOKEN, port=port)
+    async with fixed:
+        assert fixed.base_url == f"http://127.0.0.1:{port}"
+
+
+async def test_advertised_base_url_moves_only_the_chat_url() -> None:
+    store = CallbackStore(on_terminal_commit=_passthrough_commit)
+    listener = CallbackListener(
+        store,
+        auth_token=TOKEN,
+        advertised_base_url="https://fake-name.trycloudflare.com/",
+    )
+    async with listener:
+        assert listener.chat_completions_url("rid") == (
+            "https://fake-name.trycloudflare.com/v1/rollouts/rid"
+        )
+        # Host-process callbacks stay on loopback.
+        assert listener.completion_url("rid").startswith(listener.base_url)
+        assert listener.grader_url("rid").startswith(listener.base_url)
+
+
+async def test_advertised_base_url_settable_after_start() -> None:
+    """An auto-managed tunnel learns its public URL only after the bind."""
+    store = CallbackStore(on_terminal_commit=_passthrough_commit)
+    listener = CallbackListener(store, auth_token=TOKEN)
+    async with listener:
+        assert listener.chat_completions_url("rid").startswith(listener.base_url)
+        listener.advertised_base_url = "https://late.trycloudflare.com"
+        assert listener.chat_completions_url("rid") == (
+            "https://late.trycloudflare.com/v1/rollouts/rid"
+        )
+
+
 async def _serve_until_exit(self, sockets=None):
     self.started = True
     while not self.should_exit:
