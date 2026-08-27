@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import subprocess
+from http.client import IncompleteRead
 from pathlib import Path
 
 import pytest
@@ -224,6 +225,26 @@ class TestNormalizeGitIdentity:
         assert "github.com" not in result.identity
         assert "secret" not in result.identity
         assert "secret" not in result.display_url
+
+
+def test_github_api_get_returns_none_on_truncated_response(monkeypatch) -> None:
+    class TruncatedResponse:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self):
+            raise IncompleteRead(b"{", 2)
+
+    monkeypatch.setattr(
+        workspace_repo, "urlopen", lambda *_args, **_kwargs: TruncatedResponse()
+    )
+
+    assert workspace_repo._github_api_get("https://example.com", {}) is None
 
 
 # ---------------------------------------------------------------------------

@@ -8,6 +8,7 @@ import re
 import shutil
 import subprocess
 from dataclasses import dataclass
+from http.client import HTTPException
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.parse import SplitResult, urlsplit, urlunsplit
@@ -172,8 +173,11 @@ def _github_api_get(
             raw = response.read()
     except HTTPError as exc:
         status = exc.code
-        raw = exc.read()
-    except (URLError, TimeoutError, OSError):
+        try:
+            raw = exc.read()
+        except HTTPException:
+            return None
+    except (HTTPException, URLError, TimeoutError, OSError):
         return None
     try:
         payload = json.loads(raw)

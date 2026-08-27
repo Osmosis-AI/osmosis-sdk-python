@@ -47,14 +47,6 @@ def _content_block_messages(messages: list[dict[str, Any]]) -> list[dict[str, An
     return converted
 
 
-logger: logging.Logger = logging.getLogger(__name__)
-
-__all__ = [
-    "OsmosisRolloutModel",
-    "OsmosisStrandsAgent",
-]
-
-
 class StrandsAgentSampleSource(SampleSource):
     """Produces the rollout sample from a Strands agent's ``messages`` field.
 

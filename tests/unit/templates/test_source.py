@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import shutil
 import tarfile
+from http.client import InvalidURL
 from pathlib import Path
 
 import pytest
@@ -90,12 +91,13 @@ def test_missing_override_path_uses_user_facing_template_terms(
     assert "workspace template" not in message
 
 
+@pytest.mark.parametrize("error", [source.URLError("offline"), InvalidURL("bad URL")])
 def test_download_failure_uses_user_facing_template_terms(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, error: Exception
 ) -> None:
     def fail_urlopen(*args, **kwargs):
         del args, kwargs
-        raise source.URLError("offline")
+        raise error
 
     monkeypatch.setattr(source, "urlopen", fail_urlopen)
 

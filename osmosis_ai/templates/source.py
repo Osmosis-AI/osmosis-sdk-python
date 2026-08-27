@@ -13,6 +13,7 @@ import os
 import shutil
 import tarfile
 import tempfile
+from http.client import HTTPException
 from pathlib import Path
 from urllib.error import URLError
 from urllib.request import Request, urlopen
@@ -51,7 +52,7 @@ def _download_workspace_template(repo: str, ref: str, destination: Path) -> None
     try:
         with urlopen(Request(url), timeout=30) as response:
             content = response.read()
-    except (URLError, TimeoutError, OSError) as exc:
+    except (HTTPException, URLError, TimeoutError, OSError) as exc:
         raise CLIError(
             f"Unable to fetch starter templates from {url}: {exc}",
             code="NETWORK",

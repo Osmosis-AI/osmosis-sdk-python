@@ -1676,8 +1676,10 @@ full = [
     { name = "mcp" },
     { name = "openai-agents", extra = ["litellm"] },
     { name = "orjson" },
+    { name = "platformdirs" },
     { name = "pyarrow" },
     { name = "strands-agents", extra = ["litellm"] },
+    { name = "toml" },
     { name = "uv" },
     { name = "uvicorn" },
 ]
@@ -1688,6 +1690,8 @@ harbor = [
     { name = "harbor" },
     { name = "litellm" },
     { name = "orjson" },
+    { name = "platformdirs" },
+    { name = "toml" },
     { name = "uv" },
 ]
 openai-agents = [
@@ -1764,6 +1768,7 @@ requires-dist = [
     { name = "osmosis-ai", extras = ["eval", "harbor", "openai-agents", "parquet", "rubric", "server", "strands"], marker = "extra == 'full'" },
     { name = "osmosis-ai", extras = ["parquet", "server"], marker = "extra == 'eval'" },
     { name = "packaging", specifier = ">=24.0" },
+    { name = "platformdirs", marker = "extra == 'harbor'", specifier = ">=4.0" },
     { name = "prompt-toolkit", specifier = ">=3.0.0,<4.0.0" },
     { name = "pyarrow", marker = "extra == 'parquet'", specifier = ">=23.0.1" },
     { name = "pydantic", specifier = ">=2.0.0,<3.0.0" },
@@ -1771,6 +1776,7 @@ requires-dist = [
     { name = "questionary", specifier = ">=2.1.0,<3.0.0" },
     { name = "rich", specifier = ">=14.2.0" },
     { name = "strands-agents", extras = ["litellm"], marker = "extra == 'strands'", specifier = ">=1.29.0,<2.0.0" },
+    { name = "toml", marker = "extra == 'harbor'", specifier = ">=0.10.2,<1.0.0" },
     { name = "typer", specifier = ">=0.27,<0.28" },
     { name = "uv", marker = "extra == 'eval'", specifier = ">=0.9.7,<0.13" },
     { name = "uv", marker = "extra == 'harbor'", specifier = ">=0.9.7,<0.13" },

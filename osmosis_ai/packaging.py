@@ -8,8 +8,6 @@ anywhere with one ``pip install`` — a rollout container or a user's own box.
 
 from __future__ import annotations
 
-import json
-import os
 import shutil
 import subprocess
 import sys
@@ -21,11 +19,11 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from importlib.metadata import PathDistribution
 from pathlib import Path
-from typing import Any
 
 from packaging.requirements import Requirement
 from packaging.utils import canonicalize_name
 
+from osmosis_ai._imports import raise_optional_dependency_error
 from osmosis_ai._uv import _uv_executable
 from osmosis_ai.source_scan import (
     EXCLUDE_DIRS,
@@ -34,77 +32,19 @@ from osmosis_ai.source_scan import (
     source_digest,
 )
 
+# Only the Harbor backend packages rollout projects, so these ship with that
+# extra rather than the base install.
+try:
+    import platformdirs
+    import toml
+except ModuleNotFoundError as _exc:
+    raise_optional_dependency_error(
+        _exc,
+        extra="harbor",
+        feature="Rollout bundle packaging",
+    )
 
-def _user_cache_dir(app: str) -> Path:
-    """Return the per-user cache directory for *app* (XDG / macOS / Windows)."""
-    if sys.platform == "darwin":
-        return Path.home() / "Library" / "Caches" / app
-    if sys.platform == "win32":
-        base = os.environ.get("LOCALAPPDATA")
-        root = Path(base) if base else Path.home() / "AppData" / "Local"
-        return root / app / "Cache"
-    xdg = os.environ.get("XDG_CACHE_HOME")
-    return Path(xdg) / app if xdg else Path.home() / ".cache" / app
-
-
-def _toml_key(key: str) -> str:
-    if key and all(ch.isalnum() or ch in "-_" for ch in key):
-        return key
-    return json.dumps(key)
-
-
-def _toml_value(value: Any) -> str:
-    if isinstance(value, bool):
-        return "true" if value else "false"
-    if isinstance(value, int):
-        return str(value)
-    if isinstance(value, float):
-        if value != value:
-            return "nan"
-        if value == float("inf"):
-            return "inf"
-        if value == float("-inf"):
-            return "-inf"
-        return repr(value)
-    if isinstance(value, str):
-        return json.dumps(value, ensure_ascii=False)
-    if isinstance(value, list):
-        if not value:
-            return "[]"
-        return "[" + ", ".join(_toml_value(item) for item in value) + "]"
-    if isinstance(value, dict):
-        if not value:
-            return "{}"
-        inner = ", ".join(
-            f"{_toml_key(key)} = {_toml_value(item)}" for key, item in value.items()
-        )
-        return "{ " + inner + " }"
-    raise TypeError(f"unsupported TOML value: {type(value).__name__}")
-
-
-def _toml_dumps(data: dict[str, Any]) -> str:
-    """Serialize a ``tomllib``-shaped mapping back to TOML."""
-    lines: list[str] = []
-
-    def emit_table(table: dict[str, Any], path: tuple[str, ...]) -> None:
-        nested: list[tuple[str, dict[str, Any]]] = []
-        if path:
-            if lines:
-                lines.append("")
-            lines.append("[" + ".".join(_toml_key(part) for part in path) + "]")
-        for key, value in table.items():
-            if isinstance(value, dict):
-                nested.append((key, value))
-            else:
-                lines.append(f"{_toml_key(key)} = {_toml_value(value)}")
-        for key, child in nested:
-            emit_table(child, (*path, key))
-
-    emit_table(data, ())
-    return "\n".join(lines) + ("\n" if lines else "")
-
-
-BUNDLES_DIR = _user_cache_dir("osmosis") / "bundles"
+BUNDLES_DIR = platformdirs.user_cache_path("osmosis") / "bundles"
 
 AGENT_MAIN_TEMPLATE = """\
 
@@ -435,7 +375,7 @@ def build_bundle(
                 if requirement_name(spec) not in overridden_dependency_names
             ] + dependency_overrides
         staged_project["scripts"] = {**staged_project.get("scripts", {}), **scripts}
-        (stage / "pyproject.toml").write_text(_toml_dumps(staged))
+        (stage / "pyproject.toml").write_text(toml.dumps(staged))
         subprocess.run(
             [
                 _uv_executable(),

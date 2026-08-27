@@ -34,6 +34,9 @@ def _path(value: str) -> Path:
     return Path(value)
 
 
+_MULTIPLY_DATA_PATH = _path("data/multiply.jsonl")
+
+
 def _recipe(name: str, description: str) -> TemplateRecipe:
     return TemplateRecipe(
         name=name,
@@ -42,7 +45,7 @@ def _recipe(name: str, description: str) -> TemplateRecipe:
             _path(f"rollouts/{name}/**"),
             _path(f"configs/eval/{name}.toml"),
             _path(f"configs/training/{name}.toml"),
-            _path("data/multiply.jsonl"),
+            _MULTIPLY_DATA_PATH,
         ),
         owned_dirs=(_path(f"rollouts/{name}"),),
         next_steps=(
@@ -87,7 +90,7 @@ def recipes_by_name() -> dict[str, TemplateRecipe]:
 
 def shared_template_files() -> frozenset[Path]:
     """Files explicitly shared by multiple SDK-owned template recipes."""
-    return frozenset({Path("data/multiply.jsonl")})
+    return frozenset({_MULTIPLY_DATA_PATH})
 
 
 __all__ = [
