@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import shutil
@@ -9,8 +10,6 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import SplitResult, urlsplit, urlunsplit
-
-import requests
 
 from osmosis_ai.cli.errors import CLIError
 
@@ -161,28 +160,40 @@ def _github_token_from_git_credentials() -> str | None:
     return _password_from_git_credentials(result.stdout)
 
 
+def _github_api_get(
+    url: str, headers: dict[str, str]
+) -> tuple[int, dict[str, object] | None] | None:
+    """GET a GitHub API URL. Returns ``(status, json)`` or ``None`` on transport failure."""
+    import httpx
+
+    try:
+        response = httpx.get(url, headers=headers, timeout=10, follow_redirects=True)
+    except httpx.HTTPError:
+        return None
+    try:
+        payload = response.json()
+    except (json.JSONDecodeError, UnicodeDecodeError, TypeError):
+        return response.status_code, None
+    if not isinstance(payload, dict):
+        return response.status_code, None
+    return response.status_code, payload
+
+
 def _resolve_via_git_credentials(owner: str, repo: str) -> str | None:
     token = _github_token_from_git_credentials()
     if token is None:
         return None
 
-    try:
-        response = requests.get(
-            f"https://api.github.com/repos/{owner}/{repo}",
-            headers={"Authorization": f"token {token}"},
-            allow_redirects=True,
-            timeout=10,
-        )
-    except requests.RequestException:
+    fetched = _github_api_get(
+        f"https://api.github.com/repos/{owner}/{repo}",
+        {"Authorization": f"token {token}"},
+    )
+    if fetched is None:
         return None
-
-    if response.status_code != 200:
+    status, payload = fetched
+    if status != 200 or payload is None:
         return None
-
-    try:
-        full_name = response.json().get("full_name")
-    except ValueError:
-        return None
+    full_name = payload.get("full_name")
     return full_name if isinstance(full_name, str) and full_name else None
 
 
@@ -406,22 +417,19 @@ def _commit_exists_via_git_credentials(
     token = _github_token_from_git_credentials()
     if token is None:
         return None
-    try:
-        response = requests.get(
-            f"https://api.github.com/repos/{owner}/{repo}/commits/{commit_sha}",
-            headers={
-                "Authorization": f"token {token}",
-                "Accept": "application/vnd.github+json",
-            },
-            allow_redirects=True,
-            timeout=10,
-        )
-    except requests.RequestException:
+    fetched = _github_api_get(
+        f"https://api.github.com/repos/{owner}/{repo}/commits/{commit_sha}",
+        {
+            "Authorization": f"token {token}",
+            "Accept": "application/vnd.github+json",
+        },
+    )
+    if fetched is None:
         return None
-
-    if response.status_code == 200:
+    status, _payload = fetched
+    if status == 200:
         return True
-    if response.status_code == 422:
+    if status == 422:
         return False
     return None
 

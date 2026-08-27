@@ -33,7 +33,6 @@ BASE_REQUIREMENTS = {
     "pydantic",
     "python-dotenv",
     "questionary",
-    "requests",
     "rich",
     "typer",
 }
@@ -67,7 +66,7 @@ EXTRA_REQUIREMENTS: dict[str, set[str]] = {
         "toml",
         "uv",
     },
-    "rubric": {"aiohttp", "click", "litellm", "orjson", "tqdm"},
+    "rubric": {"aiohttp", "click", "litellm", "orjson"},
     "parquet": {"pyarrow"},
     # eval = osmosis-ai[server,parquet] self-reference + the in-process
     # LiteLLM bridge and the uv executable used to launch rollout environments.
@@ -363,7 +362,7 @@ SCENARIO_PRESENT: dict[str, set[str]] = {
     "strands": {"litellm", "strands-agents"},
     "openai-agents": {"litellm", "openai-agents"},
     "harbor": {"dockerfile-parse", "harbor", "platformdirs", "toml", "uv"},
-    "rubric": {"litellm", "orjson", "tqdm"},
+    "rubric": {"litellm", "orjson"},
     "parquet": {"pyarrow"},
     "eval": {"fastapi", "litellm", "pyarrow", "uv", "uvicorn"},
     "full": {
@@ -377,7 +376,6 @@ SCENARIO_PRESENT: dict[str, set[str]] = {
         "pyarrow",
         "strands-agents",
         "toml",
-        "tqdm",
         "uv",
         "uvicorn",
     },

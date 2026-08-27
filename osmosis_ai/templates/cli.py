@@ -63,14 +63,6 @@ def list_command() -> ListResult:
 # ── osmosis template apply <name> ────────────────────────────────
 
 
-def _is_under(path: Path, directory: Path) -> bool:
-    try:
-        path.relative_to(directory)
-    except ValueError:
-        return False
-    return True
-
-
 def _same_file_contents(left: Path, right: Path) -> bool:
     try:
         return (
@@ -115,21 +107,7 @@ def _format_blocked_owned_paths(blocked_paths: list[str]) -> CLIError:
 
 def _next_steps(name: str) -> list[str]:
     """Commands to run after applying a template."""
-    try:
-        recipe = template_recipe(name)
-    except TemplateNotFoundError:
-        recipe = None
-    if recipe is not None and recipe.next_steps:
-        return list(recipe.next_steps)
-    return [
-        f"pip install -e rollouts/{name}",
-        f"osmosis eval submit configs/eval/{name}.toml",
-        f"osmosis dataset upload data/{name}.jsonl",
-        f"Edit configs/training/{name}.toml with the uploaded dataset ID and target model",
-        'git add . && git commit -m "add rollout template"',
-        "git push",
-        f"osmosis train submit configs/training/{name}.toml",
-    ]
+    return list(template_recipe(name).next_steps)
 
 
 def _copy_template(
@@ -170,7 +148,7 @@ def _copy_template(
         for rel in file_rels:
             src = template_root / rel
             dest = workspace_directory_resolved / rel
-            if any(_is_under(dest, owned_dest) for owned_dest in owned_dests):
+            if any(dest.is_relative_to(owned_dest) for owned_dest in owned_dests):
                 continue
             if dest.exists():
                 if rel in shared_file_rels and _same_file_contents(src, dest):
@@ -203,7 +181,7 @@ def _copy_template(
     seen: set[Path] = set(top_level)
     for rel in file_rels:
         dest = workspace_directory_resolved / rel
-        if any(_is_under(dest, owned_dest) for owned_dest in owned_dests):
+        if any(dest.is_relative_to(owned_dest) for owned_dest in owned_dests):
             continue
         parent = dest.parent
         if parent not in seen:

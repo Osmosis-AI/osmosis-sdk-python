@@ -1,12 +1,12 @@
-"""Tests for osmosis_ai.rollout.utils.messages."""
+"""Tests for Strands initial-message content-block conversion."""
 
-from osmosis_ai.rollout.utils.messages import map_initial_messages_to_content_blocks
+from osmosis_ai.rollout.integrations.agents.strands import _content_block_messages
 
 
-class TestMapInitialMessagesToContentBlocks:
+class TestContentBlockMessages:
     def test_single_message(self):
         msgs = [{"role": "user", "content": "Hello"}]
-        result = map_initial_messages_to_content_blocks(msgs)
+        result = _content_block_messages(msgs)
         assert result == [{"role": "user", "content": [{"text": "Hello"}]}]
 
     def test_multi_turn(self):
@@ -14,7 +14,7 @@ class TestMapInitialMessagesToContentBlocks:
             {"role": "system", "content": "You are helpful."},
             {"role": "user", "content": "Hi"},
         ]
-        result = map_initial_messages_to_content_blocks(msgs)
+        result = _content_block_messages(msgs)
         assert len(result) == 2
         assert result[0] == {
             "role": "system",
@@ -23,4 +23,4 @@ class TestMapInitialMessagesToContentBlocks:
         assert result[1] == {"role": "user", "content": [{"text": "Hi"}]}
 
     def test_empty_list(self):
-        assert map_initial_messages_to_content_blocks([]) == []
+        assert _content_block_messages([]) == []

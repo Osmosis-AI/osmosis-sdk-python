@@ -1,3 +1,4 @@
+# pyright: reportPrivateImportUsage=false
 """
 Async rubric evaluation engine using LiteLLM.
 
@@ -15,25 +16,26 @@ import os
 import re
 from typing import Any
 
-from osmosis_ai._litellm_compat import (
+import litellm
+from litellm import (
     APIConnectionError as _LitellmAPIConnectionError,
 )
-from osmosis_ai._litellm_compat import (
+from litellm import (
     APIError as _LitellmAPIError,
 )
-from osmosis_ai._litellm_compat import (
+from litellm import (
     AuthenticationError as _LitellmAuthenticationError,
 )
-from osmosis_ai._litellm_compat import (
+from litellm import (
     NotFoundError as _LitellmNotFoundError,
 )
-from osmosis_ai._litellm_compat import (
+from litellm import (
     RateLimitError as _LitellmRateLimitError,
 )
-from osmosis_ai._litellm_compat import (
+from litellm import (
     Timeout as _LitellmTimeout,
 )
-from osmosis_ai._litellm_compat import (
+from litellm import (
     completion as _litellm_completion,
 )
 
@@ -45,6 +47,8 @@ from .types import (
 )
 
 DEFAULT_REQUEST_TIMEOUT_SECONDS = 30.0
+
+litellm.suppress_debug_info = True
 
 # LiteLLM uses these same environment variables internally
 DEFAULT_API_KEY_ENV = {
@@ -350,30 +354,8 @@ def _resolve_api_key(provider: str, api_key_override: str | None) -> str | None:
 # ============================================================================
 
 
-_litellm_cache: Any = None
-
-
-def _ensure_litellm(provider: str, model: str):
-    """Import litellm and suppress debug output. Raises on missing dependency."""
-    global _litellm_cache
-    if _litellm_cache is not None:
-        return _litellm_cache
-    try:
-        import litellm
-    except ImportError as e:
-        raise ProviderRequestError(
-            provider,
-            model,
-            "LiteLLM is required. Install it via `pip install litellm`.",
-        ) from e
-    litellm.suppress_debug_info = True
-    _litellm_cache = litellm
-    return litellm
-
-
 def _call_litellm(
     provider: str,
-    litellm_module: Any,
     litellm_model: str,
     bare_model: str,
     api_key: str | None,
@@ -391,9 +373,7 @@ def _call_litellm(
 
     # Use json_schema when the model supports it, otherwise fall back to
     # json_object (e.g. Cerebras models that only accept the simpler mode).
-    if litellm_module.supports_response_schema(
-        model=litellm_model, custom_llm_provider=None
-    ):
+    if litellm.supports_response_schema(model=litellm_model, custom_llm_provider=None):
         response_format: dict[str, Any] = {
             "type": "json_schema",
             "json_schema": _RUBRIC_RESPONSE_SCHEMA,
@@ -578,9 +558,6 @@ async def evaluate_rubric(
     else:
         resolved_timeout = _default_timeout_for_model(provider, bare_model)
 
-    # -- Ensure litellm is available ---------------------------------------
-    litellm_module = _ensure_litellm(provider, bare_model)
-
     # -- Build prompts -----------------------------------------------------
     system_content = _build_system_prompt(score_min, score_max, system_prompt)
     user_content = _build_user_prompt(
@@ -598,7 +575,6 @@ async def evaluate_rubric(
         result = await asyncio.to_thread(
             _call_litellm,
             provider=provider,
-            litellm_module=litellm_module,
             litellm_model=litellm_model,
             bare_model=bare_model,
             api_key=resolved_api_key,

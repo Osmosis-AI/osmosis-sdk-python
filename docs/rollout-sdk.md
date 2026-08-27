@@ -247,7 +247,7 @@ app = create_rollout_server(backend=backend, lifespan=backend.prewarm_lifespan()
 
 v0.3 removed the original Harbor backend and gave its name to the implementation that had been called `HarborBackendV2`. The old one mounted the SDK and your source tree into the task environment and ran the workflow through an installed-agent adapter; `HarborBackend` builds a wheel from your project instead, so task images stay pure task environments.
 
-Note that `HarborBackend` still resolves — with a different constructor. A call site passing the old keywords raises a `TypeError` naming them and pointing here; port it with this table:
+Note that `HarborBackend` still resolves — with a different constructor. Port a pre-v0.3 call site with this table:
 
 | Pre-v0.3 | v0.3 |
 |----------|------|

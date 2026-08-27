@@ -315,38 +315,27 @@ def _submit_eval(
     )
 
 
-def _eval_next_steps(
-    result: SubmitRunResult, _config: EvalSubmitConfig
-) -> tuple[list[str], list[dict[str, Any]]]:
-    display = [
-        f"Status: {result.status}",
-        f"Rollout: {_config.experiment_rollout}",
-        f"Model: {_config.experiment_model_path}",
-        f"Dataset: {_config.experiment_dataset}",
-        (
-            f"View: {result.platform_url}"
-            if result.platform_url
-            else f"Check status with: osmosis eval info {result.name}"
-        ),
-    ]
-    structured: list[dict[str, Any]] = [
-        {"action": "eval_info", "name": result.name},
-        {"action": "eval_list"},
-    ]
-    if result.platform_url:
-        structured.append({"action": "open_url", "url": result.platform_url})
-    return display, structured
+def _validate_eval_context(config: EvalSubmitConfig, workspace_directory: Path) -> None:
+    from osmosis_ai.platform.cli.shared_config import validate_workspace_rollout_paths
+
+    validate_workspace_rollout_paths(
+        rollout=config.experiment_rollout,
+        entrypoint=config.experiment_entrypoint,
+        workspace_directory=workspace_directory,
+        command_label="Evaluation",
+    )
 
 
 def submit(
     config_path: Path, *, yes: bool, secrets_file: str | None = None
 ) -> OperationResult:
     """Submit an evaluation run."""
-    from osmosis_ai.platform.cli.eval_config import (
-        load_eval_submit_config,
-        validate_eval_submit_context_paths,
+    from osmosis_ai.platform.cli.eval_config import load_eval_submit_config
+    from osmosis_ai.platform.cli.shared_submit import (
+        CloudSubmitSpec,
+        run_cloud_submit,
+        submit_next_steps,
     )
-    from osmosis_ai.platform.cli.shared_submit import CloudSubmitSpec, run_cloud_submit
 
     spec = CloudSubmitSpec(
         config_dir="configs/eval",
@@ -357,9 +346,11 @@ def submit(
         operation="eval.submit",
         success_message_format="Evaluation run submitted: {name}",
         load_config=load_eval_submit_config,
-        validate_context=validate_eval_submit_context_paths,
+        validate_context=_validate_eval_context,
         submit=_submit_eval,
-        build_next_steps=_eval_next_steps,
+        build_next_steps=lambda result, config: submit_next_steps(
+            result, config, verb="eval"
+        ),
     )
     return run_cloud_submit(config_path, yes=yes, spec=spec, secrets_file=secrets_file)
 

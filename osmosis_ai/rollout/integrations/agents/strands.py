@@ -26,7 +26,6 @@ from osmosis_ai.rollout.context import (
     get_rollout_context,
 )
 from osmosis_ai.rollout.types import RolloutSample
-from osmosis_ai.rollout.utils.messages import map_initial_messages_to_content_blocks
 
 logger: logging.Logger = logging.getLogger(__name__)
 
@@ -34,6 +33,18 @@ __all__ = [
     "OsmosisRolloutModel",
     "OsmosisStrandsAgent",
 ]
+
+
+def _content_block_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Convert plain-string-content messages to content-block-content messages."""
+    converted: list[dict[str, Any]] = []
+    for message in messages:
+        content = message.get("content")
+        if isinstance(content, str):
+            converted.append({"role": message["role"], "content": [{"text": content}]})
+        else:
+            converted.append(message)
+    return converted
 
 
 class StrandsAgentSampleSource(SampleSource):
@@ -103,7 +114,7 @@ class OsmosisStrandsAgent(StrandsAgent):
         **kwargs: Any,
     ) -> None:
         if messages:
-            messages = map_initial_messages_to_content_blocks(messages)
+            messages = _content_block_messages(messages)
 
         if isinstance(model, OsmosisRolloutModel):
             rollout_ctx = get_rollout_context()

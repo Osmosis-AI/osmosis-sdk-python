@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import shutil
 import tarfile
+from http.client import InvalidURL
 from pathlib import Path
 
 import pytest
-import requests
 
 from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.templates import source
@@ -91,14 +91,15 @@ def test_missing_override_path_uses_user_facing_template_terms(
     assert "workspace template" not in message
 
 
+@pytest.mark.parametrize("error", [source.URLError("offline"), InvalidURL("bad URL")])
 def test_download_failure_uses_user_facing_template_terms(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, error: Exception
 ) -> None:
-    def fail_get(*args, **kwargs):
+    def fail_urlopen(*args, **kwargs):
         del args, kwargs
-        raise requests.RequestException("offline")
+        raise error
 
-    monkeypatch.setattr(source.requests, "get", fail_get)
+    monkeypatch.setattr(source, "urlopen", fail_urlopen)
 
     with pytest.raises(CLIError) as exc_info:
         source._download_workspace_template(
@@ -108,3 +109,27 @@ def test_download_failure_uses_user_facing_template_terms(
     message = str(exc_info.value).lower()
     assert "unable to fetch starter templates" in message
     assert "workspace template" not in message
+
+
+def test_download_percent_encodes_unicode_ref(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    requested_urls: list[str] = []
+
+    def fail_urlopen(request, **_kwargs):
+        requested_urls.append(request.full_url)
+        raise source.URLError("offline")
+
+    monkeypatch.setattr(source, "urlopen", fail_urlopen)
+
+    with pytest.raises(CLIError):
+        source._download_workspace_template(
+            "Osmosis-AI/workspace-template",
+            "feature/功能",
+            tmp_path / "templates",
+        )
+
+    assert requested_urls == [
+        "https://github.com/Osmosis-AI/workspace-template/"
+        "archive/feature/%E5%8A%9F%E8%83%BD.tar.gz"
+    ]

@@ -59,9 +59,8 @@ def _raise_blocked_scaffold_paths(blocked_paths: list[str]) -> None:
     )
 
 
-def load_scaffold_entries() -> tuple[list[ScaffoldEntry], set[str]]:
-    """Load scaffold entries and official paths from the SDK catalog."""
-    official_paths = {path.as_posix() for path in OFFICIAL_AGENT_SCAFFOLD_PATHS}
+def load_scaffold_entries() -> list[ScaffoldEntry]:
+    """Load scaffold entries from the SDK catalog."""
     entries = [
         ScaffoldEntry(
             dest=directory.joinpath(".gitkeep").as_posix(),
@@ -75,17 +74,16 @@ def load_scaffold_entries() -> tuple[list[ScaffoldEntry], set[str]]:
         )
         for path in OFFICIAL_AGENT_SCAFFOLD_PATHS
     )
-    return entries, official_paths
+    return entries
 
 
-def write_scaffold(target: Path, project_name: str, *, update: bool = False) -> None:
+def write_scaffold(target: Path) -> None:
     """Write missing scaffold paths into *target*.
 
     The SDK controls the allowed paths; agent scaffold content comes from the
     latest template source. Existing files are never overwritten here.
     """
-    del project_name, update
-    entries, _official_paths = load_scaffold_entries()
+    entries = load_scaffold_entries()
     blocked_paths: list[str] = []
     for entry in entries:
         symlink_path = _first_symlinked_path(target, entry.dest)

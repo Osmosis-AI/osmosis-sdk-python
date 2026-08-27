@@ -11,7 +11,6 @@ from osmosis_ai.platform.cli.shared_config import (
     BackendValidatedParamSection,
     BaseSubmitConfig,
     load_submit_config,
-    validate_workspace_rollout_paths,
 )
 
 _TRAIN_SUBMIT_CONFIG_LABEL = "training"
@@ -74,19 +73,7 @@ def load_train_submit_config(path: Path) -> TrainSubmitConfig:
     )
 
 
-def validate_train_submit_context_paths(
-    config: TrainSubmitConfig, workspace_directory: Path
-) -> None:
-    validate_workspace_rollout_paths(
-        rollout=config.experiment_rollout,
-        entrypoint=config.experiment_entrypoint,
-        workspace_directory=workspace_directory,
-        command_label="Training",
-    )
-
-
 __all__ = [
     "TrainSubmitConfig",
     "load_train_submit_config",
-    "validate_train_submit_context_paths",
 ]

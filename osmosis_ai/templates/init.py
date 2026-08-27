@@ -151,12 +151,12 @@ def _check_force_config_targets(
 def init_command(name: str, *, force: bool = False) -> OperationResult:
     """Scaffold ``rollouts/<name>/`` and matching evaluation/training configs."""
     from osmosis_ai.platform.cli.workspace_directory_contract import (
-        resolve_workspace_directory_from_cwd,
+        resolve_workspace_directory,
         validate_workspace_directory_contract,
     )
 
     _validate_rollout_name(name)
-    workspace_directory = resolve_workspace_directory_from_cwd()
+    workspace_directory = resolve_workspace_directory()
     validate_workspace_directory_contract(workspace_directory)
 
     destinations = _planned_destinations(workspace_directory, name)

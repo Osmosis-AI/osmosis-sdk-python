@@ -59,6 +59,27 @@ def test_build_produces_scripts_and_keeps_deps(project, tmp_path):
     assert info.grader_script == "my-harness-grade"
 
 
+def test_build_accepts_toml_dates_and_unicode_keys(project, tmp_path):
+    pyproject_path = project / "pyproject.toml"
+    pyproject_path.write_text(
+        pyproject_path.read_text()
+        + """\
+
+[tool.bundle]
+released = 2026-08-27
+"café" = "ok"
+"""
+    )
+
+    wheel = build_bundle(
+        project,
+        workflow="my_harness.solver:MyWorkflow",
+        bundles_dir=tmp_path / "bundles",
+    )
+
+    assert wheel.is_file()
+
+
 def test_deps_override_same_named_pyproject_entries(project, tmp_path):
     wheel = build_bundle(
         project,

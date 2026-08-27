@@ -13,7 +13,6 @@ from pydantic import ValidationError
 
 from osmosis_ai.packaging import build_bundle, inspect_bundle
 from osmosis_ai.rollout.backend.harbor.backend import (
-    MIGRATION_DOCS_URL,
     CredentialScrubError,
     HarborBackend,
 )
@@ -95,21 +94,6 @@ class TestPublicSurface:
         )
 
         assert backend.health()["backend"] == "harbor"
-
-    def test_pre_v03_call_is_told_the_constructor_changed(self, template_task):
-        # The stale call passes no tasks_dir, so without the __new__ guard this
-        # would surface as "missing a required argument: 'tasks_dir'".
-        with pytest.raises(TypeError) as excinfo:
-            HarborBackend(
-                orchestrator=TrialQueue(n_concurrent=1),
-                task_dir=template_task,
-                user_code_dir=template_task,
-                workflow="rollout.workflow:Workflow",
-            )
-
-        message = str(excinfo.value)
-        assert "no longer takes task_dir, user_code_dir, workflow" in message
-        assert MIGRATION_DOCS_URL in message
 
     def test_a_typo_still_reads_like_a_typo(self, template_task):
         with pytest.raises(TypeError, match="unexpected keyword argument 'taks_dir'"):

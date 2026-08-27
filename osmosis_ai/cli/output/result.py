@@ -26,7 +26,6 @@ class ListColumn:
 
     key: str
     label: str
-    plain: bool = True
     no_wrap: bool = False
     overflow: Literal["fold", "crop", "ellipsis", "ignore"] | None = None
     ratio: int | None = None
@@ -112,20 +111,5 @@ class OperationResult(CommandResult):
     message: str | None = None
     display_next_steps: list[str] = field(default_factory=list)
     next_steps_structured: list[dict[str, Any]] = field(default_factory=list)
-    extra: dict[str, Any] = field(default_factory=dict)
-    exit_code: int = 0
-
-
-@dataclass
-class MessageResult(CommandResult):
-    """Free-form message that does not map cleanly to a resource.
-
-    Reserved member of the result family: the renderer fully supports it across
-    rich/plain/JSON, but no command currently produces one (commands prefer
-    ``OperationResult`` so a structured ``resource`` rides along). Kept as the
-    sanctioned shape for any future command that emits only a human message.
-    """
-
-    message: str
     extra: dict[str, Any] = field(default_factory=dict)
     exit_code: int = 0

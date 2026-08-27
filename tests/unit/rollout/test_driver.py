@@ -1,5 +1,5 @@
 from osmosis_ai.rollout import driver
-from osmosis_ai.rollout.driver import RolloutDriver, RolloutOutcome, RolloutRunRequest
+from osmosis_ai.rollout.driver import RolloutOutcome, RolloutRunRequest
 from osmosis_ai.rollout.types import RolloutStatus
 
 
@@ -12,8 +12,9 @@ def test_rollout_outcome_defaults():
 
 
 def test_driver_exports_controller_contract_only():
-    assert driver.__all__ == ["RolloutDriver", "RolloutOutcome", "RolloutRunRequest"]
+    assert driver.__all__ == ["RolloutOutcome", "RolloutRunRequest"]
     assert not hasattr(driver, "InProcessDriver")
+    assert not hasattr(driver, "RolloutDriver")
 
 
 def test_rollout_run_request_defaults():
@@ -27,7 +28,7 @@ def test_rollout_run_request_defaults():
 
 
 async def test_driver_run_accepts_a_single_request():
-    class RecordingDriver(RolloutDriver):
+    class RecordingDriver:
         def __init__(self) -> None:
             self.seen: RolloutRunRequest | None = None
 

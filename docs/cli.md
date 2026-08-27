@@ -49,13 +49,12 @@ Result types ([../osmosis_ai/cli/output/result.py](../osmosis_ai/cli/output/resu
 | `SectionedListResult` | Multiple named lists (e.g. base + LoRA models) |
 | `DetailResult` | One resource's fields/sections |
 | `OperationResult` | A mutation's outcome |
-| `MessageResult` | A plain message |
 
 Serializers that turn API models into these shapes live in [../osmosis_ai/cli/output/serializers.py](../osmosis_ai/cli/output/serializers.py).
 
 ## Output envelopes
 
-[../osmosis_ai/cli/output/renderer.py](../osmosis_ai/cli/output/renderer.py) builds the machine contract. Every JSON success envelope carries `schema_version: 1` and a shape matching the result type (`_envelope_list`, `_envelope_sectioned_list`, `_envelope_detail`, `_envelope_operation`, `_envelope_message`). Rich is the default for humans; `--plain` is intentionally low-noise text (not a strict schema).
+[../osmosis_ai/cli/output/renderer.py](../osmosis_ai/cli/output/renderer.py) builds the machine contract. Every JSON success envelope carries `schema_version: 1` and a shape matching the result type (`_envelope_list`, `_envelope_sectioned_list`, `_envelope_detail`, `_envelope_operation`). Rich is the default for humans; `--plain` is intentionally low-noise text (not a strict schema).
 
 The output context, format enum, and selector resolution live in [../osmosis_ai/cli/output/context.py](../osmosis_ai/cli/output/context.py); the full output surface is re-exported from [../osmosis_ai/cli/output/__init__.py](../osmosis_ai/cli/output/__init__.py). Serializer names are lazy (PEP 562) so importing the package does not load platform API models.
 

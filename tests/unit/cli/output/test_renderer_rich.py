@@ -15,7 +15,6 @@ from osmosis_ai.cli.output.result import (
     ListColumn,
     ListResult,
     ListSection,
-    MessageResult,
     OperationResult,
     SectionedListResult,
 )
@@ -310,11 +309,6 @@ def test_rich_list_renders_raw_cell_markup_as_text() -> None:
     )
     stdout, _ = _render(result)
     assert "[red]model[/red]" in stdout
-
-
-def test_rich_message_renders_message_text() -> None:
-    stdout, _ = _render(MessageResult(message="Logged out."))
-    assert "Logged out." in stdout
 
 
 def test_rich_operation_renders_message() -> None:

@@ -10,7 +10,6 @@ from osmosis_ai.cli.output.result import (
     ListColumn,
     ListResult,
     ListSection,
-    MessageResult,
     OperationResult,
     SectionedListResult,
 )
@@ -143,8 +142,3 @@ def test_operation_result_with_structured_next_steps() -> None:
     assert result.display_next_steps == [
         "Deploy with: osmosis model deploy run-step-40"
     ]
-
-
-def test_message_result() -> None:
-    result = MessageResult(message="Logged out successfully.")
-    assert result.message == "Logged out successfully."

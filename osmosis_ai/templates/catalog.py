@@ -7,7 +7,6 @@ in the SDK so local user edits cannot change CLI behavior.
 
 from __future__ import annotations
 
-from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -35,61 +34,34 @@ def _path(value: str) -> Path:
     return Path(value)
 
 
+_MULTIPLY_DATA_PATH = _path("data/multiply.jsonl")
+
+
+def _recipe(name: str, description: str) -> TemplateRecipe:
+    return TemplateRecipe(
+        name=name,
+        description=description,
+        files=(
+            _path(f"rollouts/{name}/**"),
+            _path(f"configs/eval/{name}.toml"),
+            _path(f"configs/training/{name}.toml"),
+            _MULTIPLY_DATA_PATH,
+        ),
+        owned_dirs=(_path(f"rollouts/{name}"),),
+        next_steps=(
+            f"pip install -e rollouts/{name}",
+            "git push",
+            "Confirm Git Sync is connected in the Osmosis Platform",
+            f"osmosis eval submit configs/eval/{name}.toml",
+            f"osmosis train submit configs/training/{name}.toml",
+        ),
+    )
+
+
 TEMPLATE_RECIPES: tuple[TemplateRecipe, ...] = (
-    TemplateRecipe(
-        name="multiply-local-strands",
-        description="Local Strands multiply rollout",
-        files=(
-            _path("rollouts/multiply-local-strands/**"),
-            _path("configs/eval/multiply-local-strands.toml"),
-            _path("configs/training/multiply-local-strands.toml"),
-            _path("data/multiply.jsonl"),
-        ),
-        owned_dirs=(_path("rollouts/multiply-local-strands"),),
-        next_steps=(
-            "pip install -e rollouts/multiply-local-strands",
-            "git push",
-            "Confirm Git Sync is connected in the Osmosis Platform",
-            "osmosis eval submit configs/eval/multiply-local-strands.toml",
-            "osmosis train submit configs/training/multiply-local-strands.toml",
-        ),
-    ),
-    TemplateRecipe(
-        name="multiply-local-openai",
-        description="Local OpenAI Agents multiply rollout",
-        files=(
-            _path("rollouts/multiply-local-openai/**"),
-            _path("configs/eval/multiply-local-openai.toml"),
-            _path("configs/training/multiply-local-openai.toml"),
-            _path("data/multiply.jsonl"),
-        ),
-        owned_dirs=(_path("rollouts/multiply-local-openai"),),
-        next_steps=(
-            "pip install -e rollouts/multiply-local-openai",
-            "git push",
-            "Confirm Git Sync is connected in the Osmosis Platform",
-            "osmosis eval submit configs/eval/multiply-local-openai.toml",
-            "osmosis train submit configs/training/multiply-local-openai.toml",
-        ),
-    ),
-    TemplateRecipe(
-        name="multiply-harbor-strands",
-        description="Harbor-backed Strands multiply rollout",
-        files=(
-            _path("rollouts/multiply-harbor-strands/**"),
-            _path("configs/eval/multiply-harbor-strands.toml"),
-            _path("configs/training/multiply-harbor-strands.toml"),
-            _path("data/multiply.jsonl"),
-        ),
-        owned_dirs=(_path("rollouts/multiply-harbor-strands"),),
-        next_steps=(
-            "pip install -e rollouts/multiply-harbor-strands",
-            "git push",
-            "Confirm Git Sync is connected in the Osmosis Platform",
-            "osmosis eval submit configs/eval/multiply-harbor-strands.toml",
-            "osmosis train submit configs/training/multiply-harbor-strands.toml",
-        ),
-    ),
+    _recipe("multiply-local-strands", "Local Strands multiply rollout"),
+    _recipe("multiply-local-openai", "Local OpenAI Agents multiply rollout"),
+    _recipe("multiply-harbor-strands", "Harbor-backed Strands multiply rollout"),
 )
 
 
@@ -116,16 +88,9 @@ def recipes_by_name() -> dict[str, TemplateRecipe]:
     return {recipe.name: recipe for recipe in TEMPLATE_RECIPES}
 
 
-def _has_glob(path: Path) -> bool:
-    return any("*" in part for part in path.parts)
-
-
 def shared_template_files() -> frozenset[Path]:
     """Files explicitly shared by multiple SDK-owned template recipes."""
-    counts: Counter[Path] = Counter()
-    for recipe in TEMPLATE_RECIPES:
-        counts.update(path for path in recipe.files if not _has_glob(path))
-    return frozenset(path for path, count in counts.items() if count > 1)
+    return frozenset({_MULTIPLY_DATA_PATH})
 
 
 __all__ = [

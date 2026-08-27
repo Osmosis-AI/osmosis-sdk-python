@@ -7,11 +7,21 @@ from pathlib import Path
 import pytest
 
 from osmosis_ai.cli.errors import CLIError
+from osmosis_ai.platform.cli.shared_config import validate_workspace_rollout_paths
 from osmosis_ai.platform.cli.training_config import (
     TrainSubmitConfig,
     load_train_submit_config,
-    validate_train_submit_context_paths,
 )
+
+
+def _validate_train_paths(config, workspace_directory: Path) -> None:
+    validate_workspace_rollout_paths(
+        rollout=config.experiment_rollout,
+        entrypoint=config.experiment_entrypoint,
+        workspace_directory=workspace_directory,
+        command_label="Training",
+    )
+
 
 # ---------------------------------------------------------------------------
 # Valid configs
@@ -463,62 +473,62 @@ def _training_config(
     )
 
 
-def test_validate_train_submit_context_paths_allows_entrypoint_under_rollout(
+def test__validate_train_paths_allows_entrypoint_under_rollout(
     tmp_path: Path,
 ) -> None:
     cfg = _training_config()
 
-    validate_train_submit_context_paths(cfg, tmp_path)
+    _validate_train_paths(cfg, tmp_path)
 
 
-def test_validate_train_submit_context_paths_rejects_entrypoint_escape(
+def test__validate_train_paths_rejects_entrypoint_escape(
     tmp_path: Path,
 ) -> None:
     cfg = _training_config(entrypoint="../outside.py")
 
     with pytest.raises(CLIError, match="under rollouts/<rollout>"):
-        validate_train_submit_context_paths(cfg, tmp_path)
+        _validate_train_paths(cfg, tmp_path)
 
 
-def test_validate_train_submit_context_paths_rejects_rollout_with_separator(
+def test__validate_train_paths_rejects_rollout_with_separator(
     tmp_path: Path,
 ) -> None:
     cfg = _training_config(rollout="../outside", entrypoint="main.py")
 
     with pytest.raises(CLIError, match="single-segment name"):
-        validate_train_submit_context_paths(cfg, tmp_path)
+        _validate_train_paths(cfg, tmp_path)
 
 
-def test_validate_train_submit_context_paths_rejects_rollout_with_forward_slash(
+def test__validate_train_paths_rejects_rollout_with_forward_slash(
     tmp_path: Path,
 ) -> None:
     cfg = _training_config(rollout="foo/bar", entrypoint="main.py")
 
     with pytest.raises(CLIError, match="single-segment name"):
-        validate_train_submit_context_paths(cfg, tmp_path)
+        _validate_train_paths(cfg, tmp_path)
 
 
 @pytest.mark.parametrize("rollout", ["", ".", ".."])
-def test_validate_train_submit_context_paths_rejects_non_logical_rollout_name(
+def test__validate_train_paths_rejects_non_logical_rollout_name(
     tmp_path: Path,
     rollout: str,
 ) -> None:
     cfg = _training_config(rollout=rollout, entrypoint="main.py")
 
     with pytest.raises(CLIError, match="not a valid rollout name"):
-        validate_train_submit_context_paths(cfg, tmp_path)
+        _validate_train_paths(cfg, tmp_path)
 
 
-def test_validate_train_submit_context_paths_rejects_absolute_rollout(
+def test__validate_train_paths_rejects_absolute_rollout(
     tmp_path: Path,
 ) -> None:
     cfg = _training_config(rollout=str(tmp_path / "outside"), entrypoint="main.py")
 
     with pytest.raises(CLIError, match="logical rollout name"):
-        validate_train_submit_context_paths(cfg, tmp_path)
+        _validate_train_paths(cfg, tmp_path)
 
 
-def test_validate_train_submit_context_paths_rejects_absolute_rollout_under_project(
+def test__validate_train_paths_rejects_absolute_rollout_under_project(
     tmp_path: Path,
 ) -> None:
     cfg = _training_config(
@@ -527,7 +537,7 @@ def test_validate_train_submit_context_paths_rejects_absolute_rollout_under_proj
     )
 
     with pytest.raises(CLIError, match="logical rollout name"):
-        validate_train_submit_context_paths(cfg, tmp_path)
+        _validate_train_paths(cfg, tmp_path)
 
 
 # ---------------------------------------------------------------------------

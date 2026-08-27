@@ -15,17 +15,20 @@ from osmosis_ai.cli.output.renderer import (
     render_command_result,
     verify_output_emitted,
 )
-from osmosis_ai.cli.output.result import MessageResult
+from osmosis_ai.cli.output.result import OperationResult
 
 
 def test_render_command_result_renders_command_result_in_json() -> None:
     out = io.StringIO()
     with override_output_context(format=OutputFormat.json) as ctx:
         with redirect_stdout(out):
-            render_command_result(MessageResult(message="ok"))
+            render_command_result(
+                OperationResult(operation="logout", status="success", message="ok")
+            )
         assert ctx.output_emitted is True
     payload = json.loads(out.getvalue())
-    assert payload == {"schema_version": 1, "message": "ok"}
+    assert payload["schema_version"] == 1
+    assert payload["message"] == "ok"
 
 
 def test_render_command_result_passes_none_through_in_rich_mode() -> None:

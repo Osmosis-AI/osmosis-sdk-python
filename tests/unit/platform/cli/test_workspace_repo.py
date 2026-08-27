@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import subprocess
 from pathlib import Path
-from types import SimpleNamespace
 
+import httpx
 import pytest
 
 from osmosis_ai.cli.errors import CLIError
@@ -152,28 +152,13 @@ class TestNormalizeGitIdentity:
                 stderr="",
             )
 
-        def _fake_get(url, **kwargs):
+        def _fake_github_get(url: str, headers: dict[str, str]):
             assert url == "https://api.github.com/repos/acme/old-name"
-            assert kwargs["headers"] == {"Authorization": "token gho_token"}
-            assert kwargs["allow_redirects"] is True
-            assert kwargs["timeout"] == 10
-
-            class _Response:
-                status_code = 200
-
-                @staticmethod
-                def json():
-                    return {"full_name": "Acme/new-name"}
-
-            return _Response()
+            assert headers == {"Authorization": "token gho_token"}
+            return 200, {"full_name": "Acme/new-name"}
 
         monkeypatch.setattr(workspace_repo.subprocess, "run", _fake_run)
-        monkeypatch.setattr(
-            workspace_repo,
-            "requests",
-            SimpleNamespace(get=_fake_get, RequestException=Exception),
-            raising=False,
-        )
+        monkeypatch.setattr(workspace_repo, "_github_api_get", _fake_github_get)
 
         result = workspace_repo.resolve_canonical_git_identity("acme/old-name")
 
@@ -240,6 +225,43 @@ class TestNormalizeGitIdentity:
         assert "github.com" not in result.identity
         assert "secret" not in result.identity
         assert "secret" not in result.display_url
+
+
+def test_github_api_get_returns_none_on_transport_error(monkeypatch) -> None:
+    def fail_get(*_args, **_kwargs):
+        raise httpx.ReadError("truncated response")
+
+    monkeypatch.setattr(httpx, "get", fail_get)
+
+    assert workspace_repo._github_api_get("https://example.com", {}) is None
+
+
+def test_github_api_get_strips_auth_on_cross_host_redirect(monkeypatch) -> None:
+    requests: list[tuple[str, str | None]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append((request.url.host, request.headers.get("authorization")))
+        if request.url.host == "api.github.com":
+            return httpx.Response(
+                302,
+                headers={"Location": "https://attacker.example/capture"},
+            )
+        return httpx.Response(200, json={"full_name": "Acme/new-name"})
+
+    def mock_get(url: str, **kwargs) -> httpx.Response:
+        with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+            return client.get(url, **kwargs)
+
+    monkeypatch.setattr(httpx, "get", mock_get)
+
+    assert workspace_repo._github_api_get(
+        "https://api.github.com/repos/acme/old-name",
+        {"Authorization": "token secret"},
+    ) == (200, {"full_name": "Acme/new-name"})
+    assert requests == [
+        ("api.github.com", "token secret"),
+        ("attacker.example", None),
+    ]
 
 
 # ---------------------------------------------------------------------------

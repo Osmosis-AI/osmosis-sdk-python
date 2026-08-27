@@ -1,7 +1,6 @@
 """Tests for osmosis_ai.eval.rubric.engine -- provider parsing, prompt building, JSON parsing, and evaluation."""
 
 import json
-import sys
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -256,13 +255,15 @@ class TestEvaluateRubric:
     @pytest.fixture()
     def mock_rubric_litellm(self):
         """Mock both litellm module and _litellm_completion for rubric eval tests."""
-        mock_litellm = MagicMock()
         mock_completion = MagicMock()
         with (
-            patch.dict(sys.modules, {"litellm": mock_litellm}),
+            patch(
+                "osmosis_ai.eval.rubric.engine.litellm.supports_response_schema",
+                return_value=True,
+            ),
             patch(_COMPLETION_PATCH, mock_completion),
         ):
-            yield mock_litellm, mock_completion
+            yield None, mock_completion
 
     async def test_solution_str_returns_rubric_result(self, mock_rubric_litellm):
         _, mock_completion = mock_rubric_litellm

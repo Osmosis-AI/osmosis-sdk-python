@@ -1,4 +1,4 @@
-"""Concrete ``RolloutDriver`` over the v0.3 HTTP + callback protocol.
+"""HTTP driver over the v0.3 HTTP + callback protocol.
 
 Owns admission (202 / 429), the callback rendezvous, and the best-effort
 ``/rollout/cancel`` teardown that follows a callback timeout or task
@@ -19,7 +19,7 @@ from contextlib import suppress
 import httpx
 
 from osmosis_ai.rollout.controller.store import CallbackStore, TerminalCallbackResult
-from osmosis_ai.rollout.driver import RolloutDriver, RolloutOutcome, RolloutRunRequest
+from osmosis_ai.rollout.driver import RolloutOutcome, RolloutRunRequest
 from osmosis_ai.rollout.types import (
     CancelRolloutsRequest,
     GraderStatus,
@@ -85,7 +85,7 @@ def _retry_after_seconds(response: httpx.Response, default: float = 1.0) -> floa
     return min(max(_RETRY_AFTER_FLOOR_SEC, value), _MAX_RETRY_AFTER_SEC)
 
 
-class HttpRolloutDriver(RolloutDriver):
+class HttpRolloutDriver:
     """POST /rollout driver with in-memory callback rendezvous."""
 
     def __init__(
@@ -227,7 +227,7 @@ class HttpRolloutDriver(RolloutDriver):
                 with suppress(asyncio.CancelledError):
                     await waiter
 
-    async def _cancel_rollout(self, rollout_id: str) -> dict[str, str]:
+    async def _cancel_rollout(self, rollout_id: str) -> None:
         request = CancelRolloutsRequest(ids=[rollout_id])
         try:
             if self._fresh_cancel_client:
@@ -261,37 +261,13 @@ class HttpRolloutDriver(RolloutDriver):
                 rollout_id,
                 exc_info=True,
             )
-            return {}
-        if response.status_code >= 400:
-            logger.warning(
-                "Cancel rollout %s returned HTTP %s",
-                rollout_id,
-                response.status_code,
-            )
-            return {}
-        try:
-            payload = response.json()
-        except ValueError:
-            logger.warning(
-                "Cancel rollout %s returned malformed JSON",
-                rollout_id,
-                exc_info=True,
-            )
-            return {}
-        if not isinstance(payload, dict):
-            logger.warning(
-                "Cancel rollout %s returned a non-object JSON body",
-                rollout_id,
-            )
-            return {}
-        dispositions = payload.get("dispositions", {})
-        if not isinstance(dispositions, dict):
-            logger.warning(
-                "Cancel rollout %s returned malformed dispositions",
-                rollout_id,
-            )
-            return {}
-        return dispositions
+            return
+        logger.log(
+            logging.WARNING if response.status_code >= 400 else logging.DEBUG,
+            "Cancel rollout %s returned HTTP %s",
+            rollout_id,
+            response.status_code,
+        )
 
 
 def _outcome_from_terminal(terminal: TerminalCallbackResult) -> RolloutOutcome:
