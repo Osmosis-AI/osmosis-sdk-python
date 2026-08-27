@@ -8,11 +8,8 @@ import re
 import shutil
 import subprocess
 from dataclasses import dataclass
-from http.client import HTTPException
 from pathlib import Path
-from urllib.error import HTTPError, URLError
 from urllib.parse import SplitResult, urlsplit, urlunsplit
-from urllib.request import Request, urlopen
 
 from osmosis_ai.cli.errors import CLIError
 
@@ -167,25 +164,19 @@ def _github_api_get(
     url: str, headers: dict[str, str]
 ) -> tuple[int, dict[str, object] | None] | None:
     """GET a GitHub API URL. Returns ``(status, json)`` or ``None`` on transport failure."""
+    import httpx
+
     try:
-        with urlopen(Request(url, headers=headers), timeout=10) as response:
-            status = response.status
-            raw = response.read()
-    except HTTPError as exc:
-        status = exc.code
-        try:
-            raw = exc.read()
-        except HTTPException:
-            return None
-    except (HTTPException, URLError, TimeoutError, OSError):
+        response = httpx.get(url, headers=headers, timeout=10, follow_redirects=True)
+    except httpx.HTTPError:
         return None
     try:
-        payload = json.loads(raw)
+        payload = response.json()
     except (json.JSONDecodeError, UnicodeDecodeError, TypeError):
-        return status, None
+        return response.status_code, None
     if not isinstance(payload, dict):
-        return status, None
-    return status, payload
+        return response.status_code, None
+    return response.status_code, payload
 
 
 def _resolve_via_git_credentials(owner: str, repo: str) -> str | None:

@@ -16,6 +16,7 @@ import tempfile
 from http.client import HTTPException
 from pathlib import Path
 from urllib.error import URLError
+from urllib.parse import quote
 from urllib.request import Request, urlopen
 
 from osmosis_ai.cli.errors import CLIError
@@ -48,7 +49,9 @@ def _safe_extract(archive: tarfile.TarFile, target: Path) -> None:
 
 
 def _download_workspace_template(repo: str, ref: str, destination: Path) -> None:
-    url = f"https://github.com/{repo}/archive/{ref}.tar.gz"
+    repo_path = quote(repo, safe="/")
+    ref_path = quote(ref, safe="/")
+    url = f"https://github.com/{repo_path}/archive/{ref_path}.tar.gz"
     try:
         with urlopen(Request(url), timeout=30) as response:
             content = response.read()

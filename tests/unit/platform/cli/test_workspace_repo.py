@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import subprocess
-from http.client import IncompleteRead
 from pathlib import Path
 
+import httpx
 import pytest
 
 from osmosis_ai.cli.errors import CLIError
@@ -227,24 +227,41 @@ class TestNormalizeGitIdentity:
         assert "secret" not in result.display_url
 
 
-def test_github_api_get_returns_none_on_truncated_response(monkeypatch) -> None:
-    class TruncatedResponse:
-        status = 200
+def test_github_api_get_returns_none_on_transport_error(monkeypatch) -> None:
+    def fail_get(*_args, **_kwargs):
+        raise httpx.ReadError("truncated response")
 
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *_args):
-            return False
-
-        def read(self):
-            raise IncompleteRead(b"{", 2)
-
-    monkeypatch.setattr(
-        workspace_repo, "urlopen", lambda *_args, **_kwargs: TruncatedResponse()
-    )
+    monkeypatch.setattr(httpx, "get", fail_get)
 
     assert workspace_repo._github_api_get("https://example.com", {}) is None
+
+
+def test_github_api_get_strips_auth_on_cross_host_redirect(monkeypatch) -> None:
+    requests: list[tuple[str, str | None]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append((request.url.host, request.headers.get("authorization")))
+        if request.url.host == "api.github.com":
+            return httpx.Response(
+                302,
+                headers={"Location": "https://attacker.example/capture"},
+            )
+        return httpx.Response(200, json={"full_name": "Acme/new-name"})
+
+    def mock_get(url: str, **kwargs) -> httpx.Response:
+        with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+            return client.get(url, **kwargs)
+
+    monkeypatch.setattr(httpx, "get", mock_get)
+
+    assert workspace_repo._github_api_get(
+        "https://api.github.com/repos/acme/old-name",
+        {"Authorization": "token secret"},
+    ) == (200, {"full_name": "Acme/new-name"})
+    assert requests == [
+        ("api.github.com", "token secret"),
+        ("attacker.example", None),
+    ]
 
 
 # ---------------------------------------------------------------------------
