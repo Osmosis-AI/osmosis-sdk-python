@@ -840,11 +840,6 @@ class LocalEvalRunner:
         for name, value in secrets.items():
             os.environ.setdefault(name, value)
 
-        if self._options.tunnel not in (None, "cloudflared"):
-            raise LocalEvalError(
-                f"unsupported tunnel provider {self._options.tunnel!r}; "
-                "only 'cloudflared' is available"
-            )
         bridge = LiteLLMBridge(model=self._spec.model_path)
         self._bridge = bridge
         advertise_url = self._options.advertise_url

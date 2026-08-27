@@ -509,23 +509,16 @@ def create_bridge_router(
         request_model = str(body.get("model") or bridge.model)
 
         if not is_stream:
-            if not non_stream_keepalive:
-                try:
-                    response = await _serve_completion(body, rollout_id)
-                except Exception as exc:
-                    logger.warning("LLM bridge error: %s", exc)
-                    return JSONResponse({"detail": str(exc)}, status_code=502)
-                return JSONResponse(
-                    _model_response_to_payload(
-                        response, request_model=request_model, stream=False
-                    )
-                )
             task = asyncio.create_task(_serve_completion(body, rollout_id))
             try:
                 # asyncio.wait, never wait_for: a provider raising
                 # TimeoutError must be a clean 502 below, not read as the
-                # grace timer expiring.
-                done, _ = await asyncio.wait({task}, timeout=_NON_STREAM_GRACE_SEC)
+                # grace timer expiring. Without the keepalive there is no
+                # grace timer at all, so the wait is unbounded.
+                done, _ = await asyncio.wait(
+                    {task},
+                    timeout=_NON_STREAM_GRACE_SEC if non_stream_keepalive else None,
+                )
             except asyncio.CancelledError:
                 await _cancel_task(task)
                 raise
@@ -539,7 +532,7 @@ def create_bridge_router(
             try:
                 response = task.result()
             except Exception as exc:
-                # Within the grace window errors keep their clean status code.
+                # No byte committed yet, so errors keep their clean status code.
                 logger.warning("LLM bridge error: %s", exc)
                 return JSONResponse({"detail": str(exc)}, status_code=502)
             return JSONResponse(

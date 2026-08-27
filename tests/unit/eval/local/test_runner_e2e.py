@@ -790,14 +790,3 @@ async def test_tunnel_death_halts_dispatch_and_leaves_work_pending(
     assert any("cloudflared tunnel exited" in note for note in harness.hooks.notes)
     # Nothing was stamped failed: the items stay pending for a resume.
     assert harness.journal_lines() == []
-
-
-async def test_unsupported_tunnel_provider_is_refused(
-    harness: RunnerHarness,
-) -> None:
-    from osmosis_ai.eval.local.runner import LocalEvalError
-
-    with pytest.raises(LocalEvalError, match="only 'cloudflared'"):
-        await harness.runner(
-            options=LocalEvalOptions(name="run-1", tunnel="ngrok")
-        ).run()
