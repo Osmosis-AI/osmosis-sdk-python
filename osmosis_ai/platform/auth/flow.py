@@ -394,7 +394,7 @@ def device_login(timeout: float = 900.0) -> tuple[LoginResult, Credentials]:
     Returns:
         Tuple of (LoginResult, Credentials). Caller is responsible for saving credentials.
     """
-    with console.spinner("Requesting device code..."):
+    with console.status("Requesting device code..."):
         device_code_resp = request_device_code()
 
     console.print()
@@ -428,7 +428,7 @@ def device_login(timeout: float = 900.0) -> tuple[LoginResult, Credentials]:
     console.print()
     effective_timeout = min(timeout, float(device_code_resp.expires_in))
 
-    with console.spinner("Waiting for authorization..."):
+    with console.status("Waiting for authorization..."):
         token_response = poll_device_token(
             device_code=device_code_resp.device_code,
             interval=device_code_resp.interval,

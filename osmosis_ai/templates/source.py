@@ -14,8 +14,8 @@ import shutil
 import tarfile
 import tempfile
 from pathlib import Path
-
-import requests
+from urllib.error import URLError
+from urllib.request import Request, urlopen
 
 from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.platform.auth.config import CACHE_DIR
@@ -42,28 +42,16 @@ def _cache_key(repo: str, ref: str) -> str:
 
 
 def _safe_extract(archive: tarfile.TarFile, target: Path) -> None:
-    """Extract a tar archive while rejecting path traversal."""
-    target_resolved = target.resolve()
-    for member in archive.getmembers():
-        member_path = target / member.name
-        try:
-            member_path.resolve().relative_to(target_resolved)
-        except ValueError as exc:
-            raise CLIError(
-                f"Template archive contains an unsafe path: {member.name}",
-                code="VALIDATION",
-            ) from exc
-    # The data filter rejects unsafe links and special files while allowing
-    # safe in-archive symlinks used by the workspace template.
+    """Extract a tar archive, rejecting unsafe members via the data filter."""
     archive.extractall(target, filter="data")
 
 
 def _download_workspace_template(repo: str, ref: str, destination: Path) -> None:
     url = f"https://github.com/{repo}/archive/{ref}.tar.gz"
     try:
-        response = requests.get(url, timeout=30)
-        response.raise_for_status()
-    except requests.RequestException as exc:
+        with urlopen(Request(url), timeout=30) as response:
+            content = response.read()
+    except (URLError, TimeoutError, OSError) as exc:
         raise CLIError(
             f"Unable to fetch starter templates from {url}: {exc}",
             code="NETWORK",
@@ -73,7 +61,7 @@ def _download_workspace_template(repo: str, ref: str, destination: Path) -> None
     with tempfile.TemporaryDirectory(prefix="osmosis-template-") as tmp_name:
         tmp_dir = Path(tmp_name)
         archive_path = tmp_dir / "workspace-template.tar.gz"
-        archive_path.write_bytes(response.content)
+        archive_path.write_bytes(content)
         extract_dir = tmp_dir / "extract"
         extract_dir.mkdir()
         try:

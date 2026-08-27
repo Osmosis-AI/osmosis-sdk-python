@@ -48,14 +48,18 @@ from harbor.tasks.client import TaskClient
 from harbor.trial.hooks import TrialEvent, TrialHookEvent
 from harbor.trial.queue import TrialQueue
 
-from osmosis_ai.packaging import BundleInfo
+from osmosis_ai.packaging import (
+    BundleInfo,
+    build_bundle,
+    inspect_bundle,
+    project_dir_for,
+)
 from osmosis_ai.rollout.backend.base import ExecutionBackend, ResultCallback
 from osmosis_ai.rollout.backend.harbor.artifacts import (
     merge_grader_artifacts,
     relocate_trial_artifacts,
     retain_trial_logs,
 )
-from osmosis_ai.rollout.backend.harbor.bundling import resolve_backend_bundle
 from osmosis_ai.rollout.backend.harbor.diagnostics import (
     agent_phase_failure,
     diagnostic_payload,
@@ -103,7 +107,7 @@ from osmosis_ai.rollout.types import (
 )
 from osmosis_ai.rollout.utils.errors import categorize_exception
 from osmosis_ai.rollout.utils.file_artifacts import default_artifact_root
-from osmosis_ai.rollout.utils.imports import ensure_import_path
+from osmosis_ai.rollout.utils.imports import ensure_import_path, resolve_object
 from osmosis_ai.rollout.utils.rewards import validate_sample_has_reward
 from osmosis_ai.rollout.utils.ttl_cache import TtlCache
 
@@ -114,23 +118,6 @@ HARNESS_AGENT_IMPORT_PATH = (
 )
 PREWARM_PREFIX = "prewarm-"
 STATUS_RETENTION_SEC = 900.0
-
-# Constructor keywords belonging to the backend v0.3 removed. This class kept
-# that class's name but not its signature, so a stale call site would otherwise
-# fail on the argument it does *not* pass ("missing a required argument:
-# 'tasks_dir'") rather than on the ones it does. Drop once v0.3 has shipped.
-MIGRATION_DOCS_URL = "https://docs.osmosis.ai/migration-guides/v0-3"
-PRE_V03_KWARGS = frozenset(
-    {
-        "task_dir",
-        "user_code_dir",
-        "workflow",
-        "custom_tests_dir",
-        "prebuild_local_image",
-        "symlink_environment",
-        "_sdk_source_dir",
-    }
-)
 
 
 class CredentialScrubError(RuntimeError):
@@ -147,19 +134,41 @@ def trial_cancelled(err: Any) -> bool:
     return err is not None and err.exception_type == "CancelledError"
 
 
-class HarborBackend(ExecutionBackend):
-    def __new__(cls, *args: Any, **kwargs: Any) -> HarborBackend:
-        # In __new__, whose arguments bind permissively, so this runs before
-        # __init__ can reject the call for the tasks_dir it never received.
-        if stale := sorted(PRE_V03_KWARGS & kwargs.keys()):
-            raise TypeError(
-                f"HarborBackend no longer takes {', '.join(stale)}. v0.3 removed "
-                "the backend those belonged to and gave its name to the one that "
-                "packages your project into a wheel and installs it in the task "
-                f"container; port the call with {MIGRATION_DOCS_URL}"
-            )
-        return super().__new__(cls)
+def _resolve_backend_bundle(
+    *,
+    agent: str | type | None,
+    grader: type | str | None,
+    workflow_config: Any = None,
+    grader_config: Any = None,
+    code_dir: Path | None = None,
+    bundle: Path | None = None,
+    native: bool = False,
+) -> BundleInfo | None:
+    """Native agents need a bundle only when a grader is delivered;
+    workflow agents always need one."""
+    if bundle is not None:
+        return inspect_bundle(Path(bundle))
+    if native:
+        if grader is None:
+            return None
+        anchor = resolve_object(grader)
+    else:
+        if agent is None:
+            raise ValueError("pass agent (a native name or an AgentWorkflow)")
+        anchor = resolve_object(agent)
+    wheel = build_bundle(
+        code_dir or project_dir_for(anchor),
+        workflow=None if native else ensure_import_path(agent),
+        grader=ensure_import_path(grader) if grader else None,
+        workflow_config=ensure_import_path(workflow_config)
+        if workflow_config
+        else None,
+        grader_config=ensure_import_path(grader_config) if grader_config else None,
+    )
+    return inspect_bundle(wheel)
 
+
+class HarborBackend(ExecutionBackend):
     def __init__(
         self,
         *,
@@ -202,7 +211,7 @@ class HarborBackend(ExecutionBackend):
                 "datasets and verifiers, never for training",
                 agent,
             )
-        self.bundle: BundleInfo | None = resolve_backend_bundle(
+        self.bundle: BundleInfo | None = _resolve_backend_bundle(
             agent=agent,
             grader=grader,
             workflow_config=workflow_config,

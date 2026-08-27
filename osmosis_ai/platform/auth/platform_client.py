@@ -514,6 +514,41 @@ def _raise_for_http_error(
     ) from e
 
 
+def _prepare_platform_request(
+    endpoint: str,
+    *,
+    method: str = "GET",
+    data: dict[str, Any] | None = None,
+    headers: dict[str, str] | None = None,
+    credentials: Credentials | None = None,
+    git_identity: str | None = None,
+    require_git_repo: bool = True,
+) -> tuple[Request, bool]:
+    """Build an authenticated platform ``Request`` and env-token flag."""
+    _reject_reserved_headers(headers)
+
+    if credentials is None:
+        credentials = load_credentials()
+    if credentials is None:
+        raise CLIError(MSG_NOT_LOGGED_IN, code="AUTH_REQUIRED")
+    using_env_token = _credentials_match_env_token(credentials)
+
+    url = f"{get_platform_url()}{endpoint}"
+    req_headers = cli_request_headers(token=credentials.access_token)
+    if require_git_repo:
+        if not git_identity:
+            raise PlatformAPIError(
+                "Git-scoped platform requests require an explicit git_identity.",
+                error_code="GIT_SCOPE_HEADER_REQUIRED",
+            )
+        req_headers["X-Osmosis-Git"] = git_identity
+    if headers:
+        req_headers.update(headers)
+
+    body = json.dumps(data).encode() if data is not None else None
+    return Request(url, data=body, headers=req_headers, method=method), using_env_token
+
+
 def platform_request(
     endpoint: str,
     method: str = "GET",
@@ -545,31 +580,15 @@ def platform_request(
         AuthenticationExpiredError: If 401 received
         PlatformAPIError: For other API errors
     """
-    _reject_reserved_headers(headers)
-
-    if credentials is None:
-        credentials = load_credentials()
-    if credentials is None:
-        raise CLIError(MSG_NOT_LOGGED_IN, code="AUTH_REQUIRED")
-    using_env_token = _credentials_match_env_token(credentials)
-
-    url = f"{get_platform_url()}{endpoint}"
-
-    req_headers = cli_request_headers(token=credentials.access_token)
-
-    if require_git_repo:
-        if not git_identity:
-            raise PlatformAPIError(
-                "Git-scoped platform requests require an explicit git_identity.",
-                error_code="GIT_SCOPE_HEADER_REQUIRED",
-            )
-        req_headers["X-Osmosis-Git"] = git_identity
-
-    if headers:
-        req_headers.update(headers)
-
-    body = json.dumps(data).encode() if data is not None else None
-    request = Request(url, data=body, headers=req_headers, method=method)
+    request, using_env_token = _prepare_platform_request(
+        endpoint,
+        method=method,
+        data=data,
+        headers=headers,
+        credentials=credentials,
+        git_identity=git_identity,
+        require_git_repo=require_git_repo,
+    )
 
     try:
         with urlopen(request, timeout=timeout) as response:
@@ -645,24 +664,14 @@ def platform_stream(
     ``timeout`` is the per-read socket timeout; it must exceed the server's
     heartbeat interval so an idle-but-alive stream is not torn down.
     """
-    if credentials is None:
-        credentials = load_credentials()
-    if credentials is None:
-        raise CLIError(MSG_NOT_LOGGED_IN, code="AUTH_REQUIRED")
-    using_env_token = _credentials_match_env_token(credentials)
-
-    url = f"{get_platform_url()}{endpoint}"
-    req_headers = cli_request_headers(token=credentials.access_token)
-    req_headers["Accept"] = "text/event-stream"
-    if require_git_repo:
-        if not git_identity:
-            raise PlatformAPIError(
-                "Git-scoped platform requests require an explicit git_identity.",
-                error_code="GIT_SCOPE_HEADER_REQUIRED",
-            )
-        req_headers["X-Osmosis-Git"] = git_identity
-
-    request = Request(url, headers=req_headers, method="GET")
+    request, using_env_token = _prepare_platform_request(
+        endpoint,
+        method="GET",
+        headers={"Accept": "text/event-stream"},
+        credentials=credentials,
+        git_identity=git_identity,
+        require_git_repo=require_git_repo,
+    )
 
     try:
         response = urlopen(request, timeout=timeout)

@@ -5,10 +5,17 @@ from pathlib import Path
 import pytest
 
 from osmosis_ai.cli.errors import CLIError
-from osmosis_ai.platform.cli.eval_config import (
-    load_eval_submit_config,
-    validate_eval_submit_context_paths,
-)
+from osmosis_ai.platform.cli.eval_config import load_eval_submit_config
+from osmosis_ai.platform.cli.shared_config import validate_workspace_rollout_paths
+
+
+def _validate_eval_paths(config, workspace_directory: Path) -> None:
+    validate_workspace_rollout_paths(
+        rollout=config.experiment_rollout,
+        entrypoint=config.experiment_entrypoint,
+        workspace_directory=workspace_directory,
+        command_label="Evaluation",
+    )
 
 
 def _write_config(path: Path, body: str) -> Path:
@@ -431,7 +438,7 @@ required = []
     }
 
 
-def test_validate_eval_submit_context_paths_rejects_entrypoint_escape(
+def test__validate_eval_paths_rejects_entrypoint_escape(
     tmp_path: Path,
 ) -> None:
     config_path = _write_config(
@@ -450,7 +457,7 @@ required = []
     config = load_eval_submit_config(config_path)
 
     with pytest.raises(CLIError, match="entrypoint must resolve under"):
-        validate_eval_submit_context_paths(config, tmp_path)
+        _validate_eval_paths(config, tmp_path)
 
 
 def _write_eval_config_with_rollout(path: Path, rollout: str) -> Path:
@@ -469,28 +476,28 @@ required = []
     )
 
 
-def test_validate_eval_submit_context_paths_rejects_rollout_with_separator(
+def test__validate_eval_paths_rejects_rollout_with_separator(
     tmp_path: Path,
 ) -> None:
     config_path = _write_eval_config_with_rollout(tmp_path / "eval.toml", "../outside")
     config = load_eval_submit_config(config_path)
 
     with pytest.raises(CLIError, match="single-segment name"):
-        validate_eval_submit_context_paths(config, tmp_path)
+        _validate_eval_paths(config, tmp_path)
 
 
-def test_validate_eval_submit_context_paths_rejects_rollout_with_forward_slash(
+def test__validate_eval_paths_rejects_rollout_with_forward_slash(
     tmp_path: Path,
 ) -> None:
     config_path = _write_eval_config_with_rollout(tmp_path / "eval.toml", "foo/bar")
     config = load_eval_submit_config(config_path)
 
     with pytest.raises(CLIError, match="single-segment name"):
-        validate_eval_submit_context_paths(config, tmp_path)
+        _validate_eval_paths(config, tmp_path)
 
 
 @pytest.mark.parametrize("rollout", ["", ".", ".."])
-def test_validate_eval_submit_context_paths_rejects_non_logical_rollout_name(
+def test__validate_eval_paths_rejects_non_logical_rollout_name(
     tmp_path: Path,
     rollout: str,
 ) -> None:
@@ -498,10 +505,10 @@ def test_validate_eval_submit_context_paths_rejects_non_logical_rollout_name(
     config = load_eval_submit_config(config_path)
 
     with pytest.raises(CLIError, match="not a valid rollout name"):
-        validate_eval_submit_context_paths(config, tmp_path)
+        _validate_eval_paths(config, tmp_path)
 
 
-def test_validate_eval_submit_context_paths_rejects_absolute_rollout(
+def test__validate_eval_paths_rejects_absolute_rollout(
     tmp_path: Path,
 ) -> None:
     absolute_rollout = str(tmp_path / "outside")
@@ -512,4 +519,4 @@ def test_validate_eval_submit_context_paths_rejects_absolute_rollout(
     config = load_eval_submit_config(config_path)
 
     with pytest.raises(CLIError, match="logical rollout name"):
-        validate_eval_submit_context_paths(config, tmp_path)
+        _validate_eval_paths(config, tmp_path)

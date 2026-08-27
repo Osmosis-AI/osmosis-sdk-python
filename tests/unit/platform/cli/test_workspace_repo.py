@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import subprocess
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
@@ -152,28 +151,13 @@ class TestNormalizeGitIdentity:
                 stderr="",
             )
 
-        def _fake_get(url, **kwargs):
+        def _fake_github_get(url: str, headers: dict[str, str]):
             assert url == "https://api.github.com/repos/acme/old-name"
-            assert kwargs["headers"] == {"Authorization": "token gho_token"}
-            assert kwargs["allow_redirects"] is True
-            assert kwargs["timeout"] == 10
-
-            class _Response:
-                status_code = 200
-
-                @staticmethod
-                def json():
-                    return {"full_name": "Acme/new-name"}
-
-            return _Response()
+            assert headers == {"Authorization": "token gho_token"}
+            return 200, {"full_name": "Acme/new-name"}
 
         monkeypatch.setattr(workspace_repo.subprocess, "run", _fake_run)
-        monkeypatch.setattr(
-            workspace_repo,
-            "requests",
-            SimpleNamespace(get=_fake_get, RequestException=Exception),
-            raising=False,
-        )
+        monkeypatch.setattr(workspace_repo, "_github_api_get", _fake_github_get)
 
         result = workspace_repo.resolve_canonical_git_identity("acme/old-name")
 

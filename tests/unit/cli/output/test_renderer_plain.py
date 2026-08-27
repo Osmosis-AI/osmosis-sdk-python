@@ -15,7 +15,6 @@ from osmosis_ai.cli.output.result import (
     ListColumn,
     ListResult,
     ListSection,
-    MessageResult,
     OperationResult,
     SectionedListResult,
 )
@@ -134,7 +133,7 @@ def test_list_uses_display_items_for_plain_human_values() -> None:
     assert stdout == "train[ok].jsonl\t12.1 KB\t2026-04-26\n"
 
 
-def test_list_skips_columns_marked_plain_false() -> None:
+def test_list_renders_all_columns() -> None:
     result = ListResult(
         title="Datasets",
         items=[{"id": "ds_1", "status": "uploaded", "internal_id": "int_1"}],
@@ -144,11 +143,13 @@ def test_list_skips_columns_marked_plain_false() -> None:
         columns=[
             ListColumn(key="id", label="ID"),
             ListColumn(key="status", label="Status"),
-            ListColumn(key="internal_id", label="Internal ID", plain=False),
+            ListColumn(key="internal_id", label="Internal ID"),
         ],
     )
     stdout, _ = _render(result)
-    assert stdout.strip() == "ds_1\tuploaded"
+    assert "ds_1" in stdout
+    assert "uploaded" in stdout
+    assert "int_1" in stdout
 
 
 def test_list_normalises_tabs_and_newlines_in_values() -> None:
@@ -258,11 +259,6 @@ def test_operation_renders_concise_success_line() -> None:
     lines = stdout.splitlines()
     assert lines[0] == "Checkpoint deployed."
     assert any("Test it:" in line for line in lines)
-
-
-def test_message_renders_text_only() -> None:
-    stdout, _ = _render(MessageResult(message="Logged out."))
-    assert stdout == "Logged out.\n"
 
 
 def test_no_ansi_in_plain_stdout() -> None:

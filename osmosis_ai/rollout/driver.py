@@ -1,12 +1,11 @@
-"""RolloutDriver — eval-facing protocol for rollout execution.
+"""Eval-facing types for a single rollout execution.
 
-RolloutDriver is to eval what the trainer is to the rollout server:
+``HttpRolloutDriver`` is to eval what the trainer is to the rollout server:
 it provides data + LLM endpoint and consumes trace + reward.
 """
 
 from __future__ import annotations
 
-from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Any
 
@@ -30,7 +29,7 @@ class RolloutOutcome:
 
 @dataclass
 class RolloutRunRequest:
-    """Inputs for one ``RolloutDriver.run`` call."""
+    """Inputs for one ``HttpRolloutDriver.run`` call."""
 
     messages: list[MessageDict]
     label: str | None = None
@@ -41,12 +40,4 @@ class RolloutRunRequest:
     extra_fields: dict[str, Any] | None = None
 
 
-class RolloutDriver(ABC):
-    """Drives a rollout execution."""
-
-    @abstractmethod
-    async def run(self, request: RolloutRunRequest) -> RolloutOutcome:
-        raise NotImplementedError
-
-
-__all__ = ["RolloutDriver", "RolloutOutcome", "RolloutRunRequest"]
+__all__ = ["RolloutOutcome", "RolloutRunRequest"]

@@ -44,8 +44,6 @@ def test_rollout_root_exports_only_framework_neutral_core() -> None:
             "GraderCompleteRequest",
             "GraderConfig",
             "GraderContext",
-            "GraderInitRequest",
-            "GraderInitResponse",
             "GraderStatus",
             "LocalBackend",
             "MessageDict",
@@ -323,20 +321,6 @@ def test_extra_modules_table_matches_pyproject_extras() -> None:
             "harbor",
             "harbor",
         ),
-        # The bundle builder reaches osmosis_ai.packaging, whose toml and
-        # platformdirs imports ship with the harbor extra.
-        (
-            "osmosis_ai.rollout.backend.harbor",
-            "HarborBackend",
-            "toml",
-            "harbor",
-        ),
-        (
-            "osmosis_ai.rollout.backend.harbor",
-            "HarborBackend",
-            "platformdirs",
-            "harbor",
-        ),
         (
             "osmosis_ai.eval.rubric",
             "evaluate_rubric",
@@ -435,9 +419,8 @@ def test_local_eval_runner_imports_without_harbor_extra() -> None:
     """`osmosis eval run` ships with `[eval]`, which does not carry harbor.
 
     The runner spawns the rollout server through uv, so it needs uv resolution
-    -- but reaching it through `osmosis_ai.packaging`, whose platformdirs and
-    toml imports ship with `[harbor]`, would break `eval run` at startup for an
-    `[eval]`-only install.
+    -- but reaching it through `osmosis_ai.packaging` would couple eval startup
+    to the Harbor bundle builder.
     """
     result = _run_python(
         """

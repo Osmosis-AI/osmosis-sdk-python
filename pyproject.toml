@@ -25,7 +25,6 @@ dependencies = [
     # CLI and rollout core. Security floors are kept with the feature that
     # owns the dependency; lower bounds still allow patched releases to float.
     "python-dotenv>=1.2.2,<2.0.0",
-    "requests>=2.33.0,<3.0.0",
     "httpx>=0.25.0,<1.0.0",
     "pydantic>=2.0.0,<3.0.0",
     # Secure credential storage (system keychain)
@@ -97,12 +96,7 @@ harbor = [
     # extra. Supply that narrow dependency without installing SkyPilot.
     "dockerfile-parse>=2.0.1,<3.0.0",
     # osmosis_ai.packaging builds the bundle wheel that Harbor installs in the
-    # task container: toml rewrites the rollout project's pyproject.toml and
-    # platformdirs locates the bundle cache, and uv performs the isolated wheel
-    # build. Nothing outside this backend imports them, so they stay out of the
-    # base install.
-    "toml>=0.10.2,<1.0.0",
-    "platformdirs>=4.0",
+    # task container; uv performs the isolated wheel build.
     "uv>=0.9.7,<0.13",
     # Harbor currently uses LiteLLM and PyIceberg, which own these runtime and
     # security floors in this feature.
@@ -116,7 +110,6 @@ harbor = [
 rubric = [
     "litellm>=1.91.1,!=1.95.0,<2.0.0",
     "orjson>=3.11.6,<4.0",
-    "tqdm>=4.0.0,<5.0.0",
     "aiohttp>=3.14.3",
     "click>=8.3.3",
 ]
@@ -152,7 +145,6 @@ dev = [
     "ruff==0.16.0",  # Keep in sync with pre-commit and CI
     "pre-commit>=4.6.0,<5.0.0",
     "pyright[nodejs]==1.1.411",
-    "types-requests>=2.0",
 ]
 
 [project.urls]

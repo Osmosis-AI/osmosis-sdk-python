@@ -11,7 +11,6 @@ from osmosis_ai.platform.cli.shared_config import (
     BackendValidatedParamSection,
     BaseSubmitConfig,
     load_submit_config,
-    validate_workspace_rollout_paths,
 )
 
 _EVAL_CONFIG_LABEL = "eval"
@@ -49,21 +48,7 @@ def load_eval_submit_config(path: Path) -> EvalSubmitConfig:
     )
 
 
-def validate_eval_submit_context_paths(
-    config: EvalSubmitConfig,
-    workspace_directory: Path,
-) -> None:
-    """Validate rollout and entrypoint paths against the workspace directory."""
-    validate_workspace_rollout_paths(
-        rollout=config.experiment_rollout,
-        entrypoint=config.experiment_entrypoint,
-        workspace_directory=workspace_directory,
-        command_label="Evaluation",
-    )
-
-
 __all__ = [
     "EvalSubmitConfig",
     "load_eval_submit_config",
-    "validate_eval_submit_context_paths",
 ]

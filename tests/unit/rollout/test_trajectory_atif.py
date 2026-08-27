@@ -245,9 +245,7 @@ def test_multimodal_and_subagent_contract_validation() -> None:
         type="image",
         source=ImageSource(media_type="image/png", path="image.png"),
     )
-    assert _trajectory(
-        Step(step_id=1, source="user", message=[image])
-    ).has_multimodal_content()
+    _trajectory(Step(step_id=1, source="user", message=[image]))
 
     subagent = _trajectory(trajectory_id="subagent-1")
     with pytest.raises(ValidationError, match="not unique"):

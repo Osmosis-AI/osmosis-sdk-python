@@ -91,6 +91,33 @@ class CloudSubmitSpec[ConfigT: BaseSubmitConfig]:
     ]
 
 
+def submit_next_steps(
+    result: SubmitRunResult,
+    config: BaseSubmitConfig,
+    *,
+    verb: str,
+) -> tuple[list[str], list[dict[str, Any]]]:
+    """Shared success hints for train/eval cloud submit."""
+    display = [
+        f"Status: {result.status}",
+        f"Rollout: {config.experiment_rollout}",
+        f"Model: {config.experiment_model_path}",
+        f"Dataset: {config.experiment_dataset}",
+        (
+            f"View: {result.platform_url}"
+            if result.platform_url
+            else f"Check status with: osmosis {verb} info {result.name}"
+        ),
+    ]
+    structured: list[dict[str, Any]] = [
+        {"action": f"{verb}_info", "name": result.name},
+        {"action": f"{verb}_list"},
+    ]
+    if result.platform_url:
+        structured.append({"action": "open_url", "url": result.platform_url})
+    return display, structured
+
+
 def _fetch_secret_scopes(
     client: OsmosisClient, *, credentials: Any, git_identity: str
 ) -> tuple[set[str], set[str]] | None:
@@ -428,4 +455,5 @@ __all__ = [
     "confirm_remote_fetch_and_post",
     "prepare_submit_secrets",
     "run_cloud_submit",
+    "submit_next_steps",
 ]

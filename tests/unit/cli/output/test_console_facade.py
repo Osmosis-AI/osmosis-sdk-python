@@ -45,7 +45,7 @@ def test_console_spinner_is_silent_in_json_mode() -> None:
     out, err = io.StringIO(), io.StringIO()
     with override_output_context(format=OutputFormat.json):
         with redirect_stdout(out), redirect_stderr(err):
-            with Console().spinner("Loading workspaces..."):
+            with Console().status("Loading workspaces..."):
                 pass
     assert out.getvalue() == ""
     assert err.getvalue() == ""
@@ -55,7 +55,7 @@ def test_console_spinner_writes_to_stderr_in_plain_mode() -> None:
     out, err = io.StringIO(), io.StringIO()
     with override_output_context(format=OutputFormat.plain):
         with redirect_stdout(out), redirect_stderr(err):
-            with Console().spinner("Loading..."):
+            with Console().status("Loading..."):
                 pass
     assert out.getvalue() == ""
     assert "Loading..." in err.getvalue()
@@ -74,7 +74,7 @@ def test_console_spinner_does_not_leak_into_stdout_under_redirection() -> None:
     # `> out.txt` case; the old stdout path would have failed this.
     with override_output_context(format=OutputFormat.rich, interactive=False):
         with redirect_stdout(out), redirect_stderr(err):
-            with Console(file=out).spinner("Fetching datasets..."):
+            with Console(file=out).status("Fetching datasets..."):
                 out.write("REAL_RESULT_ROW\n")
     assert out.getvalue() == "REAL_RESULT_ROW\n"
     assert "Fetching datasets..." in err.getvalue()
@@ -85,7 +85,7 @@ def test_non_global_console_tracks_its_own_spinner() -> None:
     local_console = Console(file=out, force_terminal=True)
 
     with override_output_context(format=OutputFormat.rich, interactive=True):
-        with redirect_stderr(err), local_console.spinner("Loading..."):
+        with redirect_stderr(err), local_console.status("Loading..."):
             assert local_console._active_status is not None
             assert shared_console._active_status is None
             local_console.print("Still working...")

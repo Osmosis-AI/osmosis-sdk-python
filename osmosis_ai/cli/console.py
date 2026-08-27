@@ -386,34 +386,14 @@ class Console:
             )
 
     @contextmanager
-    def spinner(self, message: str) -> Generator[None, None, None]:
-        """Show a spinner while work is in progress (alias for :meth:`status`).
-
-        Historically this rendered the spinner to *stdout*, which leaked the
-        progress text into redirected output — ``osmosis dataset list > out.txt``
-        used to write ``Fetching datasets...`` into ``out.txt``. It now delegates
-        to :meth:`status` so progress goes to stderr and stays output-mode aware,
-        keeping stdout clean for piping/redirection. Kept as a named alias so the
-        existing call sites (dataset, auth) read naturally.
-
-        Usage::
-
-            with console.spinner("Loading workspaces..."):
-                result = api_call()
-        """
-        with self.status(message):
-            yield
-
-    @contextmanager
     def track_spinner(self, status: Any) -> Generator[None, None, None]:
         """Register ``status`` as the process-wide active spinner while live.
 
         A terminal can only show one spinner at a time, so the active Rich
         ``Status`` is tracked on this (singleton) console regardless of which
-        spinner implementation created it — ``console.spinner`` here, or
-        ``OutputContext.status`` on its own stderr console. Terminal output
-        consults it to pause/resume the spinner around a write, so a note or
-        warning fired mid-spin neither glues onto nor strands the spinner line.
+        spinner implementation created it. Terminal output consults it to
+        pause/resume the spinner around a write, so a note or warning fired
+        mid-spin neither glues onto nor strands the spinner line.
 
         Saves and restores any previously-active status so nested spinners
         behave; the innermost live spinner is the one output pauses.
@@ -427,7 +407,11 @@ class Console:
 
     @contextmanager
     def status(self, message: str) -> Generator[None, None, None]:
-        """Alias for spinner with output-context aware routing."""
+        """Show a status spinner while work is in progress.
+
+        Routes through the active output context so JSON mode stays silent and
+        progress writes to stderr, keeping stdout clean for piping.
+        """
         from osmosis_ai.cli.output.context import get_output_context
 
         with get_output_context().status(message, spinner_tracker=self):

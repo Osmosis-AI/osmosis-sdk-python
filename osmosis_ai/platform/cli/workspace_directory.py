@@ -67,7 +67,7 @@ def doctor_workspace_directory(path: Any | None = None, *, fix: bool = False) ->
     missing = _missing_scaffold_paths(workspace_directory)
 
     if fix:
-        write_scaffold(workspace_directory, workspace_directory.name)
+        write_scaffold(workspace_directory)
         missing = _missing_scaffold_paths(workspace_directory)
 
     valid = not missing
@@ -129,7 +129,7 @@ def _doctor_display_lines(
 def _missing_scaffold_paths(workspace_directory: Path) -> list[str]:
     from osmosis_ai.platform.cli.scaffold import load_scaffold_entries
 
-    scaffold, _agent_refresh_paths = load_scaffold_entries()
+    scaffold = load_scaffold_entries()
     missing: list[str] = []
     for entry in scaffold:
         rel_path = Path(entry.dest)

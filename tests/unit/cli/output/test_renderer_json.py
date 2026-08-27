@@ -19,7 +19,6 @@ from osmosis_ai.cli.output.result import (
     ListColumn,
     ListResult,
     ListSection,
-    MessageResult,
     OperationResult,
     SectionedListResult,
 )
@@ -231,25 +230,6 @@ def test_operation_envelope_extra_cannot_override_reserved_keys() -> None:
     assert payload["workspace"] == "ws-a"
 
 
-def test_message_envelope_includes_schema_version() -> None:
-    result = MessageResult(message="Logged out.")
-    payload, _ = _render_to_json(result)
-    assert payload == {"schema_version": 1, "message": "Logged out."}
-
-
-def test_message_envelope_extra_cannot_override_reserved_keys() -> None:
-    result = MessageResult(
-        message="Logged out.",
-        extra={"schema_version": 999, "message": "from extra", "workspace": "ws-a"},
-    )
-    payload, _ = _render_to_json(result)
-    assert payload == {
-        "schema_version": 1,
-        "message": "Logged out.",
-        "workspace": "ws-a",
-    }
-
-
 def test_no_ansi_or_rich_box_on_json_stdout() -> None:
     result = DetailResult(
         title="Dataset",
@@ -267,7 +247,7 @@ def test_no_ansi_or_rich_box_on_json_stdout() -> None:
 
 
 def test_render_marks_output_emitted() -> None:
-    result = MessageResult(message="ok")
+    result = OperationResult(operation="logout", status="success", message="ok")
     out = io.StringIO()
     with override_output_context(format=OutputFormat.json) as ctx:
         with redirect_stdout(out):

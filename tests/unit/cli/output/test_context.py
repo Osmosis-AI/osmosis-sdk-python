@@ -34,7 +34,6 @@ def test_default_output_context_is_rich_and_uses_stdin_isatty(monkeypatch) -> No
     output = default_output_context()
     assert output.format is OutputFormat.rich
     assert output.interactive is False
-    assert output.schema_version == 1
     assert output.output_emitted is False
 
 

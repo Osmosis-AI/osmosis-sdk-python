@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import tempfile
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from email.message import Message
 from pathlib import Path
 from urllib.parse import urljoin
@@ -109,6 +109,45 @@ def _stream_download_response(
             response.read()
 
 
+def _write_response_to_file(
+    response: httpx.Response,
+    destination: Path,
+    *,
+    expected_size: int | None = None,
+    on_bytes: Callable[[int], None] | None = None,
+) -> int:
+    """Stream ``response`` to ``destination`` via a sibling temp file."""
+    tmp_path: Path | None = None
+    bytes_downloaded = 0
+    try:
+        with tempfile.NamedTemporaryFile(
+            "wb",
+            delete=False,
+            dir=destination.parent,
+            prefix=f".{destination.name}.",
+            suffix=".partial",
+        ) as tmp_file:
+            tmp_path = Path(tmp_file.name)
+            for chunk in response.iter_bytes(DOWNLOAD_CHUNK_SIZE):
+                if not chunk:
+                    continue
+                tmp_file.write(chunk)
+                bytes_downloaded += len(chunk)
+                if on_bytes is not None:
+                    on_bytes(bytes_downloaded)
+        if expected_size is not None and bytes_downloaded != expected_size:
+            raise RuntimeError(
+                f"Downloaded size mismatch: expected {expected_size}, "
+                f"received {bytes_downloaded}"
+            )
+        tmp_path.replace(destination)
+    except Exception:
+        if tmp_path is not None:
+            tmp_path.unlink(missing_ok=True)
+        raise
+    return bytes_downloaded
+
+
 def download_file_to(
     url: str,
     destination: Path,
@@ -128,34 +167,9 @@ def download_file_to(
         if not 200 <= response.status_code < 300:
             body = response.read().decode("utf-8", errors="replace")[:500]
             raise DownloadHTTPError(response.status_code, body)
-
-        tmp_path: Path | None = None
-        bytes_downloaded = 0
-        try:
-            with tempfile.NamedTemporaryFile(
-                "wb",
-                delete=False,
-                dir=destination.parent,
-                prefix=f".{destination.name}.",
-                suffix=".partial",
-            ) as tmp_file:
-                tmp_path = Path(tmp_file.name)
-                for chunk in response.iter_bytes(DOWNLOAD_CHUNK_SIZE):
-                    if not chunk:
-                        continue
-                    tmp_file.write(chunk)
-                    bytes_downloaded += len(chunk)
-            if expected_size is not None and bytes_downloaded != expected_size:
-                raise RuntimeError(
-                    f"Downloaded size mismatch: expected {expected_size}, "
-                    f"received {bytes_downloaded}"
-                )
-            tmp_path.replace(destination)
-        except Exception:
-            if tmp_path is not None:
-                tmp_path.unlink(missing_ok=True)
-            raise
-    return bytes_downloaded
+        return _write_response_to_file(
+            response, destination, expected_size=expected_size
+        )
 
 
 def download_file(
@@ -196,32 +210,12 @@ def download_file(
             description="Downloading",
         )
 
-        tmp_path: Path | None = None
-        bytes_downloaded = 0
-        try:
-            with tempfile.NamedTemporaryFile(
-                "wb",
-                delete=False,
-                dir=destination.parent,
-                prefix=f".{destination.name}.",
-                suffix=".tmp",
-            ) as tmp_file:
-                tmp_path = Path(tmp_file.name)
-                with progress_ctx:
-                    for chunk in response.iter_bytes(DOWNLOAD_CHUNK_SIZE):
-                        if not chunk:
-                            continue
-                        tmp_file.write(chunk)
-                        bytes_downloaded += len(chunk)
-                        progress_cb(
-                            min(bytes_downloaded, progress_total), progress_total
-                        )
-
-            Path(tmp_path).replace(destination)
-            progress_cb(progress_total, progress_total)
-        except Exception:
-            if tmp_path is not None:
-                tmp_path.unlink(missing_ok=True)
-            raise
+        with progress_ctx:
+            _write_response_to_file(
+                response,
+                destination,
+                on_bytes=lambda n: progress_cb(min(n, progress_total), progress_total),
+            )
+        progress_cb(progress_total, progress_total)
 
     return destination

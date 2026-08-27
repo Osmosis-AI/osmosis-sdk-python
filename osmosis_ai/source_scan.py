@@ -7,8 +7,7 @@ resume across a code change. Keeping one traversal here means those two
 digests can never disagree about which files count -- only the width differs,
 since the packager truncates its cache key while eval stores a full SHA-256.
 
-This module must stay free of optional dependencies: ``osmosis_ai.packaging``
-requires the ``harbor`` extra and local evaluation must not.
+This module must stay free of optional dependencies: local evaluation imports it, and the Harbor bundle packager shares the same traversal.
 """
 
 from __future__ import annotations

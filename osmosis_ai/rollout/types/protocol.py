@@ -130,25 +130,6 @@ class RolloutCompleteRequest(BaseModel):
     err_category: RolloutErrorCategory | None = None
 
 
-class GraderInitRequest(BaseModel):
-    """Body of a POST to a remote grader endpoint.
-
-    A rollout produces a single sample (the agent's conversation), so this
-    carries that one sample directly rather than the legacy
-    ``dict[str, RolloutSample]``.
-    """
-
-    sample: RolloutSample
-    rollout_id: str | None = None
-    completion_callback_url: str
-
-    extra_fields: dict[str, Any] | None = None
-    controller_api_key: str | None = None
-
-
-class GraderInitResponse(BaseModel): ...
-
-
 class GraderStatus(StrEnum):
     PENDING = "pending"
     SUCCESS = "success"

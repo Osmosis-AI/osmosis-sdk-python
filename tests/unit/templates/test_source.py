@@ -7,7 +7,6 @@ import tarfile
 from pathlib import Path
 
 import pytest
-import requests
 
 from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.templates import source
@@ -94,11 +93,11 @@ def test_missing_override_path_uses_user_facing_template_terms(
 def test_download_failure_uses_user_facing_template_terms(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    def fail_get(*args, **kwargs):
+    def fail_urlopen(*args, **kwargs):
         del args, kwargs
-        raise requests.RequestException("offline")
+        raise source.URLError("offline")
 
-    monkeypatch.setattr(source.requests, "get", fail_get)
+    monkeypatch.setattr(source, "urlopen", fail_urlopen)
 
     with pytest.raises(CLIError) as exc_info:
         source._download_workspace_template(

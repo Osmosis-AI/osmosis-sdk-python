@@ -8,6 +8,8 @@ import subprocess
 import sys
 from typing import Any
 
+from packaging.version import Version
+
 from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.cli.output import OperationResult, OutputFormat, get_output_context
 from osmosis_ai.consts import PACKAGE_VERSION, package_name
@@ -18,25 +20,8 @@ PYPI_URL = f"https://pypi.org/pypi/{package_name}/json"
 def _is_up_to_date(installed: str, latest: str) -> bool:
     """Return True if installed >= latest using PEP 440 version comparison."""
     try:
-        from packaging.version import Version
-
         return Version(installed) >= Version(latest)
     except Exception:
-        # If packaging is unavailable or versions are unparseable,
-        # fall back to simple numeric tuple comparison.
-        pass
-
-    try:
-        installed_t = tuple(int(x) for x in installed.split("."))
-        latest_t = tuple(int(x) for x in latest.split("."))
-        # Pad shorter tuple with zeros to ensure correct comparison
-        # (e.g., "1.2" == "1.2.0")
-        max_len = max(len(installed_t), len(latest_t))
-        installed_t += (0,) * (max_len - len(installed_t))
-        latest_t += (0,) * (max_len - len(latest_t))
-        return installed_t >= latest_t
-    except (ValueError, AttributeError):
-        # Cannot reliably compare — assume an upgrade is needed.
         return False
 
 

@@ -20,8 +20,8 @@ osmosis_ai/
 │   ├── agent_workflow.py  # AgentWorkflow ABC
 │   ├── grader.py          # Grader ABC
 │   ├── context.py         # RolloutContext / AgentWorkflowContext / GraderContext
-│   ├── driver.py          # RolloutDriver / RolloutRunRequest — eval-facing execution contract
-│   ├── http_driver.py     # concrete HTTP driver over the callback protocol
+│   ├── driver.py          # RolloutOutcome / RolloutRunRequest — eval-facing execution types
+│   ├── http_driver.py     # HttpRolloutDriver over the callback protocol
 │   ├── controller/        # callback store (core); localhost listener + LiteLLM bridge (`[eval]`)
 │   ├── server/            # optional generic FastAPI server (`[server]`) + ControllerAuth
 │   ├── backend/           # ExecutionBackend ABC + Local / optional Harbor backend
@@ -36,7 +36,6 @@ osmosis_ai/
 ├── packaging.py       # Build an installable wheel bundle from a rollout project
 ├── __init__.py        # Top-level exports (lazy __getattr__)
 ├── _imports.py        # Lazy-export + missing-extra helpers shared by every facade
-├── _litellm_compat.py # LiteLLM import shim (used by eval/rubric/engine.py)
 └── consts.py          # PACKAGE_VERSION
 ```
 
@@ -76,7 +75,6 @@ CLI startup must stay fast (~150 ms vs ~1 s), so heavy dependencies load on firs
 - **Top-level package** — [../osmosis_ai/__init__.py](../osmosis_ai/__init__.py) resolves rubric exports (`evaluate_rubric`, `RubricResult`, error types) through `__getattr__`. Only `__version__` is eager.
 - **Command shells** — every file in [../osmosis_ai/cli/commands/](../osmosis_ai/cli/commands/) uses function-level imports for heavy deps (`rollout.*`, `platform.api.*`, `platform.cli.*`, `eval.*`, `cli.console`). Module-level imports stay light: `typer`, `cli.errors`, the lightweight `platform.constants`, and stdlib.
 - **No eager `cli.main`** — [../osmosis_ai/cli/__init__.py](../osmosis_ai/cli/__init__.py) does not import `cli.main`, which prevents circular imports when rollout/server modules import `cli.console`. The entry point is `osmosis_ai.cli.main:main` directly.
-- **`_litellm_compat.py`** stays at the package top level because `eval/rubric/` depends on it.
 
 ## Remote rollout protocol
 
@@ -110,7 +108,7 @@ The controller delivers results asynchronously via the two callback URLs, so it 
 
 ### Eval path
 
-The eval-facing contract is `RolloutDriver` / `RolloutRunRequest` / `RolloutOutcome` in [../osmosis_ai/rollout/driver.py](../osmosis_ai/rollout/driver.py). The optional HTTP implementation is [../osmosis_ai/rollout/http_driver.py](../osmosis_ai/rollout/http_driver.py), with a generic callback store and localhost listener under [../osmosis_ai/rollout/controller/](../osmosis_ai/rollout/controller/). The store exposes a single `wait_terminal` rendezvous; a completion callback is recorded on the live session for duplicate detection but is not awaited separately. Eval supplies data + an LLM endpoint and consumes trace + reward, without caring whether execution was in-process or over HTTP.
+The eval-facing types are `RolloutRunRequest` / `RolloutOutcome` in [../osmosis_ai/rollout/driver.py](../osmosis_ai/rollout/driver.py). The HTTP implementation is [../osmosis_ai/rollout/http_driver.py](../osmosis_ai/rollout/http_driver.py), with a generic callback store and localhost listener under [../osmosis_ai/rollout/controller/](../osmosis_ai/rollout/controller/). The store exposes a single `wait_terminal` rendezvous; a completion callback is recorded on the live session for duplicate detection but is not awaited separately. Eval supplies data + an LLM endpoint and consumes trace + reward.
 
 ## Backend validation
 

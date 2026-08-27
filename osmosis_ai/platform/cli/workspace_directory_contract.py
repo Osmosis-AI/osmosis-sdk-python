@@ -42,11 +42,6 @@ def resolve_workspace_directory(start: Path | None = None) -> Path:
     return workspace_directory.resolve()
 
 
-def resolve_workspace_directory_from_cwd(cwd: Path | None = None) -> Path:
-    """Resolve the active Osmosis workspace directory from cwd's Git worktree."""
-    return resolve_workspace_directory(cwd or Path.cwd())
-
-
 def missing_workspace_directory_paths(workspace_directory: Path) -> list[str]:
     workspace_directory = workspace_directory.resolve()
     return [
@@ -291,7 +286,6 @@ __all__ = [
     "find_workspace_directory",
     "missing_workspace_directory_paths",
     "resolve_workspace_directory",
-    "resolve_workspace_directory_from_cwd",
     "validate_rollout_backend",
     "validate_workspace_directory_contract",
 ]

@@ -14,10 +14,11 @@ from .result import (
     ListColumn,
     ListResult,
     ListSection,
-    MessageResult,
     OperationResult,
     SectionedListResult,
 )
+
+_JSON_SCHEMA_VERSION = 1
 
 _RICH_STYLE_TAG_RE = re.compile(
     r"\[/?(?:bold|dim|italic|underline|blink|reverse|strike|"
@@ -47,9 +48,9 @@ def _list_page_payload(source: ListResult | ListSection) -> dict[str, Any]:
     }
 
 
-def _envelope_list(result: ListResult, *, schema_version: int) -> dict[str, Any]:
+def _envelope_list(result: ListResult) -> dict[str, Any]:
     payload: dict[str, Any] = {
-        "schema_version": schema_version,
+        "schema_version": _JSON_SCHEMA_VERSION,
         **_list_page_payload(result),
     }
     return _merge_extra(
@@ -59,10 +60,8 @@ def _envelope_list(result: ListResult, *, schema_version: int) -> dict[str, Any]
     )
 
 
-def _envelope_sectioned_list(
-    result: SectionedListResult, *, schema_version: int
-) -> dict[str, Any]:
-    payload: dict[str, Any] = {"schema_version": schema_version}
+def _envelope_sectioned_list(result: SectionedListResult) -> dict[str, Any]:
+    payload: dict[str, Any] = {"schema_version": _JSON_SCHEMA_VERSION}
     for section in result.sections:
         payload[section.key] = _list_page_payload(section)
     return _merge_extra(
@@ -72,18 +71,16 @@ def _envelope_sectioned_list(
     )
 
 
-def _envelope_detail(result: DetailResult, *, schema_version: int) -> dict[str, Any]:
+def _envelope_detail(result: DetailResult) -> dict[str, Any]:
     return {
-        "schema_version": schema_version,
+        "schema_version": _JSON_SCHEMA_VERSION,
         "data": result.data,
     }
 
 
-def _envelope_operation(
-    result: OperationResult, *, schema_version: int
-) -> dict[str, Any]:
+def _envelope_operation(result: OperationResult) -> dict[str, Any]:
     payload: dict[str, Any] = {
-        "schema_version": schema_version,
+        "schema_version": _JSON_SCHEMA_VERSION,
         "status": result.status,
         "operation": result.operation,
     }
@@ -107,32 +104,20 @@ def _envelope_operation(
     )
 
 
-def _envelope_message(result: MessageResult, *, schema_version: int) -> dict[str, Any]:
-    payload: dict[str, Any] = {
-        "schema_version": schema_version,
-        "message": result.message,
-    }
-    return _merge_extra(payload, result.extra, reserved={"schema_version", "message"})
-
-
-def _build_json_envelope(
-    result: CommandResult, *, schema_version: int
-) -> dict[str, Any]:
+def _build_json_envelope(result: CommandResult) -> dict[str, Any]:
     if isinstance(result, ListResult):
-        return _envelope_list(result, schema_version=schema_version)
+        return _envelope_list(result)
     if isinstance(result, SectionedListResult):
-        return _envelope_sectioned_list(result, schema_version=schema_version)
+        return _envelope_sectioned_list(result)
     if isinstance(result, DetailResult):
-        return _envelope_detail(result, schema_version=schema_version)
+        return _envelope_detail(result)
     if isinstance(result, OperationResult):
-        return _envelope_operation(result, schema_version=schema_version)
-    if isinstance(result, MessageResult):
-        return _envelope_message(result, schema_version=schema_version)
+        return _envelope_operation(result)
     raise TypeError(f"Unsupported CommandResult: {type(result).__name__}")
 
 
 def _render_json(result: CommandResult, output: OutputContext) -> None:
-    envelope = _build_json_envelope(result, schema_version=output.schema_version)
+    envelope = _build_json_envelope(result)
     sys.stdout.write(dump_cli_json(envelope))
     sys.stdout.write("\n")
     sys.stdout.flush()
@@ -224,7 +209,7 @@ def _can_protect_primary_column(
 
 
 def _write_plain_list_rows(source: ListResult | ListSection) -> None:
-    cols = [column for column in source.columns if column.plain]
+    cols = source.columns
     display_items = _display_items(source)
     for idx, item in enumerate(display_items):
         raw_item = source.items[idx] if idx < len(source.items) else {}
@@ -268,10 +253,6 @@ def _render_plain(result: CommandResult, output: OutputContext) -> None:
         sys.stdout.write(_normalise_plain_value(line) + "\n")
         for hint in result.display_next_steps:
             sys.stdout.write(_normalise_plain_value(hint) + "\n")
-        return
-
-    if isinstance(result, MessageResult):
-        sys.stdout.write(_normalise_plain_value(result.message) + "\n")
         return
 
     raise TypeError(f"Unsupported CommandResult: {type(result).__name__}")
@@ -369,10 +350,6 @@ def _render_rich(result: CommandResult, output: OutputContext) -> None:
             console.rich.print(_rich_text(result.message, style=style))
         for hint in result.display_next_steps:
             console.rich.print(_rich_text(hint, style="dim"))
-        return
-
-    if isinstance(result, MessageResult):
-        console.rich.print(_rich_text(result.message))
         return
 
     raise TypeError(f"Unsupported CommandResult: {type(result).__name__}")

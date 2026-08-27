@@ -29,10 +29,12 @@ from osmosis_ai.platform.auth.platform_client import (
 )
 from osmosis_ai.platform.cli.eval_config import (
     load_eval_submit_config,
-    validate_eval_submit_context_paths,
 )
 from osmosis_ai.platform.cli.secret_resolution import resolve_run_secrets
-from osmosis_ai.platform.cli.shared_config import build_submit_summary_rows
+from osmosis_ai.platform.cli.shared_config import (
+    build_submit_summary_rows,
+    validate_workspace_rollout_paths,
+)
 from osmosis_ai.platform.cli.utils import require_git_workspace_directory_context
 from osmosis_ai.platform.cli.workspace_directory_context import git_result_context
 from osmosis_ai.platform.cli.workspace_directory_contract import (
@@ -332,7 +334,12 @@ def run(
     config = load_eval_submit_config(resolved_config_path)
     # Path contract only: the rollout runs in its own uv-resolved environment, so
     # importing it here would validate the wrong dependency set.
-    validate_eval_submit_context_paths(config, workspace_directory)
+    validate_workspace_rollout_paths(
+        rollout=config.experiment_rollout,
+        entrypoint=config.experiment_entrypoint,
+        workspace_directory=workspace_directory,
+        command_label="Evaluation",
+    )
 
     evaluation = config.evaluation_config
     # ``or 1.0`` would turn a configured 0.0 -- "every graded row passes" -- into

@@ -30,7 +30,6 @@ class OutputContext:
 
     format: OutputFormat
     interactive: bool
-    schema_version: int = 1
     output_emitted: bool = False
 
     @contextmanager

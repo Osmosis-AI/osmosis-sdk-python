@@ -40,7 +40,7 @@ def test_write_scaffold_creates_repair_paths(
 ) -> None:
     target = _make_existing_project(tmp_path / "project")
 
-    write_scaffold(target, "project")
+    write_scaffold(target)
 
     assert not (target / ".osmosis" / "project.toml").exists()
     assert not (target / ".osmosis" / "cache").exists()
@@ -65,7 +65,7 @@ def test_write_scaffold_does_not_overwrite_existing_files(
     tmp_path: Path,
 ) -> None:
     target = _make_existing_project(tmp_path / "project")
-    write_scaffold(target, "project")
+    write_scaffold(target)
 
     existing_files = {
         "rollouts/.gitkeep": "custom marker",
@@ -76,7 +76,7 @@ def test_write_scaffold_does_not_overwrite_existing_files(
     for rel_path, content in existing_files.items():
         (target / rel_path).write_text(content, encoding="utf-8")
 
-    write_scaffold(target, "project")
+    write_scaffold(target)
 
     for rel_path, content in existing_files.items():
         assert (target / rel_path).read_text(encoding="utf-8") == content
@@ -90,7 +90,7 @@ def test_write_scaffold_rejects_broken_symlinked_official_file(
     (target / "AGENTS.md").symlink_to(outside_file)
 
     with pytest.raises(CLIError) as exc_info:
-        write_scaffold(target, "project")
+        write_scaffold(target)
 
     assert exc_info.value.code == "CONFLICT"
     assert "AGENTS.md" in str(exc_info.value)
@@ -101,7 +101,7 @@ def test_write_scaffold_update_does_not_overwrite_agent_files(
     tmp_path: Path,
 ) -> None:
     target = _make_existing_project(tmp_path / "project")
-    write_scaffold(target, "project")
+    write_scaffold(target)
 
     refreshed_files = {
         "AGENTS.md": "custom agents",
@@ -114,7 +114,7 @@ def test_write_scaffold_update_does_not_overwrite_agent_files(
     for rel_path, content in {**refreshed_files, **preserved_files}.items():
         (target / rel_path).write_text(content, encoding="utf-8")
 
-    write_scaffold(target, "project", update=True)
+    write_scaffold(target)
 
     for rel_path, content in refreshed_files.items():
         assert (target / rel_path).read_text(encoding="utf-8") == content
@@ -129,7 +129,7 @@ def test_write_scaffold_missing_official_file_uses_user_facing_template_terms(
     target = _make_existing_project(tmp_path / "project")
 
     with pytest.raises(CLIError) as exc_info:
-        write_scaffold(target, "project")
+        write_scaffold(target)
 
     message = str(exc_info.value).lower()
     assert "template source is missing an official agent scaffold file" in message

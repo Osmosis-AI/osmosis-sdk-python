@@ -2,8 +2,8 @@
 
 Two callers need it: the Harbor bundle packager builds wheels with it, and
 local evaluation launches the rollout server through it. It lives here rather
-than in ``osmosis_ai.packaging`` because that module requires the ``harbor``
-extra, and local evaluation must not.
+than in ``osmosis_ai.packaging`` so local evaluation does not import the
+bundle builder.
 """
 
 from __future__ import annotations

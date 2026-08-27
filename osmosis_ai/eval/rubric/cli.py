@@ -172,12 +172,27 @@ class RubricCommand:
             and getattr(sys.stderr, "isatty", lambda: False)()
         )
         progress = None
+        progress_task = None
         if show_progress:
-            from tqdm import tqdm
-
-            progress = tqdm(
-                total=total, file=sys.stderr, dynamic_ncols=True, leave=False
+            from rich.console import Console as RichConsole
+            from rich.progress import (
+                BarColumn,
+                MofNCompleteColumn,
+                Progress,
+                SpinnerColumn,
+                TextColumn,
             )
+
+            progress = Progress(
+                SpinnerColumn(),
+                TextColumn("[progress.description]{task.description}"),
+                BarColumn(),
+                MofNCompleteColumn(),
+                console=RichConsole(file=sys.stderr, highlight=False),
+                transient=True,
+            )
+            progress.start()
+            progress_task = progress.add_task("Evaluating", total=total)
 
         # Cap concurrency to avoid overwhelming the LLM provider.
         sem = asyncio.Semaphore(8)
@@ -209,8 +224,8 @@ class RubricCommand:
                 ) as exc:
                     return None, None, str(exc)
                 finally:
-                    if progress:
-                        progress.update()
+                    if progress is not None and progress_task is not None:
+                        progress.update(progress_task, advance=1)
 
         # Flatten all (record, run_index) pairs into concurrent tasks so that
         # number > 1 runs are truly parallel, not serialized per record.
@@ -219,8 +234,8 @@ class RubricCommand:
         try:
             flat_results = await asyncio.gather(*tasks)
         finally:
-            if progress:
-                progress.close()
+            if progress is not None:
+                progress.stop()
 
         results: list[RecordResult] = []
         for idx, record in enumerate(records):

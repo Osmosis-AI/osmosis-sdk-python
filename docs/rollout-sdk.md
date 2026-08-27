@@ -30,7 +30,7 @@ Optional features use these canonical modules:
 
 The `Messages` return type is available from `osmosis_ai.rollout.types`.
 
-The `harbor` extra installs plain Harbor for an externally provided SkyPilot runtime. Daytona is retired, and do not install Harbor's `skypilot` extra. It is a host-side extra: it also carries `uv` and the other dependencies [../osmosis_ai/packaging.py](../osmosis_ai/packaging.py) needs to build the bundle wheel. Inside the task container only the framework-neutral core runs, so a bundle never installs the `harbor` extra — which is why the in-container runner and ATIF persistence must work on a bare install.
+The `harbor` extra installs plain Harbor for an externally provided SkyPilot runtime. Daytona is retired, and do not install Harbor's `skypilot` extra. It is a host-side extra: it also carries `uv`, which [../osmosis_ai/packaging.py](../osmosis_ai/packaging.py) uses to build the bundle wheel. Inside the task container only the framework-neutral core runs, so a bundle never installs the `harbor` extra — which is why the in-container runner and ATIF persistence must work on a bare install.
 
 ## AgentWorkflow
 
@@ -241,13 +241,13 @@ app = create_rollout_server(backend=backend, lifespan=backend.prewarm_lifespan()
 - `prewarm()` builds every task image and runs agent setup before the server accepts traffic; `prewarm_lifespan()` wraps it as an ASGI lifespan.
 - `max_queue_depth` bounds admission (`has_capacity()`), and `cancel_rollouts()` cancels queued or running rollouts by id, prefix, or all.
 - Keep Harbor's `TrialQueue` at its default `RetryConfig(max_retries=0)`. The SDK treats Harbor's `END` event as the terminal rollout result, so queue-level attempt retries are not supported; resubmit with a new rollout id if controller-level retry is required.
-- Bundle wheels are content-addressed and retained under `platformdirs.user_cache_path("osmosis") / "bundles"` (by default `~/Library/Caches/osmosis/bundles` on macOS and `~/.cache/osmosis/bundles` on Linux; Windows and environment overrides follow `platformdirs`). The SDK does not prune them automatically; stop rollout servers before deleting that directory to reclaim space.
+- Bundle wheels are content-addressed and retained under the per-user cache (`~/Library/Caches/osmosis/bundles` on macOS, `~/.cache/osmosis/bundles` on Linux, `%LOCALAPPDATA%\osmosis\Cache\bundles` on Windows). The SDK does not prune them automatically; stop rollout servers before deleting that directory to reclaim space.
 
 #### Migrating from the pre-v0.3 Harbor backend
 
 v0.3 removed the original Harbor backend and gave its name to the implementation that had been called `HarborBackendV2`. The old one mounted the SDK and your source tree into the task environment and ran the workflow through an installed-agent adapter; `HarborBackend` builds a wheel from your project instead, so task images stay pure task environments.
 
-Note that `HarborBackend` still resolves — with a different constructor. A call site passing the old keywords raises a `TypeError` naming them and pointing here; port it with this table:
+Note that `HarborBackend` still resolves — with a different constructor. Port a pre-v0.3 call site with this table:
 
 | Pre-v0.3 | v0.3 |
 |----------|------|

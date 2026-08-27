@@ -10,7 +10,7 @@ from osmosis_ai.platform.cli import workspace_directory_contract
 from osmosis_ai.platform.cli.workspace_directory_contract import (
     ensure_context_path,
     ensure_workspace_directory_config_path,
-    resolve_workspace_directory_from_cwd,
+    resolve_workspace_directory,
     validate_workspace_directory_contract,
 )
 
@@ -67,7 +67,7 @@ def test_resolve_workspace_directory_from_cwd_uses_git_top_level(
     project = _make_workspace_directory(tmp_path / "project")
     monkeypatch.chdir(project / "configs")
 
-    assert resolve_workspace_directory_from_cwd() == project.resolve()
+    assert resolve_workspace_directory() == project.resolve()
 
 
 def test_resolve_workspace_directory_from_cwd_reports_missing_workspace_directory(
@@ -76,7 +76,7 @@ def test_resolve_workspace_directory_from_cwd_reports_missing_workspace_director
     monkeypatch.chdir(tmp_path)
 
     with pytest.raises(CLIError) as exc:
-        resolve_workspace_directory_from_cwd()
+        resolve_workspace_directory()
 
     assert "Osmosis workspace directory created by Platform" in str(exc.value)
     assert exc.value.code == "WORKSPACE_REQUIRED"

@@ -27,11 +27,9 @@ EXTRA_MODULES: Final[Mapping[str, frozenset[str]]] = {
             "harbor",
             "litellm",
             "orjson",
-            "platformdirs",
-            "toml",
         }
     ),
-    "rubric": frozenset({"aiohttp", "click", "litellm", "orjson", "tqdm"}),
+    "rubric": frozenset({"aiohttp", "click", "litellm", "orjson"}),
     "parquet": frozenset({"pyarrow"}),
     "eval": frozenset({"click", "fastapi", "litellm", "pyarrow", "uvicorn"}),
 }

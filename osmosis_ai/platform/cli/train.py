@@ -123,38 +123,29 @@ def _submit_training(
     )
 
 
-def _train_next_steps(
-    result: SubmitRunResult, config: TrainSubmitConfig
-) -> tuple[list[str], list[dict[str, Any]]]:
-    display = [
-        f"Status: {result.status}",
-        f"Rollout: {config.experiment_rollout}",
-        f"Model: {config.experiment_model_path}",
-        f"Dataset: {config.experiment_dataset}",
-        (
-            f"View: {result.platform_url}"
-            if result.platform_url
-            else f"Check status with: osmosis train info {result.name}"
-        ),
-    ]
-    structured: list[dict[str, Any]] = [
-        {"action": "train_info", "name": result.name},
-        {"action": "train_list"},
-    ]
-    if result.platform_url:
-        structured.append({"action": "open_url", "url": result.platform_url})
-    return display, structured
+def _validate_train_context(
+    config: TrainSubmitConfig, workspace_directory: Path
+) -> None:
+    from osmosis_ai.platform.cli.shared_config import validate_workspace_rollout_paths
+
+    validate_workspace_rollout_paths(
+        rollout=config.experiment_rollout,
+        entrypoint=config.experiment_entrypoint,
+        workspace_directory=workspace_directory,
+        command_label="Training",
+    )
 
 
 def submit(
     config_path: Path, *, yes: bool, secrets_file: str | None = None
 ) -> OperationResult:
     """Submit a new training run."""
-    from osmosis_ai.platform.cli.shared_submit import CloudSubmitSpec, run_cloud_submit
-    from osmosis_ai.platform.cli.training_config import (
-        load_train_submit_config,
-        validate_train_submit_context_paths,
+    from osmosis_ai.platform.cli.shared_submit import (
+        CloudSubmitSpec,
+        run_cloud_submit,
+        submit_next_steps,
     )
+    from osmosis_ai.platform.cli.training_config import load_train_submit_config
 
     spec = CloudSubmitSpec(
         config_dir="configs/training",
@@ -165,9 +156,11 @@ def submit(
         operation="train.submit",
         success_message_format="Training run submitted: {name}",
         load_config=load_train_submit_config,
-        validate_context=validate_train_submit_context_paths,
+        validate_context=_validate_train_context,
         submit=_submit_training,
-        build_next_steps=_train_next_steps,
+        build_next_steps=lambda result, config: submit_next_steps(
+            result, config, verb="train"
+        ),
     )
     return run_cloud_submit(config_path, yes=yes, spec=spec, secrets_file=secrets_file)
 

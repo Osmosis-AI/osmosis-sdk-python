@@ -33,7 +33,6 @@ BASE_REQUIREMENTS = {
     "pydantic",
     "python-dotenv",
     "questionary",
-    "requests",
     "rich",
     "typer",
 }
@@ -63,11 +62,9 @@ EXTRA_REQUIREMENTS: dict[str, set[str]] = {
         "harbor",
         "litellm",
         "orjson",
-        "platformdirs",
-        "toml",
         "uv",
     },
-    "rubric": {"aiohttp", "click", "litellm", "orjson", "tqdm"},
+    "rubric": {"aiohttp", "click", "litellm", "orjson"},
     "parquet": {"pyarrow"},
     # eval = osmosis-ai[server,parquet] self-reference + the in-process
     # LiteLLM bridge and the uv executable used to launch rollout environments.
@@ -199,13 +196,11 @@ BARE_IMPORTABLE_MODULES = (
     "osmosis_ai.rollout.utils.ttl_cache",
     "osmosis_ai.rollout.controller.store",
     "osmosis_ai.rollout.http_driver",
+    "osmosis_ai.packaging",
 )
 
 # Leaf modules that must stay unimportable until their extra is installed.
-# osmosis_ai.packaging only ever builds the bundle wheel Harbor installs in a
-# task container, so it is harbor territory despite its top-level name.
 EXTRA_ONLY_MODULES = (
-    "osmosis_ai.packaging",
     "osmosis_ai.rollout.backend.harbor.backend",
     "osmosis_ai.rollout.backend.harbor.tasks",
     "osmosis_ai.rollout.integrations.agents.openai_agents",
@@ -223,9 +218,7 @@ def _assert_extra_only_modules_absent() -> None:
         try:
             importlib.import_module(module_name)
         except ModuleNotFoundError as error:
-            if module_name == "osmosis_ai.packaging":
-                assert 'pip install "osmosis-ai[harbor]"' in str(error), str(error)
-            elif module_name in (
+            if module_name in (
                 "osmosis_ai.rollout.controller.listener",
                 "osmosis_ai.rollout.controller.llm_bridge",
             ):
@@ -303,11 +296,10 @@ def _smoke_harbor() -> None:
         "osmosis_ai.rollout.backend.harbor",
         ("HarborBackend", "TaskMode"),
     )
-    # The bundle builder is what installs a rollout project inside the task
-    # container, so the harbor extra must carry its TOML writer.
+    # The bundle builder lives in the base install; harbor supplies uv for
+    # the isolated wheel build.
     packaging = importlib.import_module("osmosis_ai.packaging")
     assert callable(packaging.build_bundle)
-    importlib.import_module("toml")
     uv_executable = Path(sysconfig.get_path("scripts")) / (
         "uv.exe" if os.name == "nt" else "uv"
     )
@@ -362,8 +354,8 @@ SCENARIO_PRESENT: dict[str, set[str]] = {
     "server": {"fastapi", "uvicorn"},
     "strands": {"litellm", "strands-agents"},
     "openai-agents": {"litellm", "openai-agents"},
-    "harbor": {"dockerfile-parse", "harbor", "platformdirs", "toml", "uv"},
-    "rubric": {"litellm", "orjson", "tqdm"},
+    "harbor": {"dockerfile-parse", "harbor", "uv"},
+    "rubric": {"litellm", "orjson"},
     "parquet": {"pyarrow"},
     "eval": {"fastapi", "litellm", "pyarrow", "uv", "uvicorn"},
     "full": {
@@ -373,11 +365,8 @@ SCENARIO_PRESENT: dict[str, set[str]] = {
         "litellm",
         "openai-agents",
         "orjson",
-        "platformdirs",
         "pyarrow",
         "strands-agents",
-        "toml",
-        "tqdm",
         "uv",
         "uvicorn",
     },
@@ -433,7 +422,7 @@ SCENARIO_ABSENT: dict[str, set[str]] = {
         "toml",
         "uv",
     },
-    "harbor": {"openai-agents", "pyarrow", "strands-agents"},
+    "harbor": {"openai-agents", "platformdirs", "pyarrow", "strands-agents", "toml"},
     "rubric": {
         "dockerfile-parse",
         "fastapi",

@@ -296,21 +296,6 @@ class Trajectory(_ATIFModel):
                     )
         return self
 
-    def has_multimodal_content(self) -> bool:
-        """Return whether any step or observation contains an image."""
-        for step in self.steps:
-            if isinstance(step.message, list) and any(
-                part.type == "image" for part in step.message
-            ):
-                return True
-            if step.observation is not None:
-                for result in step.observation.results:
-                    if isinstance(result.content, list) and any(
-                        part.type == "image" for part in result.content
-                    ):
-                        return True
-        return False
-
 
 _NUMERIC_ARRAY_PATTERN = re.compile(
     r"\[\s*\n\s*-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?"
