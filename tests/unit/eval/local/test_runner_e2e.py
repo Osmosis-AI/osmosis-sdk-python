@@ -724,6 +724,7 @@ class _FakeTunnel:
         import asyncio
 
         self._local_url = local_url
+        self.on_spawn = _hooks.get("on_spawn")
         self._exited = asyncio.Event()
         self._returncode: int | None = None
         self.stopped = False
@@ -762,6 +763,7 @@ async def test_tunnel_mode_runs_the_full_path_and_stops_the_tunnel(
     assert summary.succeeded == 4
     (tunnel,) = _FakeTunnel.instances
     assert tunnel.stopped
+    assert callable(tunnel.on_spawn)
     assert any("tunnel ready" in stage for stage in harness.hooks.stages)
 
 
