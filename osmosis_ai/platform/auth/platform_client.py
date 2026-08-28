@@ -302,6 +302,13 @@ _REPO_SCOPE_ERROR_MESSAGES: dict[str, str] = {
         "Platform-connected repository or run `osmosis auth login` with the "
         "correct account."
     ),
+    "WORKSPACE_SCOPE_HEADER_CONFLICT": (
+        "Specify either a Git workspace or `--workspace`, not both."
+    ),
+    "WORKSPACE_SCOPE_HEADER_ACCESS_DENIED": (
+        "Platform could not resolve the selected workspace, or your account does "
+        "not have access to it. Check `--workspace` and the logged-in account."
+    ),
 }
 
 _REPO_SCOPE_RENAME_DIAGNOSTIC_CODES = {
@@ -315,7 +322,12 @@ def _reject_reserved_headers(headers: dict[str, str] | None) -> None:
         return
     # Workspace scope and CLI version are derived from local state; callers must
     # not override them. Compared case-insensitively since HTTP header names are.
-    reserved = {"x-osmosis-org", "x-osmosis-git", "x-osmosis-cli-version"}
+    reserved = {
+        "x-osmosis-org",
+        "x-osmosis-git",
+        "x-osmosis-workspace",
+        "x-osmosis-cli-version",
+    }
     supplied = {name.casefold() for name in headers}
     if supplied & reserved:
         raise PlatformAPIError(
@@ -536,12 +548,20 @@ def _prepare_platform_request(
     url = f"{get_platform_url()}{endpoint}"
     req_headers = cli_request_headers(token=credentials.access_token)
     if require_git_repo:
-        if not git_identity:
-            raise PlatformAPIError(
-                "Git-scoped platform requests require an explicit git_identity.",
-                error_code="GIT_SCOPE_HEADER_REQUIRED",
-            )
-        req_headers["X-Osmosis-Git"] = git_identity
+        if git_identity:
+            req_headers["X-Osmosis-Git"] = git_identity
+        else:
+            from osmosis_ai.platform.workspace_scope import get_workspace_name
+
+            workspace_name = get_workspace_name()
+            if workspace_name is not None:
+                req_headers["X-Osmosis-Workspace"] = workspace_name
+            else:
+                raise PlatformAPIError(
+                    "Workspace-scoped platform requests require an explicit "
+                    "git_identity or root --workspace option.",
+                    error_code="GIT_SCOPE_HEADER_REQUIRED",
+                )
     if headers:
         req_headers.update(headers)
 
@@ -569,10 +589,11 @@ def platform_request(
         timeout: Request timeout in seconds
         credentials: Optional explicit credentials override. If not provided,
             uses credentials from local storage.
-        git_identity: Explicit Git repository identity for X-Osmosis-Git header
-            when require_git_repo is True.
-        require_git_repo: If True, requires a Git repository context and adds
-            X-Osmosis-Git header. If False, omits repository scope.
+        git_identity: Explicit Git repository identity for X-Osmosis-Git. When
+            omitted, the active root --workspace selection supplies
+            X-Osmosis-Workspace instead.
+        require_git_repo: If True, requires Git identity or an explicit workspace
+            selection and adds exactly one scope header. If False, omits scope.
     Returns:
         Parsed JSON response
 

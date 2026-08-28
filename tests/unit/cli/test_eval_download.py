@@ -55,6 +55,11 @@ def _stub_git_context(monkeypatch: pytest.MonkeyPatch, workspace: Path) -> objec
         "require_git_workspace_directory_context",
         lambda: context,
     )
+    monkeypatch.setattr(
+        eval_module,
+        "require_platform_workspace_context",
+        lambda: context,
+    )
     return credentials
 
 

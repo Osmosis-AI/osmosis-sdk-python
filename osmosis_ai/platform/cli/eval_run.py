@@ -36,7 +36,11 @@ from osmosis_ai.platform.cli.shared_config import (
     validate_workspace_rollout_paths,
 )
 from osmosis_ai.platform.cli.utils import require_git_workspace_directory_context
-from osmosis_ai.platform.cli.workspace_directory_context import git_result_context
+from osmosis_ai.platform.cli.workspace_directory_context import (
+    git_result_context,
+    local_result_context,
+    resolve_local_workspace_directory_context,
+)
 from osmosis_ai.platform.cli.workspace_directory_contract import (
     ensure_workspace_directory_config_path,
     validate_workspace_directory_contract,
@@ -327,7 +331,15 @@ def run(
     except ModuleNotFoundError as exc:
         raise _missing_extra_error(exc) from exc
 
-    context = require_git_workspace_directory_context()
+    needs_platform = dataset_file is None or upload
+    if needs_platform:
+        platform_context = require_git_workspace_directory_context()
+        context = platform_context
+        result_context = git_result_context(platform_context)
+    else:
+        platform_context = None
+        context = resolve_local_workspace_directory_context()
+        result_context = local_result_context(context)
     workspace_directory = context.workspace_directory
     validate_workspace_directory_contract(workspace_directory)
 
@@ -393,9 +405,12 @@ def run(
                 parse_cli_path(dataset_file, expand_user=True).path
             )
         else:
+            if platform_context is None:
+                raise RuntimeError("platform dataset requires an authenticated context")
             cache = DatasetCache(default_dataset_cache_root())
             fetcher = PlatformDatasetFetcher(
-                credentials=context.credentials, git_identity=context.git_identity
+                credentials=platform_context.credentials,
+                git_identity=platform_context.git_identity,
             )
             with get_output_context().status("Resolving dataset..."):
                 dataset = resolve_platform_dataset(
@@ -449,10 +464,12 @@ def run(
         from osmosis_ai.platform.cli.eval_upload import upload_plan
 
         hooks.display.close()
+        if platform_context is None:
+            raise RuntimeError("upload callback requires an authenticated context")
         retry = _upload_command(summary.run_dir)
         try:
             imported = upload_plan(
-                build_eval_upload_plan(summary.run_dir), context=context
+                build_eval_upload_plan(summary.run_dir), context=platform_context
             )
         except KeyboardInterrupt as exc:
             raise CLIError(
@@ -515,7 +532,7 @@ def run(
     _print_summary(summary)
     return _result(
         summary,
-        context=context,
+        result_context=result_context,
         config_path=config_path,
         dataset_source=dataset.source,
         imported=imported,
@@ -661,7 +678,7 @@ def _upload_command(run_dir: Path) -> str:
 def _result(
     summary: Any,
     *,
-    context: Any,
+    result_context: dict[str, object],
     config_path: Path,
     dataset_source: str,
     imported: Any | None = None,
@@ -694,7 +711,7 @@ def _result(
             for failure in summary.failures
         ],
     }
-    resource.update(git_result_context(context))
+    resource.update(result_context)
     if imported is not None:
         resource["upload"] = {
             "session_id": imported.session_id,

@@ -46,7 +46,7 @@ def _stub_git_context(monkeypatch: pytest.MonkeyPatch) -> object:
     )
     monkeypatch.setattr(
         dataset_module,
-        "require_git_workspace_directory_context",
+        "require_platform_workspace_context",
         lambda: context,
     )
     return fake_credentials

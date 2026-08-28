@@ -33,7 +33,7 @@ from osmosis_ai.platform.auth import (
     AuthenticationExpiredError,
     PlatformAPIError,
 )
-from osmosis_ai.platform.cli.workspace_directory_context import git_result_context
+from osmosis_ai.platform.cli.workspace_directory_context import workspace_result_context
 from osmosis_ai.platform.constants import (
     DEFAULT_PAGE_SIZE,
     MAX_FILE_SIZE,
@@ -49,7 +49,7 @@ from .utils import (
     format_dataset_status,
     format_size,
     platform_call,
-    require_git_workspace_directory_context,
+    require_platform_workspace_context,
 )
 
 
@@ -57,7 +57,7 @@ def _abort_upload(
     client: Any,
     dataset_id: str,
     *,
-    git_identity: str,
+    git_identity: str | None,
     credentials: Any | None = None,
 ) -> None:
     """Best-effort abort of an in-progress upload."""
@@ -96,7 +96,7 @@ def _complete_with_retry(
     parts: list[dict] | None = None,
     *,
     file_extension: str | None = None,
-    git_identity: str,
+    git_identity: str | None,
     credentials: Any | None = None,
 ) -> Any:
     """Call ``client.complete_upload`` with automatic retry on transient errors.
@@ -207,7 +207,7 @@ def _create_dataset_for_upload(
     file_size: int,
     ext: str,
     overwrite: bool,
-    git_identity: str,
+    git_identity: str | None,
     credentials: Any | None = None,
 ) -> Any:
     """Create the dataset record, retrying with overwrite when explicitly requested."""
@@ -254,7 +254,7 @@ def _perform_upload(
     file_path: Path,
     ext: str,
     file_size: int,
-    git_identity: str,
+    git_identity: str | None,
     credentials: Any | None = None,
     overwrite: bool = False,
 ) -> Any:
@@ -373,7 +373,7 @@ def upload(
     yes: bool = False,
 ) -> CommandResult:
     """Upload a dataset file."""
-    context = require_git_workspace_directory_context()
+    context = require_platform_workspace_context()
     credentials = context.credentials
     git_identity = context.git_identity
 
@@ -416,7 +416,7 @@ def upload(
     )
 
     resource = serialize_dataset(dataset)
-    resource.update(git_result_context(context))
+    resource.update(workspace_result_context(context))
     display_next_steps = [
         (
             f"Processing will continue on the platform. Check status at: {dataset.platform_url}"
@@ -449,7 +449,7 @@ def list_datasets(limit: int = DEFAULT_PAGE_SIZE, all_: bool = False) -> Command
 
     effective_limit, fetch_all = validate_list_options(limit=limit, all_=all_)
 
-    context = require_git_workspace_directory_context()
+    context = require_platform_workspace_context()
     credentials = context.credentials
     git_identity = context.git_identity
     from osmosis_ai.platform.api.client import OsmosisClient
@@ -475,7 +475,7 @@ def list_datasets(limit: int = DEFAULT_PAGE_SIZE, all_: bool = False) -> Command
         total_count=total_count,
         has_more=has_more,
         next_offset=next_offset,
-        extra=git_result_context(context),
+        extra=workspace_result_context(context),
         columns=[
             ListColumn(key="file_name", label="Name", ratio=4, overflow="fold"),
             ListColumn(key="status", label="Status", no_wrap=True, ratio=1),
@@ -500,7 +500,7 @@ def info(
     name: str,
 ) -> CommandResult:
     """Show dataset details and processing status."""
-    context = require_git_workspace_directory_context()
+    context = require_platform_workspace_context()
     credentials = context.credentials
     git_identity = context.git_identity
     from osmosis_ai.platform.api.client import OsmosisClient
@@ -517,7 +517,7 @@ def info(
 
     rows = build_dataset_detail_rows(ds, include_id=ds.is_internal_user)
     data = serialize_dataset(ds)
-    data.update(git_result_context(context))
+    data.update(workspace_result_context(context))
     display_hints = [f"View: {ds.platform_url}"] if ds.platform_url else []
     if ds.status in STATUSES_ERROR:
         display_hints.append(
@@ -533,7 +533,7 @@ def info(
 
 def logs(name: str, *, limit: int, cursor: str | None = None) -> ListResult:
     """Show the most recent logs for a dataset, oldest-first."""
-    context = require_git_workspace_directory_context()
+    context = require_platform_workspace_context()
     credentials = context.credentials
     git_identity = context.git_identity
     from osmosis_ai.platform.api.client import OsmosisClient
@@ -563,7 +563,7 @@ def preview(
     rows: int = 5,
 ) -> CommandResult:
     """Preview dataset rows."""
-    context = require_git_workspace_directory_context()
+    context = require_platform_workspace_context()
     credentials = context.credentials
     git_identity = context.git_identity
     from osmosis_ai.platform.api.client import OsmosisClient
@@ -592,7 +592,7 @@ def preview(
                 "returned_rows": 0,
                 "available": False,
                 "message": message,
-                **git_result_context(context),
+                **workspace_result_context(context),
             },
             fields=[
                 DetailField(label="Dataset", value=ds.file_name),
@@ -628,7 +628,7 @@ def preview(
             "requested_rows": rows,
             "returned_rows": len(preview_rows) if isinstance(preview_rows, list) else 1,
             "available": True,
-            **git_result_context(context),
+            **workspace_result_context(context),
         },
         fields=fields,
     )
@@ -651,7 +651,7 @@ def download(
     overwrite: bool = False,
 ) -> CommandResult:
     """Download a dataset file."""
-    context = require_git_workspace_directory_context()
+    context = require_platform_workspace_context()
     credentials = context.credentials
     git_identity = context.git_identity
     from osmosis_ai.platform.api.client import OsmosisClient
@@ -707,7 +707,7 @@ def download(
 
     resource = serialize_dataset(ds)
     resource["output_path"] = str(destination)
-    resource.update(git_result_context(context))
+    resource.update(workspace_result_context(context))
     return OperationResult(
         operation="dataset.download",
         status="success",

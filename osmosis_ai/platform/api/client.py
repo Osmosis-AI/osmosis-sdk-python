@@ -57,8 +57,9 @@ def _safe_path(segment: str) -> str:
 class OsmosisClient:
     """Client for /api/cli/* endpoints.
 
-    Repo-scoped methods require an explicit ``git_identity`` so calls can
-    be tied to the trusted workspace directory context.
+    Workspace-scoped methods accept either an explicit ``git_identity`` or the
+    root CLI workspace selection through the request context when
+    ``git_identity`` is ``None``.
     """
 
     def _get_logs(
@@ -69,7 +70,7 @@ class OsmosisClient:
         cursor: str | None = None,
         direction: str = "older",
         credentials: Credentials | None = None,
-        git_identity: str,
+        git_identity: str | None,
     ) -> LogsPage:
         """Fetch one page of logs for ``{resource_path}/logs``.
 
@@ -94,7 +95,7 @@ class OsmosisClient:
         rows: str | None = None,
         route: str = "samples",
         credentials: Credentials | None = None,
-        git_identity: str,
+        git_identity: str | None,
     ) -> RunDownloadManifest:
         params: dict[str, str] = {"types": ",".join(types)}
         if rows is not None:
@@ -113,7 +114,7 @@ class OsmosisClient:
         items: Sequence[RunDownloadFile],
         route: str = "samples",
         credentials: Credentials | None = None,
-        git_identity: str,
+        git_identity: str | None,
     ) -> RunDownloadURLBatch:
         if not 1 <= len(items) <= 500:
             raise ValueError(
@@ -138,7 +139,7 @@ class OsmosisClient:
         *,
         overwrite_dataset_id: str | None = None,
         credentials: Credentials | None = None,
-        git_identity: str,
+        git_identity: str | None,
     ) -> DatasetFile:
         payload: dict[str, Any] = {
             "file_name": file_name,
@@ -164,7 +165,7 @@ class OsmosisClient:
         *,
         file_extension: str | None = None,
         credentials: Credentials | None = None,
-        git_identity: str,
+        git_identity: str | None,
     ) -> DatasetFile:
         """Complete an upload.
 
@@ -201,7 +202,7 @@ class OsmosisClient:
         file_id: str,
         *,
         credentials: Credentials | None = None,
-        git_identity: str,
+        git_identity: str | None,
     ) -> None:
         """Abort an in-progress upload.
 
@@ -222,7 +223,7 @@ class OsmosisClient:
         offset: int = 0,
         *,
         credentials: Credentials | None = None,
-        git_identity: str,
+        git_identity: str | None,
     ) -> PaginatedDatasets:
         qs = urlencode({"limit": limit, "offset": offset})
         data = platform_request(
@@ -237,7 +238,7 @@ class OsmosisClient:
         file_id: str,
         *,
         credentials: Credentials | None = None,
-        git_identity: str,
+        git_identity: str | None,
     ) -> DatasetFile:
         data = platform_request(
             f"/api/cli/datasets/{_safe_path(file_id)}",
@@ -251,7 +252,7 @@ class OsmosisClient:
         file_id: str,
         *,
         credentials: Credentials | None = None,
-        git_identity: str,
+        git_identity: str | None,
     ) -> DatasetDownloadInfo:
         data = platform_request(
             f"/api/cli/datasets/{_safe_path(file_id)}/download",
@@ -268,7 +269,7 @@ class OsmosisClient:
         cursor: str | None = None,
         direction: str = "older",
         credentials: Credentials | None = None,
-        git_identity: str,
+        git_identity: str | None,
     ) -> LogsPage:
         """Fetch one page of dataset logs.
 
@@ -298,7 +299,7 @@ class OsmosisClient:
         secrets: list[str] | None = None,
         provided_secrets: dict[str, str] | None = None,
         credentials: Credentials | None = None,
-        git_identity: str,
+        git_identity: str | None,
     ) -> SubmitRunResult:
         """Submit a new training run.
 
@@ -339,7 +340,7 @@ class OsmosisClient:
         offset: int = 0,
         *,
         credentials: Credentials | None = None,
-        git_identity: str,
+        git_identity: str | None,
     ) -> PaginatedTrainingRuns:
         qs = urlencode({"limit": limit, "offset": offset})
         data = platform_request(
@@ -354,7 +355,7 @@ class OsmosisClient:
         run_id: str,
         *,
         credentials: Credentials | None = None,
-        git_identity: str,
+        git_identity: str | None,
     ) -> TrainingRunDetail:
         data = platform_request(
             f"/api/cli/training-runs/{_safe_path(run_id)}",
@@ -368,7 +369,7 @@ class OsmosisClient:
         run_id: str,
         *,
         credentials: Credentials | None = None,
-        git_identity: str,
+        git_identity: str | None,
     ) -> dict[str, Any]:
         """Stop a non-terminal training run (queued, pending, or running)."""
         return platform_request(
@@ -384,7 +385,7 @@ class OsmosisClient:
         run_id: str,
         *,
         credentials: Credentials | None = None,
-        git_identity: str,
+        git_identity: str | None,
     ) -> TrainingRunMetrics:
         """Fetch training run metrics (only available for terminal runs)."""
         data = platform_request(
@@ -402,7 +403,7 @@ class OsmosisClient:
         cursor: str | None = None,
         direction: str = "older",
         credentials: Credentials | None = None,
-        git_identity: str,
+        git_identity: str | None,
     ) -> LogsPage:
         """Fetch one page of training run logs.
 
@@ -448,7 +449,7 @@ class OsmosisClient:
         offset: int = 0,
         *,
         credentials: Credentials | None = None,
-        git_identity: str,
+        git_identity: str | None,
     ) -> PaginatedBaseModels:
         qs = urlencode({"limit": limit, "offset": offset})
         data = platform_request(
@@ -464,7 +465,7 @@ class OsmosisClient:
         offset: int = 0,
         *,
         credentials: Credentials | None = None,
-        git_identity: str,
+        git_identity: str | None,
     ) -> PaginatedLoraModels:
         qs = urlencode({"limit": limit, "offset": offset})
         data = platform_request(
@@ -479,7 +480,7 @@ class OsmosisClient:
         lora_model_name: str,
         *,
         credentials: Credentials | None = None,
-        git_identity: str,
+        git_identity: str | None,
     ) -> LoraModelDetail:
         """Get details for a single LoRA model by name."""
         data = platform_request(
@@ -494,7 +495,7 @@ class OsmosisClient:
         lora_model_name: str,
         *,
         credentials: Credentials | None = None,
-        git_identity: str,
+        git_identity: str | None,
     ) -> LoraModelSummary:
         """Deploy (or reactivate) a LoRA model by name.
 
@@ -515,7 +516,7 @@ class OsmosisClient:
         lora_model_name: str,
         *,
         credentials: Credentials | None = None,
-        git_identity: str,
+        git_identity: str | None,
     ) -> LoraModelSummary:
         """Undeploy a LoRA model (transitions to ``inactive``); idempotent."""
         data = platform_request(
@@ -538,7 +539,7 @@ class OsmosisClient:
         *,
         scope: str = "all",
         credentials: Credentials | None = None,
-        git_identity: str,
+        git_identity: str | None,
     ) -> PaginatedEnvironmentSecrets:
         """List environment secrets (names + metadata only).
 
@@ -561,7 +562,7 @@ class OsmosisClient:
         *,
         scope: str,
         credentials: Credentials | None = None,
-        git_identity: str,
+        git_identity: str | None,
     ) -> EnvironmentSecretInfo:
         """Create or update (upsert) an environment secret.
 
@@ -585,7 +586,7 @@ class OsmosisClient:
         *,
         scope: str,
         credentials: Credentials | None = None,
-        git_identity: str,
+        git_identity: str | None,
     ) -> None:
         """Delete an environment secret by name within ``scope``.
 
@@ -607,7 +608,7 @@ class OsmosisClient:
         name_or_id: str,
         *,
         credentials: Credentials | None = None,
-        git_identity: str,
+        git_identity: str | None,
     ) -> TrainingRunCheckpoints:
         data = platform_request(
             f"/api/cli/training-runs/{_safe_path(name_or_id)}/checkpoints",
@@ -628,7 +629,7 @@ class OsmosisClient:
         secrets: list[str] | None = None,
         provided_secrets: dict[str, str] | None = None,
         credentials: Credentials | None = None,
-        git_identity: str,
+        git_identity: str | None,
     ) -> SubmitRunResult:
         """Submit a new evaluation run."""
         data: dict[str, Any] = {
@@ -761,7 +762,7 @@ class OsmosisClient:
         env_config: dict[str, str] | None = None,
         secrets: dict[str, Any] | None = None,
         credentials: Credentials | None = None,
-        git_identity: str,
+        git_identity: str | None,
     ) -> SubmitBenchmarkRunResult:
         """Submit a new benchmark run."""
         data: dict[str, Any] = {
@@ -791,7 +792,7 @@ class OsmosisClient:
         offset: int = 0,
         *,
         credentials: Credentials | None = None,
-        git_identity: str,
+        git_identity: str | None,
     ) -> PaginatedBenchmarks:
         """List benchmarks available in the current workspace."""
         qs = urlencode({"limit": limit, "offset": offset})
@@ -807,7 +808,7 @@ class OsmosisClient:
         name_or_id: str,
         *,
         credentials: Credentials | None = None,
-        git_identity: str,
+        git_identity: str | None,
     ) -> BenchmarkCatalogDetail:
         """Get benchmark metadata and task-selection options."""
         data = platform_request(
@@ -824,7 +825,7 @@ class OsmosisClient:
         *,
         benchmark: str | None = None,
         credentials: Credentials | None = None,
-        git_identity: str,
+        git_identity: str | None,
     ) -> PaginatedBenchmarkRuns:
         """List benchmark runs in the current workspace.
 
@@ -846,7 +847,7 @@ class OsmosisClient:
         name_or_id: str,
         *,
         credentials: Credentials | None = None,
-        git_identity: str,
+        git_identity: str | None,
     ) -> BenchmarkRunDetail:
         """Get benchmark run details by name or ID."""
         data = platform_request(
@@ -864,7 +865,7 @@ class OsmosisClient:
         cursor: str | None = None,
         direction: str = "older",
         credentials: Credentials | None = None,
-        git_identity: str,
+        git_identity: str | None,
     ) -> LogsPage:
         """Fetch one cursor page of benchmark run logs."""
         return self._get_logs(
@@ -882,7 +883,7 @@ class OsmosisClient:
         *,
         types: Sequence[str],
         credentials: Credentials | None = None,
-        git_identity: str,
+        git_identity: str | None,
     ) -> RunDownloadManifest:
         """Get the fixed-layout download manifest for a benchmark run."""
         return self._get_run_download_manifest(
@@ -899,7 +900,7 @@ class OsmosisClient:
         *,
         items: Sequence[RunDownloadFile],
         credentials: Credentials | None = None,
-        git_identity: str,
+        git_identity: str | None,
     ) -> RunDownloadURLBatch:
         """Exchange benchmark manifest items for bounded presigned URLs."""
         return self._get_run_download_urls(
@@ -915,7 +916,7 @@ class OsmosisClient:
         name_or_id: str,
         *,
         credentials: Credentials | None = None,
-        git_identity: str,
+        git_identity: str | None,
     ) -> dict[str, Any]:
         """Stop a non-terminal benchmark run."""
         return platform_request(
@@ -932,7 +933,7 @@ class OsmosisClient:
         offset: int = 0,
         *,
         credentials: Credentials | None = None,
-        git_identity: str,
+        git_identity: str | None,
     ) -> PaginatedEvaluationRuns:
         qs = urlencode({"limit": limit, "offset": offset})
         data = platform_request(
@@ -947,7 +948,7 @@ class OsmosisClient:
         eval_run_id: str,
         *,
         credentials: Credentials | None = None,
-        git_identity: str,
+        git_identity: str | None,
     ) -> EvaluationRunDetail:
         data = platform_request(
             f"/api/cli/eval-runs/{_safe_path(eval_run_id)}",
@@ -961,7 +962,7 @@ class OsmosisClient:
         eval_run_id: str,
         *,
         credentials: Credentials | None = None,
-        git_identity: str,
+        git_identity: str | None,
     ) -> EvalRunMetrics:
         """Fetch evaluation run metrics (unavailable for pending runs)."""
         data = platform_request(
@@ -979,7 +980,7 @@ class OsmosisClient:
         cursor: str | None = None,
         direction: str = "older",
         credentials: Credentials | None = None,
-        git_identity: str,
+        git_identity: str | None,
     ) -> LogsPage:
         """Fetch one page of evaluation run logs.
 
@@ -1002,7 +1003,7 @@ class OsmosisClient:
         types: Sequence[str],
         rows: str | None = None,
         credentials: Credentials | None = None,
-        git_identity: str,
+        git_identity: str | None,
     ) -> RunDownloadManifest:
         return self._get_run_download_manifest(
             f"/api/cli/eval-runs/{_safe_path(eval_run_id)}",
@@ -1018,7 +1019,7 @@ class OsmosisClient:
         *,
         items: Sequence[RunDownloadFile],
         credentials: Credentials | None = None,
-        git_identity: str,
+        git_identity: str | None,
     ) -> RunDownloadURLBatch:
         return self._get_run_download_urls(
             f"/api/cli/eval-runs/{_safe_path(eval_run_id)}",
@@ -1032,7 +1033,7 @@ class OsmosisClient:
         eval_run_id: str,
         *,
         credentials: Credentials | None = None,
-        git_identity: str,
+        git_identity: str | None,
     ) -> dict[str, Any]:
         """Stop a non-terminal evaluation run (queued, pending, or running)."""
         return platform_request(

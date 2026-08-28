@@ -2,6 +2,16 @@
 
 This file records changes to `osmosis-ai`. For earlier versions, see [GitHub Releases](https://github.com/Osmosis-AI/osmosis-sdk-python/releases).
 
+## Unreleased
+
+### Added
+
+- Added a root `--workspace <name>` selector for workspace-scoped platform commands, including benchmark, dataset, model, secret, training-run, and evaluation-run operations. Benchmark configs can now live outside a local Osmosis repository, while training and evaluation submit accept an absolute config path when its Git repository matches the selected workspace.
+
+### Changed
+
+- Local `osmosis eval run --dataset-file ...` no longer loads platform credentials unless `--upload` is also requested.
+
 ## 0.3.1 - 2026-08-24
 
 ### Breaking Changes

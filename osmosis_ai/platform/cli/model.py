@@ -37,10 +37,10 @@ from osmosis_ai.platform.cli.utils import (
     format_reward,
     kv_section,
     paginated_fetch,
-    require_git_workspace_directory_context,
+    require_platform_workspace_context,
     validate_list_options,
 )
-from osmosis_ai.platform.cli.workspace_directory_context import git_result_context
+from osmosis_ai.platform.cli.workspace_directory_context import workspace_result_context
 from osmosis_ai.platform.constants import INFERENCE_URL
 
 _VALID_LIST_TYPES = ("all", "base", "lora")
@@ -113,7 +113,7 @@ def _lora_model_display_item(model: LoraModelInfo) -> dict[str, Any]:
 def list_models(
     *, limit: int, all_: bool, type_: str = "all"
 ) -> SectionedListResult | ListResult:
-    """List base models and LoRA models for the current workspace directory.
+    """List base models and LoRA models for the selected workspace.
 
     ``type_`` ``"all"`` returns a :class:`SectionedListResult` with a base
     models section followed by a LoRA models section, each independently
@@ -126,7 +126,7 @@ def list_models(
         )
     effective_limit, fetch_all = validate_list_options(limit=limit, all_=all_)
 
-    context = require_git_workspace_directory_context()
+    context = require_platform_workspace_context()
     credentials = context.credentials
     git_identity = context.git_identity
 
@@ -210,7 +210,7 @@ def list_models(
         )
     if lora_models:
         display_hints.append("Use osmosis model info <lora-model-name> for details.")
-    lora_extra = {**git_result_context(context)}
+    lora_extra = {**workspace_result_context(context)}
     if deployment_info["present"]:
         lora_extra["active_deployments"] = active_deployments
         lora_extra["max_active_deployments"] = max_active_deployments
@@ -222,7 +222,7 @@ def list_models(
             total_count=base_section.total_count,
             has_more=base_section.has_more,
             next_offset=base_section.next_offset,
-            extra=git_result_context(context),
+            extra=workspace_result_context(context),
             columns=base_section.columns,
             display_items=base_section.display_items,
         )
@@ -248,7 +248,7 @@ def list_models(
 
 def info(lora_model_name: str) -> DetailResult:
     """Show details for a single LoRA model."""
-    context = require_git_workspace_directory_context()
+    context = require_platform_workspace_context()
     client = OsmosisClient()
     output = get_output_context()
 
@@ -365,7 +365,7 @@ def info(lora_model_name: str) -> DetailResult:
         data={
             "lora_model": lora_model,
             "platform_url": model.platform_url,
-            **git_result_context(context),
+            **workspace_result_context(context),
         },
         fields=detail_fields(rows),
         sections=sections,
@@ -375,7 +375,7 @@ def info(lora_model_name: str) -> DetailResult:
 
 def deploy(lora_model_name: str) -> OperationResult:
     """Deploy (or reactivate) a LoRA model."""
-    context = require_git_workspace_directory_context()
+    context = require_platform_workspace_context()
     client = OsmosisClient()
     output = get_output_context()
 
@@ -387,7 +387,7 @@ def deploy(lora_model_name: str) -> OperationResult:
         )
 
     resource = _lora_model_summary_resource(result)
-    resource.update(git_result_context(context))
+    resource.update(workspace_result_context(context))
     return OperationResult(
         operation="model.deploy",
         status="success",
@@ -402,7 +402,7 @@ def deploy(lora_model_name: str) -> OperationResult:
 
 def undeploy(lora_model_name: str) -> OperationResult:
     """Undeploy a LoRA model (transition to ``inactive``)."""
-    context = require_git_workspace_directory_context()
+    context = require_platform_workspace_context()
     client = OsmosisClient()
     output = get_output_context()
 
@@ -416,7 +416,7 @@ def undeploy(lora_model_name: str) -> OperationResult:
         )
 
     resource = _lora_model_summary_resource(result)
-    resource.update(git_result_context(context))
+    resource.update(workspace_result_context(context))
     return OperationResult(
         operation="model.undeploy",
         status="success",

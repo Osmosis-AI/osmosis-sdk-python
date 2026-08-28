@@ -72,16 +72,17 @@ def _stub_git_context(monkeypatch: pytest.MonkeyPatch) -> None:
         _git_context,
     )
     monkeypatch.setattr(
-        "osmosis_ai.platform.cli.train.require_git_workspace_directory_context",
+        "osmosis_ai.platform.cli.train.require_platform_workspace_context",
         _git_context,
     )
-    for _delegated in ("model", "rollout"):
-        monkeypatch.setattr(
-            f"osmosis_ai.platform.cli.{_delegated}."
-            "require_git_workspace_directory_context",
-            _git_context,
-            raising=False,
-        )
+    monkeypatch.setattr(
+        "osmosis_ai.platform.cli.model.require_platform_workspace_context",
+        _git_context,
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.platform.cli.rollout.require_git_workspace_directory_context",
+        _git_context,
+    )
     monkeypatch.setattr(
         "osmosis_ai.platform.cli.shared_submit.require_git_workspace_directory_context",
         _git_context,

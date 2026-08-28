@@ -122,6 +122,11 @@ def _stub_context(monkeypatch: pytest.MonkeyPatch, workspace: Path) -> None:
         eval_run_module, "require_git_workspace_directory_context", lambda: context
     )
     monkeypatch.setattr(
+        eval_run_module,
+        "resolve_local_workspace_directory_context",
+        lambda: context,
+    )
+    monkeypatch.setattr(
         eval_run_module, "validate_workspace_directory_contract", lambda _: None
     )
 
@@ -208,6 +213,24 @@ def test_the_shared_eval_toml_maps_onto_the_run_spec(
     assert spec.grader_timeout_sec == 150.0
     assert spec.env == {"LOG_LEVEL": "INFO"}
     assert spec.secret_names == ("MY_TOKEN",)
+
+
+def test_dataset_file_run_does_not_require_platform_credentials(
+    workspace: Path,
+    captured_runner: type[_CapturedRunner],
+    console_capture: StringIO,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        eval_run_module,
+        "require_git_workspace_directory_context",
+        lambda: pytest.fail("local dataset run requested platform credentials"),
+    )
+
+    result = _run(workspace)
+
+    assert result.status == "success"
+    assert len(captured_runner.calls) == 1
 
 
 def test_evaluation_limit_selects_the_first_rows(

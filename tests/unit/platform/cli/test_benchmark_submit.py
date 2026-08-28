@@ -84,6 +84,7 @@ judge_api_key_secret = "OPENAI_API_KEY"
 
 def _context(workspace: Path) -> SimpleNamespace:
     return SimpleNamespace(
+        workspace_name=None,
         workspace_directory=workspace,
         git_identity=GIT_IDENTITY,
         repo_url=REPO_URL,
@@ -127,7 +128,7 @@ def test_submit_sends_benchmark_config_and_returns_operation_result(
             )
 
     monkeypatch.setattr(
-        benchmark_module, "require_git_workspace_directory_context", lambda: context
+        benchmark_module, "require_platform_workspace_context", lambda: context
     )
     monkeypatch.setattr(benchmark_module, "OsmosisClient", FakeClient)
     monkeypatch.setattr(
@@ -160,7 +161,7 @@ def test_submit_sends_benchmark_config_and_returns_operation_result(
     )
 
 
-def test_submit_rejects_config_outside_benchmark_directory(
+def test_submit_accepts_config_outside_benchmark_directory(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -168,11 +169,56 @@ def test_submit_rejects_config_outside_benchmark_directory(
     config_path = _write_config(workspace / "smoke.toml")
     context = _context(workspace)
     monkeypatch.setattr(
-        benchmark_module, "require_git_workspace_directory_context", lambda: context
+        benchmark_module, "require_platform_workspace_context", lambda: context
+    )
+    monkeypatch.setattr(benchmark_module, "OsmosisClient", _FakeSubmitClient)
+    monkeypatch.setattr(
+        shared_submit_module,
+        "_fetch_secret_scopes",
+        lambda *args, **kwargs: ({"OPENAI_API_KEY", "CURSOR_API_KEY"}, set()),
     )
 
-    with pytest.raises(CLIError, match="configs/benchmark"):
-        benchmark_module.submit(config_path, yes=True)
+    result = benchmark_module.submit(config_path, yes=True)
+
+    assert result.status == "success"
+    assert result.resource["benchmark_name"] == "DeepSWE"
+
+
+def test_submit_with_explicit_workspace_needs_no_local_repo(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    config_path = _write_config(tmp_path / "smoke.toml")
+    captured: dict[str, Any] = {}
+    context = SimpleNamespace(
+        workspace_name="acme",
+        workspace_directory=None,
+        git_identity=None,
+        repo_url=None,
+        credentials=FAKE_CREDENTIALS,
+    )
+
+    class FakeClient:
+        def submit_benchmark_run(self, **kwargs: Any) -> SubmitBenchmarkRunResult:
+            captured.update(kwargs)
+            return _FakeSubmitClient().submit_benchmark_run(**kwargs)
+
+    monkeypatch.setattr(
+        benchmark_module, "require_platform_workspace_context", lambda: context
+    )
+    monkeypatch.setattr(benchmark_module, "OsmosisClient", FakeClient)
+    monkeypatch.setattr(
+        shared_submit_module,
+        "_fetch_secret_scopes",
+        lambda *args, **kwargs: ({"OPENAI_API_KEY", "CURSOR_API_KEY"}, set()),
+    )
+
+    result = benchmark_module.submit(config_path, yes=True)
+
+    assert captured["git_identity"] is None
+    assert result.resource["workspace"] == {"name": "acme"}
+    assert "git" not in result.resource
+    assert "workspace_directory" not in result.resource
 
 
 @pytest.mark.parametrize("benchmark_name", ["HLE", " HLE ", " hLe "])
@@ -191,7 +237,7 @@ def test_submit_warns_before_confirmation_for_hle_without_parity(
 
     monkeypatch.setattr(
         benchmark_module,
-        "require_git_workspace_directory_context",
+        "require_platform_workspace_context",
         lambda: _context(workspace),
     )
     monkeypatch.setattr(benchmark_module, "OsmosisClient", _FakeSubmitClient)
@@ -237,7 +283,7 @@ def test_submit_does_not_warn_when_hle_uses_parity(
 
     monkeypatch.setattr(
         benchmark_module,
-        "require_git_workspace_directory_context",
+        "require_platform_workspace_context",
         lambda: _context(workspace),
     )
     monkeypatch.setattr(benchmark_module, "OsmosisClient", _FakeSubmitClient)
@@ -271,7 +317,7 @@ def test_submit_warns_before_hle_missing_secret_failure(
 
     monkeypatch.setattr(
         benchmark_module,
-        "require_git_workspace_directory_context",
+        "require_platform_workspace_context",
         lambda: _context(workspace),
     )
     monkeypatch.setattr(benchmark_module, "OsmosisClient", _FakeSubmitClient)
@@ -340,7 +386,7 @@ required = ["WEATHER_API_KEY"]
 
     monkeypatch.setenv("WEATHER_API_KEY", "super-secret")
     monkeypatch.setattr(
-        benchmark_module, "require_git_workspace_directory_context", lambda: context
+        benchmark_module, "require_platform_workspace_context", lambda: context
     )
     monkeypatch.setattr(benchmark_module, "OsmosisClient", FakeClient)
     monkeypatch.setattr(
@@ -358,38 +404,16 @@ required = ["WEATHER_API_KEY"]
     assert "super-secret" not in json.dumps(asdict(result), default=str)
 
 
-def test_submit_prints_remote_fetch_notice(
+def test_submit_skips_remote_fetch_notice(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    """Benchmark submit shares train/eval's dirty-tree / unpushed preflight."""
+    """Benchmark submit does not fetch source from the connected repository."""
     workspace = _make_workspace(tmp_path / "workspace")
     config_path = _write_config(workspace / "configs" / "benchmark" / "smoke.toml")
-    notice: dict[str, Any] = {}
-
-    def fake_notice(
-        workspace_directory: Path,
-        *,
-        branch: str | None,
-        pinned_commit_sha: str | None,
-        extra_warnings: list[str] | None = None,
-        warn_on_missing_commit_sha: bool = True,
-    ) -> tuple[list[str], list[str]]:
-        notice.update(
-            workspace_directory=workspace_directory,
-            branch=branch,
-            pinned_commit_sha=pinned_commit_sha,
-            extra_warnings=list(extra_warnings or []),
-            warn_on_missing_commit_sha=warn_on_missing_commit_sha,
-        )
-        return (
-            ["Osmosis will fetch code from the Platform-connected repository."],
-            ["Uncommitted changes detected"],
-        )
-
     monkeypatch.setattr(
         benchmark_module,
-        "require_git_workspace_directory_context",
+        "require_platform_workspace_context",
         lambda: _context(workspace),
     )
     monkeypatch.setattr(benchmark_module, "OsmosisClient", _FakeSubmitClient)
@@ -398,13 +422,12 @@ def test_submit_prints_remote_fetch_notice(
         "_fetch_secret_scopes",
         lambda *args, **kwargs: ({"OPENAI_API_KEY", "CURSOR_API_KEY"}, set()),
     )
-    monkeypatch.setattr(shared_submit_module, "print_remote_fetch_notice", fake_notice)
+    monkeypatch.setattr(
+        shared_submit_module,
+        "print_remote_fetch_notice",
+        lambda *args, **kwargs: pytest.fail("benchmark submit inspected local Git"),
+    )
 
     result = benchmark_module.submit(config_path, yes=True)
 
     assert result.status == "success"
-    assert notice["workspace_directory"] == workspace
-    assert notice["branch"] is None
-    assert notice["pinned_commit_sha"] is None
-    assert notice["extra_warnings"] == []
-    assert notice["warn_on_missing_commit_sha"] is False

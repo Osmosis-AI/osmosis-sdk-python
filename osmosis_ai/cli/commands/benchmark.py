@@ -30,7 +30,7 @@ def benchmark_list(
     limit: int = limit_option("Maximum number of benchmarks to show."),
     all_: bool = all_option("Show all benchmarks."),
 ) -> CommandResult:
-    """List benchmarks available in the current workspace."""
+    """List benchmarks available in the selected workspace."""
     from osmosis_ai.platform.cli.benchmark import list_benchmarks as _list_benchmarks
 
     return _list_benchmarks(limit=limit, all_=all_)
@@ -80,7 +80,7 @@ def benchmark_runs_list(
     limit: int = limit_option("Maximum number of benchmark runs to show."),
     all_: bool = all_option("Show all benchmark runs."),
 ) -> CommandResult:
-    """List benchmark runs for the current workspace directory."""
+    """List benchmark runs for the selected workspace."""
     from osmosis_ai.platform.cli.benchmark import list_benchmark_runs as _list
 
     return _list(limit=limit, all_=all_)

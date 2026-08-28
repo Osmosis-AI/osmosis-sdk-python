@@ -62,7 +62,7 @@ def _make_metrics(**overrides) -> TrainingRunMetrics:
 
 
 # Patch at the platform train module where these symbols are bound at import.
-_PATCH_AUTH = "osmosis_ai.platform.cli.train.require_git_workspace_directory_context"
+_PATCH_AUTH = "osmosis_ai.platform.cli.train.require_platform_workspace_context"
 _PATCH_CLIENT = "osmosis_ai.platform.cli.train.OsmosisClient"
 
 

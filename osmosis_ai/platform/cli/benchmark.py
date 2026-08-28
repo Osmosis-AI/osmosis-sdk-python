@@ -47,13 +47,11 @@ from osmosis_ai.platform.cli.utils import (
     kv_section,
     make_progress,
     paginated_fetch,
-    require_git_workspace_directory_context,
+    require_platform_workspace_context,
     validate_list_options,
 )
-from osmosis_ai.platform.cli.workspace_directory_context import git_result_context
-from osmosis_ai.platform.cli.workspace_directory_contract import (
-    ensure_workspace_directory_config_path,
-    validate_workspace_directory_contract,
+from osmosis_ai.platform.cli.workspace_directory_context import (
+    workspace_result_context,
 )
 
 if TYPE_CHECKING:
@@ -200,9 +198,9 @@ def _task_set_display(task_sets: list[BenchmarkTaskSet]) -> str:
 
 
 def list_benchmarks(*, limit: int, all_: bool) -> ListResult:
-    """List benchmarks available in the current workspace."""
+    """List benchmarks available in the selected workspace."""
     effective_limit, fetch_all = validate_list_options(limit=limit, all_=all_)
-    context = require_git_workspace_directory_context()
+    context = require_platform_workspace_context()
     client = OsmosisClient()
     output = get_output_context()
 
@@ -225,7 +223,7 @@ def list_benchmarks(*, limit: int, all_: bool) -> ListResult:
         total_count=total_count,
         has_more=has_more,
         next_offset=next_offset,
-        extra=git_result_context(context),
+        extra=workspace_result_context(context),
         columns=_BENCHMARK_COLUMNS,
         display_items=[
             {
@@ -535,7 +533,7 @@ def _benchmark_runs_section(
 def benchmark_info(key: str, *, limit: int, all_: bool) -> DetailResult:
     """Show a benchmark: metadata, task options, leaderboard, and runs."""
     effective_limit, fetch_all = validate_list_options(limit=limit, all_=all_)
-    context = require_git_workspace_directory_context()
+    context = require_platform_workspace_context()
     client = OsmosisClient()
     output = get_output_context()
 
@@ -671,7 +669,7 @@ def benchmark_info(key: str, *, limit: int, all_: bool) -> DetailResult:
                 for run in runs
             ],
             "runs_total_count": runs_total_count,
-            **git_result_context(context),
+            **workspace_result_context(context),
         },
         fields=detail_fields(rows),
         sections=sections,
@@ -688,9 +686,9 @@ def _format_pass_at_1(value: float | None) -> str:
 
 
 def list_benchmark_runs(*, limit: int, all_: bool) -> ListResult:
-    """List benchmark runs for the current workspace directory."""
+    """List benchmark runs for the selected workspace."""
     effective_limit, fetch_all = validate_list_options(limit=limit, all_=all_)
-    context = require_git_workspace_directory_context()
+    context = require_platform_workspace_context()
     client = OsmosisClient()
     output = get_output_context()
     with output.status("Fetching benchmark runs..."):
@@ -718,7 +716,7 @@ def list_benchmark_runs(*, limit: int, all_: bool) -> ListResult:
         total_count=total_count,
         has_more=has_more,
         next_offset=next_offset,
-        extra=git_result_context(context),
+        extra=workspace_result_context(context),
         columns=[
             ListColumn(key="name", label="Name", ratio=3, overflow="fold"),
             ListColumn(key="status", label="Status", no_wrap=True, ratio=1),
@@ -862,7 +860,7 @@ def _result_rows(detail: BenchmarkRunDetail) -> list[tuple[str, str]]:
 
 def run_info(name: str) -> DetailResult:
     """Show benchmark run details, progress, configuration, and results."""
-    context = require_git_workspace_directory_context()
+    context = require_platform_workspace_context()
     client = OsmosisClient()
     output = get_output_context()
     with output.status("Fetching benchmark run..."):
@@ -941,7 +939,7 @@ def run_info(name: str) -> DetailResult:
             "progress": progress,
             "totals": detail.totals,
             "agent_metrics": detail.agent_metrics,
-            **git_result_context(context),
+            **workspace_result_context(context),
         },
         fields=detail_fields(rows),
         sections=sections,
@@ -951,7 +949,7 @@ def run_info(name: str) -> DetailResult:
 
 def logs(name: str, *, limit: int, cursor: str | None = None) -> ListResult:
     """Show the most recent logs for a benchmark run, oldest-first."""
-    context = require_git_workspace_directory_context()
+    context = require_platform_workspace_context()
     client = OsmosisClient()
     output = get_output_context()
     with output.status("Fetching logs..."):
@@ -988,7 +986,7 @@ def download(
     )
 
     selected_types = parse_download_types(types, allowed=BENCHMARK_DOWNLOAD_TYPES)
-    context = require_git_workspace_directory_context()
+    context = require_platform_workspace_context()
     client = OsmosisClient()
     output_ctx = get_output_context()
     with output_ctx.status("Fetching benchmark run..."):
@@ -1011,8 +1009,8 @@ def download(
             output=output,
             overwrite=overwrite,
             yes=yes,
-            workspace_directory=context.workspace_directory,
-            result_context=git_result_context(context),
+            workspace_directory=context.workspace_directory or Path.cwd(),
+            result_context=workspace_result_context(context),
             manifest_loader=lambda requested_types: (
                 client.get_benchmark_run_download_manifest(
                     detail.id,
@@ -1045,7 +1043,7 @@ def stop(name: str, *, yes: bool) -> OperationResult:
     """Stop a benchmark run."""
     from osmosis_ai.platform.cli.stop_run import stop_run
 
-    context = require_git_workspace_directory_context()
+    context = require_platform_workspace_context()
     client = OsmosisClient()
     output = get_output_context()
     with output.status("Fetching benchmark run..."):
@@ -1106,7 +1104,7 @@ def _submit_benchmark(
     client: OsmosisClient,
     config: BenchmarkSubmitConfig,
     credentials: Any,
-    git_identity: str,
+    git_identity: str | None,
     secret_values: dict[str, str],
 ) -> SubmitBenchmarkRunResult:
     secrets: dict[str, Any] | None = None
@@ -1131,22 +1129,12 @@ def submit(
     from osmosis_ai.platform.cli.benchmark_config import load_benchmark_submit_config
     from osmosis_ai.platform.cli.shared_config import build_env_table_rows
     from osmosis_ai.platform.cli.shared_submit import (
-        confirm_remote_fetch_and_post,
+        confirm_and_post,
         prepare_submit_secrets,
     )
 
-    context = require_git_workspace_directory_context()
-    workspace_directory = Path(context.workspace_directory)
-    validate_workspace_directory_contract(workspace_directory)
-
-    path = Path(config_path)
-    resolved_path = path if path.is_absolute() else workspace_directory / path
-    ensure_workspace_directory_config_path(
-        resolved_path,
-        workspace_directory,
-        config_dir="configs/benchmark",
-        command_label="`osmosis benchmark submit`",
-    )
+    context = require_platform_workspace_context()
+    resolved_path = Path(config_path).expanduser().resolve()
     config = load_benchmark_submit_config(resolved_path)
 
     execution = config.execution_config
@@ -1224,15 +1212,13 @@ def submit(
             secret_values,
         )
 
-    result = confirm_remote_fetch_and_post(
+    result = confirm_and_post(
         yes=yes,
         confirm_prompt="Submit this benchmark run?",
         full_summary=full_summary,
-        workspace_directory=workspace_directory,
         status_message="Submitting benchmark run...",
         post=_post,
         provided_secrets=secret_values,
-        warn_on_missing_commit_sha=False,
     )
 
     display_next_steps = [
@@ -1260,7 +1246,7 @@ def submit(
             "task_count": result.task_count,
             "created_at": result.created_at,
             **({"platform_url": result.platform_url} if result.platform_url else {}),
-            **git_result_context(context),
+            **workspace_result_context(context),
             "config": {
                 "experiment": config.experiment_config,
                 "tasks": config.tasks_config,

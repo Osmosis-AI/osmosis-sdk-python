@@ -6,6 +6,7 @@ import re
 import time
 from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from contextvars import copy_context
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -463,6 +464,7 @@ def run_download(
                 with ThreadPoolExecutor(max_workers=DOWNLOAD_CONCURRENCY) as executor:
                     futures = [
                         executor.submit(
+                            copy_context().run,
                             _download_with_retry,
                             item,
                             url,

@@ -25,6 +25,7 @@ FAKE_CREDENTIALS = object()
 
 def _context(tmp_path: Path | None = None) -> SimpleNamespace:
     return SimpleNamespace(
+        workspace_name=None,
         workspace_directory=tmp_path or Path("/repo"),
         git_identity=GIT_IDENTITY,
         repo_url="https://github.com/acme/workspace.git",
@@ -108,7 +109,7 @@ def test_list_benchmark_runs_returns_public_and_display_shapes(
             )
 
     monkeypatch.setattr(
-        benchmark_module, "require_git_workspace_directory_context", _context
+        benchmark_module, "require_platform_workspace_context", _context
     )
     monkeypatch.setattr(benchmark_module, "OsmosisClient", FakeClient)
 
@@ -157,7 +158,7 @@ def test_benchmark_list_json_envelope(
             )
 
     monkeypatch.setattr(
-        benchmark_module, "require_git_workspace_directory_context", _context
+        benchmark_module, "require_platform_workspace_context", _context
     )
     monkeypatch.setattr(benchmark_module, "OsmosisClient", FakeClient)
 
@@ -182,7 +183,7 @@ def test_run_info_returns_config_agents_results_and_next_steps(
             return _detail()
 
     monkeypatch.setattr(
-        benchmark_module, "require_git_workspace_directory_context", _context
+        benchmark_module, "require_platform_workspace_context", _context
     )
     monkeypatch.setattr(benchmark_module, "OsmosisClient", FakeClient)
 
@@ -250,7 +251,7 @@ def test_run_info_reports_duration_and_per_agent_metrics(
             return detail
 
     monkeypatch.setattr(
-        benchmark_module, "require_git_workspace_directory_context", _context
+        benchmark_module, "require_platform_workspace_context", _context
     )
     monkeypatch.setattr(benchmark_module, "OsmosisClient", FakeClient)
 
@@ -289,7 +290,7 @@ def test_run_info_shows_id_only_to_internal_users(
             return _detail(is_internal_user=is_internal_user)
 
     monkeypatch.setattr(
-        benchmark_module, "require_git_workspace_directory_context", _context
+        benchmark_module, "require_platform_workspace_context", _context
     )
     monkeypatch.setattr(benchmark_module, "OsmosisClient", FakeClient)
 
@@ -319,7 +320,7 @@ def test_logs_uses_shared_cursor_result(monkeypatch: pytest.MonkeyPatch) -> None
             )
 
     monkeypatch.setattr(
-        benchmark_module, "require_git_workspace_directory_context", _context
+        benchmark_module, "require_platform_workspace_context", _context
     )
     monkeypatch.setattr(benchmark_module, "OsmosisClient", FakeClient)
 
@@ -346,7 +347,7 @@ def test_stop_confirms_and_calls_platform(monkeypatch: pytest.MonkeyPatch) -> No
             return {"status": "stopped"}
 
     monkeypatch.setattr(
-        benchmark_module, "require_git_workspace_directory_context", _context
+        benchmark_module, "require_platform_workspace_context", _context
     )
     monkeypatch.setattr(benchmark_module, "OsmosisClient", FakeClient)
     monkeypatch.setattr(
@@ -400,7 +401,7 @@ def test_stop_resolves_name_before_stopping_canonical_id(
             return {"status": "stopped"}
 
     monkeypatch.setattr(
-        benchmark_module, "require_git_workspace_directory_context", _context
+        benchmark_module, "require_platform_workspace_context", _context
     )
     monkeypatch.setattr(benchmark_module, "OsmosisClient", FakeClient)
     monkeypatch.setattr(

@@ -8,8 +8,8 @@ from typing import Any
 from osmosis_ai.cli.output import OperationResult, get_output_context
 from osmosis_ai.cli.prompts import require_confirmation
 from osmosis_ai.platform.cli.workspace_directory_context import (
-    GitWorkspaceDirectoryContext,
-    git_result_context,
+    PlatformWorkspaceContext,
+    workspace_result_context,
 )
 
 
@@ -19,7 +19,7 @@ def stop_run(
     operation: str,
     confirm_name: str,
     yes: bool,
-    context: GitWorkspaceDirectoryContext,
+    context: PlatformWorkspaceContext,
     stop: Callable[[], Any],
     status_message: str,
     extra: dict[str, Any] | None = None,
@@ -36,7 +36,7 @@ def stop_run(
     resource: dict[str, Any] = {"name": confirm_name}
     if extra:
         resource.update(extra)
-    resource.update(git_result_context(context))
+    resource.update(workspace_result_context(context))
     return OperationResult(
         operation=operation,
         status="success",

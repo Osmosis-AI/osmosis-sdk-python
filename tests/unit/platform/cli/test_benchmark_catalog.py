@@ -36,6 +36,7 @@ FAKE_CREDENTIALS = object()
 
 def _context() -> SimpleNamespace:
     return SimpleNamespace(
+        workspace_name=None,
         workspace_directory=Path("/repo"),
         git_identity=GIT_IDENTITY,
         repo_url=REPO_URL,
@@ -82,7 +83,7 @@ def test_list_benchmarks_returns_catalog_and_git_context(
 
     monkeypatch.setattr(
         benchmark_module,
-        "require_git_workspace_directory_context",
+        "require_platform_workspace_context",
         _context,
     )
     monkeypatch.setattr(benchmark_module, "OsmosisClient", FakeClient)
@@ -186,7 +187,7 @@ def test_info_exposes_selection_metadata_and_full_task_list(
 
     monkeypatch.setattr(
         benchmark_module,
-        "require_git_workspace_directory_context",
+        "require_platform_workspace_context",
         _context,
     )
     monkeypatch.setattr(benchmark_module, "OsmosisClient", FakeClient)
@@ -255,7 +256,7 @@ def _list_with(
 
     monkeypatch.setattr(
         benchmark_module,
-        "require_git_workspace_directory_context",
+        "require_platform_workspace_context",
         _context,
     )
     monkeypatch.setattr(benchmark_module, "OsmosisClient", FakeClient)
@@ -328,7 +329,7 @@ def test_benchmark_info_surfaces_the_default_harness(
 
     monkeypatch.setattr(
         benchmark_module,
-        "require_git_workspace_directory_context",
+        "require_platform_workspace_context",
         _context,
     )
     monkeypatch.setattr(benchmark_module, "OsmosisClient", FakeClient)
@@ -385,7 +386,7 @@ def test_benchmark_info_names_the_official_scaffold_as_the_default(
 
     monkeypatch.setattr(
         benchmark_module,
-        "require_git_workspace_directory_context",
+        "require_platform_workspace_context",
         _context,
     )
     monkeypatch.setattr(benchmark_module, "OsmosisClient", FakeClient)
@@ -430,7 +431,7 @@ def test_benchmark_info_reports_a_scaffold_only_benchmark(
 
     monkeypatch.setattr(
         benchmark_module,
-        "require_git_workspace_directory_context",
+        "require_platform_workspace_context",
         _context,
     )
     monkeypatch.setattr(benchmark_module, "OsmosisClient", FakeClient)
@@ -524,7 +525,7 @@ def test_benchmark_info_renders_leaderboard_and_runs(
 
     monkeypatch.setattr(
         benchmark_module,
-        "require_git_workspace_directory_context",
+        "require_platform_workspace_context",
         _context,
     )
     monkeypatch.setattr(benchmark_module, "OsmosisClient", FakeClient)
@@ -748,7 +749,7 @@ def test_benchmark_info_judge_row_covers_every_grader_shape(
 
     monkeypatch.setattr(
         benchmark_module,
-        "require_git_workspace_directory_context",
+        "require_platform_workspace_context",
         _context,
     )
     monkeypatch.setattr(benchmark_module, "OsmosisClient", FakeClient)
