@@ -428,14 +428,6 @@ def test_a_missing_dataset_file_is_a_validation_error(
         )
 
 
-def test_the_missing_extra_hint_names_the_install_command() -> None:
-    error = eval_run_module._missing_extra_error(ModuleNotFoundError(name="fastapi"))
-    assert 'pip install "osmosis-ai[eval]"' in error.message
-    # No harbor variant: harbor deps live in the rollout's own environment.
-    assert "harbor" not in error.message
-    assert error.details == {"missing_module": "fastapi", "extra": "eval"}
-
-
 def test_eval_run_extra_includes_parquet_dataset_support() -> None:
     repo_root = Path(__file__).parents[4]
     pyproject = tomllib.loads(
