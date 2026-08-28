@@ -361,11 +361,12 @@ SCENARIO_PRESENT: dict[str, set[str]] = {
     "server": {"fastapi", "uvicorn"},
     "strands": {"litellm", "strands-agents"},
     "openai-agents": {"litellm", "openai-agents"},
-    "harbor": {"dockerfile-parse", "harbor", "platformdirs", "toml", "uv"},
+    "harbor": {"daytona", "dockerfile-parse", "harbor", "platformdirs", "toml", "uv"},
     "rubric": {"litellm", "orjson"},
     "parquet": {"pyarrow"},
     "eval": {"fastapi", "litellm", "pyarrow", "uv", "uvicorn"},
     "full": {
+        "daytona",
         "fastapi",
         "dockerfile-parse",
         "harbor",
@@ -386,6 +387,7 @@ SCENARIO_PRESENT: dict[str, set[str]] = {
 # cannot be used to infer whether the server/rubric extras were selected there.
 SCENARIO_ABSENT: dict[str, set[str]] = {
     "bare": {
+        "daytona",
         "dockerfile-parse",
         "fastapi",
         "harbor",
@@ -401,6 +403,7 @@ SCENARIO_ABSENT: dict[str, set[str]] = {
         "uvicorn",
     },
     "server": {
+        "daytona",
         "dockerfile-parse",
         "harbor",
         "litellm",
@@ -414,6 +417,7 @@ SCENARIO_ABSENT: dict[str, set[str]] = {
         "uv",
     },
     "strands": {
+        "daytona",
         "dockerfile-parse",
         "harbor",
         "openai-agents",
@@ -423,6 +427,7 @@ SCENARIO_ABSENT: dict[str, set[str]] = {
         "uv",
     },
     "openai-agents": {
+        "daytona",
         "dockerfile-parse",
         "harbor",
         "platformdirs",
@@ -433,6 +438,7 @@ SCENARIO_ABSENT: dict[str, set[str]] = {
     },
     "harbor": {"openai-agents", "pyarrow", "strands-agents"},
     "rubric": {
+        "daytona",
         "dockerfile-parse",
         "fastapi",
         "harbor",
@@ -445,6 +451,7 @@ SCENARIO_ABSENT: dict[str, set[str]] = {
         "uvicorn",
     },
     "parquet": {
+        "daytona",
         "dockerfile-parse",
         "fastapi",
         "harbor",
@@ -461,6 +468,7 @@ SCENARIO_ABSENT: dict[str, set[str]] = {
     # litellm transitively installs tqdm, so it cannot prove tqdm was
     # unselected here (same as every other litellm-carrying scenario).
     "eval": {
+        "daytona",
         "dockerfile-parse",
         "harbor",
         "openai-agents",
@@ -472,9 +480,9 @@ SCENARIO_ABSENT: dict[str, set[str]] = {
     "full": set(),
 }
 
-# Sandbox runtimes are supplied by the remote rollout environment. The wheel
-# must never pull retired Daytona or either SkyPilot distribution.
-PROHIBITED_SANDBOX_DISTRIBUTIONS = {"daytona", "skypilot", "skypilot-nightly"}
+# SkyPilot is supplied by the remote rollout environment. The wheel must never
+# pull either conflicting SkyPilot distribution.
+PROHIBITED_SANDBOX_DISTRIBUTIONS = {"skypilot", "skypilot-nightly"}
 
 
 def _assert_clean_import_state() -> None:
