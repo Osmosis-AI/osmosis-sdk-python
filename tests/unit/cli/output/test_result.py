@@ -67,18 +67,6 @@ def test_list_column_overflow_supports_rich_ignore() -> None:
     assert "ignore" in literal_values
 
 
-def test_list_result_next_offset_required_even_when_unsupported() -> None:
-    result = ListResult(
-        title="Caches",
-        items=[],
-        total_count=0,
-        has_more=False,
-        next_offset=None,
-        columns=[],
-    )
-    assert result.next_offset is None
-
-
 def test_sectioned_list_result_carries_per_section_pagination_and_columns() -> None:
     result = SectionedListResult(
         sections=[

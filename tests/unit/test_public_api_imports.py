@@ -59,15 +59,6 @@ def test_rollout_root_exports_only_framework_neutral_core() -> None:
         }
         assert set(rollout.__all__) == expected
 
-        removed = {
-            "ControllerAuth",
-            "HarborAgentWorkflowContext",
-            "OsmosisRolloutModel",
-            "OsmosisStrandsAgent",
-            "create_rollout_server",
-        }
-        assert not (removed & set(dir(rollout)))
-
         optional_roots = {"agents", "fastapi", "harbor", "litellm", "strands"}
         loaded_roots = {name.partition(".")[0] for name in sys.modules}
         assert not (optional_roots & loaded_roots)

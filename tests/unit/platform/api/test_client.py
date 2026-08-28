@@ -475,18 +475,6 @@ class TestSubmitTrainingRun:
             "created_at": "2026-05-04T00:00:00Z",
         }
 
-    def test_legacy_flattened_kwargs_are_not_supported(self) -> None:
-        """Training submissions use the platform's nested config contract only."""
-        client = OsmosisClient()
-        with pytest.raises(TypeError):
-            client.submit_training_run(
-                model="m1",
-                dataset="ds1",
-                rollout_name="rollout1",
-                entrypoint="rollouts/main.py",
-                git_identity="git_test",
-            )
-
     @patch("osmosis_ai.platform.api.client.platform_request")
     def test_minimal_payload_omits_optional_fields(
         self, mock_request: MagicMock

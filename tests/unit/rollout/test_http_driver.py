@@ -65,6 +65,21 @@ def _request(**overrides: Any) -> RolloutRunRequest:
     return RolloutRunRequest(**payload)
 
 
+def test_driver_value_object_defaults() -> None:
+    request = RolloutRunRequest(messages=[])
+    outcome = RolloutOutcome(status=RolloutStatus.SUCCESS)
+
+    assert (
+        request.label,
+        request.metadata,
+        request.rollout_id,
+        request.agent_timeout_sec,
+        request.grader_timeout_sec,
+        request.extra_fields,
+    ) == (None, None, "", None, None, None)
+    assert (outcome.sample, outcome.error, outcome.rollout_id) == (None, None, None)
+
+
 def _driver(
     store: CallbackStore,
     handler: Any,

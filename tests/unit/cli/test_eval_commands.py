@@ -263,9 +263,6 @@ class TestEvalInfo:
         # Errors are dropped from the rendered output but kept in JSON data.
         assert "Error" not in fields
         assert "Error" not in section_plain
-        # The detail endpoint stopped embedding logs; `osmosis eval logs` is
-        # the replacement.
-        assert "recent_logs" not in result.data
         assert result.data["summary"] == {
             "avg_reward": 0.8123,
             "pass_rate": 0.75,

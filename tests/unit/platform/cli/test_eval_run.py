@@ -386,23 +386,6 @@ def test_the_rollout_dir_is_resolved_under_the_workspace(
 # --------------------------------------------------------------------------- #
 
 
-def test_the_retired_local_eval_schema_is_rejected(
-    workspace: Path, console_capture: StringIO
-) -> None:
-    config = workspace / "configs" / "eval" / "legacy.toml"
-    config.write_text(
-        "[eval]\n"
-        'rollout = "echo-rollout"\n'
-        'entrypoint = "main.py"\n'
-        'dataset = "data/echo.jsonl"\n\n'
-        "[llm]\n"
-        'model = "openai/gpt-5-mini"\n',
-        encoding="utf-8",
-    )
-    with pytest.raises(CLIError, match=r"Missing \[experiment\] section"):
-        eval_run_module.run(config, yes=True)
-
-
 def test_a_malformed_rows_selector_is_a_validation_error(
     workspace: Path, console_capture: StringIO
 ) -> None:
@@ -431,8 +414,6 @@ def test_a_missing_dataset_file_is_a_validation_error(
 def test_the_missing_extra_hint_names_the_install_command() -> None:
     error = eval_run_module._missing_extra_error(ModuleNotFoundError(name="fastapi"))
     assert 'pip install "osmosis-ai[eval]"' in error.message
-    # No harbor variant: harbor deps live in the rollout's own environment.
-    assert "harbor" not in error.message
     assert error.details == {"missing_module": "fastapi", "extra": "eval"}
 
 

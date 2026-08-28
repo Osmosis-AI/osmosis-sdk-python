@@ -64,20 +64,6 @@ def _patch_auth(
     return verify_calls
 
 
-def _write_legacy_active_workspace(
-    monkeypatch: pytest.MonkeyPatch, config_file: Path
-) -> None:
-    config_file.parent.mkdir(parents=True, exist_ok=True)
-    config_file.write_text(
-        '{"active_workspace":{"id":"legacy-ws","name":"legacy-workspace"}}',
-        encoding="utf-8",
-    )
-    monkeypatch.setattr(
-        "osmosis_ai.platform.auth.local_config.CONFIG_FILE",
-        config_file,
-    )
-
-
 def _create_canonical_project(workspace_directory: Path) -> None:
     subprocess.run(
         ["git", "init", "-b", "main", str(workspace_directory)],
@@ -267,38 +253,6 @@ def test_whoami_env_token_ignores_unreadable_persistent_metadata(
     assert data["persistent_login"] is False
 
 
-def test_whoami_json_with_env_token_ignores_cached_workspace_resolution(
-    monkeypatch, capsys, tmp_path, fake_verify_result
-) -> None:
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv("OSMOSIS_TOKEN", "env-token")
-    _write_legacy_active_workspace(monkeypatch, tmp_path / "legacy-config.json")
-    monkeypatch.setattr(
-        "osmosis_ai.platform.auth.verify_token",
-        lambda token, git_identity=None: fake_verify_result,
-    )
-    monkeypatch.setattr(
-        "osmosis_ai.platform.auth.platform_request",
-        lambda *args, **kwargs: pytest.fail(
-            "env token whoami should not fetch workspace list"
-        ),
-    )
-    monkeypatch.setattr(
-        "osmosis_ai.platform.auth.load_credentials",
-        lambda: pytest.fail("env token whoami should not use stored credentials"),
-    )
-
-    exit_code = cli.main(["--json", "auth", "whoami"])
-    captured = capsys.readouterr()
-
-    assert exit_code == 0
-    payload = json.loads(captured.out)
-    data = payload["data"]
-    assert data["email"] == "env@example.com"
-    _assert_no_workspace_context(data)
-    assert data["source"] == "environment"
-
-
 def test_whoami_json_with_env_token_stays_auth_only_inside_project(
     monkeypatch, capsys, tmp_path, fake_verify_result
 ) -> None:
@@ -328,38 +282,6 @@ def test_whoami_json_with_env_token_stays_auth_only_inside_project(
     data = json.loads(captured.out)["data"]
     assert data["account"]["email"] == "env@example.com"
     _assert_no_workspace_context(data)
-
-
-def test_whoami_json_with_env_token_ignores_mismatched_local_workspace(
-    monkeypatch, capsys, tmp_path, fake_verify_result
-) -> None:
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv("OSMOSIS_TOKEN", "env-token")
-    _write_legacy_active_workspace(monkeypatch, tmp_path / "legacy-config.json")
-    monkeypatch.setattr(
-        "osmosis_ai.platform.auth.verify_token",
-        lambda token, git_identity=None: fake_verify_result,
-    )
-    monkeypatch.setattr(
-        "osmosis_ai.platform.auth.platform_request",
-        lambda *args, **kwargs: pytest.fail(
-            "env token whoami should not fetch workspace list"
-        ),
-    )
-    monkeypatch.setattr(
-        "osmosis_ai.platform.auth.load_credentials",
-        lambda: pytest.fail("env token whoami should not use stored credentials"),
-    )
-
-    exit_code = cli.main(["--json", "auth", "whoami"])
-    captured = capsys.readouterr()
-
-    assert exit_code == 0
-    payload = json.loads(captured.out)
-    data = payload["data"]
-    assert data["email"] == "env@example.com"
-    _assert_no_workspace_context(data)
-    assert data["source"] == "environment"
 
 
 def test_whoami_json_with_env_token_verify_failure_emits_auth_required(

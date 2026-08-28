@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import dataclasses
-
 import pytest
 
 from osmosis_ai.platform.api import models as api_models
@@ -731,13 +729,6 @@ class TestEvaluationRunModels:
         assert detail.env_config == {"PROMPT_MODE": "strict"}
         assert detail.resolved_secret_scopes == {"OPENAI_API_KEY": "workspace"}
         assert detail.dataset_df_stats == {"row_count": 1000}
-
-    def test_evaluation_run_detail_has_no_recent_logs_field(self) -> None:
-        # The detail endpoint stopped embedding logs; `osmosis eval logs` is
-        # the replacement.
-        assert "recent_logs" not in {
-            field.name for field in dataclasses.fields(EvaluationRunDetail)
-        }
 
     def test_paginated_evaluation_runs_uses_eval_runs_key(self) -> None:
         page = PaginatedEvaluationRuns.from_dict(

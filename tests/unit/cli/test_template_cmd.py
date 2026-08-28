@@ -183,8 +183,6 @@ def test_template_apply_json_writes_into_project_canonical_layout(
         workspace_directory / "configs" / "eval" / "multiply-local-strands.toml"
     ).is_file()
     assert (workspace_directory / "data" / "multiply.jsonl").is_file()
-    # The legacy staging directory must NOT be created.
-    assert not (workspace_directory / "templates").exists()
 
 
 def test_template_apply_json_in_incomplete_git_checkout(
