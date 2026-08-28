@@ -46,8 +46,7 @@ class PlatformWorkspaceContext:
     repo_url: str | None
 
 
-def _optional_identity(workspace_directory: Path) -> tuple[str | None, str | None]:
-    remote_url = get_local_git_remote_url(workspace_directory)
+def _optional_identity(remote_url: str | None) -> tuple[str | None, str | None]:
     if remote_url is None:
         return None, None
     try:
@@ -66,7 +65,8 @@ def resolve_optional_git_identity(cwd: Path | None = None) -> str | None:
     workspace_directory = find_workspace_directory(cwd or Path.cwd())
     if workspace_directory is None:
         return None
-    identity, _repo_url = _optional_identity(workspace_directory)
+    remote_url = get_local_git_remote_url(workspace_directory)
+    identity, _repo_url = _optional_identity(remote_url)
     return identity
 
 
@@ -81,13 +81,18 @@ def _require_credentials() -> Credentials:
     return credentials
 
 
+def _resolve_workspace_and_remote(cwd: Path | None) -> tuple[Path, str | None]:
+    workspace_directory = resolve_workspace_directory(cwd)
+    validate_workspace_directory_contract(workspace_directory)
+    return workspace_directory, get_local_git_remote_url(workspace_directory)
+
+
 def resolve_local_workspace_directory_context(
     *, cwd: Path | None = None
 ) -> LocalWorkspaceDirectoryContext:
     """Resolve local source without requiring credentials or a remote origin."""
-    workspace_directory = resolve_workspace_directory(cwd)
-    validate_workspace_directory_contract(workspace_directory)
-    git_identity, repo_url = _optional_identity(workspace_directory)
+    workspace_directory, remote_url = _resolve_workspace_and_remote(cwd)
+    git_identity, repo_url = _optional_identity(remote_url)
     return LocalWorkspaceDirectoryContext(
         workspace_directory=workspace_directory,
         git_identity=git_identity,
@@ -98,9 +103,7 @@ def resolve_local_workspace_directory_context(
 def resolve_git_workspace_directory_context(
     *, cwd: Path | None = None
 ) -> GitWorkspaceDirectoryContext:
-    workspace_directory = resolve_workspace_directory(cwd)
-    validate_workspace_directory_contract(workspace_directory)
-    remote_url = get_local_git_remote_url(workspace_directory)
+    workspace_directory, remote_url = _resolve_workspace_and_remote(cwd)
     if remote_url is None:
         raise CLIError(
             "Set `origin` to the Platform-connected repository, or clone the repository from Platform."
