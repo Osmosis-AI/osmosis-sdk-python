@@ -13,11 +13,13 @@ from fastapi.testclient import TestClient
 from osmosis_ai.eval.local._server_bootstrap import (
     _INSTANCE_ENV,
     ROLLOUT_INSTANCE_HEADER,
+    ROLLOUT_SDK_VERSION_HEADER,
     _install_health_marker,
     main,
 )
 
 _HEADER_NAME = ROLLOUT_INSTANCE_HEADER.encode("ascii")
+_SDK_HEADER_NAME = ROLLOUT_SDK_VERSION_HEADER.encode("ascii")
 
 
 @pytest.fixture
@@ -42,7 +44,7 @@ def restore_sys_path() -> Any:
 
 
 def test_health_marker_is_injected_only_on_health(restore_fastapi_call: None) -> None:
-    _install_health_marker("owned")
+    _install_health_marker("owned", "0.3.0")
     app = FastAPI()
 
     @app.get("/health")
@@ -59,7 +61,9 @@ def test_health_marker_is_injected_only_on_health(restore_fastapi_call: None) ->
 
     assert health_response.json() == {"status": "ok"}
     assert health_response.headers[ROLLOUT_INSTANCE_HEADER] == "owned"
+    assert health_response.headers[ROLLOUT_SDK_VERSION_HEADER] == "0.3.0"
     assert ROLLOUT_INSTANCE_HEADER not in ready_response.headers
+    assert ROLLOUT_SDK_VERSION_HEADER not in ready_response.headers
 
 
 async def test_health_marker_replaces_a_stale_header(
@@ -72,6 +76,7 @@ async def test_health_marker_replaces_a_stale_header(
                 "status": 200,
                 "headers": [
                     (_HEADER_NAME, b"stale"),
+                    (_SDK_HEADER_NAME, b"stale"),
                     (b"content-type", b"application/json"),
                 ],
             }
@@ -79,7 +84,7 @@ async def test_health_marker_replaces_a_stale_header(
         await send({"type": "http.response.body", "body": b"{}"})
 
     FastAPI.__call__ = original_call  # type: ignore[method-assign]
-    _install_health_marker("fresh")
+    _install_health_marker("fresh", "0.3.1")
 
     messages: list[dict[str, Any]] = []
 
@@ -97,8 +102,12 @@ async def test_health_marker_replaces_a_stale_header(
     start = next(
         message for message in messages if message["type"] == "http.response.start"
     )
-    values = [value for name, value in start["headers"] if name.lower() == _HEADER_NAME]
-    assert values == [b"fresh"]
+    assert [
+        value for name, value in start["headers"] if name.lower() == _HEADER_NAME
+    ] == [b"fresh"]
+    assert [
+        value for name, value in start["headers"] if name.lower() == _SDK_HEADER_NAME
+    ] == [b"0.3.1"]
     assert messages[-1]["type"] == "http.response.body"
 
 
@@ -109,7 +118,7 @@ async def test_non_http_scopes_are_left_untouched(restore_fastapi_call: None) ->
         seen.append(str(scope.get("type")))
 
     FastAPI.__call__ = original_call  # type: ignore[method-assign]
-    _install_health_marker("owned")
+    _install_health_marker("owned", "0.3.0")
 
     async def receive() -> dict[str, Any]:
         return {"type": "lifespan.shutdown"}

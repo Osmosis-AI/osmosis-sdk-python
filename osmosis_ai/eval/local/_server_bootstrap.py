@@ -1,9 +1,10 @@
-"""Launch a rollout entrypoint with a supervisor-owned health marker.
+"""Launch a rollout entrypoint with supervisor-owned health metadata.
 
 The rollout project resolves its own SDK version, which may predate the
 ``instance_id`` field in ``create_rollout_server``. Patching FastAPI at the ASGI
-boundary keeps the ownership handshake independent of that SDK version: only
-the child process the supervisor launched can echo the random marker.
+boundary keeps the handshake independent of that SDK version: only the child
+process the supervisor launched can echo the random marker and its installed
+SDK version.
 """
 
 from __future__ import annotations
@@ -11,20 +12,28 @@ from __future__ import annotations
 import os
 import runpy
 import sys
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
 from starlette.types import Message, Receive, Scope, Send
 
 ROLLOUT_INSTANCE_HEADER = "x-osmosis-rollout-instance-id"
+ROLLOUT_SDK_VERSION_HEADER = "x-osmosis-rollout-sdk-version"
 _INSTANCE_ENV = "_OSMOSIS_ROLLOUT_INSTANCE_ID"
 
 
-def _install_health_marker(instance_id: str) -> None:
+def _install_health_marker(instance_id: str, sdk_version: str) -> None:
     from fastapi import FastAPI
 
     original_call = FastAPI.__call__
-    header_name = ROLLOUT_INSTANCE_HEADER.encode("ascii")
-    header_value = instance_id.encode("ascii")
+    health_headers = (
+        (ROLLOUT_INSTANCE_HEADER.encode("ascii"), instance_id.encode("ascii")),
+        (
+            ROLLOUT_SDK_VERSION_HEADER.encode("ascii"),
+            sdk_version.encode("ascii"),
+        ),
+    )
+    header_names = {name for name, _value in health_headers}
 
     async def call_with_health_marker(
         self: FastAPI, scope: Scope, receive: Receive, send: Send
@@ -38,9 +47,9 @@ def _install_health_marker(instance_id: str) -> None:
                 headers = [
                     (name, value)
                     for name, value in message.get("headers", [])
-                    if name.lower() != header_name
+                    if name.lower() not in header_names
                 ]
-                headers.append((header_name, header_value))
+                headers.extend(health_headers)
                 message = {**message, "headers": headers}
             await send(message)
 
@@ -59,7 +68,11 @@ def main() -> None:
     if not instance_id:
         raise SystemExit(f"{_INSTANCE_ENV} is required")
 
-    _install_health_marker(instance_id)
+    try:
+        sdk_version = version("osmosis-ai")
+    except PackageNotFoundError:
+        sdk_version = "unknown"
+    _install_health_marker(instance_id, sdk_version)
     sys.argv = [str(entrypoint)]
     sys.path.insert(0, str(entrypoint.parent))
     runpy.run_path(str(entrypoint), run_name="__main__")

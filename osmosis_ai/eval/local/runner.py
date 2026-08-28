@@ -31,7 +31,10 @@ import httpx
 
 from osmosis_ai._uv import _uv_executable
 from osmosis_ai.consts import PACKAGE_VERSION
-from osmosis_ai.eval.local._server_bootstrap import ROLLOUT_INSTANCE_HEADER
+from osmosis_ai.eval.local._server_bootstrap import (
+    ROLLOUT_INSTANCE_HEADER,
+    ROLLOUT_SDK_VERSION_HEADER,
+)
 from osmosis_ai.eval.local.dataset import (
     EvalDatasetRow,
     ResolvedDataset,
@@ -197,6 +200,9 @@ class RunnerHooks(Protocol):
 
     def note(self, message: str) -> None:
         """Surface a human-readable status line."""
+
+    def warning(self, message: str) -> None:
+        """Surface a non-fatal warning without corrupting machine output."""
 
     def stage(self, message: str) -> None:
         """Surface a run milestone.
@@ -532,6 +538,7 @@ def build_subprocess_env(
 class _HealthProbe:
     payload: dict[str, Any]
     instance_id: str | None
+    sdk_version: str | None
 
 
 async def _probe_health(
@@ -552,6 +559,7 @@ async def _probe_health(
     return _HealthProbe(
         payload=payload,
         instance_id=response.headers.get(ROLLOUT_INSTANCE_HEADER),
+        sdk_version=response.headers.get(ROLLOUT_SDK_VERSION_HEADER),
     )
 
 
@@ -1754,6 +1762,25 @@ class LocalEvalRunner:
                         f"instead of this run's; stop it, or choose a "
                         f"different --rollout-port"
                     )
+                if (
+                    health.sdk_version not in (None, "unknown")
+                    and health.sdk_version != PACKAGE_VERSION
+                ):
+                    message = (
+                        f"rollout server uses osmosis-ai {health.sdk_version}, but "
+                        f"this CLI uses {PACKAGE_VERSION}; update "
+                        f"rollouts/{self._spec.rollout_name}/pyproject.toml and run "
+                        f"uv sync --project rollouts/{self._spec.rollout_name} if "
+                        f"the run misbehaves"
+                    )
+                    self._write_log(
+                        "warning",
+                        "server",
+                        message,
+                        server_sdk_version=health.sdk_version,
+                        cli_sdk_version=PACKAGE_VERSION,
+                    )
+                    self._hooks.warning(message)
                 return
             remaining = deadline - time.monotonic()
             if remaining <= 0:

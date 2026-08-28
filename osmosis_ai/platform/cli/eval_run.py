@@ -132,6 +132,13 @@ class _Hooks:
     def note(self, message: str) -> None:
         console.print(message, style="dim")
 
+    def warning(self, message: str) -> None:
+        from osmosis_ai.cli.output.context import OutputFormat
+
+        # Rich --verbose already streams this WARNING line from logs.txt.
+        if not (self.verbose and get_output_context().format is OutputFormat.rich):
+            console.print_warning(message, code="ROLLOUT_SDK_VERSION_MISMATCH")
+
     def stage(self, message: str) -> None:
         # --verbose echoes the whole log stream, and every stage is a line in
         # it; printing here too would double each milestone.
