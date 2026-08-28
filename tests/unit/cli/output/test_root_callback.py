@@ -12,6 +12,7 @@ import osmosis_ai.platform.cli.dataset as dataset_module
 from osmosis_ai.cli import main as cli
 from osmosis_ai.platform.api.models import DatasetFile, PaginatedDatasets
 from osmosis_ai.platform.workspace_scope import get_workspace_name
+from tests.unit.platform.cli.conftest import strip_ansi
 
 
 def test_help_is_plain_text_even_with_json(capsys) -> None:
@@ -25,7 +26,7 @@ def test_help_is_plain_text_even_with_json(capsys) -> None:
 
 def test_help_lists_workspace_selector(capsys) -> None:
     assert cli.main(["--help"]) == 0
-    assert "--workspace" in capsys.readouterr().out
+    assert "--workspace" in strip_ansi(capsys.readouterr().out)
 
 
 def test_version_is_plain_text_even_with_json(capsys) -> None:
