@@ -57,8 +57,9 @@ def _safe_path(segment: str) -> str:
 class OsmosisClient:
     """Client for /api/cli/* endpoints.
 
-    Methods accept either an explicit ``git_identity`` or the root CLI workspace
-    selection through the request context when ``git_identity`` is ``None``.
+    Workspace-scoped methods accept either an explicit ``git_identity`` or the
+    root CLI workspace selection through the request context when
+    ``git_identity`` is ``None``.
     """
 
     def _get_logs(

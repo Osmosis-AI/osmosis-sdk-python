@@ -78,6 +78,15 @@ def test_platform_context_requires_origin_and_credentials(
 ) -> None:
     _repo(tmp_path, origin="https://github.com/Acme/Rollouts.git")
     _scaffold(tmp_path)
+    remote_calls: list[Path] = []
+
+    def get_remote(workspace_directory: Path) -> str:
+        remote_calls.append(workspace_directory)
+        return "https://github.com/Acme/Rollouts.git"
+
+    monkeypatch.setattr(
+        workspace_directory_context, "get_local_git_remote_url", get_remote
+    )
     monkeypatch.setattr(
         workspace_directory_context, "load_credentials", lambda: _make_credentials()
     )
@@ -90,6 +99,7 @@ def test_platform_context_requires_origin_and_credentials(
     assert ctx.git_identity == "acme/rollouts"
     assert ctx.repo_url == "https://github.com/Acme/Rollouts.git"
     assert ctx.credentials.access_token == "token"
+    assert remote_calls == [tmp_path.resolve()]
 
 
 def test_platform_context_rejects_missing_origin(tmp_path: Path) -> None:

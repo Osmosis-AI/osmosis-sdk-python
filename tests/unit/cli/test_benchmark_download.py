@@ -10,6 +10,7 @@ import osmosis_ai.cli.main as cli
 import osmosis_ai.platform.cli.benchmark as benchmark_module
 import osmosis_ai.platform.cli.run_download as run_download_module
 from osmosis_ai.cli.errors import CLIError
+from osmosis_ai.platform.api.download import DownloadHTTPError
 from osmosis_ai.platform.api.models import (
     BenchmarkRunDetail,
     RunDownloadFile,
@@ -18,6 +19,7 @@ from osmosis_ai.platform.api.models import (
     RunDownloadURLBatch,
 )
 from osmosis_ai.platform.auth import PlatformAPIError
+from osmosis_ai.platform.workspace_scope import get_workspace_name
 
 GIT_IDENTITY = "acme/workspace"
 
@@ -48,6 +50,7 @@ def _detail(status: str = "finished") -> BenchmarkRunDetail:
 def _stub_context(monkeypatch: pytest.MonkeyPatch, workspace: Path) -> object:
     credentials = object()
     context = SimpleNamespace(
+        workspace_name=None,
         workspace_directory=workspace,
         git_identity=GIT_IDENTITY,
         repo_url="https://github.com/acme/workspace.git",
@@ -61,6 +64,21 @@ def _stub_context(monkeypatch: pytest.MonkeyPatch, workspace: Path) -> object:
     return credentials
 
 
+def _stub_explicit_workspace_context(monkeypatch: pytest.MonkeyPatch) -> None:
+    context = SimpleNamespace(
+        workspace_name="acme",
+        workspace_directory=None,
+        git_identity=None,
+        repo_url=None,
+        credentials=object(),
+    )
+    monkeypatch.setattr(
+        benchmark_module,
+        "require_platform_workspace_context",
+        lambda: context,
+    )
+
+
 def _fake_client(
     *,
     status: str = "finished",
@@ -69,6 +87,7 @@ def _fake_client(
 ):
     manifest_calls: list[tuple[str, ...]] = []
     url_calls: list[list[RunDownloadFile]] = []
+    workspace_names_seen: list[str | None] = []
 
     class FakeClient:
         def get_benchmark_run(self, name_or_id, *, git_identity, credentials=None):
@@ -97,6 +116,7 @@ def _fake_client(
         ):
             assert run_id == "benchmark-run-1"
             url_calls.append(list(items))
+            workspace_names_seen.append(get_workspace_name())
             return RunDownloadURLBatch(
                 items=[
                     RunDownloadURL(
@@ -110,6 +130,7 @@ def _fake_client(
 
     FakeClient.manifest_calls = manifest_calls
     FakeClient.url_calls = url_calls
+    FakeClient.workspace_names_seen = workspace_names_seen
     return FakeClient
 
 
@@ -173,6 +194,50 @@ def test_all_benchmark_download_accepts_stable_artifact_paths(
     assert result.status == "success"
     assert (root / "artifacts" / "result_01" / "logs" / "agent.log").is_file()
     assert (root / "logs.txt").is_file()
+
+
+def test_workspace_scope_reaches_expired_url_refresh_worker(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _stub_explicit_workspace_context(monkeypatch)
+    fake_client = _fake_client(manifest_files=FILES["summary"])
+    attempts = 0
+
+    def expired_once(url, destination, *, expected_size=None):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise DownloadHTTPError(403, "expired")
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(b"x" * expected_size)
+        return expected_size
+
+    monkeypatch.setattr(benchmark_module, "OsmosisClient", fake_client)
+    monkeypatch.setattr(run_download_module, "download_file_to", expired_once)
+    monkeypatch.setattr(run_download_module, "DOWNLOAD_RETRY_BASE_SECONDS", 0)
+    monkeypatch.chdir(tmp_path)
+
+    exit_code = cli.main(
+        [
+            "--workspace",
+            "acme",
+            "--json",
+            "benchmark",
+            "runs",
+            "download",
+            "hle-smoke",
+            "--type",
+            "summary",
+        ]
+    )
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert json.loads(captured.out)["resource"]["files_downloaded"] == 1
+    assert attempts == 2
+    assert fake_client.workspace_names_seen == ["acme", "acme"]
 
 
 def test_benchmark_artifact_named_like_an_eval_manifest_is_downloadable(
