@@ -79,13 +79,22 @@ def test_platform_context_requires_origin_and_credentials(
     _repo(tmp_path, origin="https://github.com/Acme/Rollouts.git")
     _scaffold(tmp_path)
     remote_calls: list[Path] = []
+    normalize_calls: list[str] = []
+    normalize_git_identity = workspace_directory_context.normalize_git_identity
 
     def get_remote(workspace_directory: Path) -> str:
         remote_calls.append(workspace_directory)
         return "https://github.com/Acme/Rollouts.git"
 
+    def normalize(remote_url: str):
+        normalize_calls.append(remote_url)
+        return normalize_git_identity(remote_url)
+
     monkeypatch.setattr(
         workspace_directory_context, "get_local_git_remote_url", get_remote
+    )
+    monkeypatch.setattr(
+        workspace_directory_context, "normalize_git_identity", normalize
     )
     monkeypatch.setattr(
         workspace_directory_context, "load_credentials", lambda: _make_credentials()
@@ -100,6 +109,7 @@ def test_platform_context_requires_origin_and_credentials(
     assert ctx.repo_url == "https://github.com/Acme/Rollouts.git"
     assert ctx.credentials.access_token == "token"
     assert remote_calls == [tmp_path.resolve()]
+    assert normalize_calls == ["https://github.com/Acme/Rollouts.git"]
 
 
 def test_platform_context_rejects_missing_origin(tmp_path: Path) -> None:
@@ -112,6 +122,40 @@ def test_platform_context_rejects_missing_origin(tmp_path: Path) -> None:
         )
 
     assert "Set `origin` to the Platform-connected repository" in str(exc.value)
+
+
+@pytest.mark.parametrize(
+    ("origin", "message"),
+    [
+        (
+            "https://gitlab.com/acme/rollouts.git",
+            "Git remote URL must be hosted on github.com.",
+        ),
+        (
+            "https://[github.com/acme/rollouts.git",
+            "Git remote URL must be a valid URL.",
+        ),
+    ],
+)
+def test_platform_context_preserves_invalid_origin_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    origin: str,
+    message: str,
+) -> None:
+    _repo(tmp_path, origin=origin)
+    _scaffold(tmp_path)
+    monkeypatch.setattr(
+        workspace_directory_context,
+        "load_credentials",
+        lambda: pytest.fail("invalid origin loaded credentials"),
+    )
+
+    with pytest.raises(CLIError) as exc_info:
+        workspace_directory_context.resolve_git_workspace_directory_context(
+            cwd=tmp_path
+        )
+    assert str(exc_info.value) == message
 
 
 def test_platform_context_requires_credentials(
@@ -209,6 +253,27 @@ def test_local_workspace_context_does_not_require_origin(
     assert workspace_directory_context.local_result_context(ctx) == {
         "workspace_directory": str(tmp_path.resolve())
     }
+
+
+@pytest.mark.parametrize(
+    "origin",
+    [
+        "https://gitlab.com/acme/rollouts.git",
+        "https://[github.com/acme/rollouts.git",
+    ],
+)
+def test_local_workspace_context_ignores_invalid_origin(
+    tmp_path: Path, origin: str
+) -> None:
+    _repo(tmp_path, origin=origin)
+    _scaffold(tmp_path)
+
+    ctx = workspace_directory_context.resolve_local_workspace_directory_context(
+        cwd=tmp_path
+    )
+
+    assert ctx.git_identity is None
+    assert ctx.repo_url is None
 
 
 def test_git_result_context_shape(tmp_path: Path) -> None:

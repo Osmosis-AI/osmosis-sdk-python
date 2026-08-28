@@ -98,17 +98,20 @@ def resolve_local_workspace_directory_context(
 def resolve_git_workspace_directory_context(
     *, cwd: Path | None = None
 ) -> GitWorkspaceDirectoryContext:
-    local = resolve_local_workspace_directory_context(cwd=cwd)
-    if local.git_identity is None or local.repo_url is None:
+    workspace_directory = resolve_workspace_directory(cwd)
+    validate_workspace_directory_contract(workspace_directory)
+    remote_url = get_local_git_remote_url(workspace_directory)
+    if remote_url is None:
         raise CLIError(
             "Set `origin` to the Platform-connected repository, or clone the repository from Platform."
         )
+    normalized = normalize_git_identity(remote_url)
     credentials = _require_credentials()
 
     return GitWorkspaceDirectoryContext(
-        workspace_directory=local.workspace_directory,
-        git_identity=local.git_identity,
-        repo_url=local.repo_url,
+        workspace_directory=workspace_directory,
+        git_identity=normalized.identity,
+        repo_url=normalized.display_url,
         credentials=credentials,
     )
 
