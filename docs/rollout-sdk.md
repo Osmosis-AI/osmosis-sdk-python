@@ -30,7 +30,7 @@ Optional features use these canonical modules:
 
 The `Messages` return type is available from `osmosis_ai.rollout.types`.
 
-The `harbor` extra installs plain Harbor for an externally provided SkyPilot runtime. Daytona is retired, and do not install Harbor's `skypilot` extra. It is a host-side extra: it also carries `uv` and the other dependencies [../osmosis_ai/packaging.py](../osmosis_ai/packaging.py) needs to build the bundle wheel. Inside the task container only the framework-neutral core runs, so a bundle never installs the `harbor` extra — which is why the in-container runner and ATIF persistence must work on a bare install.
+The `harbor` extra installs Harbor with its Daytona environment dependencies. It does not install Harbor's `skypilot` extra because the rollout runtime provides SkyPilot. It is a host-side extra: it also carries `uv` and the other dependencies [../osmosis_ai/packaging.py](../osmosis_ai/packaging.py) needs to build the bundle wheel. Inside the task container only the framework-neutral core runs, so a bundle never installs the `harbor` extra — which is why the in-container runner and ATIF persistence must work on a bare install.
 
 ## AgentWorkflow
 

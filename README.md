@@ -37,7 +37,7 @@ pip install "osmosis-ai[full]"              # every optional feature
 # or with uv:  uv add osmosis-ai
 ```
 
-There is one distribution, `osmosis-ai`. The `harbor` extra installs plain Harbor only: Daytona is retired, and Harbor's `skypilot` extra must not be installed because the rollout runtime provides SkyPilot. See [Installation](https://docs.osmosis.ai/cli/installation) for product setup and [CONTRIBUTING.md](CONTRIBUTING.md) for development setup.
+There is one distribution, `osmosis-ai`. The `harbor` extra installs Harbor with its Daytona environment dependencies. It does not install Harbor's `skypilot` extra because the rollout runtime provides SkyPilot. See [Installation](https://docs.osmosis.ai/cli/installation) for product setup and [CONTRIBUTING.md](CONTRIBUTING.md) for development setup.
 
 ## Documentation
 
