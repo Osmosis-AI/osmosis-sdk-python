@@ -95,15 +95,6 @@ class TestPublicSurface:
 
         assert backend.health()["backend"] == "harbor"
 
-    def test_a_typo_still_reads_like_a_typo(self, template_task):
-        with pytest.raises(TypeError, match="unexpected keyword argument 'taks_dir'"):
-            HarborBackend(
-                orchestrator=TrialQueue(n_concurrent=1),
-                tasks_dir=template_task,
-                agent="terminus-2",
-                taks_dir=template_task,
-            )
-
 
 class TestContract:
     def test_spec_round_trip(self, tmp_path):

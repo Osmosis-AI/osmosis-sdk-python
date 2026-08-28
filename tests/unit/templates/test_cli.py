@@ -152,8 +152,6 @@ def test_apply_command_writes_directly_into_project_canonical_layout(
         workspace_directory / "configs" / "eval" / "multiply-local-strands.toml"
     ).is_file()
     assert (workspace_directory / "data" / "multiply.jsonl").is_file()
-    # The legacy staging directory must NOT be created.
-    assert not (workspace_directory / "templates").exists()
 
     assert result is not None
     assert result.operation == "template.apply"

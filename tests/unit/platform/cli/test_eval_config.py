@@ -343,19 +343,12 @@ required = []
         load_eval_submit_config(path)
 
 
-def test_load_eval_submit_config_rejects_old_local_eval_schema(
-    tmp_path: Path,
-) -> None:
+def test_load_eval_submit_config_requires_experiment_section(tmp_path: Path) -> None:
     path = _write_config(
         tmp_path / "eval.toml",
         """
-[eval]
-rollout = "calculator"
-entrypoint = "main.py"
-dataset = "data/multiply.jsonl"
-
-[llm]
-model = "openai/gpt-5-mini"
+[evaluation]
+rubric = "Score correctness"
 """,
     )
 
@@ -363,9 +356,7 @@ model = "openai/gpt-5-mini"
         load_eval_submit_config(path)
 
 
-def test_load_eval_submit_config_rejects_legacy_llm_section(
-    tmp_path: Path,
-) -> None:
+def test_load_eval_submit_config_rejects_unknown_section(tmp_path: Path) -> None:
     path = _write_config(
         tmp_path / "eval.toml",
         """
@@ -375,15 +366,15 @@ entrypoint = "main.py"
 model_path = "openai/gpt-5-mini"
 dataset = "multiply"
 
-[llm]
-model_path = "openai/gpt-5-mini"
+[unexpected]
+value = "unknown"
 
 [secrets]
 required = []
 """,
     )
 
-    with pytest.raises(CLIError, match=r"llm: Unrecognized section"):
+    with pytest.raises(CLIError, match=r"unexpected: Unrecognized section"):
         load_eval_submit_config(path)
 
 

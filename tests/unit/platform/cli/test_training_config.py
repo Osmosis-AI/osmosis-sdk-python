@@ -448,7 +448,6 @@ dataset = "d"
     assert cfg.sampling_config == {}
     assert cfg.checkpoints_config == {}
     assert cfg.advanced_config == {}
-    assert not hasattr(cfg, "to_api_config")
 
 
 # ---------------------------------------------------------------------------

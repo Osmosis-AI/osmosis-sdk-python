@@ -32,20 +32,50 @@ from osmosis_ai.eval.rubric.types import RubricResult
 class TestLoadRubricDataset:
     """Tests for the JSONL dataset loader."""
 
-    def test_messages_format_loads_correctly(self, tmp_path: Path):
+    @pytest.mark.parametrize(
+        ("messages", "expected"),
+        [
+            (
+                [
+                    {"role": "user", "content": "Hello"},
+                    {"role": "assistant", "content": "Hi there!"},
+                ],
+                "Hi there!",
+            ),
+            (
+                [
+                    {"role": "assistant", "content": "First"},
+                    {"role": "user", "content": "Again"},
+                    {"role": "assistant", "content": "Last"},
+                ],
+                "Last",
+            ),
+            (
+                [
+                    {
+                        "role": "assistant",
+                        "content": [
+                            {"type": "text", "text": "Part one"},
+                            {"type": "image_url", "image_url": "ignored"},
+                            {"type": "text", "text": "Part two"},
+                        ],
+                    }
+                ],
+                "Part one\nPart two",
+            ),
+        ],
+    )
+    def test_messages_format_loads_correctly(
+        self, tmp_path: Path, messages: list[dict], expected: str
+    ) -> None:
         data_file = tmp_path / "data.jsonl"
-        record = {
-            "messages": [
-                {"role": "user", "content": "Hello"},
-                {"role": "assistant", "content": "Hi there!"},
-            ]
-        }
+        record = {"messages": messages}
         data_file.write_text(json.dumps(record) + "\n", encoding="utf-8")
 
         records = load_rubric_dataset(data_file)
 
         assert len(records) == 1
-        assert records[0].solution_str == "Hi there!"
+        assert records[0].solution_str == expected
         assert records[0].ground_truth is None
         assert records[0].original_input is None
         assert records[0].metadata is None
@@ -151,14 +181,21 @@ class TestLoadRubricDataset:
         with pytest.raises(CLIError, match="Expected JSON object"):
             load_rubric_dataset(data_file)
 
-    def test_empty_messages_list_raises(self, tmp_path: Path):
+    @pytest.mark.parametrize(
+        ("messages", "expected_error"),
+        [
+            ([], r"must include 'messages'.*or 'solution_str'"),
+            ([{"role": "user", "content": "Hello"}], "at least one assistant message"),
+        ],
+    )
+    def test_invalid_messages_raise(
+        self, tmp_path: Path, messages: list[dict], expected_error: str
+    ) -> None:
         data_file = tmp_path / "data.jsonl"
-        record = {"messages": []}
+        record = {"messages": messages}
         data_file.write_text(json.dumps(record) + "\n", encoding="utf-8")
 
-        with pytest.raises(
-            CLIError, match=r"must include 'messages'.*or 'solution_str'"
-        ):
+        with pytest.raises(CLIError, match=expected_error):
             load_rubric_dataset(data_file)
 
     def test_whitespace_only_solution_str_raises(self, tmp_path: Path):
