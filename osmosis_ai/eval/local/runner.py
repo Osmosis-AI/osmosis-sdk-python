@@ -1763,7 +1763,7 @@ class LocalEvalRunner:
                         f"different --rollout-port"
                     )
                 if (
-                    health.sdk_version is not None
+                    health.sdk_version not in (None, "unknown")
                     and health.sdk_version != PACKAGE_VERSION
                 ):
                     message = (

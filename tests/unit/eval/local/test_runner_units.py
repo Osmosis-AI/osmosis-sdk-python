@@ -487,7 +487,7 @@ async def test_wait_for_health_accepts_header_ownership_without_json_id(
 
 @pytest.mark.parametrize(
     ("server_version", "warns"),
-    [("0.3.0", True), (PACKAGE_VERSION, False)],
+    [("0.3.0", True), (PACKAGE_VERSION, False), ("unknown", False)],
 )
 async def test_wait_for_health_warns_when_the_server_sdk_differs(
     tmp_path: Path, server_version: str, warns: bool
