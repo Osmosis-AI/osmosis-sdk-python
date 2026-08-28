@@ -1,10 +1,9 @@
 """Shared orchestration for cloud submit (train, eval, and benchmark).
 
-Train and eval follow the same script via ``CloudSubmitSpec`` /
+Train and eval follow the same source-backed script via ``CloudSubmitSpec`` /
 ``run_cloud_submit``. Benchmark TOML is a different shape (no
 ``BaseSubmitConfig``, no ``commit_sha``), so it renders its own summary
-tables and HLE warning, then joins the shared tail:
-``prepare_submit_secrets`` → ``confirm_remote_fetch_and_post``.
+tables and HLE warning, then joins only the platform-only confirmation tail.
 """
 
 from __future__ import annotations
@@ -16,7 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from osmosis_ai.cli.console import console
-from osmosis_ai.cli.errors import CLIError
+from osmosis_ai.cli.errors import CLIError, CLIErrorCode
 from osmosis_ai.cli.output import OperationResult, get_output_context
 from osmosis_ai.cli.prompts import require_confirmation
 from osmosis_ai.platform.api.client import OsmosisClient
@@ -34,13 +33,18 @@ from osmosis_ai.platform.cli.utils import (
     print_remote_fetch_notice,
     require_git_workspace_directory_context,
 )
-from osmosis_ai.platform.cli.workspace_directory_context import git_result_context
+from osmosis_ai.platform.cli.workspace_directory_context import (
+    GitWorkspaceDirectoryContext,
+    git_result_context,
+    resolve_git_workspace_directory_context,
+)
 from osmosis_ai.platform.cli.workspace_directory_contract import (
     ensure_workspace_directory_config_path,
     validate_rollout_backend,
     validate_workspace_directory_contract,
 )
 from osmosis_ai.platform.cli.workspace_repo import check_pinned_commit
+from osmosis_ai.platform.workspace_scope import get_workspace_name
 
 _MISSING_SECRET_RE = re.compile(r"Secret\(s\) not found: (.+)")
 
@@ -83,7 +87,7 @@ class CloudSubmitSpec[ConfigT: BaseSubmitConfig]:
     load_config: Callable[[Path], ConfigT]
     validate_context: Callable[[ConfigT, Path], None]
     submit: Callable[
-        [OsmosisClient, ConfigT, Any, str, dict[str, str]], SubmitRunResult
+        [OsmosisClient, ConfigT, Any, str | None, dict[str, str]], SubmitRunResult
     ]
     build_next_steps: Callable[
         [SubmitRunResult, ConfigT],
@@ -119,7 +123,7 @@ def submit_next_steps(
 
 
 def _fetch_secret_scopes(
-    client: OsmosisClient, *, credentials: Any, git_identity: str
+    client: OsmosisClient, *, credentials: Any, git_identity: str | None
 ) -> tuple[set[str], set[str]] | None:
     """Return ``(workspace_names, personal_names)`` for the caller's workspace.
 
@@ -210,7 +214,7 @@ def prepare_submit_secrets(
     required_names: list[str],
     secrets_file: str | None,
     credentials: Any,
-    git_identity: str,
+    git_identity: str | None,
     full_summary: list[tuple[str, str]],
 ) -> dict[str, str]:
     """Resolve provided secrets, print the secrets table, extend ``full_summary``.
@@ -270,28 +274,18 @@ def prepare_submit_secrets(
     return provided_secrets
 
 
-def confirm_remote_fetch_and_post[T](
+def confirm_and_post[T](
     *,
     yes: bool,
     confirm_prompt: str,
     full_summary: list[tuple[str, str]],
-    workspace_directory: Path,
     status_message: str,
     post: Callable[[], T],
-    branch: str | None = None,
-    pinned_commit_sha: str | None = None,
-    extra_warnings: list[str] | None = None,
+    notes: list[str] | None = None,
+    warnings: list[str] | None = None,
     provided_secrets: dict[str, str] | None = None,
-    warn_on_missing_commit_sha: bool = True,
 ) -> T:
-    """Shared tail: remote-fetch notice, confirmation, POST with secret-404 hints."""
-    notes, warnings = print_remote_fetch_notice(
-        workspace_directory,
-        branch=branch,
-        pinned_commit_sha=pinned_commit_sha,
-        extra_warnings=extra_warnings,
-        warn_on_missing_commit_sha=warn_on_missing_commit_sha,
-    )
+    """Confirm and POST while preserving secret redaction and error enrichment."""
     require_confirmation(
         confirm_prompt,
         yes=yes,
@@ -318,6 +312,95 @@ def confirm_remote_fetch_and_post[T](
             raise
 
 
+def confirm_remote_fetch_and_post[T](
+    *,
+    yes: bool,
+    confirm_prompt: str,
+    full_summary: list[tuple[str, str]],
+    workspace_directory: Path,
+    status_message: str,
+    post: Callable[[], T],
+    branch: str | None = None,
+    pinned_commit_sha: str | None = None,
+    extra_warnings: list[str] | None = None,
+    provided_secrets: dict[str, str] | None = None,
+    warn_on_missing_commit_sha: bool = True,
+) -> T:
+    """Add source-fetch diagnostics before the shared confirmation + POST tail."""
+    notes, warnings = print_remote_fetch_notice(
+        workspace_directory,
+        branch=branch,
+        pinned_commit_sha=pinned_commit_sha,
+        extra_warnings=extra_warnings,
+        warn_on_missing_commit_sha=warn_on_missing_commit_sha,
+    )
+    return confirm_and_post(
+        yes=yes,
+        confirm_prompt=confirm_prompt,
+        full_summary=full_summary,
+        status_message=status_message,
+        post=post,
+        notes=notes,
+        warnings=warnings,
+        provided_secrets=provided_secrets,
+    )
+
+
+def _resolve_source_submit_context(
+    config_path: Path,
+) -> tuple[GitWorkspaceDirectoryContext, Path, str | None]:
+    """Resolve source from the config path when ``--workspace`` is explicit.
+
+    Source submits still validate local Git. The workspace name is an explicit
+    client-side guard: it must name a membership connected to the same repository
+    that contains the absolute config path, then the API request uses workspace
+    scope only.
+    """
+    requested_path = config_path.expanduser()
+    workspace_name = get_workspace_name()
+    if workspace_name is None:
+        context = require_git_workspace_directory_context()
+        resolved_path = (
+            requested_path
+            if requested_path.is_absolute()
+            else context.workspace_directory / requested_path
+        )
+        return context, resolved_path.resolve(), context.git_identity
+
+    if not requested_path.is_absolute():
+        raise CLIError(
+            "`--workspace` with train or eval submit requires an absolute config path.",
+            code=CLIErrorCode.VALIDATION,
+        )
+
+    resolved_path = requested_path.resolve()
+    context = resolve_git_workspace_directory_context(cwd=resolved_path.parent)
+    workspaces = OsmosisClient().list_workspaces(credentials=context.credentials)
+    workspace = next(
+        (item for item in workspaces if item.name == workspace_name),
+        None,
+    )
+    if workspace is None:
+        raise CLIError(
+            f"Workspace {workspace_name!r} is not available to this account.",
+            code=CLIErrorCode.NOT_FOUND,
+        )
+    connected_repo = workspace.connected_repo_full_name
+    if connected_repo is None:
+        raise CLIError(
+            f"Workspace {workspace_name!r} has no connected repository and cannot "
+            "submit source-backed runs.",
+            code=CLIErrorCode.VALIDATION,
+        )
+    if connected_repo.casefold() != context.git_identity.casefold():
+        raise CLIError(
+            f"Workspace {workspace_name!r} is connected to {connected_repo}, but the "
+            f"config file belongs to {context.git_identity}.",
+            code=CLIErrorCode.VALIDATION,
+        )
+    return context, resolved_path, None
+
+
 def run_cloud_submit[ConfigT: BaseSubmitConfig](
     config_path: Path,
     *,
@@ -326,14 +409,11 @@ def run_cloud_submit[ConfigT: BaseSubmitConfig](
     secrets_file: str | None = None,
 ) -> OperationResult:
     """Run the shared submit flow for ``spec``."""
-    context = require_git_workspace_directory_context()
+    context, resolved_config_path, request_git_identity = (
+        _resolve_source_submit_context(Path(config_path))
+    )
     workspace_directory = context.workspace_directory
     validate_workspace_directory_contract(workspace_directory)
-
-    config_path = Path(config_path)
-    resolved_config_path = (
-        config_path if config_path.is_absolute() else workspace_directory / config_path
-    )
     ensure_workspace_directory_config_path(
         resolved_config_path,
         workspace_directory,
@@ -395,7 +475,7 @@ def run_cloud_submit[ConfigT: BaseSubmitConfig](
         required_names=list(config.secrets),
         secrets_file=secrets_file,
         credentials=context.credentials,
-        git_identity=context.git_identity,
+        git_identity=request_git_identity,
         full_summary=full_summary,
     )
 
@@ -404,7 +484,7 @@ def run_cloud_submit[ConfigT: BaseSubmitConfig](
             OsmosisClient(),
             config,
             context.credentials,
-            context.git_identity,
+            request_git_identity,
             provided_secrets,
         )
 
@@ -423,6 +503,11 @@ def run_cloud_submit[ConfigT: BaseSubmitConfig](
 
     display_next_steps, next_steps_structured = spec.build_next_steps(result, config)
 
+    result_context = git_result_context(context)
+    workspace_name = get_workspace_name()
+    if workspace_name is not None:
+        result_context["workspace"] = {"name": workspace_name}
+
     return OperationResult(
         operation=spec.operation,
         status="success",
@@ -434,7 +519,7 @@ def run_cloud_submit[ConfigT: BaseSubmitConfig](
             "dataset_name": config.experiment_dataset,
             "created_at": result.created_at,
             **({"url": result.platform_url} if result.platform_url else {}),
-            **git_result_context(context),
+            **result_context,
             "config": {
                 "rollout": config.experiment_rollout,
                 "entrypoint": config.experiment_entrypoint,

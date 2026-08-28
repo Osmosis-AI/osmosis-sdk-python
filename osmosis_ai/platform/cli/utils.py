@@ -36,8 +36,10 @@ from osmosis_ai.platform.api.models import (
 )
 from osmosis_ai.platform.cli.workspace_directory_context import (
     GitWorkspaceDirectoryContext,
-    git_result_context,
+    PlatformWorkspaceContext,
     resolve_git_workspace_directory_context,
+    resolve_platform_workspace_context,
+    workspace_result_context,
 )
 from osmosis_ai.platform.constants import DEFAULT_PAGE_SIZE
 
@@ -103,6 +105,11 @@ def platform_call[T](message: str, call: Callable[[], T]) -> T:
 def require_git_workspace_directory_context() -> GitWorkspaceDirectoryContext:
     """Resolve the current Git-scoped Osmosis workspace directory for platform commands."""
     return resolve_git_workspace_directory_context()
+
+
+def require_platform_workspace_context() -> PlatformWorkspaceContext:
+    """Resolve explicit workspace scope, falling back to the current Git workspace."""
+    return resolve_platform_workspace_context()
 
 
 # Ordered ``(statuses, style)`` buckets per domain. The first bucket whose set
@@ -267,7 +274,7 @@ def build_logs_result(
     *,
     title: str,
     page: LogsPage,
-    context: GitWorkspaceDirectoryContext,
+    context: PlatformWorkspaceContext,
     next_step_hint: str,
 ) -> ListResult:
     """Build the shared ``ListResult`` for a logs page (train/eval/dataset).
@@ -291,7 +298,7 @@ def build_logs_result(
         total_count=len(items),
         has_more=page.next_cursor is not None,
         next_offset=None,
-        extra={"next_cursor": page.next_cursor, **git_result_context(context)},
+        extra={"next_cursor": page.next_cursor, **workspace_result_context(context)},
         columns=[
             ListColumn(key="timestamp", label="Time", no_wrap=True, ratio=2),
             ListColumn(key="level", label="Level", no_wrap=True, ratio=1),
@@ -413,7 +420,7 @@ def fetch_environment_secrets(
     *,
     scope: str,
     credentials: Any,
-    git_identity: str,
+    git_identity: str | None,
 ) -> list[Any] | None:
     """Best-effort fetch of every environment secret in ``scope``.
 

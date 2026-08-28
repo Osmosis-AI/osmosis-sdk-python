@@ -44,9 +44,13 @@ from osmosis_ai.platform.cli.utils import (
     make_progress,
     paginated_fetch,
     require_git_workspace_directory_context,
+    require_platform_workspace_context,
     validate_list_options,
 )
-from osmosis_ai.platform.cli.workspace_directory_context import git_result_context
+from osmosis_ai.platform.cli.workspace_directory_context import (
+    git_result_context,
+    workspace_result_context,
+)
 
 if TYPE_CHECKING:
     from osmosis_ai.platform.cli.eval_config import EvalSubmitConfig
@@ -300,7 +304,7 @@ def _submit_eval(
     client: OsmosisClient,
     config: EvalSubmitConfig,
     credentials: Any,
-    git_identity: str,
+    git_identity: str | None,
     provided_secrets: dict[str, str],
 ) -> SubmitRunResult:
     return client.submit_evaluation_run(
@@ -356,10 +360,10 @@ def submit(
 
 
 def list_eval_runs(*, limit: int, all_: bool) -> ListResult:
-    """List evaluation runs for the current workspace directory."""
+    """List evaluation runs for the selected workspace."""
     effective_limit, fetch_all = validate_list_options(limit=limit, all_=all_)
 
-    context = require_git_workspace_directory_context()
+    context = require_platform_workspace_context()
     credentials = context.credentials
 
     client = OsmosisClient()
@@ -389,7 +393,7 @@ def list_eval_runs(*, limit: int, all_: bool) -> ListResult:
         total_count=total_count,
         has_more=has_more,
         next_offset=next_offset,
-        extra=git_result_context(context),
+        extra=workspace_result_context(context),
         columns=[
             ListColumn(key="name", label="Name", ratio=4, overflow="fold"),
             ListColumn(key="status", label="Status", no_wrap=True, ratio=1),
@@ -416,7 +420,7 @@ def list_eval_runs(*, limit: int, all_: bool) -> ListResult:
 
 def logs(name: str, *, limit: int, cursor: str | None = None) -> ListResult:
     """Show the most recent logs for an evaluation run, oldest-first."""
-    context = require_git_workspace_directory_context()
+    context = require_platform_workspace_context()
     credentials = context.credentials
 
     client = OsmosisClient()
@@ -446,7 +450,7 @@ def info(name: str, *, output: str | None) -> DetailResult:
         resolve_eval_metrics_output,
     )
 
-    context = require_git_workspace_directory_context()
+    context = require_platform_workspace_context()
     credentials = context.credentials
 
     client = OsmosisClient()
@@ -589,7 +593,7 @@ def info(name: str, *, output: str | None) -> DetailResult:
                 out_path = resolve_eval_metrics_output(
                     detail.name,
                     detail.id,
-                    workspace_directory=context.workspace_directory,
+                    workspace_directory=context.workspace_directory or Path.cwd(),
                     output=output,
                 )
                 manifest = client.get_eval_run_download_manifest(
@@ -639,7 +643,7 @@ def info(name: str, *, output: str | None) -> DetailResult:
             "metrics_error": metrics_error,
             "output_path": output_path,
             "save_warning": save_warning,
-            **git_result_context(context),
+            **workspace_result_context(context),
         },
         fields=fields,
         sections=sections,
@@ -727,7 +731,7 @@ def stop(name: str, *, yes: bool) -> OperationResult:
     """Stop an evaluation run."""
     from osmosis_ai.platform.cli.stop_run import stop_run
 
-    context = require_git_workspace_directory_context()
+    context = require_platform_workspace_context()
     client = OsmosisClient()
     return stop_run(
         noun="evaluation run",

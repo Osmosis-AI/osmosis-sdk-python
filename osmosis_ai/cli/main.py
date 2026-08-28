@@ -194,6 +194,11 @@ def _callback(
         "--platform",
         help="Platform base URL for this command.",
     ),
+    workspace: str | None = typer.Option(
+        None,
+        "--workspace",
+        help="Select a workspace by name for this command.",
+    ),
 ) -> None:
     """Osmosis AI CLI.
 
@@ -214,6 +219,15 @@ def _callback(
     )
     install_output_context(ctx, output)
     ctx.call_on_close(verify_output_emitted)
+
+    workspace_name = workspace.strip() if workspace is not None else None
+    if workspace is not None and not workspace_name:
+        from osmosis_ai.cli.errors import CLIError
+
+        raise CLIError("--workspace requires a non-empty name.", code="VALIDATION")
+    from osmosis_ai.platform.workspace_scope import install_workspace_name
+
+    install_workspace_name(ctx, workspace_name)
 
     selected_env_file = env_file or _find_env_file()
     if selected_env_file is not None:

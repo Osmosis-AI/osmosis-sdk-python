@@ -260,7 +260,7 @@ def eval_list(
     limit: int = limit_option("Maximum number of evaluation runs to show."),
     all_: bool = all_option("Show all evaluation runs."),
 ) -> CommandResult:
-    """List evaluation runs for the current workspace directory."""
+    """List evaluation runs for the selected workspace."""
     from osmosis_ai.platform.cli.eval import list_eval_runs as _list_eval_runs
 
     return _list_eval_runs(limit=limit, all_=all_)

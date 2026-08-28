@@ -11,6 +11,7 @@ import osmosis_ai.platform.api.client as api_client_module
 import osmosis_ai.platform.cli.dataset as dataset_module
 from osmosis_ai.cli import main as cli
 from osmosis_ai.platform.api.models import DatasetFile, PaginatedDatasets
+from osmosis_ai.platform.workspace_scope import get_workspace_name
 
 
 def test_help_is_plain_text_even_with_json(capsys) -> None:
@@ -20,6 +21,11 @@ def test_help_is_plain_text_even_with_json(capsys) -> None:
     assert "Osmosis" in captured.out
     with pytest.raises(json.JSONDecodeError):
         json.loads(captured.out)
+
+
+def test_help_lists_workspace_selector(capsys) -> None:
+    assert cli.main(["--help"]) == 0
+    assert "--workspace" in capsys.readouterr().out
 
 
 def test_version_is_plain_text_even_with_json(capsys) -> None:
@@ -54,7 +60,7 @@ def _stub_dataset_list(monkeypatch: pytest.MonkeyPatch) -> None:
     )
     monkeypatch.setattr(
         dataset_module,
-        "require_git_workspace_directory_context",
+        "require_platform_workspace_context",
         lambda: context,
     )
 
@@ -111,6 +117,39 @@ def test_postfix_plain_output_matches_prefix(monkeypatch, capsys) -> None:
 
     assert postfix_out == prefix_out
     assert "train.jsonl" in postfix_out
+
+
+def test_workspace_selection_is_available_during_command_and_then_resets(
+    monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    seen: list[str | None] = []
+    context = SimpleNamespace(
+        workspace_name="acme",
+        workspace_directory=None,
+        git_identity=None,
+        repo_url=None,
+        credentials=object(),
+    )
+
+    def resolve_context() -> SimpleNamespace:
+        seen.append(get_workspace_name())
+        return context
+
+    monkeypatch.setattr(
+        dataset_module, "require_platform_workspace_context", resolve_context
+    )
+
+    class FakeClient:
+        def list_datasets(self, *, limit, offset, git_identity, credentials=None):
+            assert git_identity is None
+            return PaginatedDatasets(datasets=[], total_count=0, has_more=False)
+
+    monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+
+    assert cli.main(["--workspace", "acme", "--json", "dataset", "list"]) == 0
+    capsys.readouterr()
+    assert seen == ["acme"]
+    assert get_workspace_name() is None
 
 
 def test_postfix_json_works_for_argument_taking_command(

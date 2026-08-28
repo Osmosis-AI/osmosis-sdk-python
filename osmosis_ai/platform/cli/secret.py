@@ -33,10 +33,10 @@ from osmosis_ai.platform.cli.shared_config import SECRET_NAME_RE
 from osmosis_ai.platform.cli.utils import (
     fetch_environment_secrets,
     paginated_fetch,
-    require_git_workspace_directory_context,
+    require_platform_workspace_context,
     validate_list_options,
 )
-from osmosis_ai.platform.cli.workspace_directory_context import git_result_context
+from osmosis_ai.platform.cli.workspace_directory_context import workspace_result_context
 
 # Mirror the platform's ``environmentSecretNameSchema`` (^[A-Z][A-Z0-9_]*$):
 # uppercase env-var style so a referencing config's [env]-style name and the
@@ -160,7 +160,7 @@ def list_secrets(*, limit: int, all_: bool, scope: str = "all") -> ListResult:
         )
     effective_limit, fetch_all = validate_list_options(limit=limit, all_=all_)
 
-    context = require_git_workspace_directory_context()
+    context = require_platform_workspace_context()
     credentials = context.credentials
 
     client = OsmosisClient()
@@ -192,7 +192,7 @@ def list_secrets(*, limit: int, all_: bool, scope: str = "all") -> ListResult:
 
     platform_url = captured.get("platform_url")
 
-    extra = git_result_context(context)
+    extra = workspace_result_context(context)
     display_hints: list[str] = []
     if platform_url:
         extra["platform_url"] = platform_url
@@ -239,14 +239,14 @@ def set_secret(
     # Reject before any network/workspace call when no value source is usable.
     _require_value_source_available(env, output)
 
-    context = require_git_workspace_directory_context()
+    context = require_platform_workspace_context()
 
     value = _resolve_secret_value(env=env, output=output)
     if value is None:
         return OperationResult(
             operation="secret.set",
             status="cancelled",
-            resource=git_result_context(context),
+            resource=workspace_result_context(context),
             message="Cancelled.",
         )
 
@@ -270,7 +270,7 @@ def set_secret(
         del value
 
     resource = serialize_environment_secret(secret)
-    resource.update(git_result_context(context))
+    resource.update(workspace_result_context(context))
 
     extra: dict[str, Any] = {}
     display_next_steps: list[str] = []
@@ -298,7 +298,7 @@ def _existing_secret_names(
     *,
     scope: str,
     credentials: Any,
-    git_identity: str,
+    git_identity: str | None,
 ) -> set[str] | None:
     """Names that exist in ``scope`` (a wire value). ``None`` if the lookup fails,
     so a transient error falls back to letting the platform validate."""
@@ -322,7 +322,7 @@ def delete_secret(
     _validate_secret_name(name)
     _validate_scope(scope)
 
-    context = require_git_workspace_directory_context()
+    context = require_platform_workspace_context()
     client = OsmosisClient()
     wire_scope = _SCOPE_TO_WIRE[scope]
 
@@ -371,7 +371,7 @@ def delete_secret(
         )
 
     resource: dict[str, Any] = {"name": name, "scope": scope}
-    resource.update(git_result_context(context))
+    resource.update(workspace_result_context(context))
     return OperationResult(
         operation="secret.delete",
         status="success",

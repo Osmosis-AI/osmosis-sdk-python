@@ -39,7 +39,7 @@ def test_list_datasets_renders_inactive_statuses_dim(
     monkeypatch.setattr(utils_module, "console", console)
     monkeypatch.setattr(
         dataset_module,
-        "require_git_workspace_directory_context",
+        "require_platform_workspace_context",
         lambda: SimpleNamespace(
             credentials=fake_credentials,
             git_identity=GIT_IDENTITY,

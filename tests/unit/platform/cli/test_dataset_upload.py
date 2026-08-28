@@ -480,7 +480,7 @@ class TestUploadCommand:
 
         monkeypatch.setattr(
             dataset_module,
-            "require_git_workspace_directory_context",
+            "require_platform_workspace_context",
             lambda: fake_context,
         )
         monkeypatch.setattr(
@@ -532,7 +532,7 @@ class TestUploadCommand:
 
         monkeypatch.setattr(
             dataset_module,
-            "require_git_workspace_directory_context",
+            "require_platform_workspace_context",
             lambda: fake_context,
         )
         monkeypatch.setattr(

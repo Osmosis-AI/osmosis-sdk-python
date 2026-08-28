@@ -94,7 +94,7 @@ def mock_git_context(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
         credentials=AUTH_CREDENTIALS,
     )
     monkeypatch.setattr(
-        "osmosis_ai.platform.cli.model.require_git_workspace_directory_context",
+        "osmosis_ai.platform.cli.model.require_platform_workspace_context",
         lambda: context,
     )
     return context

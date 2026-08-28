@@ -27,6 +27,7 @@ from osmosis_ai.platform.auth.platform_client import (
     platform_stream,
     revoke_cli_token,
 )
+from osmosis_ai.platform.workspace_scope import override_workspace_name
 
 # =============================================================================
 # Helper: Create real Credentials for testing
@@ -274,6 +275,36 @@ class TestPlatformRequest:
         request_obj = mock_urlopen.call_args[0][0]
         assert request_obj.get_header("X-osmosis-git") == "git_123"
 
+    @patch("osmosis_ai.platform.auth.platform_client.urlopen")
+    def test_adds_workspace_header_without_git_header(
+        self, mock_urlopen: MagicMock
+    ) -> None:
+        mock_urlopen.return_value = _make_http_response({"ok": True})
+        creds = _make_credentials()
+
+        with override_workspace_name("acme"):
+            platform_request("/api/test", credentials=creds)
+
+        request_obj = mock_urlopen.call_args[0][0]
+        assert request_obj.get_header("X-osmosis-workspace") == "acme"
+        assert request_obj.get_header("X-osmosis-git") is None
+
+    @patch("osmosis_ai.platform.auth.platform_client.urlopen")
+    def test_git_scope_wins_without_sending_both_scope_headers(
+        self, mock_urlopen: MagicMock
+    ) -> None:
+        mock_urlopen.return_value = _make_http_response({"ok": True})
+        creds = _make_credentials()
+
+        with override_workspace_name("acme"):
+            platform_request(
+                "/api/test", credentials=creds, git_identity="acme/rollouts"
+            )
+
+        request_obj = mock_urlopen.call_args[0][0]
+        assert request_obj.get_header("X-osmosis-git") == "acme/rollouts"
+        assert request_obj.get_header("X-osmosis-workspace") is None
+
     def test_require_git_repo_true_requires_explicit_git_identity(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -306,6 +337,8 @@ class TestPlatformRequest:
             "x-osmosis-org",
             "X-Osmosis-Git",
             "x-osmosis-git",
+            "X-Osmosis-Workspace",
+            "x-osmosis-workspace",
             "X-Osmosis-CLI-Version",
             "x-osmosis-cli-version",
         ],
@@ -580,6 +613,16 @@ class TestPlatformRequest:
                 403,
                 "GIT_SCOPE_HEADER_ACCESS_DENIED",
                 "could not resolve this workspace directory's repository",
+            ),
+            (
+                400,
+                "WORKSPACE_SCOPE_HEADER_CONFLICT",
+                "either a Git workspace or `--workspace`, not both",
+            ),
+            (
+                403,
+                "WORKSPACE_SCOPE_HEADER_ACCESS_DENIED",
+                "could not resolve the selected workspace, or your account",
             ),
         ],
     )

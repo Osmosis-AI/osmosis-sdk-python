@@ -56,7 +56,7 @@ def _mock_git_context(monkeypatch: pytest.MonkeyPatch) -> None:
         _git_context,
     )
     monkeypatch.setattr(
-        platform_train_module, "require_git_workspace_directory_context", _git_context
+        platform_train_module, "require_platform_workspace_context", _git_context
     )
 
 

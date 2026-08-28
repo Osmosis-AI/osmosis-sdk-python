@@ -47,7 +47,7 @@ def _stub_git_context(monkeypatch: pytest.MonkeyPatch) -> object:
     )
     monkeypatch.setattr(
         secret_module,
-        "require_git_workspace_directory_context",
+        "require_platform_workspace_context",
         lambda: context,
     )
     return fake_credentials
@@ -424,7 +424,7 @@ def test_secret_set_without_value_source_checks_before_workspace(
 
     monkeypatch.setattr(
         secret_module,
-        "require_git_workspace_directory_context",
+        "require_platform_workspace_context",
         fail_if_workspace_resolved,
     )
 

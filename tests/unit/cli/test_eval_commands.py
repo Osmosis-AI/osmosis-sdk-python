@@ -53,7 +53,7 @@ def _mock_git_context(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(
         platform_eval_module,
-        "require_git_workspace_directory_context",
+        "require_platform_workspace_context",
         _git_context,
     )
 

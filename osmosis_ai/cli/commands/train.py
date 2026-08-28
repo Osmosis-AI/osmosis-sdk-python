@@ -22,7 +22,7 @@ def list_runs(
     limit: int = limit_option("Maximum number of runs to show."),
     all_: bool = all_option("Show all training runs."),
 ) -> CommandResult:
-    """List training runs for the current workspace directory."""
+    """List training runs for the selected workspace."""
     from osmosis_ai.platform.cli.train import list_training_runs as _list
 
     return _list(limit=limit, all_=all_)

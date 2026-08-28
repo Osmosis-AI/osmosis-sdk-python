@@ -55,7 +55,7 @@ def _stub_context(monkeypatch: pytest.MonkeyPatch, workspace: Path) -> object:
     )
     monkeypatch.setattr(
         benchmark_module,
-        "require_git_workspace_directory_context",
+        "require_platform_workspace_context",
         lambda: context,
     )
     return credentials

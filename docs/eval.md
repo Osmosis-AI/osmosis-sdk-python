@@ -16,12 +16,15 @@ Reads an evaluation config TOML, validates its **structure** locally, and POSTs 
 osmosis eval submit configs/eval/<name>.toml        # interactive confirmation
 osmosis eval submit configs/eval/<name>.toml --yes  # skip the prompt
 
+# Run from any directory while still submitting source from the matching repo
+osmosis --workspace <name> eval submit /absolute/repo/configs/eval/<name>.toml --yes
+
 # Supply per-run values for [secrets] names without saving them
 osmosis eval submit configs/eval/<name>.toml --secrets-file .env.run
 vault read -field=env secret/eval | osmosis eval submit configs/eval/<name>.toml --secrets-file -
 ```
 
-The config path must resolve under `configs/eval/` inside the current git workspace directory.
+Without `--workspace`, the config path must resolve under `configs/eval/` inside the current Git workspace directory. With root `--workspace <name>`, the config path must be absolute; the SDK locates its containing Git workspace and requires the named platform workspace to be connected to the same repository. After that client-side guard, the submit request uses only workspace-name scope; the platform resolves rollout source from that workspace's connected repository.
 
 ### Config contract (what the SDK validates)
 
@@ -62,7 +65,7 @@ The SDK validates **structure only**; the backend owns value-level semantics. So
 
 `run_cloud_submit` ([shared_submit.py](../osmosis_ai/platform/cli/shared_submit.py)) runs in order:
 
-1. Resolve the git/workspace-directory context and validate the workspace contract.
+1. Resolve the Git/workspace-directory context and validate the workspace contract. With root `--workspace`, resolve from the absolute config path and verify that the named workspace is connected to the same repository.
 2. Resolve the config path and ensure it lives under `configs/eval/`.
 3. Load + validate the TOML (`load_eval_submit_config`).
 4. Validate `rollout`/`entrypoint` resolve under `rollouts/<rollout>/`, then validate the rollout backend.
@@ -87,7 +90,7 @@ The result is an `OperationResult` whose next-steps point at `osmosis eval info 
 
 ### Companion commands
 
-All operate on the current git workspace directory ([../osmosis_ai/platform/cli/eval.py](../osmosis_ai/platform/cli/eval.py)):
+The list, info, logs, and stop commands accept root `--workspace <name>` and otherwise use the current Git workspace directory ([../osmosis_ai/platform/cli/eval.py](../osmosis_ai/platform/cli/eval.py)). Download remains local-workspace scoped because it writes into a workspace-relative run layout:
 
 - `osmosis eval list [--all] [--limit N]` — list runs for the workspace.
 - `osmosis eval info <name|id> [-o root]` — run detail, results, and metrics (writes `<root>/metrics.json` in rich mode; default `.osmosis/evals/<name>/metrics.json`).
