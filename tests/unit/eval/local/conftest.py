@@ -130,6 +130,7 @@ class RecordingHooks:
 
     secrets: dict[str, str] = field(default_factory=dict)
     notes: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
     stages: list[str] = field(default_factory=list)
     confirmations: list[tuple[int, str]] = field(default_factory=list)
     progress_snapshots: list[ProgressSnapshot] = field(default_factory=list)
@@ -140,6 +141,9 @@ class RecordingHooks:
 
     def note(self, message: str) -> None:
         self.notes.append(message)
+
+    def warning(self, message: str) -> None:
+        self.warnings.append(message)
 
     def stage(self, message: str) -> None:
         self.stages.append(message)

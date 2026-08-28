@@ -14,7 +14,11 @@ from unittest.mock import patch
 import httpx
 import pytest
 
-from osmosis_ai.eval.local._server_bootstrap import ROLLOUT_INSTANCE_HEADER
+from osmosis_ai.consts import PACKAGE_VERSION
+from osmosis_ai.eval.local._server_bootstrap import (
+    ROLLOUT_INSTANCE_HEADER,
+    ROLLOUT_SDK_VERSION_HEADER,
+)
 from osmosis_ai.eval.local.dataset import (
     ResolvedDataset,
     resolve_explicit_dataset_file,
@@ -418,7 +422,10 @@ async def test_probe_health_reads_the_ownership_header() -> None:
 
     server = await _serve_health(
         {"status": "ok"},
-        extra_headers={ROLLOUT_INSTANCE_HEADER: "hdr-id"},
+        extra_headers={
+            ROLLOUT_INSTANCE_HEADER: "hdr-id",
+            ROLLOUT_SDK_VERSION_HEADER: "0.3.0",
+        },
     )
     port = int(server.sockets[0].getsockname()[1])
     try:
@@ -431,6 +438,7 @@ async def test_probe_health_reads_the_ownership_header() -> None:
         await server.wait_closed()
     assert probe is not None
     assert probe.instance_id == "hdr-id"
+    assert probe.sdk_version == "0.3.0"
     assert probe.payload == {"status": "ok"}
 
 
@@ -475,6 +483,48 @@ async def test_wait_for_health_accepts_header_ownership_without_json_id(
     finally:
         server.close()
         await server.wait_closed()
+
+
+@pytest.mark.parametrize(
+    ("server_version", "warns"),
+    [("0.3.0", True), (PACKAGE_VERSION, False)],
+)
+async def test_wait_for_health_warns_when_the_server_sdk_differs(
+    tmp_path: Path, server_version: str, warns: bool
+) -> None:
+    from osmosis_ai.eval.local.runner import RunLog
+
+    class _LiveChild:
+        returncode = None
+
+    server = await _serve_health(
+        {"status": "ok"},
+        extra_headers={
+            ROLLOUT_INSTANCE_HEADER: "owned",
+            ROLLOUT_SDK_VERSION_HEADER: server_version,
+        },
+    )
+    port = int(server.sockets[0].getsockname()[1])
+    runner = _runner(_spec(), tmp_path)
+    warnings: list[str] = []
+    runner._hooks.warning = warnings.append
+    runner._log = RunLog(tmp_path / "logs.txt")
+    try:
+        async with httpx.AsyncClient() as client:
+            await runner._wait_for_health(
+                client,
+                f"http://127.0.0.1:{port}",
+                instance_id="owned",
+                child=_LiveChild(),
+            )
+    finally:
+        runner._log.close()
+        server.close()
+        await server.wait_closed()
+
+    logs = (tmp_path / "logs.txt").read_text()
+    assert ("rollout server uses" in " ".join(warnings)) is warns
+    assert ("WARNING [server] rollout server uses" in logs) is warns
 
 
 # --------------------------------------------------------------------------- #
@@ -614,6 +664,8 @@ def _runner(
             self.stages: list[str] = []
 
         def note(self, message: str) -> None: ...
+
+        def warning(self, message: str) -> None: ...
 
         def stage(self, message: str) -> None:
             self.stages.append(message)
@@ -922,6 +974,7 @@ async def test_bootstrap_marks_old_server_health_as_supervisor_owned(
         assert response is not None
         assert response.json() == {"status": "ok"}
         assert response.headers[ROLLOUT_INSTANCE_HEADER] == instance_id
+        assert response.headers[ROLLOUT_SDK_VERSION_HEADER] == PACKAGE_VERSION
     finally:
         if child.returncode is None:
             child.terminate()

@@ -816,6 +816,25 @@ def test_stage_lines_print_once_and_only_without_verbose(
     assert "not repeated" not in printed
 
 
+def test_runner_warning_uses_the_output_mode_aware_console(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[str, str | None]] = []
+    monkeypatch.setattr(
+        eval_run_module.console,
+        "print_warning",
+        lambda message, *, code=None: calls.append((message, code)),
+    )
+
+    eval_run_module._Hooks(yes=True, secrets_file=None).warning("versions differ")
+    with override_output_context(format=OutputFormat.rich):
+        eval_run_module._Hooks(yes=True, secrets_file=None, verbose=True).warning(
+            "already streamed"
+        )
+
+    assert calls == [("versions differ", "ROLLOUT_SDK_VERSION_MISMATCH")]
+
+
 def test_progress_falls_back_to_printed_lines_without_a_terminal(
     console_capture: StringIO,
 ) -> None:
