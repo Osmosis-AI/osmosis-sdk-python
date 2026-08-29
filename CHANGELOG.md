@@ -2,15 +2,29 @@
 
 This file records changes to `osmosis-ai`. For earlier versions, see [GitHub Releases](https://github.com/Osmosis-AI/osmosis-sdk-python/releases).
 
-## Unreleased
+## 0.3.2rc1 - 2026-08-28
+
+### Breaking Changes
+
+- Removed the public `MessageResult`, `GraderInitRequest`, `GraderInitResponse`, `RolloutDriver`, and `resolve_workspace_directory_from_cwd()` APIs; replace `MessageResult` with `OperationResult`, `RolloutDriver` with `HttpRolloutDriver`, and workspace lookup with `resolve_workspace_directory()` ([#328](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/328)).
+- The SDK no longer declares `requests` as a base dependency or `tqdm` in the `rubric` extra; declare either package directly if your project imports it ([#328](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/328)).
 
 ### Added
 
-- Added a root `--workspace <name>` selector for workspace-scoped platform commands, including benchmark, dataset, model, secret, training-run, and evaluation-run operations. Benchmark configs can now live outside a local Osmosis repository, while training and evaluation submit accept an absolute config path when its Git repository matches the selected workspace.
+- Added managed `cloudflared` and bring-your-own tunnel support to `osmosis eval run` so Daytona, SkyPilot, and other cloud sandboxes can reach the local model bridge ([#327](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/327)).
+- Added a root `--workspace <name>` selector for workspace-scoped platform commands; benchmark operations can now run without a local repository, while training and evaluation submit accept an absolute config path when its Git repository matches the selected workspace ([#332](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/332)).
 
 ### Changed
 
-- Local `osmosis eval run --dataset-file ...` no longer loads platform credentials unless `--upload` is also requested.
+- Local `osmosis eval run --dataset-file ...` no longer loads platform credentials unless `--upload` is also requested ([#332](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/332)).
+
+### Fixed
+
+- Local evaluation now keeps slow non-streaming tunnel responses alive, avoids cancellation deadlocks, and reports unreachable loopback endpoints instead of hanging ([#327](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/327)).
+- Local evaluation now warns when the CLI and rollout environments use different `osmosis-ai` versions ([#330](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/330)).
+- The `harbor` extra now installs Harbor's Daytona dependencies so Daytona environments work without separate dependency setup ([#331](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/331)).
+
+[Full changelog](https://github.com/Osmosis-AI/osmosis-sdk-python/compare/v0.3.1...v0.3.2rc1)
 
 ## 0.3.1 - 2026-08-24
 
