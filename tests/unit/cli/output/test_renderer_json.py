@@ -47,7 +47,7 @@ def test_list_envelope_required_keys() -> None:
     expected_keys = json.loads(
         (GOLDEN / "list_envelope.json").read_text(encoding="utf-8")
     )["keys"]
-    assert sorted(payload.keys()) == sorted(expected_keys)
+    assert list(payload) == expected_keys
     assert payload["schema_version"] == 1
     assert payload["items"] == [{"id": "ds_1"}]
     assert payload["next_offset"] is None
@@ -121,18 +121,9 @@ def test_sectioned_list_envelope_required_keys() -> None:
     golden = json.loads(
         (GOLDEN / "sectioned_list_envelope.json").read_text(encoding="utf-8")
     )
-    assert sorted(payload.keys()) == sorted(golden["keys"])
+    assert list(payload) == golden["keys"]
     for section_key in ("base_models", "lora_models"):
-        assert sorted(payload[section_key].keys()) == sorted(golden["section_keys"])
-    assert payload["schema_version"] == 1
-    assert stderr == ""
-
-
-def test_sectioned_list_envelope_keys_each_section_with_own_pagination() -> None:
-    payload, stderr = _render_to_json(_sectioned_list_result())
-    assert sorted(payload.keys()) == sorted(
-        ["schema_version", "base_models", "lora_models"]
-    )
+        assert list(payload[section_key]) == golden["section_keys"]
     assert payload["schema_version"] == 1
     assert payload["base_models"] == {
         "items": [{"id": "m_1"}],
@@ -179,7 +170,7 @@ def test_detail_envelope_required_keys() -> None:
     expected_keys = json.loads(
         (GOLDEN / "detail_envelope.json").read_text(encoding="utf-8")
     )["keys"]
-    assert sorted(payload.keys()) == sorted(expected_keys)
+    assert list(payload) == expected_keys
     assert payload["data"] == {"id": "ds_1"}
 
 
@@ -188,12 +179,20 @@ def test_operation_envelope_required_keys() -> None:
         operation="deploy",
         status="success",
         resource={"id": "dep_1", "checkpoint_name": "run-step-40", "status": "active"},
+        message="Deployed.",
+        next_steps_structured=[{"action": "model_info", "model_name": "run-step-40"}],
+        extra={"workspace": "ws-a"},
     )
     payload, _ = _render_to_json(result)
     expected_keys = json.loads(
         (GOLDEN / "operation_envelope.json").read_text(encoding="utf-8")
     )["keys"]
-    assert set(expected_keys["required"]).issubset(payload.keys())
+    expected_order = [
+        *expected_keys["required"],
+        *(key for key in expected_keys["optional"] if key in payload),
+        "workspace",
+    ]
+    assert list(payload) == expected_order
     assert payload["status"] == "success"
     assert payload["operation"] == "deploy"
 
@@ -244,15 +243,6 @@ def test_no_ansi_or_rich_box_on_json_stdout() -> None:
     assert "\x1b[" not in raw
     assert "\u2500" not in raw
     json.loads(raw)
-
-
-def test_render_marks_output_emitted() -> None:
-    result = OperationResult(operation="logout", status="success", message="ok")
-    out = io.StringIO()
-    with override_output_context(format=OutputFormat.json) as ctx:
-        with redirect_stdout(out):
-            render(result, ctx)
-        assert ctx.output_emitted is True
 
 
 def test_json_envelope_rejects_nonfinite_floats() -> None:

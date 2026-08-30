@@ -27,8 +27,12 @@ from typing import Any
 
 from osmosis_ai._imports import raise_optional_dependency_error
 from osmosis_ai.rollout.controller.openai_responses import (
+    _compact_json,
     build_responses_kwargs,
     to_chat_response,
+)
+from osmosis_ai.rollout.controller.openai_responses import (
+    _field as _getattr_or_key,
 )
 
 try:
@@ -95,12 +99,6 @@ def _get_litellm() -> Any:
         )
     litellm.suppress_debug_info = True
     return litellm
-
-
-def _getattr_or_key(obj: Any, name: str, default: Any = None) -> Any:
-    if isinstance(obj, dict):
-        return obj.get(name, default)
-    return getattr(obj, name, default)
 
 
 def _unsupported_openai_sampling_param(exc: Exception, *, litellm: Any) -> str | None:
@@ -258,10 +256,6 @@ def _model_response_to_payload(
     if usage:
         payload["usage"] = usage
     return payload
-
-
-def _compact_json(data: Any) -> str:
-    return json.dumps(data, separators=(",", ":"))
 
 
 class LiteLLMBridge:
