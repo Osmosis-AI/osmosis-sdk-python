@@ -57,61 +57,81 @@ async def save_trajectory(
     ``diagnostics`` overrides ``result.extra_fields`` for the sidecar.
     """
     try:
-        root = artifact_root or default_artifact_root()
-        # Written before the sample-None early return so failures leave a record.
-        payload = diagnostics if diagnostics is not None else result.extra_fields
-        if payload is not None:
-            diagnostics_dest = root / rollout_id / "diagnostics.json"
-            diagnostics_data = json.dumps(
-                payload, ensure_ascii=False, indent=2, sort_keys=True, default=str
-            ).encode()
-            await asyncio.to_thread(_write_document, diagnostics_dest, diagnostics_data)
-            logger.info(
-                "Saved rollout diagnostics for %s -> %s",
-                rollout_id,
-                diagnostics_dest,
-            )
-
-        sample = result.sample
-        if sample is None:
-            return
-        if sample.trajectory_messages is None:
-            # Explicit opt-out, or an upstream conversion/snapshot failure
-            # that already warned with a traceback -- not worth a warning here.
-            logger.info(
-                "Skipping trajectory for rollout %s: no trajectory messages "
-                "(persistence disabled or conversion failed upstream)",
-                rollout_id,
-            )
-            return
-
-        matched_report, unmatched_reports = _resolve_sample_report(report)
-        if unmatched_reports:
-            logger.warning(
-                "Trajectory report for rollout %s has %d entries but the rollout "
-                "produced one sample; preserving them under "
-                "extra.osmosis.unmatched_sample_reports",
-                rollout_id,
-                len(unmatched_reports),
-            )
-        trajectory = convert_sample_to_trajectory(
-            sample,
+        await _save(
             rollout_id=rollout_id,
+            result=result,
             request_label=request_label,
             request_metadata=request_metadata,
             request_extra_fields=request_extra_fields,
-            report=matched_report,
-            default_model_name=report.model_name if report else None,
-            unmatched_sample_reports=unmatched_reports or None,
+            report=report,
+            artifact_root=artifact_root or default_artifact_root(),
+            diagnostics=diagnostics,
         )
-        dest = root / rollout_id / "trajectory.json"
-        # Keep large token-id/logprob arrays compact inside the pretty document.
-        data = format_trajectory_json(trajectory.to_json_dict()).encode()
-        await asyncio.to_thread(_write_document, dest, data)
-        logger.info("Saved trajectory document for rollout %s -> %s", rollout_id, dest)
     except Exception:
         logger.warning(
             "Failed to save the trajectory for rollout %s (best-effort)",
             rollout_id,
             exc_info=True,
         )
+
+
+async def _save(
+    *,
+    rollout_id: str,
+    result: ExecutionResult,
+    request_label: str | None,
+    request_metadata: dict[str, Any] | None,
+    request_extra_fields: dict[str, Any] | None,
+    report: TrajectoryReport | None,
+    artifact_root: Path,
+    diagnostics: dict[str, Any] | None = None,
+) -> None:
+    # Written before the sample-None early return so failures leave a record.
+    payload = diagnostics if diagnostics is not None else result.extra_fields
+    if payload is not None:
+        diagnostics_dest = artifact_root / rollout_id / "diagnostics.json"
+        diagnostics_data = json.dumps(
+            payload, ensure_ascii=False, indent=2, sort_keys=True, default=str
+        ).encode()
+        await asyncio.to_thread(_write_document, diagnostics_dest, diagnostics_data)
+        logger.info(
+            "Saved rollout diagnostics for %s -> %s", rollout_id, diagnostics_dest
+        )
+
+    sample = result.sample
+    if sample is None:
+        return
+    if sample.trajectory_messages is None:
+        # Explicit opt-out, or an upstream conversion/snapshot failure
+        # that already warned with a traceback -- not worth a warning here.
+        logger.info(
+            "Skipping trajectory for rollout %s: no trajectory messages "
+            "(persistence disabled or conversion failed upstream)",
+            rollout_id,
+        )
+        return
+
+    matched_report, unmatched_reports = _resolve_sample_report(report)
+    if unmatched_reports:
+        logger.warning(
+            "Trajectory report for rollout %s has %d entries but the rollout "
+            "produced one sample; preserving them under "
+            "extra.osmosis.unmatched_sample_reports",
+            rollout_id,
+            len(unmatched_reports),
+        )
+    trajectory = convert_sample_to_trajectory(
+        sample,
+        rollout_id=rollout_id,
+        request_label=request_label,
+        request_metadata=request_metadata,
+        request_extra_fields=request_extra_fields,
+        report=matched_report,
+        default_model_name=report.model_name if report else None,
+        unmatched_sample_reports=unmatched_reports or None,
+    )
+    dest = artifact_root / rollout_id / "trajectory.json"
+    # Keep large token-id/logprob arrays compact inside the pretty document.
+    data = format_trajectory_json(trajectory.to_json_dict()).encode()
+    await asyncio.to_thread(_write_document, dest, data)
+    logger.info("Saved trajectory document for rollout %s -> %s", rollout_id, dest)
