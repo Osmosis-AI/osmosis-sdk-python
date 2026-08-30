@@ -203,7 +203,7 @@ def test_save_writes_new_token_and_metadata_before_legacy_cleanup(
         events.append(("set", account))
         return True
 
-    def fake_write(path, data, *, mode):
+    def fake_write(path, data):
         events.append(
             ("metadata", data["platforms"][DEFAULT_PLATFORM]["keyring_account"])
         )

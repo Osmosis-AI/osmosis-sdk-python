@@ -30,11 +30,7 @@ class ScaffoldEntry:
     official: bool = False
 
 
-def _path(value: str) -> Path:
-    return Path(value)
-
-
-_MULTIPLY_DATA_PATH = _path("data/multiply.jsonl")
+_MULTIPLY_DATA_PATH = Path("data/multiply.jsonl")
 
 
 def _recipe(name: str, description: str) -> TemplateRecipe:
@@ -42,12 +38,12 @@ def _recipe(name: str, description: str) -> TemplateRecipe:
         name=name,
         description=description,
         files=(
-            _path(f"rollouts/{name}/**"),
-            _path(f"configs/eval/{name}.toml"),
-            _path(f"configs/training/{name}.toml"),
+            Path(f"rollouts/{name}/**"),
+            Path(f"configs/eval/{name}.toml"),
+            Path(f"configs/training/{name}.toml"),
             _MULTIPLY_DATA_PATH,
         ),
-        owned_dirs=(_path(f"rollouts/{name}"),),
+        owned_dirs=(Path(f"rollouts/{name}"),),
         next_steps=(
             f"pip install -e rollouts/{name}",
             "git push",
@@ -66,16 +62,16 @@ TEMPLATE_RECIPES: tuple[TemplateRecipe, ...] = (
 
 
 OFFICIAL_AGENT_SCAFFOLD_PATHS: tuple[Path, ...] = (
-    _path("AGENTS.md"),
-    _path("CLAUDE.md"),
-    _path("configs/AGENTS.md"),
+    Path("AGENTS.md"),
+    Path("CLAUDE.md"),
+    Path("configs/AGENTS.md"),
 )
 
 REQUIRED_WORKSPACE_DIRS: tuple[Path, ...] = (
-    _path("rollouts"),
-    _path("configs/training"),
-    _path("configs/eval"),
-    _path("data"),
+    Path("rollouts"),
+    Path("configs/training"),
+    Path("configs/eval"),
+    Path("data"),
 )
 
 

@@ -20,12 +20,6 @@ def _parse_iso_datetime(value: str | None) -> datetime | None:
     return parsed
 
 
-def _localize(dt: datetime, *, tz: tzinfo | None = None) -> datetime:
-    if tz is not None:
-        return dt.astimezone(tz)
-    return dt.astimezone()
-
-
 def _twelve_hour_time(dt: datetime, *, with_seconds: bool = False) -> str:
     """12-hour clock time with AM/PM and no leading-zero hour (e.g. ``6:16 PM``)."""
     hour = dt.hour % 12 or 12
@@ -40,7 +34,7 @@ def format_local_date(
     parsed = _parse_iso_datetime(value)
     if parsed is None:
         return "" if value is None else str(value)[:10]
-    local = _localize(parsed, tz=tz)
+    local = parsed.astimezone(tz)
     return f"{local.strftime('%Y-%m-%d')} {_twelve_hour_time(local)} {local.strftime('%Z')}"
 
 
@@ -50,7 +44,7 @@ def format_local_datetime(
     parsed = _parse_iso_datetime(value)
     if parsed is None:
         return "" if value is None else str(value)
-    local = _localize(parsed, tz=tz)
+    local = parsed.astimezone(tz)
     return (
         f"{local.strftime('%Y-%m-%d')} "
         f"{_twelve_hour_time(local, with_seconds=True)} {local.strftime('%Z')}"

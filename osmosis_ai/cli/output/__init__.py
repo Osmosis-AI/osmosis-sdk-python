@@ -51,34 +51,19 @@ if TYPE_CHECKING:
     )
 
 _SERIALIZER_EXPORTS: dict[str, tuple[str, str]] = {
-    "serialize_benchmark_run": (
-        "osmosis_ai.cli.output.serializers",
+    name: ("osmosis_ai.cli.output.serializers", name)
+    for name in (
         "serialize_benchmark_run",
-    ),
-    "serialize_checkpoint": (
-        "osmosis_ai.cli.output.serializers",
         "serialize_checkpoint",
-    ),
-    "serialize_dataset": ("osmosis_ai.cli.output.serializers", "serialize_dataset"),
-    "serialize_dev_rollout_server": (
-        "osmosis_ai.cli.output.serializers",
+        "serialize_dataset",
         "serialize_dev_rollout_server",
-    ),
-    "serialize_environment_secret": (
-        "osmosis_ai.cli.output.serializers",
         "serialize_environment_secret",
-    ),
-    "serialize_eval_run": ("osmosis_ai.cli.output.serializers", "serialize_eval_run"),
-    "serialize_lora_model": (
-        "osmosis_ai.cli.output.serializers",
+        "serialize_eval_run",
         "serialize_lora_model",
-    ),
-    "serialize_model": ("osmosis_ai.cli.output.serializers", "serialize_model"),
-    "serialize_rollout": ("osmosis_ai.cli.output.serializers", "serialize_rollout"),
-    "serialize_training_run": (
-        "osmosis_ai.cli.output.serializers",
+        "serialize_model",
+        "serialize_rollout",
         "serialize_training_run",
-    ),
+    )
 }
 
 

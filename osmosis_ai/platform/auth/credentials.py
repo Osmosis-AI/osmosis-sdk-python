@@ -239,16 +239,6 @@ def _is_default_platform_url(platform_url: str) -> bool:
     return normalize_platform_url(platform_url) == _default_platform_url()
 
 
-def _dedupe(values: list[str]) -> list[str]:
-    result: list[str] = []
-    seen: set[str] = set()
-    for value in values:
-        if value and value not in seen:
-            result.append(value)
-            seen.add(value)
-    return result
-
-
 def _is_platform_registry(data: dict[str, Any]) -> bool:
     return "platforms" in data
 
@@ -354,7 +344,7 @@ def _keyring_accounts_for_entry(
     if is_default_platform:
         accounts.append(KEYRING_ACCOUNT)
 
-    return _dedupe(accounts)
+    return list(dict.fromkeys(account for account in accounts if account))
 
 
 def _cleanup_platform_keyring_entries(
@@ -644,7 +634,7 @@ def save_credentials(
         del registry["platforms"][old_key]
     registry["platforms"][platform_url] = data
     try:
-        atomic_write_json(CREDENTIALS_FILE, registry, mode=0o600)
+        atomic_write_json(CREDENTIALS_FILE, registry)
     except Exception:
         if keyring_account not in old_keyring_accounts:
             try:
@@ -783,7 +773,7 @@ def delete_credentials(
 
         del registry["platforms"][platform_key]
         if registry["platforms"]:
-            atomic_write_json(CREDENTIALS_FILE, registry, mode=0o600)
+            atomic_write_json(CREDENTIALS_FILE, registry)
             return True
 
         try:

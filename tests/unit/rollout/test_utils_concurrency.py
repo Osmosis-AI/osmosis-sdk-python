@@ -32,6 +32,18 @@ class TestConcurrencyLimiter:
         await asyncio.gather(task(1), task(2))
         assert sorted(order) == [1, 2]
 
+    async def test_cancelled_waiter_restores_queue_count(self):
+        limiter = ConcurrencyLimiter(max_concurrent=1)
+
+        async with limiter.acquire():
+            waiter = asyncio.create_task(limiter.acquire().__aenter__())
+            await asyncio.sleep(0)
+            assert limiter.queued == 1
+            waiter.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await waiter
+            assert limiter.queued == 0
+
     async def test_snapshot_reflects_state(self):
         limiter = ConcurrencyLimiter(max_concurrent=2)
         assert limiter.snapshot()["running"] == 0

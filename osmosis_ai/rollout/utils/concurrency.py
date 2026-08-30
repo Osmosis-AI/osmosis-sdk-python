@@ -14,28 +14,21 @@ class ConcurrencyLimiter:
 
     @asynccontextmanager
     async def acquire(self) -> AsyncIterator[None]:
-        if self._semaphore is None:
-            self.running += 1
+        semaphore = self._semaphore
+        if semaphore is not None:
+            self.queued += 1
             try:
-                yield
+                await semaphore.acquire()
             finally:
-                self.running -= 1
-            return
+                self.queued -= 1
 
-        self.queued += 1
-        try:
-            await self._semaphore.acquire()
-        except BaseException:
-            self.queued -= 1
-            raise
-
-        self.queued -= 1
         self.running += 1
         try:
             yield
         finally:
             self.running -= 1
-            self._semaphore.release()
+            if semaphore is not None:
+                semaphore.release()
 
     def snapshot(self) -> dict[str, int | None]:
         return {

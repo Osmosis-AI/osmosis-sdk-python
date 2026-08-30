@@ -29,7 +29,7 @@ GOLDEN_DIR = Path(__file__).resolve().parents[3] / "golden" / "cli_output"
 
 def _assert_keys_match_golden(payload: dict, golden_name: str) -> None:
     expected = json.loads((GOLDEN_DIR / golden_name).read_text(encoding="utf-8"))
-    assert sorted(payload.keys()) == sorted(expected["keys"])
+    assert list(payload) == expected["keys"]
 
 
 def test_serialize_dataset_keys() -> None:
