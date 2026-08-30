@@ -9,6 +9,7 @@ import pytest
 from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.templates.registry import (
     TemplateNotFoundError,
+    _expand_catalog_files,
     iter_template_files,
     list_templates,
 )
@@ -87,6 +88,15 @@ def test_iter_template_files_returns_catalog_relative_paths(
     for rel in files:
         assert isinstance(rel, Path)
         assert not rel.is_absolute()
+
+
+def test_expand_catalog_files_supports_non_terminal_wildcards(
+    workspace_template: Path,
+) -> None:
+    assert _expand_catalog_files(workspace_template, (Path("configs/*/*.toml"),)) == [
+        Path("configs/eval/multiply-local-strands.toml"),
+        Path("configs/training/multiply-local-strands.toml"),
+    ]
 
 
 def test_iter_template_files_missing_catalog_file_uses_user_facing_template_terms(

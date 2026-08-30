@@ -42,8 +42,11 @@ def _expand_catalog_files(root: Path, patterns: tuple[Path, ...]) -> list[Path]:
     rel_paths: set[Path] = set()
     for pattern in patterns:
         pattern_text = pattern.as_posix()
-        if pattern.parts[-1] == "**":
-            matches = sorted((root / Path(*pattern.parts[:-1])).rglob("*"))
+        if any(part in {"*", "**"} or "*" in part for part in pattern.parts):
+            if pattern.parts[-1] == "**":
+                matches = sorted((root / Path(*pattern.parts[:-1])).rglob("*"))
+            else:
+                matches = sorted(root.glob(pattern_text))
             file_matches = [path for path in matches if path.is_file()]
             if not file_matches:
                 raise CLIError(
