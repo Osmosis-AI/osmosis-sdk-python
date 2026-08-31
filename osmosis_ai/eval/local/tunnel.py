@@ -34,6 +34,9 @@ _PROBE_INTERVAL_SEC = 1.0
 # connection. Probing that fresh hostname in between can cache NXDOMAIN for
 # the zone's full negative TTL, so wait briefly for the registration log.
 _CONNECTION_REGISTRATION_GRACE_SEC = 1.0
+# Catch a child that logs registration and exits in the same stderr burst.
+# This is process-stability time, not another host readiness probe.
+_CONNECTION_REGISTRATION_STABILITY_SEC = 0.1
 _TERM_GRACE_SEC = 5.0
 _CONNECTION_REGISTERED_MARKER = "Registered tunnel connection"
 
@@ -112,9 +115,8 @@ class CloudflaredTunnel:
         # never-started tunnel has nothing running, so it starts confirmed.
         self._stop_confirmed = True
         self.public_url: str | None = None
-        # False when the readiness probe got no HTTP response at all — the
-        # host's DNS/egress cannot see the edge, which says nothing about
-        # whether the sandbox's can.
+        # True once either this host reaches the URL or cloudflared reports
+        # that Cloudflare registered the edge connection.
         self.verified: bool = False
         self.unverified_reason: str | None = None
 
@@ -176,8 +178,29 @@ class CloudflaredTunnel:
                         connection_registered.wait(),
                         timeout=min(_CONNECTION_REGISTRATION_GRACE_SEC, remaining),
                     )
-            self.verified = await self._probe_ready(url, deadline)
-            if not self.verified and not connection_registered.is_set():
+            if not connection_registered.is_set():
+                self.verified = await self._probe_ready_until_registered(
+                    url, deadline, connection_registered
+                )
+            if connection_registered.is_set():
+                drain_task = self._drain_task
+                assert drain_task is not None
+                done, _ = await asyncio.wait(
+                    (drain_task,),
+                    timeout=_CONNECTION_REGISTRATION_STABILITY_SEC,
+                )
+                if drain_task in done:
+                    await drain_task
+                    returncode = await process.wait()
+                    raise TunnelError(
+                        f"cloudflared exited with code {returncode} before "
+                        "tunnel startup completed"
+                    )
+                # Registration is sufficient readiness. Do not carry a
+                # transient host-probe failure into the success message.
+                self.verified = True
+                self.unverified_reason = None
+            if not self.verified:
                 raise TunnelError(
                     "cloudflared published a tunnel URL, but it neither "
                     "registered a connection nor passed this host's "
@@ -224,14 +247,37 @@ class CloudflaredTunnel:
                     # Known failure with a known cause: name it instead of
                     # the generic exit-code message the child produces.
                     url_future.set_exception(TunnelError(_RATE_LIMIT_HINT))
+        returncode = await process.wait()
         if not url_future.done():
-            returncode = await process.wait()
             url_future.set_exception(
                 TunnelError(
                     f"cloudflared exited with code {returncode} before "
                     "publishing a tunnel URL"
                 )
             )
+
+    async def _probe_ready_until_registered(
+        self,
+        url: str,
+        deadline: float,
+        connection_registered: asyncio.Event,
+    ) -> bool:
+        """Probe this host until it succeeds or Cloudflare registers the edge."""
+        probe_task = asyncio.create_task(self._probe_ready(url, deadline))
+        registration_task = asyncio.create_task(connection_registered.wait())
+        tasks = (probe_task, registration_task)
+        try:
+            done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+            # Preserve a probe failure (notably child exit) if both signals
+            # complete together; registration must not hide a dead child.
+            if probe_task in done:
+                return await probe_task
+            return False
+        finally:
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
 
     async def _probe_ready(self, url: str, deadline: float) -> bool:
         """GET through the edge until our app answers (any non-5xx status).
@@ -263,6 +309,7 @@ class CloudflaredTunnel:
                     self.unverified_reason = _probe_failure_reason(exc)
                 else:
                     if response.status_code < 500:
+                        self.unverified_reason = None
                         return True
                     self.unverified_reason = f"HTTP {response.status_code}"
                 if time.monotonic() >= deadline:
