@@ -185,8 +185,14 @@ async def test_unregistered_unreachable_tunnel_fails_and_cleans_up(
 
     monkeypatch.setattr(CloudflaredTunnel, "_probe_ready", unreachable_host_probe)
     tunnel = CloudflaredTunnel(local_url="http://127.0.0.1:1", on_spawn=spawned.append)
-    with pytest.raises(TunnelError, match="neither registered a connection nor"):
+    with pytest.raises(
+        TunnelError, match="neither registered a connection nor"
+    ) as excinfo:
         await tunnel.start()
+    message = str(excinfo.value)
+    assert probe_reason in message
+    assert "--advertise-url" in message
+    assert tunnel_module._QUICK_TUNNEL_DOCS_URL in message
     assert spawned[0].returncode is not None
     assert tunnel._process is None
 

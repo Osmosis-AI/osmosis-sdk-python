@@ -201,11 +201,14 @@ class CloudflaredTunnel:
                 self.verified = True
                 self.unverified_reason = None
             if not self.verified:
+                reason = self.unverified_reason or "no response"
                 raise TunnelError(
                     "cloudflared published a tunnel URL, but it neither "
                     "registered a connection nor passed this host's "
                     f"readiness check within {_START_TIMEOUT_SEC:.0f}s; "
-                    "see the run log for its output"
+                    f"last readiness failure: {reason}. Retry, or run your "
+                    "own tunnel and pass --advertise-url. Quick-tunnel "
+                    f"documentation: {_QUICK_TUNNEL_DOCS_URL}"
                 )
         except BaseException:
             # Never let cleanup mask the original error: a failing stop()

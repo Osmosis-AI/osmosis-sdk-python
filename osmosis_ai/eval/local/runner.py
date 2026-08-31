@@ -1030,16 +1030,7 @@ class LocalEvalRunner:
         except TunnelError as exc:
             raise LocalEvalError(str(exc)) from exc
         listener.advertised_base_url = public_url
-        if tunnel.verified:
-            self._stage("tunnel", f"tunnel ready: {public_url}")
-        else:
-            reason = tunnel.unverified_reason or "host readiness check timed out"
-            self._stage(
-                "tunnel",
-                f"tunnel up at {public_url}, but this host's readiness check "
-                f"did not pass ({reason}); sandboxes use independent "
-                "DNS/egress — continuing",
-            )
+        self._stage("tunnel", f"tunnel ready: {public_url}")
 
     async def _stop_tunnel(self) -> None:
         tunnel, self._tunnel = self._tunnel, None
