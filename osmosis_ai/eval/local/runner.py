@@ -891,17 +891,19 @@ class LocalEvalRunner:
         self._redactor.extend([controller_token, bridge_token])
         store = CallbackStore(on_terminal_commit=self._commit_terminal)
 
-        # litellm resolves provider credentials from the environment; a secret
-        # supplied through --secrets-file must reach it the same way.
-        for name, value in secrets.items():
-            os.environ.setdefault(name, value)
+        # litellm resolves provider credentials from the environment; values
+        # explicitly supplied through --secrets-file take precedence for this
+        # run, then the caller's environment is restored on every exit path.
+        original_env = {name: os.environ.get(name) for name in secrets}
+        missing_env_names = set(secrets).difference(os.environ)
+        os.environ.update(secrets)
 
-        bridge = LiteLLMBridge(model=self._spec.model_path)
-        self._bridge = bridge
         advertise_url = self._options.advertise_url
         listener: CallbackListener | None = None
         cancelled = False
         try:
+            bridge = LiteLLMBridge(model=self._spec.model_path)
+            self._bridge = bridge
             self._stage("preflight", f"checking model {self._spec.model_path}")
             await self._model_preflight(bridge)
             async with httpx.AsyncClient() as client:
@@ -988,11 +990,22 @@ class LocalEvalRunner:
                 if cancelled:
                     await self._settle_cancellations(base_url)
         finally:
-            await self._stop_rollout_server()
-            await self._stop_tunnel()
-            if listener is not None:
-                with contextlib.suppress(Exception):
-                    await listener.stop()
+            try:
+                await self._stop_rollout_server()
+                await self._stop_tunnel()
+                if listener is not None:
+                    with contextlib.suppress(Exception):
+                        await listener.stop()
+            finally:
+                os.environ.update(
+                    {
+                        name: value
+                        for name, value in original_env.items()
+                        if value is not None
+                    }
+                )
+                for name in missing_env_names:
+                    os.environ.pop(name, None)
         return self._finalize(cancelled=cancelled)
 
     async def _start_tunnel(self, listener: CallbackListener) -> None:
@@ -1020,11 +1033,11 @@ class LocalEvalRunner:
         if tunnel.verified:
             self._stage("tunnel", f"tunnel ready: {public_url}")
         else:
-            reason = tunnel.unverified_reason or "no HTTP response"
+            reason = tunnel.unverified_reason or "host readiness check timed out"
             self._stage(
                 "tunnel",
-                f"tunnel up at {public_url}, but this host's readiness probe "
-                f"got no HTTP response ({reason}); sandboxes use independent "
+                f"tunnel up at {public_url}, but this host's readiness check "
+                f"did not pass ({reason}); sandboxes use independent "
                 "DNS/egress — continuing",
             )
 
@@ -1594,9 +1607,14 @@ class LocalEvalRunner:
         if not self._output_root.is_dir():
             return
         for run_dir in self._output_root.iterdir():
-            if not run_dir.is_dir() or not any(
-                (run_dir / filename).is_file()
-                for filename in (SERVER_STATE_FILENAME, TUNNEL_STATE_FILENAME)
+            if (
+                run_dir.is_symlink()
+                or not run_dir.is_dir()
+                or not any(
+                    not (run_dir / filename).is_symlink()
+                    and (run_dir / filename).is_file()
+                    for filename in (SERVER_STATE_FILENAME, TUNNEL_STATE_FILENAME)
+                )
             ):
                 continue
             try:
@@ -1620,11 +1638,15 @@ class LocalEvalRunner:
         as the server: an orphaned quick tunnel keeps a live public URL
         forwarding to a local port a later run may reuse.
         """
+        if run_dir.is_symlink():
+            return
         for filename, label in (
             (SERVER_STATE_FILENAME, "rollout server"),
             (TUNNEL_STATE_FILENAME, "cloudflared tunnel"),
         ):
             path = run_dir / filename
+            if path.is_symlink():
+                continue
             try:
                 reaped = await asyncio.to_thread(
                     reap_orphan_server, path, grace_sec=_SERVER_TERM_GRACE_SEC

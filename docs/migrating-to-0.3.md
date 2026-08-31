@@ -4,7 +4,7 @@ Version 0.3 intentionally breaks the pre-0.3 rollout contract. This page is the 
 
 ## Installation and imports
 
-The base distribution now contains the CLI and framework-neutral rollout core. Install only the extras used by the rollout: `server`, `strands`, `openai-agents`, `harbor`, `rubric`, or `parquet`; `full` installs every optional feature. The former `platform` extra and published `dev` extra are gone, and SkyPilot is supplied by the managed rollout runtime rather than Harbor's conflicting `skypilot` extra.
+The base distribution now contains the CLI and framework-neutral rollout core. Install only the extras used by the rollout: `server`, `eval`, `strands`, `openai-agents`, `harbor`, `rubric`, or `parquet`; `full` installs every optional feature. The former `platform` extra and published `dev` extra are gone, and SkyPilot is supplied by the managed rollout runtime rather than Harbor's conflicting `skypilot` extra.
 
 Server, Harbor, Strands, and OpenAI Agents integrations must be imported from their explicit submodules. `LocalBackend`, `AgentWorkflow`, `Grader`, and their core types remain available from `osmosis_ai.rollout`; import `HarborBackend` from `osmosis_ai.rollout.backend.harbor` and `evaluate_rubric` from `osmosis_ai.eval.rubric`.
 

@@ -135,7 +135,10 @@ class _Hooks:
     display: _ProgressDisplay = field(default_factory=_ProgressDisplay)
 
     def note(self, message: str) -> None:
-        console.print(message, style="dim")
+        # Rollout and tunnel logs are arbitrary text, not Rich markup. A prefix
+        # such as ``[rollout-server]`` must remain visible, and a malformed tag
+        # in a dependency log must not stop stdout draining.
+        console.print(message, style="dim", markup=False)
 
     def warning(self, message: str) -> None:
         from osmosis_ai.cli.output.context import OutputFormat
@@ -191,6 +194,7 @@ class _Hooks:
             names=list(names),
             secrets_file=self.secrets_file,
             stored_names=set(),
+            suggest_secret_store=False,
         )
 
     def progress(self, snapshot: Any) -> None:
@@ -403,7 +407,7 @@ def run(
         # §5: recorded as provenance, one warning for the rest. Local execution
         # consumes no [advanced] keys today.
         console.print_warning(
-            "\\[advanced] keys are recorded but not consumed by `osmosis eval run`: "
+            "[advanced] keys are recorded but not consumed by `osmosis eval run`: "
             + ", ".join(sorted(advanced))
         )
 

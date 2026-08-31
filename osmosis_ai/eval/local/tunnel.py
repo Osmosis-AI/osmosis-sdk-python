@@ -2,9 +2,10 @@
 
 Spawns ``cloudflared tunnel --url <listener>`` as a child process (same
 process-group discipline as the rollout server), parses the public
-``https://*.trycloudflare.com`` URL from its log output, probes readiness
-through the edge, and terminates with the run. The ``cloudflared`` binary on
-PATH is the whole contract: no Python dependency, no account, no config.
+``https://*.trycloudflare.com`` URL from its log output, requires either an
+edge registration log or a successful host probe, and terminates with the run.
+The ``cloudflared`` binary on PATH is the whole contract: no Python dependency,
+no account, no config.
 
 Quick tunnels run a single edge connection, so the child can die mid-run;
 the supervisor watches :meth:`CloudflaredTunnel.wait` and halts dispatch with
@@ -176,6 +177,13 @@ class CloudflaredTunnel:
                         timeout=min(_CONNECTION_REGISTRATION_GRACE_SEC, remaining),
                     )
             self.verified = await self._probe_ready(url, deadline)
+            if not self.verified and not connection_registered.is_set():
+                raise TunnelError(
+                    "cloudflared published a tunnel URL, but it neither "
+                    "registered a connection nor passed this host's "
+                    f"readiness check within {_START_TIMEOUT_SEC:.0f}s; "
+                    "see the run log for its output"
+                )
         except BaseException:
             # Never let cleanup mask the original error: a failing stop()
             # would otherwise replace the TunnelError mid-flight.
@@ -236,13 +244,10 @@ class CloudflaredTunnel:
         ``*.trycloudflare.com`` name can take longer than the startup budget
         to propagate through some resolvers, so giving up early would misread
         a routine propagation delay. Returns False when no HTTP response
-        arrived by the deadline: the host's own DNS or egress may never see
-        the edge at all (Tailscale MagicDNS and corporate filters both do
-        this) even though the sandbox resolves it independently —
-        unverifiable is a warning, not an error. An edge that answers but
-        keeps answering 5xx is a real failure.
+        passed by the deadline: the caller can still accept cloudflared's
+        independent connection-registration log, because the host's own DNS,
+        egress, or proxy may disagree with the sandbox that consumes the URL.
         """
-        saw_response = False
         self.unverified_reason = None
         async with httpx.AsyncClient(timeout=5.0, follow_redirects=False) as client:
             while True:
@@ -257,18 +262,10 @@ class CloudflaredTunnel:
                 except httpx.HTTPError as exc:
                     self.unverified_reason = _probe_failure_reason(exc)
                 else:
-                    saw_response = True
                     if response.status_code < 500:
                         return True
+                    self.unverified_reason = f"HTTP {response.status_code}"
                 if time.monotonic() >= deadline:
-                    if saw_response:
-                        raise TunnelError(
-                            f"tunnel {url} did not become reachable within "
-                            f"{_START_TIMEOUT_SEC:.0f}s. Some networks block "
-                            "*.trycloudflare.com; if yours does, run your own "
-                            "tunnel and pass --advertise-url. Quick-tunnel "
-                            f"docs: {_QUICK_TUNNEL_DOCS_URL}"
-                        )
                     return False
                 await asyncio.sleep(_PROBE_INTERVAL_SEC)
 

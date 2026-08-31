@@ -69,8 +69,9 @@ async def test_start_parses_url_and_stop_kills_child(
     assert await tunnel.wait() is None
 
 
-async def test_start_waits_for_connection_registration_before_probing(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize("probe_reason", ["DNS lookup failed", "HTTP 530"])
+async def test_registered_connection_does_not_require_host_reachability(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, probe_reason: str
 ) -> None:
     script = _fake_cloudflared(
         tmp_path,
@@ -80,19 +81,69 @@ async def test_start_waits_for_connection_registration_before_probing(
         "exec sleep 60",
     )
     monkeypatch.setattr(shutil, "which", lambda name: str(script))
-    lines: list[str] = []
+    probe_calls = 0
 
-    async def assert_registered_before_probe(
+    async def unreachable_host_probe(
         self: CloudflaredTunnel, url: str, deadline: float
     ) -> bool:
-        assert any("Registered tunnel connection" in line for line in lines)
+        nonlocal probe_calls
+        probe_calls += 1
+        self.unverified_reason = probe_reason
+        return False
+
+    monkeypatch.setattr(CloudflaredTunnel, "_probe_ready", unreachable_host_probe)
+    tunnel = CloudflaredTunnel(local_url="http://127.0.0.1:1")
+    assert await tunnel.start() == FAKE_URL
+    assert probe_calls == 1
+    assert tunnel.verified is False
+    await tunnel.stop()
+
+
+@pytest.mark.parametrize("probe_reason", ["DNS lookup failed", "HTTP 530"])
+async def test_unregistered_unreachable_tunnel_fails_and_cleans_up(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, probe_reason: str
+) -> None:
+    script = _fake_cloudflared(
+        tmp_path,
+        f"echo 'INF |  {FAKE_URL}  |' >&2\nexec sleep 60",
+    )
+    monkeypatch.setattr(shutil, "which", lambda name: str(script))
+    monkeypatch.setattr(tunnel_module, "_CONNECTION_REGISTRATION_GRACE_SEC", 0.01)
+    spawned: list[asyncio.subprocess.Process] = []
+
+    async def unreachable_host_probe(
+        self: CloudflaredTunnel, url: str, deadline: float
+    ) -> bool:
+        self.unverified_reason = probe_reason
+        return False
+
+    monkeypatch.setattr(CloudflaredTunnel, "_probe_ready", unreachable_host_probe)
+    tunnel = CloudflaredTunnel(local_url="http://127.0.0.1:1", on_spawn=spawned.append)
+    with pytest.raises(TunnelError, match="neither registered a connection nor"):
+        await tunnel.start()
+    assert spawned[0].returncode is not None
+    assert tunnel._process is None
+
+
+async def test_host_http_success_does_not_require_registration_marker(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    script = _fake_cloudflared(
+        tmp_path,
+        f"echo 'INF |  {FAKE_URL}  |' >&2\nexec sleep 60",
+    )
+    monkeypatch.setattr(shutil, "which", lambda name: str(script))
+    monkeypatch.setattr(tunnel_module, "_CONNECTION_REGISTRATION_GRACE_SEC", 0.01)
+
+    async def reachable_host_probe(
+        self: CloudflaredTunnel, url: str, deadline: float
+    ) -> bool:
         return True
 
-    monkeypatch.setattr(
-        CloudflaredTunnel, "_probe_ready", assert_registered_before_probe
-    )
-    tunnel = CloudflaredTunnel(local_url="http://127.0.0.1:1", on_log=lines.append)
-    await tunnel.start()
+    monkeypatch.setattr(CloudflaredTunnel, "_probe_ready", reachable_host_probe)
+    tunnel = CloudflaredTunnel(local_url="http://127.0.0.1:1")
+    assert await tunnel.start() == FAKE_URL
+    assert tunnel.verified is True
     await tunnel.stop()
 
 
@@ -124,7 +175,7 @@ async def test_probe_ready_accepts_app_404() -> None:
         assert await tunnel._probe_ready(server.base_url, time.monotonic() + 5.0)
 
 
-async def test_probe_ready_times_out_on_edge_errors(
+async def test_probe_ready_marks_edge_errors_unverified(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     app = FastAPI()
@@ -136,8 +187,10 @@ async def test_probe_ready_times_out_on_edge_errors(
     monkeypatch.setattr(tunnel_module, "_PROBE_INTERVAL_SEC", 0.01)
     async with LocalhostUvicornServer(app) as server:
         tunnel = CloudflaredTunnel(local_url=server.base_url)
-        with pytest.raises(TunnelError, match="did not become reachable"):
-            await tunnel._probe_ready(server.base_url, time.monotonic() + 0.3)
+        assert (
+            await tunnel._probe_ready(server.base_url, time.monotonic() + 0.3) is False
+        )
+        assert tunnel.unverified_reason == "HTTP 530"
 
 
 async def test_probe_with_no_http_response_is_unverified_not_fatal(

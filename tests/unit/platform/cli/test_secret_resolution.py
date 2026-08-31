@@ -58,6 +58,7 @@ def test_non_tty_lists_every_missing_name_at_once(
         "flags": ["--secrets-file"],
     }
     assert "--secrets-file" in exc.value.message
+    assert "osmosis secret set" in exc.value.message
 
 
 def test_comments_and_blank_lines_are_ignored(tmp_path: Path) -> None:

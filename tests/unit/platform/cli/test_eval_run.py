@@ -944,6 +944,35 @@ def test_stage_lines_print_once_and_only_without_verbose(
     assert "not repeated" not in printed
 
 
+def test_verbose_notes_print_arbitrary_log_lines_literally(
+    console_capture: StringIO,
+) -> None:
+    hooks = eval_run_module._Hooks(yes=True, secrets_file=None, verbose=True)
+
+    hooks.note("[rollout-server] ready")
+    hooks.note("dependency emitted [/bold]")
+
+    assert console_capture.getvalue().splitlines() == [
+        "[rollout-server] ready",
+        "dependency emitted [/bold]",
+    ]
+
+
+def test_local_missing_secret_omits_platform_store_advice(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("A_KEY", raising=False)
+
+    with override_output_context(format=OutputFormat.rich, interactive=False):
+        with pytest.raises(CLIError) as exc:
+            eval_run_module._Hooks(yes=True, secrets_file=None).resolve_secrets(
+                ["A_KEY"]
+            )
+
+    assert "--secrets-file" in exc.value.message
+    assert "osmosis secret set" not in exc.value.message
+
+
 def test_runner_warning_uses_the_output_mode_aware_console(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -961,6 +990,31 @@ def test_runner_warning_uses_the_output_mode_aware_console(
         )
 
     assert calls == [("versions differ", "ROLLOUT_SDK_VERSION_MISMATCH")]
+
+
+def test_advanced_warning_has_no_visible_escape(
+    workspace: Path,
+    captured_runner: type[_CapturedRunner],
+    console_capture: StringIO,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = workspace / "configs" / "eval" / "echo.toml"
+    config_path.write_text(
+        config_path.read_text("utf-8") + "\n\n[advanced]\ncustom = true\n",
+        encoding="utf-8",
+    )
+    warnings: list[str] = []
+    monkeypatch.setattr(
+        eval_run_module.console,
+        "print_warning",
+        lambda message, **_kwargs: warnings.append(message),
+    )
+
+    _run(workspace)
+
+    assert warnings == [
+        "[advanced] keys are recorded but not consumed by `osmosis eval run`: custom"
+    ]
 
 
 def test_startup_status_uses_spinner_except_in_verbose_mode(
