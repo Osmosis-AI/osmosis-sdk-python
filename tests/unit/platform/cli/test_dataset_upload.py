@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 from contextlib import nullcontext
+from io import StringIO
 
 import pytest
 
+from osmosis_ai.cli.console import Console
 from osmosis_ai.cli.output.context import OutputFormat, override_output_context
 from osmosis_ai.platform.api.models import DatasetFile, UploadInfo
 
@@ -72,7 +74,8 @@ class TestPerformUpload:
         assert result.id == "dataset-1"
         assert messages == ["Uploading dataset..."]
 
-    def test_simple_upload_flow(self, monkeypatch, tmp_path):
+    @pytest.mark.parametrize("method", ["simple", "multipart"])
+    def test_upload_flow(self, monkeypatch, tmp_path, method):
         """_perform_upload creates dataset, uploads to S3, and completes."""
         import osmosis_ai.platform.api.client as api_client_module
         import osmosis_ai.platform.api.upload as upload_module
@@ -83,7 +86,10 @@ class TestPerformUpload:
 
         calls: dict[str, bool] = {}
         fake_credentials = object()
-        fake_dataset = _make_fake_dataset(file_size=file_size)
+        fake_dataset = _make_fake_dataset(file_size=file_size, method=method)
+        expected_parts = (
+            [{"PartNumber": 1, "ETag": "etag"}] if method == "multipart" else None
+        )
 
         class FakeClient:
             def create_dataset(
@@ -107,7 +113,7 @@ class TestPerformUpload:
             ):
                 calls["complete"] = True
                 assert file_id == "dataset-1"
-                assert parts is None
+                assert parts == expected_parts
                 assert git_identity == GIT_IDENTITY
                 assert credentials is fake_credentials
                 return DatasetFile(
@@ -123,13 +129,12 @@ class TestPerformUpload:
             "make_progress_bar",
             lambda _size: (nullcontext(), lambda _done, _total: None),
         )
-        monkeypatch.setattr(
-            upload_module,
-            "upload_file_simple",
-            lambda _fp, _info, progress_callback=None: calls.update(
-                {"s3_upload": True}
-            ),
-        )
+
+        def fake_upload(_fp, _info, progress_callback=None):
+            calls["s3_upload"] = True
+            return expected_parts
+
+        monkeypatch.setattr(upload_module, f"upload_file_{method}", fake_upload)
 
         from osmosis_ai.platform.cli.dataset import _perform_upload
 
@@ -238,21 +243,29 @@ class TestPerformUpload:
                 credentials=None,
             )
 
-    def test_abort_on_keyboard_interrupt(self, monkeypatch, tmp_path):
+    @pytest.mark.parametrize(
+        ("method", "shows_interrupted_message"),
+        [("simple", True), ("multipart", False)],
+    )
+    def test_abort_on_keyboard_interrupt(
+        self, monkeypatch, tmp_path, method, shows_interrupted_message
+    ):
         """_perform_upload aborts and re-raises KeyboardInterrupt."""
         import osmosis_ai.platform.api.client as api_client_module
         import osmosis_ai.platform.api.upload as upload_module
+        import osmosis_ai.platform.cli.dataset as dataset_module
 
         file_path = tmp_path / "data.jsonl"
         file_path.write_text("{}")
         file_size = file_path.stat().st_size
 
         aborted = {}
+        output = StringIO()
 
         class FakeClient:
             def create_dataset(self, *args, git_identity, **kwargs):
                 assert git_identity == GIT_IDENTITY
-                return _make_fake_dataset(file_size=file_size)
+                return _make_fake_dataset(file_size=file_size, method=method)
 
             def abort_upload(self, file_id, *, git_identity, credentials=None):
                 assert git_identity == GIT_IDENTITY
@@ -262,6 +275,7 @@ class TestPerformUpload:
                 pass
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr(dataset_module, "console", Console(file=output))
         monkeypatch.setattr(
             upload_module,
             "make_progress_bar",
@@ -269,16 +283,14 @@ class TestPerformUpload:
         )
         monkeypatch.setattr(
             upload_module,
-            "upload_file_simple",
+            f"upload_file_{method}",
             lambda _fp, _info, progress_callback=None: (_ for _ in ()).throw(
                 KeyboardInterrupt
             ),
         )
 
-        from osmosis_ai.platform.cli.dataset import _perform_upload
-
         with pytest.raises(KeyboardInterrupt):
-            _perform_upload(
+            dataset_module._perform_upload(
                 file_path=file_path,
                 ext="jsonl",
                 file_size=file_size,
@@ -287,6 +299,7 @@ class TestPerformUpload:
             )
 
         assert aborted.get("called")
+        assert ("Upload interrupted." in output.getvalue()) is shows_interrupted_message
 
     def test_duplicate_name_without_overwrite_raises_guided_conflict(
         self, monkeypatch, tmp_path

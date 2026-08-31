@@ -36,8 +36,6 @@ async def post_json_with_retry(
         raise ValueError("max_attempts must be >= 1")
 
     client = get_shared_client(timeout_seconds)
-    last_exception: Exception | None = None
-
     for attempt in range(1, max_attempts + 1):
         try:
             response = await client.post(url, json=payload, headers=headers)
@@ -51,10 +49,7 @@ async def post_json_with_retry(
             response.raise_for_status()
             return response
         except (httpx.RequestError, httpx.HTTPStatusError) as exc:
-            last_exception = exc
-            is_last_attempt = attempt >= max_attempts
-            should_retry = _is_retryable_exception(exc)
-            if is_last_attempt or not should_retry:
+            if attempt >= max_attempts or not _is_retryable_exception(exc):
                 raise
 
             delay = min(base_delay_seconds * (2 ** (attempt - 1)), max_delay_seconds)
@@ -70,17 +65,11 @@ async def post_json_with_retry(
             await asyncio.sleep(delay)
 
     # This should be unreachable, but keeps type-checkers satisfied.
-    raise RuntimeError(
-        "POST request failed without raising an exception"
-    ) from last_exception
+    raise RuntimeError("POST request failed without raising an exception")
 
 
 def _is_retryable_exception(exc: Exception) -> bool:
-    if isinstance(exc, httpx.RequestError):
-        return True
-
-    if isinstance(exc, httpx.HTTPStatusError):
-        status_code = exc.response.status_code
-        return status_code in {429, 500, 502, 503, 504}
-
-    return False
+    return isinstance(exc, httpx.RequestError) or (
+        isinstance(exc, httpx.HTTPStatusError)
+        and exc.response.status_code in {429, 500, 502, 503, 504}
+    )

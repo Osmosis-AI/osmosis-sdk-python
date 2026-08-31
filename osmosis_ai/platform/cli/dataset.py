@@ -303,66 +303,45 @@ def _perform_upload(
 
     ctx, progress_cb = make_progress_bar(file_size)
 
-    if is_multipart:
-        try:
-            with ctx:
+    parts = None
+    try:
+        with ctx:
+            if is_multipart:
                 parts = upload_file_multipart(
                     file_path, upload_info, progress_callback=progress_cb
                 )
-        except KeyboardInterrupt:
-            _abort_upload(
-                client,
-                dataset.id,
-                credentials=credentials,
-                git_identity=git_identity,
-            )
-            raise
-        except Exception as e:
-            _abort_upload(
-                client,
-                dataset.id,
-                credentials=credentials,
-                git_identity=git_identity,
-            )
-            raise CLIError(f"Upload failed: {e}") from e
-        completed = _complete_with_retry(
-            client,
-            dataset.id,
-            parts=parts,
-            file_extension=ext,
-            credentials=credentials,
-            git_identity=git_identity,
-        )
-    else:
-        try:
-            with ctx:
+            else:
                 upload_file_simple(
                     file_path, upload_info, progress_callback=progress_cb
                 )
-        except KeyboardInterrupt:
+    except KeyboardInterrupt:
+        if not is_multipart:
             console.print("\nUpload interrupted.")
-            _abort_upload(
-                client,
-                dataset.id,
-                credentials=credentials,
-                git_identity=git_identity,
-            )
-            raise
-        except Exception as e:
-            _abort_upload(
-                client,
-                dataset.id,
-                credentials=credentials,
-                git_identity=git_identity,
-            )
-            raise CLIError(f"Upload failed: {e}") from e
-        completed = _complete_with_retry(
+        _abort_upload(
             client,
             dataset.id,
-            file_extension=ext,
             credentials=credentials,
             git_identity=git_identity,
         )
+        raise
+    except Exception as e:
+        _abort_upload(
+            client,
+            dataset.id,
+            credentials=credentials,
+            git_identity=git_identity,
+        )
+        raise CLIError(f"Upload failed: {e}") from e
+
+    complete_kwargs = {"parts": parts} if is_multipart else {}
+    completed = _complete_with_retry(
+        client,
+        dataset.id,
+        **complete_kwargs,
+        file_extension=ext,
+        credentials=credentials,
+        git_identity=git_identity,
+    )
 
     return completed or dataset
 

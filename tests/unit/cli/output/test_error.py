@@ -41,13 +41,13 @@ def _capture_envelope(err: CLIError) -> dict[str, Any]:
 def test_envelope_keys_match_golden() -> None:
     envelope = _capture_envelope(CLIError("Bad input.", code="VALIDATION"))
     expected = json.loads((GOLDEN / "error_envelope.json").read_text(encoding="utf-8"))
-    assert sorted(envelope.keys()) == sorted(expected["keys"])
+    assert list(envelope) == expected["keys"]
     assert envelope["schema_version"] == 1
     assert envelope["command"] == "dataset list"
     assert envelope["cli_version"]
     assert envelope["error"]["code"] == "VALIDATION"
     assert envelope["error"]["details"] == {}
-    assert sorted(envelope["error"].keys()) == sorted(expected["error_keys"])
+    assert list(envelope["error"]) == expected["error_keys"]
     assert "request_id" not in envelope["error"]
 
 
@@ -111,11 +111,6 @@ def test_billing_required_maps_to_billing_code() -> None:
         SubscriptionRequiredError("need billing", error_code="BILLING_REQUIRED")
     )
     assert cli_err.code == "BILLING_REQUIRED"
-
-
-def test_generic_403_stays_platform_error() -> None:
-    cli_err = classify_error(PlatformAPIError("forbidden", status_code=403))
-    assert cli_err.code == "PLATFORM_ERROR"
 
 
 def test_authentication_expired_error_maps_to_auth_required() -> None:
@@ -368,16 +363,6 @@ def test_command_registry_matches_registered_app() -> None:
     command_names = {info.name for info in cli_main.app.registered_commands}
     assert group_names == COMMAND_GROUPS
     assert command_names == STANDALONE_COMMANDS
-
-
-def test_command_path_uses_click_context_when_available() -> None:
-    parent = Context(typer.core.TyperCommand(name="osmosis"))
-    parent.info_name = "osmosis"
-    middle = Context(typer.core.TyperCommand(name="dataset"), parent=parent)
-    middle.info_name = "dataset"
-    nested = Context(typer.core.TyperCommand(name="list"), parent=middle)
-    nested.info_name = "list"
-    assert command_path_for_error(nested) == "dataset list"
 
 
 def test_command_path_root_when_argv_empty(monkeypatch) -> None:

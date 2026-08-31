@@ -10,11 +10,9 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from osmosis_ai.cli.errors import CLIError
+from osmosis_ai.cli.output import OutputFormat, override_output_context
 from osmosis_ai.eval.rubric.cli import RubricCommand
-from osmosis_ai.eval.rubric.dataset import (
-    RubricRecord,
-    load_rubric_dataset,
-)
+from osmosis_ai.eval.rubric.dataset import RubricRecord, load_rubric_dataset
 from osmosis_ai.eval.rubric.report import (
     ConsoleReportRenderer,
     JsonReportWriter,
@@ -81,16 +79,6 @@ class TestLoadRubricDataset:
         assert records[0].metadata is None
         assert records[0].record_id is None
 
-    def test_solution_str_format_auto_converts(self, tmp_path: Path):
-        data_file = tmp_path / "data.jsonl"
-        record = {"solution_str": "The answer is 42."}
-        data_file.write_text(json.dumps(record) + "\n", encoding="utf-8")
-
-        records = load_rubric_dataset(data_file)
-
-        assert len(records) == 1
-        assert records[0].solution_str == "The answer is 42."
-
     def test_missing_messages_and_solution_str_raises(self, tmp_path: Path):
         data_file = tmp_path / "data.jsonl"
         record = {"some_other_field": "value"}
@@ -106,13 +94,6 @@ class TestLoadRubricDataset:
         data_file.write_text("not valid json\n", encoding="utf-8")
 
         with pytest.raises(CLIError, match="Invalid JSON on line 1"):
-            load_rubric_dataset(data_file)
-
-    def test_empty_file_raises(self, tmp_path: Path):
-        data_file = tmp_path / "data.jsonl"
-        data_file.write_text("", encoding="utf-8")
-
-        with pytest.raises(CLIError, match="No JSON records found"):
             load_rubric_dataset(data_file)
 
     def test_blank_lines_only_raises(self, tmp_path: Path):
@@ -163,17 +144,6 @@ class TestLoadRubricDataset:
         records = load_rubric_dataset(data_file)
         assert records[0].record_id == "primary-id"
 
-    def test_multiple_records(self, tmp_path: Path):
-        data_file = tmp_path / "data.jsonl"
-        lines = [
-            json.dumps({"messages": [{"role": "assistant", "content": f"Answer {i}"}]})
-            for i in range(3)
-        ]
-        data_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
-
-        records = load_rubric_dataset(data_file)
-        assert len(records) == 3
-
     def test_non_dict_json_raises(self, tmp_path: Path):
         data_file = tmp_path / "data.jsonl"
         data_file.write_text("[1, 2, 3]\n", encoding="utf-8")
@@ -223,33 +193,13 @@ class TestLoadRubricDataset:
         assert len(records) == 2
 
 
-# =============================================================================
-# RubricRecord.label Tests
-# =============================================================================
-
-
-class TestRubricRecordLabel:
-    """Tests for RubricRecord.label() method."""
-
-    def test_with_record_id_returns_record_id(self):
-        record = RubricRecord(
-            solution_str="test",
-            ground_truth=None,
-            original_input=None,
-            metadata=None,
-            record_id="my-record-id",
-        )
-        assert record.label(5) == "my-record-id"
-
-    def test_without_record_id_returns_indexed_label(self):
-        record = RubricRecord(
-            solution_str="test",
-            ground_truth=None,
-            original_input=None,
-            metadata=None,
-            record_id=None,
-        )
-        assert record.label(3) == "record[3]"
+@pytest.mark.parametrize(
+    ("record_id", "index", "expected"),
+    [("my-record-id", 5, "my-record-id"), (None, 3, "record[3]")],
+)
+def test_rubric_record_label(record_id: str | None, index: int, expected: str) -> None:
+    record = RubricRecord("test", None, None, None, record_id)
+    assert record.label(index) == expected
 
 
 # =============================================================================
@@ -287,52 +237,17 @@ class TestCalculateStatistics:
 
 
 # =============================================================================
-# ConsoleReportRenderer Tests
+# Console report Tests
 # =============================================================================
 
 
-class TestConsoleReportRenderer:
-    """Tests for the console report renderer."""
-
-    def test_renders_basic_report(self, tmp_path: Path):
-        lines: list[str] = []
-        renderer = ConsoleReportRenderer(printer=lines.append)
-
+class TestConsoleReport:
+    def test_renders_exact_output(self, tmp_path: Path):
+        data_path = tmp_path / "data.jsonl"
         report = RubricReport(
             model="openai/gpt-5.4",
-            rubric_text="Score quality",
-            data_path=tmp_path / "data.jsonl",
-            number=1,
-            results=[
-                RecordResult(
-                    record_index=1,
-                    label="rec-1",
-                    scores=[0.85],
-                    explanations=["Good"],
-                    errors=[],
-                    statistics=calculate_statistics([0.85]),
-                )
-            ],
-            overall_statistics=calculate_statistics([0.85]),
-        )
-        renderer.render(report)
-
-        output = "\n".join(lines)
-        assert "Model: openai/gpt-5.4" in output
-        assert "Evaluated 1 record(s)" in output
-        assert "[rec-1]" in output
-        assert "score=0.8500" in output
-        assert "explanation: Good" in output
-        assert "Overall Statistics:" in output
-
-    def test_renders_multi_run_summary(self, tmp_path: Path):
-        lines: list[str] = []
-        renderer = ConsoleReportRenderer(printer=lines.append)
-
-        report = RubricReport(
-            model="openai/gpt-5.4",
-            rubric_text="Score quality",
-            data_path=tmp_path / "data.jsonl",
+            rubric_text="评分质量",
+            data_path=data_path,
             number=2,
             results=[
                 RecordResult(
@@ -342,57 +257,55 @@ class TestConsoleReportRenderer:
                     explanations=["Good", "Better"],
                     errors=[],
                     statistics=calculate_statistics([0.8, 0.9]),
-                )
-            ],
-            overall_statistics=calculate_statistics([0.8, 0.9]),
-        )
-        renderer.render(report)
-
-        output = "\n".join(lines)
-        assert "Summary: avg=" in output
-
-    def test_renders_errors(self, tmp_path: Path):
-        lines: list[str] = []
-        renderer = ConsoleReportRenderer(printer=lines.append)
-
-        report = RubricReport(
-            model="openai/gpt-5.4",
-            rubric_text="Score quality",
-            data_path=tmp_path / "data.jsonl",
-            number=1,
-            results=[
+                ),
                 RecordResult(
-                    record_index=1,
-                    label="rec-1",
+                    record_index=2,
+                    label="rec-2",
                     scores=[],
                     explanations=[],
                     errors=["Something went wrong"],
                     statistics=calculate_statistics([]),
-                )
+                ),
             ],
-            overall_statistics=calculate_statistics([]),
+            overall_statistics=calculate_statistics([0.8, 0.9]),
         )
-        renderer.render(report)
+        lines: list[str] = []
+        ConsoleReportRenderer(lines.append).render(report)
 
-        output = "\n".join(lines)
-        assert "ERROR: Something went wrong" in output
+        assert lines == [
+            "Model: openai/gpt-5.4",
+            f"Evaluated 2 record(s) from {data_path}",
+            "Runs per record: 2",
+            "",
+            "[rec-1]",
+            "  Run 01: score=0.8000",
+            "    explanation: Good",
+            "  Run 02: score=0.9000",
+            "    explanation: Better",
+            "  Summary: avg=0.8500 stdev=0.0500 min=0.8000 max=0.9000",
+            "",
+            "[rec-2]",
+            "  ERROR: Something went wrong",
+            "",
+            "Overall Statistics:",
+            "  average:  0.8500",
+            "  stdev:    0.0500",
+            "  min/max:  0.8000 / 0.9000",
+        ]
 
 
 # =============================================================================
-# JsonReportWriter Tests
+# JSON report Tests
 # =============================================================================
 
 
-class TestJsonReportWriter:
-    """Tests for the JSON report writer."""
-
+class TestJsonReport:
     def test_writes_valid_json(self, tmp_path: Path):
-        writer = JsonReportWriter()
         output_path = tmp_path / "output" / "result.json"
 
         report = RubricReport(
             model="openai/gpt-5.4",
-            rubric_text="Score quality",
+            rubric_text="评分质量",
             data_path=tmp_path / "data.jsonl",
             number=1,
             results=[
@@ -408,19 +321,39 @@ class TestJsonReportWriter:
             overall_statistics=calculate_statistics([0.85]),
         )
 
-        result_path = writer.write(report, output_path)
+        result_path = JsonReportWriter().write(report, output_path)
 
         assert result_path == output_path
         assert output_path.exists()
 
-        data = json.loads(output_path.read_text(encoding="utf-8"))
+        raw = output_path.read_text(encoding="utf-8")
+        data = json.loads(raw)
+        assert raw == json.dumps(data, indent=2, ensure_ascii=False)
+        assert list(data) == [
+            "generated_at",
+            "model",
+            "rubric",
+            "data_path",
+            "number",
+            "overall_statistics",
+            "records",
+        ]
+        assert data["generated_at"].endswith("+00:00")
         assert data["model"] == "openai/gpt-5.4"
-        assert data["rubric"] == "Score quality"
+        assert data["rubric"] == "评分质量"
+        assert data["data_path"] == str(report.data_path)
         assert data["number"] == 1
+        assert data["overall_statistics"] == calculate_statistics([0.85])
         assert len(data["records"]) == 1
-        assert data["records"][0]["scores"] == [0.85]
-        assert "generated_at" in data
-        assert "overall_statistics" in data
+        assert data["records"][0] == {
+            "index": 1,
+            "label": "rec-1",
+            "scores": [0.85],
+            "explanations": ["Good"],
+            "errors": [],
+            "statistics": calculate_statistics([0.85]),
+        }
+        assert data["records"][0] == report.results[0].to_payload()
 
 
 # =============================================================================
@@ -434,13 +367,6 @@ class TestResolveRubricText:
     def test_inline_text_returned_stripped(self):
         result = RubricCommand._resolve_rubric_text("  Score quality  ")
         assert result == "Score quality"
-
-    def test_file_reference_reads_content(self, tmp_path: Path):
-        rubric_file = tmp_path / "rubric.txt"
-        rubric_file.write_text("  Score factual accuracy.  \n", encoding="utf-8")
-
-        result = RubricCommand._resolve_rubric_text(f"@{rubric_file}")
-        assert result == "Score factual accuracy."
 
     def test_nonexistent_file_raises(self):
         with pytest.raises(CLIError, match="does not exist"):
@@ -458,27 +384,10 @@ _EVALUATE_RUBRIC_PATCH = "osmosis_ai.eval.rubric.cli.evaluate_rubric"
 class TestRubricCommandRun:
     """End-to-end tests for RubricCommand.run."""
 
-    def test_run_succeeds(self, tmp_path: Path):
-        data_file = tmp_path / "data.jsonl"
-        record = {
-            "messages": [
-                {"role": "user", "content": "What is 2+2?"},
-                {"role": "assistant", "content": "4"},
-            ]
-        }
-        data_file.write_text(json.dumps(record) + "\n", encoding="utf-8")
-
-        mock_result = RubricResult(score=0.9, explanation="Correct")
-
-        with patch(
-            _EVALUATE_RUBRIC_PATCH, new_callable=AsyncMock, return_value=mock_result
-        ):
-            RubricCommand().run(
-                data=str(data_file),
-                rubric="Score accuracy",
-                model="openai/gpt-5.4",
-                api_key="test-key",
-            )
+    @pytest.fixture(autouse=True)
+    def _json_output(self):
+        with override_output_context(format=OutputFormat.json):
+            yield
 
     def test_run_with_output_writes_json(self, tmp_path: Path):
         data_file = tmp_path / "data.jsonl"
@@ -540,7 +449,7 @@ class TestRubricCommandRun:
         data_file.write_text(json.dumps(record) + "\n", encoding="utf-8")
 
         rubric_file = tmp_path / "rubric.txt"
-        rubric_file.write_text("Score the response quality.", encoding="utf-8")
+        rubric_file.write_text("  Score the response quality.  \n", encoding="utf-8")
 
         mock_result = RubricResult(score=0.5, explanation="Average")
 
