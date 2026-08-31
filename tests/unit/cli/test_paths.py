@@ -27,10 +27,9 @@ def test_parse_cli_path_expands_user(monkeypatch, tmp_path: Path) -> None:
 
 
 def test_display_path_is_relative_inside_the_base(tmp_path: Path) -> None:
-    assert (
-        display_path(tmp_path / ".osmosis" / "evals" / "run-1", base=tmp_path)
-        == ".osmosis/evals/run-1"
-    )
+    assert display_path(
+        tmp_path / ".osmosis" / "evals" / "run-1", base=tmp_path
+    ) == str(Path(".osmosis") / "evals" / "run-1")
 
 
 def test_display_path_keeps_an_outside_path_absolute(tmp_path: Path) -> None:

@@ -47,6 +47,21 @@ def test_explicit_run_directory_remains_supported(
     )
 
 
+def test_explicit_run_directory_is_relative_to_the_invocation_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workspace = tmp_path / "workspace"
+    nested = workspace / "tools"
+    custom = nested / "custom-evals" / "run-1"
+    custom.mkdir(parents=True)
+    monkeypatch.chdir(nested)
+
+    assert (
+        _resolve_run_dir(Path("custom-evals/run-1"), workspace_directory=workspace)
+        == custom
+    )
+
+
 def test_single_segment_is_unambiguously_a_run_name(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

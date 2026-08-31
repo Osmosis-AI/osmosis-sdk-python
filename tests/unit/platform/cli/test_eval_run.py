@@ -129,6 +129,10 @@ def _stub_context(monkeypatch: pytest.MonkeyPatch, workspace: Path) -> None:
     monkeypatch.setattr(
         eval_run_module, "validate_workspace_directory_contract", lambda _: None
     )
+    # The real context resolver discovers this workspace from the invocation
+    # directory. Keep the default unit-test setup faithful; individual tests
+    # move into a nested workspace directory when exercising that case.
+    monkeypatch.chdir(workspace)
 
 
 def _metrics(*, passed: int, scored: int) -> dict[str, Any]:
@@ -398,8 +402,12 @@ def test_output_override_is_honored(
 
 
 def test_workspace_local_output_uses_a_relative_upload_path(
-    workspace: Path, captured_runner: type[_CapturedRunner], console_capture: StringIO
+    workspace: Path,
+    captured_runner: type[_CapturedRunner],
+    console_capture: StringIO,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.chdir(workspace)
     result = _run(workspace, output=str(workspace / "custom-evals"))
 
     assert result.display_next_steps == [
@@ -407,12 +415,79 @@ def test_workspace_local_output_uses_a_relative_upload_path(
     ]
 
 
-def test_the_rollout_dir_is_resolved_under_the_workspace(
-    workspace: Path, captured_runner: type[_CapturedRunner], console_capture: StringIO
+def test_nested_invocation_uses_copyable_resume_paths(
+    workspace: Path,
+    captured_runner: type[_CapturedRunner],
+    console_capture: StringIO,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _run(workspace)
+    from osmosis_ai.eval.local.runner import RunSummary
+
+    nested = workspace / "rollouts" / ROLLOUT
+    monkeypatch.chdir(nested)
+
+    async def partial_run(self: Any, **_kwargs: Any) -> RunSummary:
+        return RunSummary(
+            run_dir=self.kwargs["output_root"] / "run-1",
+            local_run_id="a" * 32,
+            run_name="run-1",
+            total_work_items=6,
+            dispatched=3,
+            succeeded=2,
+            failed=1,
+            skipped=0,
+            resumed=0,
+            cancelled=True,
+            duration_ms=1500.0,
+            metrics=_metrics(passed=1, scored=2),
+        )
+
+    monkeypatch.setattr(captured_runner, "run", partial_run)
+    result = _run(workspace)
+
     assert captured_runner.calls[0]["rollout_dir"] == workspace / "rollouts" / ROLLOUT
-    assert captured_runner.calls[0]["display_root"] == workspace
+    assert captured_runner.calls[0]["display_root"] == nested
+    resume = next(
+        step for step in result.display_next_steps if step.startswith("Resume:")
+    )
+    retry = next(
+        step for step in result.display_next_steps if step.startswith("Retry failures")
+    )
+    config_path = str((workspace / "configs" / "eval" / "echo.toml").resolve())
+    assert config_path in resume
+    assert config_path in retry
+
+
+def test_nested_invocation_uses_a_copyable_custom_upload_path(
+    workspace: Path,
+    captured_runner: type[_CapturedRunner],
+    console_capture: StringIO,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    nested = workspace / "rollouts" / ROLLOUT
+    output = workspace / "custom-evals"
+    monkeypatch.chdir(nested)
+
+    result = _run(workspace, output=str(output))
+
+    assert result.display_next_steps == [
+        f"Upload: osmosis eval upload {output / 'run-1'}"
+    ]
+
+
+def test_single_segment_custom_upload_path_stays_distinct_from_a_run_name(
+    workspace: Path,
+    captured_runner: type[_CapturedRunner],
+    console_capture: StringIO,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.chdir(workspace)
+
+    result = _run(workspace, output=str(workspace))
+
+    assert result.display_next_steps == [
+        f"Upload: osmosis eval upload {workspace / 'run-1'}"
+    ]
 
 
 # --------------------------------------------------------------------------- #

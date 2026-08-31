@@ -349,6 +349,10 @@ def run(
         result_context = local_result_context(context)
     workspace_directory = context.workspace_directory
     validate_workspace_directory_contract(workspace_directory)
+    # Filesystem paths shown as commands must resolve from the shell that
+    # invoked us, which may be inside a workspace subdirectory. The workspace
+    # root remains the authority for config and rollout discovery only.
+    display_root = Path.cwd().resolve()
 
     resolved_config_path = config_path.expanduser().resolve()
     ensure_workspace_directory_config_path(
@@ -456,7 +460,7 @@ def run(
         output_root=output_root,
         hooks=hooks,
         provenance=_provenance(workspace_directory, spec, advanced=advanced),
-        display_root=workspace_directory,
+        display_root=display_root,
     )
 
     _print_plan(
@@ -464,7 +468,7 @@ def run(
         dataset=dataset,
         selection=selection,
         output_root=output_root,
-        workspace_directory=workspace_directory,
+        display_root=display_root,
     )
     imported: Any | None = None
 
@@ -481,9 +485,11 @@ def run(
         if platform_context is None:
             raise RuntimeError("upload callback requires an authenticated context")
         retry = _upload_command(
-            summary.run_dir, workspace_directory=workspace_directory
+            summary.run_dir,
+            workspace_directory=workspace_directory,
+            display_root=display_root,
         )
-        run_path = display_path(summary.run_dir, base=workspace_directory)
+        run_path = display_path(summary.run_dir, base=display_root)
         try:
             imported = upload_plan(
                 build_eval_upload_plan(summary.run_dir), context=platform_context
@@ -529,7 +535,7 @@ def run(
         raise CLIError(str(exc)) from exc
     except KeyboardInterrupt:
         started = runner.active_run_name
-        config_arg = quote(display_path(config_path, base=workspace_directory))
+        config_arg = quote(display_path(resolved_config_path, base=display_root))
         hint = (
             "Resume the pending work items: "
             f"osmosis eval run {config_arg} --name {started}"
@@ -546,13 +552,14 @@ def run(
         # the summary, an error, or a traceback into it.
         hooks.display.close()
 
-    _print_failures(summary, workspace_directory=workspace_directory)
-    _print_summary(summary, workspace_directory=workspace_directory)
+    _print_failures(summary, display_root=display_root)
+    _print_summary(summary, display_root=display_root)
     return _result(
         summary,
         result_context=result_context,
-        config_path=config_path,
+        config_path=resolved_config_path,
         workspace_directory=workspace_directory,
+        display_root=display_root,
         dataset_source=dataset.source,
         imported=imported,
         upload_requested=upload,
@@ -599,7 +606,7 @@ def _print_plan(
     dataset: Any,
     selection: Any,
     output_root: Path,
-    workspace_directory: Path,
+    display_root: Path,
 ) -> None:
     """What is about to run, before the cost confirmation.
 
@@ -620,14 +627,14 @@ def _print_plan(
     if runs > 1:
         rows.append(("Runs Per Row", str(runs)))
     rows.append(("Work Items", str(sampled * runs)))
-    rows.append(("Output", display_path(output_root, base=workspace_directory)))
+    rows.append(("Output", display_path(output_root, base=display_root)))
     console.table(
         [(label, console.escape(value)) for label, value in rows],
         title="Local Evaluation",
     )
 
 
-def _print_summary(summary: Any, *, workspace_directory: Path) -> None:
+def _print_summary(summary: Any, *, display_root: Path) -> None:
     """The numbers the run produced (§4.3).
 
     ``metrics`` is what ``metrics.json`` holds, so the terminal and the file
@@ -672,14 +679,14 @@ def _print_summary(summary: Any, *, workspace_directory: Path) -> None:
         )
     rows.append(("Tokens Used", f"{metrics.get('tokens_used', 0):,}"))
     rows.append(("Duration", format_duration_ms(summary.duration_ms)))
-    rows.append(("Output", display_path(summary.run_dir, base=workspace_directory)))
+    rows.append(("Output", display_path(summary.run_dir, base=display_root)))
     console.table(
         [(label, console.escape(value)) for label, value in rows],
         title="Results" + (" (incomplete)" if summary.cancelled else ""),
     )
 
 
-def _print_failures(summary: Any, *, workspace_directory: Path) -> None:
+def _print_failures(summary: Any, *, display_root: Path) -> None:
     """Print failed rows with zero-friction paths (§4.3)."""
     if not summary.failures:
         return
@@ -694,19 +701,27 @@ def _print_failures(summary: Any, *, workspace_directory: Path) -> None:
         console.print(
             f"row {failure.row_index}{source} run {failure.run_index}: "
             f"error_type={error} -> "
-            f"{display_path(failure.rollout_dir, base=workspace_directory)}"
+            f"{display_path(failure.rollout_dir, base=display_root)}"
         )
 
 
-def _upload_command(run_dir: Path, *, workspace_directory: Path) -> str:
+def _upload_command(
+    run_dir: Path, *, workspace_directory: Path, display_root: Path
+) -> str:
+    resolved = run_dir.resolve()
     default_run_dir = workspace_directory.joinpath(
         *DEFAULT_OUTPUT_SUBPATH, run_dir.name
-    )
-    argument = (
-        run_dir.name
-        if run_dir.resolve() == default_run_dir.resolve()
-        else display_path(run_dir, base=workspace_directory)
-    )
+    ).resolve()
+    if resolved == default_run_dir:
+        argument = run_dir.name
+    else:
+        argument = display_path(resolved, base=display_root)
+        parsed = Path(argument)
+        # ``eval upload foo`` is deliberately a run name under the default
+        # eval root. A custom directory that happens to be one CWD segment
+        # away therefore needs an absolute spelling to preserve path intent.
+        if not parsed.is_absolute() and len(parsed.parts) == 1:
+            argument = str(resolved)
     return f"osmosis eval upload {quote(argument)}"
 
 
@@ -716,6 +731,7 @@ def _result(
     result_context: dict[str, object],
     config_path: Path,
     workspace_directory: Path,
+    display_root: Path,
     dataset_source: str,
     imported: Any | None = None,
     upload_requested: bool = False,
@@ -762,7 +778,7 @@ def _result(
         summary.succeeded + summary.failed + summary.skipped < summary.total_work_items
     )
     noop = not incomplete and summary.dispatched == 0 and summary.total_work_items > 0
-    config_arg = quote(display_path(config_path, base=workspace_directory))
+    config_arg = quote(display_path(config_path, base=display_root))
     next_steps = []
     if noop:
         next_steps.append(
@@ -796,9 +812,13 @@ def _result(
     elif not incomplete:
         next_steps.append(
             "Upload: "
-            + _upload_command(summary.run_dir, workspace_directory=workspace_directory)
+            + _upload_command(
+                summary.run_dir,
+                workspace_directory=workspace_directory,
+                display_root=display_root,
+            )
         )
-    run_path = display_path(summary.run_dir, base=workspace_directory)
+    run_path = display_path(summary.run_dir, base=display_root)
     if noop:
         message = (
             f"Run {summary.run_name!r} was already complete; nothing ran: {run_path}"
