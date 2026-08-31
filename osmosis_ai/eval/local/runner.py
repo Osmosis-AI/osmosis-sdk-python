@@ -762,6 +762,11 @@ class LocalEvalRunner:
 
     async def _run_locked(self, *, run_name: str) -> RunSummary:
         run_dir = self._output_root / run_name
+        if run_dir.is_symlink():
+            raise LocalEvalError(
+                f"run directory {run_dir} is a symbolic link; refusing to use it. "
+                "Remove the link or choose a different --name."
+            )
         self._run_dir = run_dir
         await self._reap_orphan_server(run_dir)
         inputs = self._build_inputs()
@@ -896,12 +901,12 @@ class LocalEvalRunner:
         # run, then the caller's environment is restored on every exit path.
         original_env = {name: os.environ.get(name) for name in secrets}
         missing_env_names = set(secrets).difference(os.environ)
-        os.environ.update(secrets)
 
         advertise_url = self._options.advertise_url
         listener: CallbackListener | None = None
         cancelled = False
         try:
+            os.environ.update(secrets)
             bridge = LiteLLMBridge(model=self._spec.model_path)
             self._bridge = bridge
             self._stage("preflight", f"checking model {self._spec.model_path}")

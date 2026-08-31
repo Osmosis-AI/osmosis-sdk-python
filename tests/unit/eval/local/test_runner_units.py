@@ -733,6 +733,40 @@ def test_an_output_root_equal_to_the_rollout_dir_is_refused(tmp_path: Path) -> N
         runner._source_digest()
 
 
+@pytest.mark.parametrize("fresh", [False, True])
+async def test_run_refuses_a_named_run_directory_symlink(
+    tmp_path: Path, fresh: bool
+) -> None:
+    output_root = tmp_path / "evals"
+    output_root.mkdir()
+    target = tmp_path / "outside-output"
+    target.mkdir()
+    (target / "sentinel.txt").write_text("untouched")
+    if fresh:
+        # Without the guard, --fresh would archive the alias before creating a
+        # new run in its place.
+        (target / "manifest.json").write_text("existing manifest")
+    before = {path.name: path.read_bytes() for path in target.iterdir()}
+    alias = output_root / "run-1"
+    alias.symlink_to(target, target_is_directory=True)
+    runner = _runner(
+        _spec(),
+        tmp_path,
+        output_root=output_root,
+        options=LocalEvalOptions(
+            name="run-1", fresh=fresh, server_interpreter=sys.executable
+        ),
+    )
+
+    with pytest.raises(LocalEvalError, match=r"run directory .* symbolic link"):
+        await runner.run()
+
+    assert runner._run_dir is None
+    assert alias.is_symlink()
+    assert not list(output_root.glob("run-1.archive-*"))
+    assert {path.name: path.read_bytes() for path in target.iterdir()} == before
+
+
 def test_the_redactor_replaces_secrets_and_keeps_context() -> None:
     from osmosis_ai.eval.local.runner import SecretRedactor
 
@@ -800,6 +834,33 @@ async def test_execute_temporarily_overrides_and_restores_secret_environment(
     }
     assert os.environ[existing_name] == "from-parent"
     assert added_name not in os.environ
+
+
+async def test_execute_restores_environment_when_secret_update_partially_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    existing_name = "OSMOSIS_TEST_EXISTING_PARTIAL_PROVIDER_KEY"
+    added_name = "OSMOSIS_TEST_ADDED_PARTIAL_PROVIDER_KEY"
+    invalid_name = "OSMOSIS_TEST_INVALID_PARTIAL_PROVIDER_KEY"
+    monkeypatch.setenv(existing_name, "from-parent")
+    monkeypatch.delenv(added_name, raising=False)
+    monkeypatch.delenv(invalid_name, raising=False)
+    runner = _runner(_spec(), tmp_path)
+    runner._run_dir = tmp_path / "evals" / "run-1"
+
+    with pytest.raises(ValueError):
+        await runner._execute(
+            [],
+            secrets={
+                existing_name: "from-secrets-file",
+                added_name: "new-from-secrets-file",
+                invalid_name: "contains\x00nul",
+            },
+        )
+
+    assert os.environ[existing_name] == "from-parent"
+    assert added_name not in os.environ
+    assert invalid_name not in os.environ
 
 
 # --------------------------------------------------------------------------- #
