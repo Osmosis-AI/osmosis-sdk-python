@@ -764,7 +764,43 @@ async def test_tunnel_mode_runs_the_full_path_and_stops_the_tunnel(
     (tunnel,) = _FakeTunnel.instances
     assert tunnel.stopped
     assert callable(tunnel.on_spawn)
+    assert harness.hooks.statuses == [
+        "waiting for cloudflared URL and public readiness (up to 30s)"
+    ]
+    healthy_index = next(
+        index
+        for index, stage in enumerate(harness.hooks.stages)
+        if "rollout server healthy" in stage
+    )
+    tunnel_index = next(
+        index
+        for index, stage in enumerate(harness.hooks.stages)
+        if "starting cloudflared" in stage
+    )
+    assert healthy_index < tunnel_index
     assert any("tunnel ready" in stage for stage in harness.hooks.stages)
+
+
+async def test_rollout_server_failure_does_not_start_a_tunnel(
+    harness: RunnerHarness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from osmosis_ai.eval.local import runner as runner_module
+    from osmosis_ai.eval.local.runner import LocalEvalError
+
+    _FakeTunnel.instances.clear()
+    monkeypatch.setattr(runner_module, "CloudflaredTunnel", _FakeTunnel)
+    runner = harness.runner(
+        options=LocalEvalOptions(name="run-1", tunnel="cloudflared")
+    )
+
+    async def fail_server(**kwargs: object) -> str:
+        raise LocalEvalError("server failed")
+
+    monkeypatch.setattr(runner, "_start_rollout_server", fail_server)
+    with pytest.raises(LocalEvalError, match="server failed"):
+        await runner.run()
+
+    assert _FakeTunnel.instances == []
 
 
 async def test_tunnel_death_halts_dispatch_and_leaves_work_pending(

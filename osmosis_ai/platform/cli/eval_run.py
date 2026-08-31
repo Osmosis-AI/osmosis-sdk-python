@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Sequence
+from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass, field
 from pathlib import Path
 from shlex import quote
@@ -149,6 +150,12 @@ class _Hooks:
         if self.verbose:
             return
         console.print(f"→ {console.escape(message)}", style="cyan")
+
+    def status(self, message: str) -> AbstractContextManager[None]:
+        """Show live startup work without duplicating the verbose log stream."""
+        if self.verbose:
+            return nullcontext()
+        return console.status(message)
 
     async def confirm_dispatch(self, *, pending: int, model_path: str) -> None:
         await require_confirmation_async(

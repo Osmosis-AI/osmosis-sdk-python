@@ -866,7 +866,12 @@ class _ExitedChild:
 
 
 def _record_spawns(
-    monkeypatch: pytest.MonkeyPatch, *, sync_returncode: int = 0
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    sync_returncode: int = 0,
+    sync_output: bytes = b"uv output\n",
+    sdk_version: str = PACKAGE_VERSION,
+    server_output: bytes = b"uv output\n",
 ) -> list[tuple[list[str], dict[str, Any]]]:
     """Stand in for uv: record every spawn instead of touching the network."""
     from osmosis_ai.eval.local import runner as runner_module
@@ -875,8 +880,11 @@ def _record_spawns(
 
     async def fake_exec(*argv: str, **kwargs: Any) -> Any:
         spawns.append((list(argv), kwargs))
-        returncode = sync_returncode if argv[1] == "sync" else 0
-        return _ExitedChild(returncode, b"uv output\n")
+        if argv[1] == "sync":
+            return _ExitedChild(sync_returncode, sync_output)
+        if argv[-3:-1] == ("python", "-c"):
+            return _ExitedChild(0, f"{sdk_version}\n".encode())
+        return _ExitedChild(0, server_output)
 
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
     monkeypatch.setattr(runner_module, "_uv_executable", lambda: "/fake/bin/uv")
@@ -905,7 +913,8 @@ async def test_the_default_path_syncs_then_runs_the_rollout_project(
 
     argvs = [argv for argv, _ in spawns]
     assert argvs[0] == ["/fake/bin/uv", "sync", "--project", str(tmp_path)]
-    assert argvs[1] == [
+    assert argvs[1] == runner_module.uv_sdk_version_command("/fake/bin/uv", tmp_path)
+    assert argvs[2] == [
         "/fake/bin/uv",
         "run",
         "--no-sync",
@@ -916,7 +925,7 @@ async def test_the_default_path_syncs_then_runs_the_rollout_project(
     ]
     # Dependencies do not change when the port does, so the sync runs once for
     # the whole port-retry loop.
-    assert [argv[1] for argv in argvs] == ["sync"] + [
+    assert [argv[1] for argv in argvs] == ["sync", "run"] + [
         "run"
     ] * runner_module._PORT_ATTEMPTS
     assert runner._hooks.stages[0] == "syncing rollout dependencies (echo-rollout)"
@@ -924,6 +933,44 @@ async def test_the_default_path_syncs_then_runs_the_rollout_project(
         assert kwargs["cwd"] == str(tmp_path)
         assert "VIRTUAL_ENV" not in kwargs["env"]
         assert kwargs["start_new_session"] is True
+
+
+async def test_sdk_mismatch_warns_before_a_server_import_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _record_spawns(monkeypatch, sdk_version="0.3.0")
+    runner = _uv_runner(tmp_path)
+    warnings: list[str] = []
+    runner._hooks.warning = warnings.append
+
+    async with httpx.AsyncClient() as client:
+        with pytest.raises(LocalEvalError, match="before becoming healthy"):
+            await runner._start_rollout_server(secrets={}, client=client)
+
+    assert len(warnings) == 1
+    assert "rollout server uses osmosis-ai 0.3.0" in warnings[0]
+    assert f"this CLI uses {PACKAGE_VERSION}" in warnings[0]
+
+
+async def test_startup_error_surfaces_the_redacted_last_child_line(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    secret = "sk-live-startup-secret"
+    _record_spawns(
+        monkeypatch,
+        server_output=f"ModuleNotFoundError: {secret}\n".encode(),
+    )
+    runner = _uv_runner(tmp_path)
+    runner._redactor.extend([secret])
+
+    async with httpx.AsyncClient() as client:
+        with pytest.raises(LocalEvalError) as exc_info:
+            await runner._start_rollout_server(secrets={}, client=client)
+
+    message = str(exc_info.value)
+    assert "ModuleNotFoundError: [REDACTED]" in message
+    assert secret not in message
+    assert f"Logs: {(tmp_path / 'evals' / 'run-1' / 'logs.txt').resolve()}" in message
 
 
 async def test_bootstrap_marks_old_server_health_as_supervisor_owned(
@@ -987,13 +1034,26 @@ async def test_a_failing_uv_sync_is_reported_as_a_dependency_failure(
 ) -> None:
     # Attribution is the point: an unresolvable dependency must not surface
     # later as a rollout server that never became healthy.
-    spawns = _record_spawns(monkeypatch, sync_returncode=2)
+    secret = "sk-sync-secret"
+    spawns = _record_spawns(
+        monkeypatch,
+        sync_returncode=2,
+        sync_output=(
+            f"resolving dependencies\nerror: Distribution not found at: {secret}\n"
+        ).encode(),
+    )
     runner = _uv_runner(tmp_path)
+    runner._redactor.extend([secret])
 
     async with httpx.AsyncClient() as client:
-        with pytest.raises(LocalEvalError, match=r"uv sync failed .*exit code 2"):
+        with pytest.raises(LocalEvalError) as exc_info:
             await runner._start_rollout_server(secrets={}, client=client)
 
+    message = str(exc_info.value)
+    assert "uv sync failed for rollouts/echo-rollout with exit code 2" in message
+    assert "error: Distribution not found at: [REDACTED]" in message
+    assert secret not in message
+    assert f"Logs: {(tmp_path / 'evals' / 'run-1' / 'logs.txt').resolve()}" in message
     assert [argv[1] for argv, _ in spawns] == ["sync"]
 
 

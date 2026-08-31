@@ -18,6 +18,7 @@ import contextlib
 import os
 import re
 import shutil
+import socket
 import time
 from collections.abc import Callable
 
@@ -28,7 +29,12 @@ from osmosis_ai.eval.local.state import process_group_of, terminate_process_grou
 _URL_PATTERN = re.compile(r"https://[a-z0-9-]+\.trycloudflare\.com")
 _START_TIMEOUT_SEC = 30.0
 _PROBE_INTERVAL_SEC = 1.0
+# cloudflared prints the public URL shortly before it registers the edge
+# connection. Probing that fresh hostname in between can cache NXDOMAIN for
+# the zone's full negative TTL, so wait briefly for the registration log.
+_CONNECTION_REGISTRATION_GRACE_SEC = 1.0
 _TERM_GRACE_SEC = 5.0
+_CONNECTION_REGISTERED_MARKER = "Registered tunnel connection"
 
 _INSTALL_HINT = (
     "--tunnel cloudflared requires the `cloudflared` binary on PATH. Install "
@@ -63,6 +69,24 @@ class TunnelError(RuntimeError):
     """The tunnel could not be started."""
 
 
+def _probe_failure_reason(exc: httpx.HTTPError) -> str:
+    """A safe, short reason suitable for the non-verbose CLI warning."""
+    current: BaseException | None = exc
+    seen: set[int] = set()
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if isinstance(current, socket.gaierror):
+            return "DNS lookup failed"
+        current = current.__cause__ or current.__context__
+    if isinstance(exc, httpx.ConnectTimeout):
+        return "connection timed out"
+    if isinstance(exc, httpx.ReadTimeout):
+        return "response timed out"
+    if isinstance(exc, httpx.ConnectError):
+        return "connection failed"
+    return type(exc).__name__
+
+
 class CloudflaredTunnel:
     """One quick-tunnel child process; :meth:`start` returns the public URL."""
 
@@ -90,6 +114,7 @@ class CloudflaredTunnel:
         # host's DNS/egress cannot see the edge, which says nothing about
         # whether the sandbox's can.
         self.verified: bool = False
+        self.unverified_reason: str | None = None
 
     async def start(self) -> str:
         executable = shutil.which("cloudflared")
@@ -129,7 +154,10 @@ class CloudflaredTunnel:
                     ) from exc
             deadline = time.monotonic() + _START_TIMEOUT_SEC
             url_future: asyncio.Future[str] = asyncio.get_running_loop().create_future()
-            self._drain_task = asyncio.create_task(self._drain(process, url_future))
+            connection_registered = asyncio.Event()
+            self._drain_task = asyncio.create_task(
+                self._drain(process, url_future, connection_registered)
+            )
             try:
                 url = await asyncio.wait_for(
                     url_future, timeout=deadline - time.monotonic()
@@ -139,6 +167,13 @@ class CloudflaredTunnel:
                     "cloudflared did not publish a trycloudflare.com URL within "
                     f"{_START_TIMEOUT_SEC:.0f}s; see the run log for its output"
                 ) from None
+            remaining = deadline - time.monotonic()
+            if remaining > 0 and not connection_registered.is_set():
+                with contextlib.suppress(TimeoutError):
+                    await asyncio.wait_for(
+                        connection_registered.wait(),
+                        timeout=min(_CONNECTION_REGISTRATION_GRACE_SEC, remaining),
+                    )
             self.verified = await self._probe_ready(url, deadline)
         except BaseException:
             # Never let cleanup mask the original error: a failing stop()
@@ -150,7 +185,10 @@ class CloudflaredTunnel:
         return url
 
     async def _drain(
-        self, process: asyncio.subprocess.Process, url_future: asyncio.Future[str]
+        self,
+        process: asyncio.subprocess.Process,
+        url_future: asyncio.Future[str],
+        connection_registered: asyncio.Event,
     ) -> None:
         """Read cloudflared's log stream for the tunnel URL, then keep draining.
 
@@ -167,6 +205,8 @@ class CloudflaredTunnel:
             if self._on_log is not None:
                 with contextlib.suppress(Exception):
                     self._on_log(text)
+            if _CONNECTION_REGISTERED_MARKER in text:
+                connection_registered.set()
             if not url_future.done():
                 match = _URL_PATTERN.search(text)
                 if match is not None:
@@ -202,6 +242,7 @@ class CloudflaredTunnel:
         keeps answering 5xx is a real failure.
         """
         saw_response = False
+        self.unverified_reason = None
         async with httpx.AsyncClient(timeout=5.0, follow_redirects=False) as client:
             while True:
                 process = self._process
@@ -212,8 +253,8 @@ class CloudflaredTunnel:
                     )
                 try:
                     response = await client.get(url)
-                except httpx.HTTPError:
-                    pass
+                except httpx.HTTPError as exc:
+                    self.unverified_reason = _probe_failure_reason(exc)
                 else:
                     saw_response = True
                     if response.status_code < 500:

@@ -7,6 +7,7 @@ import json
 import subprocess
 import tomllib
 from collections.abc import Iterator
+from contextlib import contextmanager
 from io import StringIO
 from pathlib import Path
 from shlex import quote
@@ -856,6 +857,30 @@ def test_runner_warning_uses_the_output_mode_aware_console(
         )
 
     assert calls == [("versions differ", "ROLLOUT_SDK_VERSION_MISMATCH")]
+
+
+def test_startup_status_uses_spinner_except_in_verbose_mode(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events: list[str] = []
+
+    @contextmanager
+    def fake_status(message: str) -> Iterator[None]:
+        events.append(f"start:{message}")
+        try:
+            yield
+        finally:
+            events.append(f"stop:{message}")
+
+    monkeypatch.setattr(eval_run_module.console, "status", fake_status)
+    with eval_run_module._Hooks(yes=True, secrets_file=None).status("starting"):
+        events.append("work")
+    with eval_run_module._Hooks(yes=True, secrets_file=None, verbose=True).status(
+        "verbose"
+    ):
+        events.append("verbose-work")
+
+    assert events == ["start:starting", "work", "stop:starting", "verbose-work"]
 
 
 def test_progress_falls_back_to_printed_lines_without_a_terminal(
