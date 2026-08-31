@@ -871,6 +871,24 @@ def test_an_incomplete_upload_run_reports_skipped_upload_and_resumes_with_upload
     assert "/runs/rollout_trials/bbbb" in printed
 
 
+def test_failed_rollout_path_escapes_rich_markup(
+    tmp_path: Path, console_capture: StringIO
+) -> None:
+    failure = SimpleNamespace(
+        row_index=1,
+        source_row_index=1,
+        run_index=0,
+        error_type="agent_error",
+        rollout_dir=tmp_path / "[trial]",
+    )
+
+    eval_run_module._print_failures(
+        SimpleNamespace(failures=[failure]), display_root=tmp_path
+    )
+
+    assert "[trial]" in console_capture.getvalue()
+
+
 # --------------------------------------------------------------------------- #
 # What a plain (non---verbose) run prints
 # --------------------------------------------------------------------------- #

@@ -987,6 +987,48 @@ async def test_sdk_mismatch_warns_before_a_server_import_failure(
     assert f"this CLI uses {PACKAGE_VERSION}" in warnings[0]
 
 
+async def test_sdk_version_probe_times_out_and_stops_its_child(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from osmosis_ai.eval.local import runner as runner_module
+
+    class HangingChild:
+        pid = 123
+        returncode: int | None = None
+
+        def __init__(self) -> None:
+            self.stdout = asyncio.StreamReader()
+
+        async def wait(self) -> int:
+            if self.returncode is None:
+                await asyncio.Future()
+            assert self.returncode is not None
+            return self.returncode
+
+    child = HangingChild()
+    terminated: list[int] = []
+
+    async def fake_exec(*_argv: str, **_kwargs: Any) -> HangingChild:
+        return child
+
+    def fake_terminate(pgid: int, *, grace_sec: float) -> None:
+        terminated.append(pgid)
+        child.returncode = -15
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
+    monkeypatch.setattr(runner_module, "process_group_of", lambda _pid: child.pid)
+    monkeypatch.setattr(runner_module, "terminate_process_group", fake_terminate)
+    monkeypatch.setattr(runner_module, "_SDK_VERSION_TIMEOUT_SEC", 0.01)
+    runner = _uv_runner(tmp_path)
+
+    version = await asyncio.wait_for(
+        runner._read_rollout_sdk_version("/fake/bin/uv"), timeout=1.0
+    )
+
+    assert version is None
+    assert terminated == [child.pid]
+
+
 async def test_startup_error_surfaces_the_redacted_last_child_line(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

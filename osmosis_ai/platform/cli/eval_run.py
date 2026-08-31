@@ -701,7 +701,7 @@ def _print_failures(summary: Any, *, display_root: Path) -> None:
         console.print(
             f"row {failure.row_index}{source} run {failure.run_index}: "
             f"error_type={error} -> "
-            f"{display_path(failure.rollout_dir, base=display_root)}"
+            f"{console.escape(display_path(failure.rollout_dir, base=display_root))}"
         )
 
 

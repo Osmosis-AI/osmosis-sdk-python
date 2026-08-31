@@ -101,6 +101,8 @@ LOGS_FILENAME = "logs.txt"
 _HEALTH_TIMEOUT_SEC = 90.0
 _HEALTH_POLL_INTERVAL_SEC = 0.2
 _CHILD_OUTPUT_DRAIN_TIMEOUT_SEC = 0.5
+# This metadata probe is best-effort and must not delay rollout startup.
+_SDK_VERSION_TIMEOUT_SEC = 10.0
 # One retry covers a lost bind race on an ephemeral port; more would only make a
 # hung server cost another full health timeout before the run gives up.
 _PORT_ATTEMPTS = 2
@@ -1744,10 +1746,18 @@ class LocalEvalRunner:
             )
         except OSError:
             return None
-        try:
+
+        async def read_child() -> tuple[bytes, int]:
             assert child.stdout is not None
             output = await child.stdout.read()
-            returncode = await child.wait()
+            return output, await child.wait()
+
+        try:
+            output, returncode = await asyncio.wait_for(
+                read_child(), timeout=_SDK_VERSION_TIMEOUT_SEC
+            )
+        except TimeoutError:
+            return None
         except asyncio.CancelledError:
             raise
         except (OSError, ValueError):
