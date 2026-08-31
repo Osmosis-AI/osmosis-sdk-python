@@ -1,0 +1,51 @@
+tests/unit/eval/local/test_runner_e2e.py
+  s_922fd30793c15a::t_2ab9a046c146c9 767-780,784-803
+osmosis_ai/eval/local/runner.py
+  s_922fd30793c15a::t_9e69ab46535800 1656,1682-1686,1689,1856,1878,1897,2041-2043
+  s_922fd30793c15a::t_303a1f2f38fd40 1710-1713,1721-1722,1844
+  s_922fd30793c15a::t_0ae2477e2d532c 217-218,220,971-972
+  s_922fd30793c15a::t_5991ddadddd593 103,507-520,655-656,1692-1709,1714-1720,1723-1750,1790,1843,1845-1853,1872,1896,1898,1901
+  s_922fd30793c15a::t_2ab9a046c146c9 905-915
+  s_922fd30793c15a::t_4055ac69dcf5d6 1768
+  s_922fd30793c15a::t_babed05a5f9db7 219
+  s_922fd30793c15a::t_2b72b1ea7fad5e 979,982-984
+  s_922fd30793c15a::t_ff5db749f79e85 964
+tests/unit/platform/cli/test_eval_run.py
+  s_922fd30793c15a::t_babed05a5f9db7 878-880
+  s_922fd30793c15a::t_0ae2477e2d532c 10,862-877,881-883
+docs/eval-run-local.md
+  s_922fd30793c15a::t_bde48946ca33d4 25
+  s_922fd30793c15a::t_2ab9a046c146c9 196
+  s_922fd30793c15a::t_2b72b1ea7fad5e 206
+tests/unit/eval/local/test_runner_units.py
+  s_922fd30793c15a::t_5991ddadddd593 869-871,873-874,883,885-887,917,928,938-972
+  s_922fd30793c15a::t_4055ac69dcf5d6 916
+  s_922fd30793c15a::t_9e69ab46535800 872,884,973-975,1037-1044,1046,1049,1052-1056
+osmosis_ai/eval/local/tunnel.py
+  s_922fd30793c15a::t_2b72b1ea7fad5e 21,32-35,37,72-89,117,157-160,170-176,188-191,208-209,245,256-257
+tests/unit/eval/local/test_tunnel.py
+  s_922fd30793c15a::t_ff5db749f79e85 94
+  s_922fd30793c15a::t_2b72b1ea7fad5e 54-56,154-164,172-174,190-192,213-215,279-281
+  s_922fd30793c15a::t_a5498ab23a4886 12,16
+  s_922fd30793c15a::t_d2332ddd3d6cca 72-93,95-98,236-238
+tests/unit/eval/local/conftest.py
+  s_922fd30793c15a::t_0ae2477e2d532c 14,136,153-156
+osmosis_ai/platform/cli/eval_run.py
+  s_922fd30793c15a::t_0ae2477e2d532c 13,154-158
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "638af40b664ec44bbe252ef4527b25bf2bd777f5",
+  "prompts": {},
+  "sessions": {
+    "s_922fd30793c15a": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a05653-3b98-7d72-91ad-1c359267489e",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}
