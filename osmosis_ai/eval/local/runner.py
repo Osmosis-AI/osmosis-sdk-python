@@ -627,6 +627,7 @@ class LocalEvalRunner:
         output_root: Path,
         hooks: RunnerHooks,
         provenance: Mapping[str, Any] | None = None,
+        display_root: Path | None = None,
     ) -> None:
         self._spec = spec
         self._options = options
@@ -636,6 +637,9 @@ class LocalEvalRunner:
         self._output_root = output_root
         self._hooks = hooks
         self._provenance = dict(provenance or {})
+        self._display_root = (
+            display_root.resolve() if display_root is not None else None
+        )
 
         # The name actually being run, once chosen -- generated names included.
         # The CLI reads it to print an exact resume command on interrupt.
@@ -2040,7 +2044,11 @@ class LocalEvalRunner:
 
     def _logs_path(self) -> Path:
         assert self._run_dir is not None
-        return (self._run_dir / LOGS_FILENAME).resolve()
+        path = (self._run_dir / LOGS_FILENAME).resolve()
+        if self._display_root is not None:
+            with contextlib.suppress(ValueError):
+                return path.relative_to(self._display_root)
+        return path
 
     def _stage(self, step: str, message: str, **details: Any) -> None:
         """Log a milestone and surface it to the CLI.

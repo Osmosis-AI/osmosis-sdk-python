@@ -246,7 +246,8 @@ def eval_upload(
         dir_okay=True,
         readable=False,
         resolve_path=False,
-        help="Completed local evaluation run directory.",
+        metavar="EVAL_NAME_OR_DIRECTORY",
+        help="Completed local evaluation name or run directory.",
     ),
 ) -> CommandResult:
     """Upload a completed local evaluation run to the platform."""

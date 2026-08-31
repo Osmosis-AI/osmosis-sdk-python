@@ -898,6 +898,13 @@ def _uv_runner(tmp_path: Path) -> Any:
     return runner
 
 
+def test_logs_path_is_relative_to_the_cli_display_root(tmp_path: Path) -> None:
+    runner = _uv_runner(tmp_path)
+    runner._display_root = tmp_path.resolve()
+
+    assert runner._logs_path() == Path("evals/run-1/logs.txt")
+
+
 async def test_the_default_path_syncs_then_runs_the_rollout_project(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

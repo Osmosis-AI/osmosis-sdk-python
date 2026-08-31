@@ -27,3 +27,13 @@ def parse_cli_path(value: str, *, expand_user: bool = False) -> ParsedCliPath:
         path=path,
         has_trailing_separator=value.endswith(tuple(separators)),
     )
+
+
+def display_path(path: Path, *, base: Path) -> str:
+    """Prefer a stable path relative to *base*, keeping outside paths absolute."""
+    resolved = path.expanduser().resolve()
+    try:
+        relative = resolved.relative_to(base.expanduser().resolve())
+    except ValueError:
+        return str(resolved)
+    return str(relative) if relative.parts else "."

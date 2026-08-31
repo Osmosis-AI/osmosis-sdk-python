@@ -10,7 +10,6 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from io import StringIO
 from pathlib import Path
-from shlex import quote
 from types import SimpleNamespace
 from typing import Any
 
@@ -398,11 +397,22 @@ def test_output_override_is_honored(
     assert captured_runner.calls[0]["output_root"] == tmp_path / "elsewhere"
 
 
+def test_workspace_local_output_uses_a_relative_upload_path(
+    workspace: Path, captured_runner: type[_CapturedRunner], console_capture: StringIO
+) -> None:
+    result = _run(workspace, output=str(workspace / "custom-evals"))
+
+    assert result.display_next_steps == [
+        "Upload: osmosis eval upload custom-evals/run-1"
+    ]
+
+
 def test_the_rollout_dir_is_resolved_under_the_workspace(
     workspace: Path, captured_runner: type[_CapturedRunner], console_capture: StringIO
 ) -> None:
     _run(workspace)
     assert captured_runner.calls[0]["rollout_dir"] == workspace / "rollouts" / ROLLOUT
+    assert captured_runner.calls[0]["display_root"] == workspace
 
 
 # --------------------------------------------------------------------------- #
@@ -527,9 +537,7 @@ def test_a_complete_run_reports_success_with_the_output_path(
     assert result.resource["succeeded"] == 6
     assert result.resource["dataset_source"] == "explicit"
     assert result.resource["output_path"].endswith("run-1")
-    assert result.display_next_steps == [
-        f"Upload: osmosis eval upload {quote(str(workspace / '.osmosis/evals/run-1'))}"
-    ]
+    assert result.display_next_steps == ["Upload: osmosis eval upload run-1"]
 
 
 def test_upload_flag_uploads_after_finalize_and_surfaces_platform_url(
@@ -614,14 +622,14 @@ def test_upload_failure_says_local_results_are_complete_and_gives_retry_command(
         "upload_plan",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("offline")),
     )
-    run_dir = workspace / ".osmosis" / "evals" / "run-1"
-
     with pytest.raises(CLIError) as raised:
         _run(workspace, upload=True)
 
-    assert f"Local evaluation results are complete at {run_dir}" in raised.value.message
+    assert "Local evaluation results are complete at .osmosis/evals/run-1" in (
+        raised.value.message
+    )
     assert "local evaluation upload failed: offline" in raised.value.message
-    assert f"osmosis eval upload {quote(str(run_dir))}" in raised.value.message
+    assert "osmosis eval upload run-1" in raised.value.message
     assert "platform upload failed" not in raised.value.message
 
 
@@ -728,15 +736,15 @@ def test_upload_platform_error_keeps_auth_code_and_retry_context(
             PlatformAPIError("session expired", status_code=401)
         ),
     )
-    run_dir = workspace / ".osmosis" / "evals" / "run-1"
-
     with pytest.raises(CLIError) as raised:
         _run(workspace, upload=True)
 
     assert raised.value.code == CLIErrorCode.AUTH_REQUIRED
     assert raised.value.details["status_code"] == 401
-    assert f"Local evaluation results are complete at {run_dir}" in raised.value.message
-    assert f"osmosis eval upload {quote(str(run_dir))}" in raised.value.message
+    assert "Local evaluation results are complete at .osmosis/evals/run-1" in (
+        raised.value.message
+    )
+    assert "osmosis eval upload run-1" in raised.value.message
 
 
 def test_an_incomplete_upload_run_reports_skipped_upload_and_resumes_with_upload(
@@ -806,6 +814,8 @@ def test_the_plan_is_printed_before_the_run_starts(
     assert "3 of 4" in printed  # rows selected of the dataset
     work_items = next(line for line in printed.splitlines() if "Work Items" in line)
     assert "6" in work_items  # 3 rows x n=2
+    assert ".osmosis/evals" in printed
+    assert str(workspace / ".osmosis/evals") not in printed
 
 
 def test_the_results_table_reports_the_metrics(
@@ -820,6 +830,7 @@ def test_the_results_table_reports_the_metrics(
     # The same formatter `eval info` uses, so local and cloud runs read alike.
     assert "Duration" in printed
     assert "4.2s" in printed
+    assert ".osmosis/evals/run-1" in printed
 
 
 def test_stage_lines_print_once_and_only_without_verbose(
@@ -957,10 +968,7 @@ def test_plain_output_prints_the_upload_command_after_a_complete_run(
     )
     captured = capsys.readouterr()
     assert exit_code == 0, captured.err
-    assert (
-        f"Upload: osmosis eval upload {quote(str(workspace / '.osmosis/evals/run-1'))}"
-        in captured.out
-    )
+    assert "Upload: osmosis eval upload run-1" in captured.out
 
 
 def test_the_command_is_registered_under_the_eval_group() -> None:
