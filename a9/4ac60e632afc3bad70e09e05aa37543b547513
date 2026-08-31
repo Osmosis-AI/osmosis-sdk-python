@@ -1,0 +1,23 @@
+osmosis_ai/eval/local/tunnel.py
+  s_26a8fef0032071::t_5e277b69f6eda6 204,209-211
+osmosis_ai/eval/local/runner.py
+  s_26a8fef0032071::t_b41d24409d8886 1033
+tests/unit/eval/local/test_tunnel.py
+  s_26a8fef0032071::t_5e277b69f6eda6 188-190,192-195
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "a94ac60e632afc3bad70e09e05aa37543b547513",
+  "prompts": {},
+  "sessions": {
+    "s_26a8fef0032071": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a05909-7119-73e0-80f8-35c1fd8bb832",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}
