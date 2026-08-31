@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Sequence
+from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass, field
 from pathlib import Path
 from shlex import quote
@@ -21,7 +22,7 @@ from osmosis_ai.cli.output import CommandResult, OperationResult
 from osmosis_ai.cli.output.context import get_output_context
 from osmosis_ai.cli.output.display import format_duration_ms
 from osmosis_ai.cli.output.error import classify_error
-from osmosis_ai.cli.paths import parse_cli_path
+from osmosis_ai.cli.paths import display_path, parse_cli_path
 from osmosis_ai.cli.prompts import confirm_async, require_confirmation_async
 from osmosis_ai.platform.auth.platform_client import (
     AuthenticationExpiredError,
@@ -149,6 +150,12 @@ class _Hooks:
         if self.verbose:
             return
         console.print(f"→ {console.escape(message)}", style="cyan")
+
+    def status(self, message: str) -> AbstractContextManager[None]:
+        """Show live startup work without duplicating the verbose log stream."""
+        if self.verbose:
+            return nullcontext()
+        return console.status(message)
 
     async def confirm_dispatch(self, *, pending: int, model_path: str) -> None:
         await require_confirmation_async(
@@ -342,6 +349,10 @@ def run(
         result_context = local_result_context(context)
     workspace_directory = context.workspace_directory
     validate_workspace_directory_contract(workspace_directory)
+    # Filesystem paths shown as commands must resolve from the shell that
+    # invoked us, which may be inside a workspace subdirectory. The workspace
+    # root remains the authority for config and rollout discovery only.
+    display_root = Path.cwd().resolve()
 
     resolved_config_path = config_path.expanduser().resolve()
     ensure_workspace_directory_config_path(
@@ -449,9 +460,16 @@ def run(
         output_root=output_root,
         hooks=hooks,
         provenance=_provenance(workspace_directory, spec, advanced=advanced),
+        display_root=display_root,
     )
 
-    _print_plan(spec, dataset=dataset, selection=selection, output_root=output_root)
+    _print_plan(
+        spec,
+        dataset=dataset,
+        selection=selection,
+        output_root=output_root,
+        display_root=display_root,
+    )
     imported: Any | None = None
 
     def _upload_completed(summary: Any) -> None:
@@ -466,19 +484,24 @@ def run(
         hooks.display.close()
         if platform_context is None:
             raise RuntimeError("upload callback requires an authenticated context")
-        retry = _upload_command(summary.run_dir)
+        retry = _upload_command(
+            summary.run_dir,
+            workspace_directory=workspace_directory,
+            display_root=display_root,
+        )
+        run_path = display_path(summary.run_dir, base=display_root)
         try:
             imported = upload_plan(
                 build_eval_upload_plan(summary.run_dir), context=platform_context
             )
         except KeyboardInterrupt as exc:
             raise CLIError(
-                f"Local evaluation results are complete at {summary.run_dir}, but "
+                f"Local evaluation results are complete at {run_path}, but "
                 f"the platform upload was interrupted.\nRetry with: {retry}"
             ) from exc
         except (AuthenticationExpiredError, PlatformAPIError) as exc:
             message = (
-                f"Local evaluation results are complete at {summary.run_dir}, but "
+                f"Local evaluation results are complete at {run_path}, but "
                 f"the platform upload failed: {exc}\nRetry with: {retry}"
             )
             classified = classify_error(exc)
@@ -487,18 +510,18 @@ def run(
             ) from exc
         except LocalEvalUploadError as exc:
             raise CLIError(
-                f"Local evaluation results are complete at {summary.run_dir}, but "
+                f"Local evaluation results are complete at {run_path}, but "
                 f"cannot be uploaded: {exc}"
             ) from exc
         except (OSError, RuntimeError, ValueError) as exc:
             raise CLIError(
-                f"Local evaluation results are complete at {summary.run_dir}, but "
+                f"Local evaluation results are complete at {run_path}, but "
                 f"the local evaluation upload failed: {exc}\nRetry with: {retry}"
             ) from exc
         except Exception as exc:
             classified = classify_error(exc)
             raise CLIError(
-                f"Local evaluation results are complete at {summary.run_dir}, but "
+                f"Local evaluation results are complete at {run_path}, but "
                 f"the upload failed: {exc}\nRetry with: {retry}",
                 code=classified.code,
                 details=classified.details,
@@ -512,9 +535,10 @@ def run(
         raise CLIError(str(exc)) from exc
     except KeyboardInterrupt:
         started = runner.active_run_name
+        config_arg = quote(display_path(resolved_config_path, base=display_root))
         hint = (
             "Resume the pending work items: "
-            f"osmosis eval run {quote(str(config_path))} --name {started}"
+            f"osmosis eval run {config_arg} --name {started}"
             f"{rerun_flags}"
             if started
             else "Nothing was started."
@@ -528,12 +552,14 @@ def run(
         # the summary, an error, or a traceback into it.
         hooks.display.close()
 
-    _print_failures(summary)
-    _print_summary(summary)
+    _print_failures(summary, display_root=display_root)
+    _print_summary(summary, display_root=display_root)
     return _result(
         summary,
         result_context=result_context,
-        config_path=config_path,
+        config_path=resolved_config_path,
+        workspace_directory=workspace_directory,
+        display_root=display_root,
         dataset_source=dataset.source,
         imported=imported,
         upload_requested=upload,
@@ -574,7 +600,14 @@ def _provenance(
     return {key: value for key, value in provenance.items() if value is not None}
 
 
-def _print_plan(spec: Any, *, dataset: Any, selection: Any, output_root: Path) -> None:
+def _print_plan(
+    spec: Any,
+    *,
+    dataset: Any,
+    selection: Any,
+    output_root: Path,
+    display_root: Path,
+) -> None:
     """What is about to run, before the cost confirmation.
 
     Deliberately the same table ``osmosis eval submit`` prints: the two commands
@@ -594,14 +627,14 @@ def _print_plan(spec: Any, *, dataset: Any, selection: Any, output_root: Path) -
     if runs > 1:
         rows.append(("Runs Per Row", str(runs)))
     rows.append(("Work Items", str(sampled * runs)))
-    rows.append(("Output", str(output_root)))
+    rows.append(("Output", display_path(output_root, base=display_root)))
     console.table(
         [(label, console.escape(value)) for label, value in rows],
         title="Local Evaluation",
     )
 
 
-def _print_summary(summary: Any) -> None:
+def _print_summary(summary: Any, *, display_root: Path) -> None:
     """The numbers the run produced (§4.3).
 
     ``metrics`` is what ``metrics.json`` holds, so the terminal and the file
@@ -646,14 +679,14 @@ def _print_summary(summary: Any) -> None:
         )
     rows.append(("Tokens Used", f"{metrics.get('tokens_used', 0):,}"))
     rows.append(("Duration", format_duration_ms(summary.duration_ms)))
-    rows.append(("Output", str(summary.run_dir)))
+    rows.append(("Output", display_path(summary.run_dir, base=display_root)))
     console.table(
         [(label, console.escape(value)) for label, value in rows],
         title="Results" + (" (incomplete)" if summary.cancelled else ""),
     )
 
 
-def _print_failures(summary: Any) -> None:
+def _print_failures(summary: Any, *, display_root: Path) -> None:
     """Print failed rows with zero-friction paths (§4.3)."""
     if not summary.failures:
         return
@@ -667,12 +700,29 @@ def _print_failures(summary: Any) -> None:
         error = failure.error_type or "unknown"
         console.print(
             f"row {failure.row_index}{source} run {failure.run_index}: "
-            f"error_type={error} -> {failure.rollout_dir}"
+            f"error_type={error} -> "
+            f"{console.escape(display_path(failure.rollout_dir, base=display_root))}"
         )
 
 
-def _upload_command(run_dir: Path) -> str:
-    return f"osmosis eval upload {quote(str(run_dir))}"
+def _upload_command(
+    run_dir: Path, *, workspace_directory: Path, display_root: Path
+) -> str:
+    resolved = run_dir.resolve()
+    default_run_dir = workspace_directory.joinpath(
+        *DEFAULT_OUTPUT_SUBPATH, run_dir.name
+    ).resolve()
+    if resolved == default_run_dir:
+        argument = run_dir.name
+    else:
+        argument = display_path(resolved, base=display_root)
+        parsed = Path(argument)
+        # ``eval upload foo`` is deliberately a run name under the default
+        # eval root. A custom directory that happens to be one CWD segment
+        # away therefore needs an absolute spelling to preserve path intent.
+        if not parsed.is_absolute() and len(parsed.parts) == 1:
+            argument = str(resolved)
+    return f"osmosis eval upload {quote(argument)}"
 
 
 def _result(
@@ -680,6 +730,8 @@ def _result(
     *,
     result_context: dict[str, object],
     config_path: Path,
+    workspace_directory: Path,
+    display_root: Path,
     dataset_source: str,
     imported: Any | None = None,
     upload_requested: bool = False,
@@ -726,7 +778,7 @@ def _result(
         summary.succeeded + summary.failed + summary.skipped < summary.total_work_items
     )
     noop = not incomplete and summary.dispatched == 0 and summary.total_work_items > 0
-    config_arg = quote(str(config_path))
+    config_arg = quote(display_path(config_path, base=display_root))
     next_steps = []
     if noop:
         next_steps.append(
@@ -758,16 +810,22 @@ def _result(
             else f"Inspect the imported run: osmosis eval info {imported_name}"
         )
     elif not incomplete:
-        next_steps.append(f"Upload: {_upload_command(summary.run_dir)}")
+        next_steps.append(
+            "Upload: "
+            + _upload_command(
+                summary.run_dir,
+                workspace_directory=workspace_directory,
+                display_root=display_root,
+            )
+        )
+    run_path = display_path(summary.run_dir, base=display_root)
     if noop:
         message = (
-            f"Run {summary.run_name!r} was already complete; nothing ran: "
-            f"{summary.run_dir}"
+            f"Run {summary.run_name!r} was already complete; nothing ran: {run_path}"
         )
     else:
         message = (
-            f"Evaluation run {'interrupted' if incomplete else 'finished'}: "
-            f"{summary.run_dir}"
+            f"Evaluation run {'interrupted' if incomplete else 'finished'}: {run_path}"
         )
     if incomplete and upload_requested:
         message += " Upload skipped because the local evaluation is incomplete."

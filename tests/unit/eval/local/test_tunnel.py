@@ -9,9 +9,11 @@ from __future__ import annotations
 
 import asyncio
 import shutil
+import socket
 import time
 from pathlib import Path
 
+import httpx
 import pytest
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
@@ -49,7 +51,9 @@ async def test_start_parses_url_and_stop_kills_child(
 ) -> None:
     script = _fake_cloudflared(
         tmp_path,
-        f"echo 'INF |  {FAKE_URL}  |' >&2\nexec sleep 60",
+        f"echo 'INF |  {FAKE_URL}  |' >&2\n"
+        "echo 'INF Registered tunnel connection' >&2\n"
+        "exec sleep 60",
     )
     monkeypatch.setattr(shutil, "which", lambda name: str(script))
     monkeypatch.setattr(CloudflaredTunnel, "_probe_ready", _no_probe)
@@ -63,6 +67,33 @@ async def test_start_parses_url_and_stop_kills_child(
     assert process.returncode is not None
     # Stopped: there is no child left to wait on.
     assert await tunnel.wait() is None
+
+
+async def test_start_waits_for_connection_registration_before_probing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    script = _fake_cloudflared(
+        tmp_path,
+        f"echo 'INF |  {FAKE_URL}  |' >&2\n"
+        "sleep 0.05\n"
+        "echo 'INF Registered tunnel connection' >&2\n"
+        "exec sleep 60",
+    )
+    monkeypatch.setattr(shutil, "which", lambda name: str(script))
+    lines: list[str] = []
+
+    async def assert_registered_before_probe(
+        self: CloudflaredTunnel, url: str, deadline: float
+    ) -> bool:
+        assert any("Registered tunnel connection" in line for line in lines)
+        return True
+
+    monkeypatch.setattr(
+        CloudflaredTunnel, "_probe_ready", assert_registered_before_probe
+    )
+    tunnel = CloudflaredTunnel(local_url="http://127.0.0.1:1", on_log=lines.append)
+    await tunnel.start()
+    await tunnel.stop()
 
 
 async def test_exit_before_url_raises(
@@ -120,6 +151,17 @@ async def test_probe_with_no_http_response_is_unverified_not_fatal(
     assert (
         await tunnel._probe_ready("http://127.0.0.1:1", time.monotonic() + 0.3) is False
     )
+    assert tunnel.unverified_reason == "connection failed"
+
+
+def test_probe_failure_reason_identifies_dns() -> None:
+    try:
+        try:
+            raise OSError("resolver failed") from socket.gaierror(8, "not known")
+        except OSError as cause:
+            raise httpx.ConnectError("connect failed") from cause
+    except httpx.ConnectError as exc:
+        assert tunnel_module._probe_failure_reason(exc) == "DNS lookup failed"
 
 
 async def test_drain_forwards_cloudflared_log_lines(
@@ -127,7 +169,9 @@ async def test_drain_forwards_cloudflared_log_lines(
 ) -> None:
     script = _fake_cloudflared(
         tmp_path,
-        f"echo 'INF |  {FAKE_URL}  |' >&2\nexec sleep 60",
+        f"echo 'INF |  {FAKE_URL}  |' >&2\n"
+        "echo 'INF Registered tunnel connection' >&2\n"
+        "exec sleep 60",
     )
     monkeypatch.setattr(shutil, "which", lambda name: str(script))
     monkeypatch.setattr(CloudflaredTunnel, "_probe_ready", _no_probe)
@@ -143,7 +187,9 @@ async def test_on_spawn_receives_the_child_process(
 ) -> None:
     script = _fake_cloudflared(
         tmp_path,
-        f"echo 'INF |  {FAKE_URL}  |' >&2\nexec sleep 60",
+        f"echo 'INF |  {FAKE_URL}  |' >&2\n"
+        "echo 'INF Registered tunnel connection' >&2\n"
+        "exec sleep 60",
     )
     monkeypatch.setattr(shutil, "which", lambda name: str(script))
     monkeypatch.setattr(CloudflaredTunnel, "_probe_ready", _no_probe)
@@ -164,7 +210,9 @@ async def test_on_spawn_failure_stops_child_and_fails_start(
 ) -> None:
     script = _fake_cloudflared(
         tmp_path,
-        f"echo 'INF |  {FAKE_URL}  |' >&2\nexec sleep 60",
+        f"echo 'INF |  {FAKE_URL}  |' >&2\n"
+        "echo 'INF Registered tunnel connection' >&2\n"
+        "exec sleep 60",
     )
     monkeypatch.setattr(shutil, "which", lambda name: str(script))
     monkeypatch.setattr(CloudflaredTunnel, "_probe_ready", _no_probe)
@@ -185,7 +233,9 @@ async def test_interrupted_stop_never_claims_the_child_exited(
 ) -> None:
     script = _fake_cloudflared(
         tmp_path,
-        f"echo 'INF |  {FAKE_URL}  |' >&2\nexec sleep 60",
+        f"echo 'INF |  {FAKE_URL}  |' >&2\n"
+        "echo 'INF Registered tunnel connection' >&2\n"
+        "exec sleep 60",
     )
     monkeypatch.setattr(shutil, "which", lambda name: str(script))
     monkeypatch.setattr(CloudflaredTunnel, "_probe_ready", _no_probe)
@@ -226,7 +276,9 @@ async def test_spawn_pins_an_empty_config_file(
 
     script = _fake_cloudflared(
         tmp_path,
-        f"echo \"ARGS:$@\" >&2\necho 'INF |  {FAKE_URL}  |' >&2\nexec sleep 60",
+        f"echo \"ARGS:$@\" >&2\necho 'INF |  {FAKE_URL}  |' >&2\n"
+        "echo 'INF Registered tunnel connection' >&2\n"
+        "exec sleep 60",
     )
     monkeypatch.setattr(shutil, "which", lambda name: str(script))
     monkeypatch.setattr(CloudflaredTunnel, "_probe_ready", _no_probe)

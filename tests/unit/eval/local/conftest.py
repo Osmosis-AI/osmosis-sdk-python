@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import sys
 from collections.abc import AsyncIterator, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
@@ -132,6 +133,7 @@ class RecordingHooks:
     notes: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     stages: list[str] = field(default_factory=list)
+    statuses: list[str] = field(default_factory=list)
     confirmations: list[tuple[int, str]] = field(default_factory=list)
     progress_snapshots: list[ProgressSnapshot] = field(default_factory=list)
     secret_requests: list[list[str]] = field(default_factory=list)
@@ -147,6 +149,11 @@ class RecordingHooks:
 
     def stage(self, message: str) -> None:
         self.stages.append(message)
+
+    @contextmanager
+    def status(self, message: str) -> Any:
+        self.statuses.append(message)
+        yield
 
     async def confirm_dispatch(self, *, pending: int, model_path: str) -> None:
         self.confirmations.append((pending, model_path))

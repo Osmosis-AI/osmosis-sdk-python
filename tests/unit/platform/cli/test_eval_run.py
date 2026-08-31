@@ -7,9 +7,9 @@ import json
 import subprocess
 import tomllib
 from collections.abc import Iterator
+from contextlib import contextmanager
 from io import StringIO
 from pathlib import Path
-from shlex import quote
 from types import SimpleNamespace
 from typing import Any
 
@@ -129,6 +129,10 @@ def _stub_context(monkeypatch: pytest.MonkeyPatch, workspace: Path) -> None:
     monkeypatch.setattr(
         eval_run_module, "validate_workspace_directory_contract", lambda _: None
     )
+    # The real context resolver discovers this workspace from the invocation
+    # directory. Keep the default unit-test setup faithful; individual tests
+    # move into a nested workspace directory when exercising that case.
+    monkeypatch.chdir(workspace)
 
 
 def _metrics(*, passed: int, scored: int) -> dict[str, Any]:
@@ -397,11 +401,93 @@ def test_output_override_is_honored(
     assert captured_runner.calls[0]["output_root"] == tmp_path / "elsewhere"
 
 
-def test_the_rollout_dir_is_resolved_under_the_workspace(
-    workspace: Path, captured_runner: type[_CapturedRunner], console_capture: StringIO
+def test_workspace_local_output_uses_a_relative_upload_path(
+    workspace: Path,
+    captured_runner: type[_CapturedRunner],
+    console_capture: StringIO,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _run(workspace)
+    monkeypatch.chdir(workspace)
+    result = _run(workspace, output=str(workspace / "custom-evals"))
+
+    assert result.display_next_steps == [
+        "Upload: osmosis eval upload custom-evals/run-1"
+    ]
+
+
+def test_nested_invocation_uses_copyable_resume_paths(
+    workspace: Path,
+    captured_runner: type[_CapturedRunner],
+    console_capture: StringIO,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from osmosis_ai.eval.local.runner import RunSummary
+
+    nested = workspace / "rollouts" / ROLLOUT
+    monkeypatch.chdir(nested)
+
+    async def partial_run(self: Any, **_kwargs: Any) -> RunSummary:
+        return RunSummary(
+            run_dir=self.kwargs["output_root"] / "run-1",
+            local_run_id="a" * 32,
+            run_name="run-1",
+            total_work_items=6,
+            dispatched=3,
+            succeeded=2,
+            failed=1,
+            skipped=0,
+            resumed=0,
+            cancelled=True,
+            duration_ms=1500.0,
+            metrics=_metrics(passed=1, scored=2),
+        )
+
+    monkeypatch.setattr(captured_runner, "run", partial_run)
+    result = _run(workspace)
+
     assert captured_runner.calls[0]["rollout_dir"] == workspace / "rollouts" / ROLLOUT
+    assert captured_runner.calls[0]["display_root"] == nested
+    resume = next(
+        step for step in result.display_next_steps if step.startswith("Resume:")
+    )
+    retry = next(
+        step for step in result.display_next_steps if step.startswith("Retry failures")
+    )
+    config_path = str((workspace / "configs" / "eval" / "echo.toml").resolve())
+    assert config_path in resume
+    assert config_path in retry
+
+
+def test_nested_invocation_uses_a_copyable_custom_upload_path(
+    workspace: Path,
+    captured_runner: type[_CapturedRunner],
+    console_capture: StringIO,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    nested = workspace / "rollouts" / ROLLOUT
+    output = workspace / "custom-evals"
+    monkeypatch.chdir(nested)
+
+    result = _run(workspace, output=str(output))
+
+    assert result.display_next_steps == [
+        f"Upload: osmosis eval upload {output / 'run-1'}"
+    ]
+
+
+def test_single_segment_custom_upload_path_stays_distinct_from_a_run_name(
+    workspace: Path,
+    captured_runner: type[_CapturedRunner],
+    console_capture: StringIO,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.chdir(workspace)
+
+    result = _run(workspace, output=str(workspace))
+
+    assert result.display_next_steps == [
+        f"Upload: osmosis eval upload {workspace / 'run-1'}"
+    ]
 
 
 # --------------------------------------------------------------------------- #
@@ -526,9 +612,7 @@ def test_a_complete_run_reports_success_with_the_output_path(
     assert result.resource["succeeded"] == 6
     assert result.resource["dataset_source"] == "explicit"
     assert result.resource["output_path"].endswith("run-1")
-    assert result.display_next_steps == [
-        f"Upload: osmosis eval upload {quote(str(workspace / '.osmosis/evals/run-1'))}"
-    ]
+    assert result.display_next_steps == ["Upload: osmosis eval upload run-1"]
 
 
 def test_upload_flag_uploads_after_finalize_and_surfaces_platform_url(
@@ -613,14 +697,14 @@ def test_upload_failure_says_local_results_are_complete_and_gives_retry_command(
         "upload_plan",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("offline")),
     )
-    run_dir = workspace / ".osmosis" / "evals" / "run-1"
-
     with pytest.raises(CLIError) as raised:
         _run(workspace, upload=True)
 
-    assert f"Local evaluation results are complete at {run_dir}" in raised.value.message
+    assert "Local evaluation results are complete at .osmosis/evals/run-1" in (
+        raised.value.message
+    )
     assert "local evaluation upload failed: offline" in raised.value.message
-    assert f"osmosis eval upload {quote(str(run_dir))}" in raised.value.message
+    assert "osmosis eval upload run-1" in raised.value.message
     assert "platform upload failed" not in raised.value.message
 
 
@@ -727,15 +811,15 @@ def test_upload_platform_error_keeps_auth_code_and_retry_context(
             PlatformAPIError("session expired", status_code=401)
         ),
     )
-    run_dir = workspace / ".osmosis" / "evals" / "run-1"
-
     with pytest.raises(CLIError) as raised:
         _run(workspace, upload=True)
 
     assert raised.value.code == CLIErrorCode.AUTH_REQUIRED
     assert raised.value.details["status_code"] == 401
-    assert f"Local evaluation results are complete at {run_dir}" in raised.value.message
-    assert f"osmosis eval upload {quote(str(run_dir))}" in raised.value.message
+    assert "Local evaluation results are complete at .osmosis/evals/run-1" in (
+        raised.value.message
+    )
+    assert "osmosis eval upload run-1" in raised.value.message
 
 
 def test_an_incomplete_upload_run_reports_skipped_upload_and_resumes_with_upload(
@@ -787,6 +871,24 @@ def test_an_incomplete_upload_run_reports_skipped_upload_and_resumes_with_upload
     assert "/runs/rollout_trials/bbbb" in printed
 
 
+def test_failed_rollout_path_escapes_rich_markup(
+    tmp_path: Path, console_capture: StringIO
+) -> None:
+    failure = SimpleNamespace(
+        row_index=1,
+        source_row_index=1,
+        run_index=0,
+        error_type="agent_error",
+        rollout_dir=tmp_path / "[trial]",
+    )
+
+    eval_run_module._print_failures(
+        SimpleNamespace(failures=[failure]), display_root=tmp_path
+    )
+
+    assert "[trial]" in console_capture.getvalue()
+
+
 # --------------------------------------------------------------------------- #
 # What a plain (non---verbose) run prints
 # --------------------------------------------------------------------------- #
@@ -805,6 +907,8 @@ def test_the_plan_is_printed_before_the_run_starts(
     assert "3 of 4" in printed  # rows selected of the dataset
     work_items = next(line for line in printed.splitlines() if "Work Items" in line)
     assert "6" in work_items  # 3 rows x n=2
+    assert ".osmosis/evals" in printed
+    assert str(workspace / ".osmosis/evals") not in printed
 
 
 def test_the_results_table_reports_the_metrics(
@@ -819,6 +923,7 @@ def test_the_results_table_reports_the_metrics(
     # The same formatter `eval info` uses, so local and cloud runs read alike.
     assert "Duration" in printed
     assert "4.2s" in printed
+    assert ".osmosis/evals/run-1" in printed
 
 
 def test_stage_lines_print_once_and_only_without_verbose(
@@ -856,6 +961,30 @@ def test_runner_warning_uses_the_output_mode_aware_console(
         )
 
     assert calls == [("versions differ", "ROLLOUT_SDK_VERSION_MISMATCH")]
+
+
+def test_startup_status_uses_spinner_except_in_verbose_mode(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events: list[str] = []
+
+    @contextmanager
+    def fake_status(message: str) -> Iterator[None]:
+        events.append(f"start:{message}")
+        try:
+            yield
+        finally:
+            events.append(f"stop:{message}")
+
+    monkeypatch.setattr(eval_run_module.console, "status", fake_status)
+    with eval_run_module._Hooks(yes=True, secrets_file=None).status("starting"):
+        events.append("work")
+    with eval_run_module._Hooks(yes=True, secrets_file=None, verbose=True).status(
+        "verbose"
+    ):
+        events.append("verbose-work")
+
+    assert events == ["start:starting", "work", "stop:starting", "verbose-work"]
 
 
 def test_progress_falls_back_to_printed_lines_without_a_terminal(
@@ -932,10 +1061,7 @@ def test_plain_output_prints_the_upload_command_after_a_complete_run(
     )
     captured = capsys.readouterr()
     assert exit_code == 0, captured.err
-    assert (
-        f"Upload: osmosis eval upload {quote(str(workspace / '.osmosis/evals/run-1'))}"
-        in captured.out
-    )
+    assert "Upload: osmosis eval upload run-1" in captured.out
 
 
 def test_the_command_is_registered_under_the_eval_group() -> None:

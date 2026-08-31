@@ -100,6 +100,9 @@ LOGS_FILENAME = "logs.txt"
 
 _HEALTH_TIMEOUT_SEC = 90.0
 _HEALTH_POLL_INTERVAL_SEC = 0.2
+_CHILD_OUTPUT_DRAIN_TIMEOUT_SEC = 0.5
+# This metadata probe is best-effort and must not delay rollout startup.
+_SDK_VERSION_TIMEOUT_SEC = 10.0
 # One retry covers a lost bind race on an ephemeral port; more would only make a
 # hung server cost another full health timeout before the run gives up.
 _PORT_ATTEMPTS = 2
@@ -183,8 +186,10 @@ class LocalEvalOptions:
     # Cloud-sandbox reachability (tunnel plan §5.2/§5.3). ``listener_port``
     # fixes the controller listener's local port; ``advertise_url`` is a
     # public base URL that already reaches it (a tunnel the user runs);
-    # ``tunnel`` auto-manages one ("cloudflared" is the only provider).
-    # Either of the last two also turns on the bridge's non-stream keepalive.
+    # ``tunnel`` forces an auto-managed one ("cloudflared" is the only
+    # provider). A current Harbor backend also advertises when its sandbox
+    # cannot reach host loopback, letting the runner select cloudflared without
+    # a flag. Any non-loopback path turns on the bridge's non-stream keepalive.
     listener_port: int | None = None
     advertise_url: str | None = None
     tunnel: str | None = None
@@ -212,6 +217,10 @@ class RunnerHooks(Protocol):
         handful of lines a plain run prints so the long gaps -- model preflight,
         rollout-server startup -- are not silent (§4.3).
         """
+
+    def status(self, message: str) -> contextlib.AbstractContextManager[None]:
+        """Surface a live status while one bounded startup step is running."""
+        ...
 
     async def confirm_dispatch(self, *, pending: int, model_path: str) -> None:
         """Cost boundary before any rollout is dispatched. Raise to abort.
@@ -499,6 +508,20 @@ def uv_run_command(
     ]
 
 
+def uv_sdk_version_command(uv_executable: str, rollout_dir: Path) -> list[str]:
+    """Argv that reads the SDK actually installed in the rollout environment."""
+    return [
+        uv_executable,
+        "run",
+        "--no-sync",
+        "--project",
+        str(rollout_dir),
+        "python",
+        "-c",
+        "import importlib.metadata as m; print(m.version('osmosis-ai'))",
+    ]
+
+
 def build_subprocess_env(
     *,
     base: Mapping[str, str],
@@ -589,6 +612,24 @@ def health_capacity(health: Mapping[str, Any]) -> int | None:
     return None
 
 
+def public_chat_endpoint_environment(health: Mapping[str, Any]) -> str | None:
+    """Return the sandbox label when it requires a non-loopback chat URL.
+
+    This is capability detection, not backend-name inference: old SDKs and
+    third-party backends that omit the object retain the explicit
+    ``--tunnel``/``--advertise-url`` behavior.
+    """
+    endpoint = health.get("chat_endpoint")
+    if not isinstance(endpoint, Mapping):
+        return None
+    if endpoint.get("requires_public_url") is not True:
+        return None
+    environment = endpoint.get("environment")
+    if isinstance(environment, str) and environment.strip():
+        return environment.strip()
+    return "remote"
+
+
 # --------------------------------------------------------------------------- #
 # Supervisor
 # --------------------------------------------------------------------------- #
@@ -608,6 +649,7 @@ class LocalEvalRunner:
         output_root: Path,
         hooks: RunnerHooks,
         provenance: Mapping[str, Any] | None = None,
+        display_root: Path | None = None,
     ) -> None:
         self._spec = spec
         self._options = options
@@ -617,6 +659,9 @@ class LocalEvalRunner:
         self._output_root = output_root
         self._hooks = hooks
         self._provenance = dict(provenance or {})
+        self._display_root = (
+            display_root.resolve() if display_root is not None else None
+        )
 
         # The name actually being run, once chosen -- generated names included.
         # The CLI reads it to print an exact resume command on interrupt.
@@ -633,6 +678,9 @@ class LocalEvalRunner:
         self._identity: RunIdentity | None = None
         self._child: asyncio.subprocess.Process | None = None
         self._child_reader: asyncio.Task[None] | None = None
+        self._last_child_output: str | None = None
+        self._rollout_health: dict[str, Any] = {}
+        self._sdk_mismatch_warned = False
         self._tunnel: CloudflaredTunnel | None = None
         self._cancelled = asyncio.Event()
         self._halt_reason: str | None = None
@@ -851,43 +899,63 @@ class LocalEvalRunner:
         bridge = LiteLLMBridge(model=self._spec.model_path)
         self._bridge = bridge
         advertise_url = self._options.advertise_url
-        listener = CallbackListener(
-            store,
-            auth_token=controller_token,
-            bridge=bridge,
-            bridge_token=bridge_token,
-            port=self._options.listener_port,
-            advertised_base_url=advertise_url,
-            # Any non-loopback path may sit behind a proxy with idle-read
-            # timeouts, so the bridge keeps non-streaming responses warm.
-            bridge_keepalive=advertise_url is not None
-            or self._options.tunnel is not None,
-        )
+        listener: CallbackListener | None = None
         cancelled = False
         try:
-            try:
-                await listener.start()
-            except OSError as exc:
-                port = self._options.listener_port
-                raise LocalEvalError(
-                    "could not bind the callback listener on 127.0.0.1"
-                    f"{f':{port}' if port else ''}: {exc}"
-                ) from exc
-            self._write_log("info", "listener", "callback listener started")
-            if self._options.tunnel is not None:
-                await self._start_tunnel(listener)
-            elif advertise_url is not None:
-                self._stage(
-                    "tunnel",
-                    f"advertising chat endpoint through {advertise_url}",
-                )
             self._stage("preflight", f"checking model {self._spec.model_path}")
             await self._model_preflight(bridge)
             async with httpx.AsyncClient() as client:
                 base_url = await self._start_rollout_server(
                     secrets=secrets, client=client
                 )
+                auto_tunnel_environment = None
+                if self._options.tunnel is None and advertise_url is None:
+                    auto_tunnel_environment = public_chat_endpoint_environment(
+                        self._rollout_health
+                    )
+                use_managed_tunnel = (
+                    self._options.tunnel is not None
+                    or auto_tunnel_environment is not None
+                )
+                if auto_tunnel_environment is not None:
+                    self._stage(
+                        "tunnel",
+                        f"detected {auto_tunnel_environment} sandbox; "
+                        "enabling cloudflared automatically",
+                        environment=auto_tunnel_environment,
+                    )
+                listener = CallbackListener(
+                    store,
+                    auth_token=controller_token,
+                    bridge=bridge,
+                    bridge_token=bridge_token,
+                    port=self._options.listener_port,
+                    advertised_base_url=advertise_url,
+                    # Any non-loopback path may sit behind a proxy with
+                    # idle-read timeouts, so keep non-streaming responses warm.
+                    bridge_keepalive=advertise_url is not None or use_managed_tunnel,
+                )
+                try:
+                    await listener.start()
+                except OSError as exc:
+                    port = self._options.listener_port
+                    raise LocalEvalError(
+                        "could not bind the callback listener on 127.0.0.1"
+                        f"{f':{port}' if port else ''}: {exc}"
+                    ) from exc
+                self._write_log("info", "listener", "callback listener started")
                 concurrency = await self._resolve_concurrency(client, base_url)
+                # A quick tunnel can spend the full startup budget waiting for
+                # fresh public DNS. Prove the model and local rollout server
+                # first so dependency/import/health failures do not create a
+                # tunnel that the run will immediately tear down.
+                if use_managed_tunnel:
+                    await self._start_tunnel(listener)
+                elif advertise_url is not None:
+                    self._stage(
+                        "tunnel",
+                        f"advertising chat endpoint through {advertise_url}",
+                    )
                 item_deadline = self._callback_deadline()
                 driver = HttpRolloutDriver(
                     rollout_base_url=base_url,
@@ -922,8 +990,9 @@ class LocalEvalRunner:
         finally:
             await self._stop_rollout_server()
             await self._stop_tunnel()
-            with contextlib.suppress(Exception):
-                await listener.stop()
+            if listener is not None:
+                with contextlib.suppress(Exception):
+                    await listener.stop()
         return self._finalize(cancelled=cancelled)
 
     async def _start_tunnel(self, listener: CallbackListener) -> None:
@@ -936,24 +1005,27 @@ class LocalEvalRunner:
             ),
         )
         self._stage("tunnel", "starting cloudflared quick tunnel")
+        status_message = "waiting for cloudflared URL and public readiness (up to 30s)"
         # Assigned before start(): a failing start() has already attempted its
         # own stop, and _execute's finally funnels through _stop_tunnel, which
         # clears the ownership record only when that stop confirmed the child
         # exited — an unconfirmed child keeps its record for the next reap.
         self._tunnel = tunnel
         try:
-            public_url = await tunnel.start()
+            with self._hooks.status(status_message):
+                public_url = await tunnel.start()
         except TunnelError as exc:
             raise LocalEvalError(str(exc)) from exc
         listener.advertised_base_url = public_url
         if tunnel.verified:
             self._stage("tunnel", f"tunnel ready: {public_url}")
         else:
+            reason = tunnel.unverified_reason or "no HTTP response"
             self._stage(
                 "tunnel",
-                f"tunnel up at {public_url}, but this host cannot reach it "
-                "(local DNS/egress); sandboxes resolve it independently — "
-                "continuing",
+                f"tunnel up at {public_url}, but this host's readiness probe "
+                f"got no HTTP response ({reason}); sandboxes use independent "
+                "DNS/egress — continuing",
             )
 
     async def _stop_tunnel(self) -> None:
@@ -1625,6 +1697,7 @@ class LocalEvalRunner:
         instead of surfacing later as a server-health timeout.
         """
         self._stage("deps", f"syncing rollout dependencies ({self._spec.rollout_name})")
+        self._last_child_output = None
         child = await asyncio.create_subprocess_exec(
             *uv_sync_command(uv_executable, self._rollout_dir),
             cwd=str(self._rollout_dir),
@@ -1650,15 +1723,89 @@ class LocalEvalRunner:
                 await child.wait()
             raise
         if returncode != 0:
+            detail = (
+                f": {self._last_child_output}"
+                if self._last_child_output is not None
+                else ""
+            )
             raise LocalEvalError(
                 f"uv sync failed for rollouts/{self._spec.rollout_name} with exit "
-                f"code {returncode}; see {LOGS_FILENAME}"
+                f"code {returncode}{detail}\nLogs: {self._logs_path()}"
             )
+
+    async def _read_rollout_sdk_version(self, uv_executable: str) -> str | None:
+        """Read installed metadata from the rollout's resolved uv environment."""
+        try:
+            child = await asyncio.create_subprocess_exec(
+                *uv_sdk_version_command(uv_executable, self._rollout_dir),
+                cwd=str(self._rollout_dir),
+                env=inherited_env(os.environ),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL,
+                start_new_session=True,
+            )
+        except OSError:
+            return None
+
+        async def read_child() -> tuple[bytes, int]:
+            assert child.stdout is not None
+            output = await child.stdout.read()
+            return output, await child.wait()
+
+        try:
+            output, returncode = await asyncio.wait_for(
+                read_child(), timeout=_SDK_VERSION_TIMEOUT_SEC
+            )
+        except TimeoutError:
+            return None
+        except asyncio.CancelledError:
+            raise
+        except (OSError, ValueError):
+            return None
+        finally:
+            if child.returncode is None:
+                with contextlib.suppress(ProcessLookupError, PermissionError, OSError):
+                    await asyncio.to_thread(
+                        terminate_process_group,
+                        process_group_of(child.pid),
+                        grace_sec=_SERVER_TERM_GRACE_SEC,
+                    )
+                with contextlib.suppress(Exception):
+                    await child.wait()
+        if returncode != 0:
+            return None
+        sdk_version = output.decode(errors="replace").strip()
+        return sdk_version or None
+
+    def _warn_sdk_mismatch(self, sdk_version: str | None) -> None:
+        if (
+            self._sdk_mismatch_warned
+            or sdk_version in (None, "unknown")
+            or sdk_version == PACKAGE_VERSION
+        ):
+            return
+        message = (
+            f"rollout server uses osmosis-ai {sdk_version}, but this CLI uses "
+            f"{PACKAGE_VERSION}; update "
+            f"rollouts/{self._spec.rollout_name}/pyproject.toml and run "
+            f"uv sync --project rollouts/{self._spec.rollout_name} if the run "
+            "misbehaves"
+        )
+        self._sdk_mismatch_warned = True
+        self._write_log(
+            "warning",
+            "server",
+            message,
+            server_sdk_version=sdk_version,
+            cli_sdk_version=PACKAGE_VERSION,
+        )
+        self._hooks.warning(message)
 
     async def _start_rollout_server(
         self, *, secrets: Mapping[str, str], client: httpx.AsyncClient
     ) -> str:
         assert self._run_dir is not None
+        self._rollout_health = {}
         entrypoint = self._rollout_dir / self._spec.entrypoint
         if not entrypoint.is_file():
             raise LocalEvalError(
@@ -1671,6 +1818,7 @@ class LocalEvalRunner:
             # Once, outside the retry loop: dependencies do not change when the
             # port does.
             await self._sync_rollout_dependencies(uv_executable)
+            self._warn_sdk_mismatch(await self._read_rollout_sdk_version(uv_executable))
             argv = uv_run_command(uv_executable, self._rollout_dir, entrypoint)
         else:
             argv = [self._options.server_interpreter, str(entrypoint)]
@@ -1692,6 +1840,7 @@ class LocalEvalRunner:
                 port=port,
                 attempt=attempt,
             )
+            self._last_child_output = None
             child = await asyncio.create_subprocess_exec(
                 *argv,
                 cwd=str(self._rollout_dir),
@@ -1744,9 +1893,20 @@ class LocalEvalRunner:
         deadline = time.monotonic() + _HEALTH_TIMEOUT_SEC
         while True:
             if child.returncode is not None:
+                if self._child_reader is not None:
+                    with contextlib.suppress(asyncio.CancelledError, Exception):
+                        await asyncio.wait_for(
+                            asyncio.shield(self._child_reader),
+                            timeout=_CHILD_OUTPUT_DRAIN_TIMEOUT_SEC,
+                        )
+                detail = (
+                    f": {self._last_child_output}"
+                    if self._last_child_output is not None
+                    else ""
+                )
                 raise LocalEvalError(
                     f"rollout server exited with code {child.returncode} "
-                    f"before becoming healthy; see {LOGS_FILENAME}"
+                    f"before becoming healthy{detail}\nLogs: {self._logs_path()}"
                 )
             health = await _probe_health(client, base_url)
             if health is not None:
@@ -1762,31 +1922,14 @@ class LocalEvalRunner:
                         f"instead of this run's; stop it, or choose a "
                         f"different --rollout-port"
                     )
-                if (
-                    health.sdk_version not in (None, "unknown")
-                    and health.sdk_version != PACKAGE_VERSION
-                ):
-                    message = (
-                        f"rollout server uses osmosis-ai {health.sdk_version}, but "
-                        f"this CLI uses {PACKAGE_VERSION}; update "
-                        f"rollouts/{self._spec.rollout_name}/pyproject.toml and run "
-                        f"uv sync --project rollouts/{self._spec.rollout_name} if "
-                        f"the run misbehaves"
-                    )
-                    self._write_log(
-                        "warning",
-                        "server",
-                        message,
-                        server_sdk_version=health.sdk_version,
-                        cli_sdk_version=PACKAGE_VERSION,
-                    )
-                    self._hooks.warning(message)
+                self._warn_sdk_mismatch(health.sdk_version)
+                self._rollout_health = dict(health.payload)
                 return
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 raise LocalEvalError(
                     f"rollout server did not become healthy within "
-                    f"{_HEALTH_TIMEOUT_SEC:.0f}s; see {LOGS_FILENAME}"
+                    f"{_HEALTH_TIMEOUT_SEC:.0f}s\nLogs: {self._logs_path()}"
                 )
             await asyncio.sleep(min(_HEALTH_POLL_INTERVAL_SEC, remaining))
 
@@ -1804,9 +1947,12 @@ class LocalEvalRunner:
                 raise
             if not raw:
                 return
+            text = raw.decode(errors="replace").rstrip()
+            if text:
+                self._last_child_output = self._redactor.scrub(text)
             # RunLog redacts every line it writes, so a secret echoed by the
             # workflow or an HTTP debug log never lands in logs.txt (§7.4).
-            self._write_log("info", step, raw.decode(errors="replace").rstrip())
+            self._write_log("info", step, text)
 
     async def _stop_rollout_server(self) -> None:
         child = self._child
@@ -1945,6 +2091,14 @@ class LocalEvalRunner:
     # ------------------------------------------------------------------ #
     # Logging helpers
     # ------------------------------------------------------------------ #
+
+    def _logs_path(self) -> Path:
+        assert self._run_dir is not None
+        path = (self._run_dir / LOGS_FILENAME).resolve()
+        if self._display_root is not None:
+            with contextlib.suppress(ValueError):
+                return path.relative_to(self._display_root)
+        return path
 
     def _stage(self, step: str, message: str, **details: Any) -> None:
         """Log a milestone and surface it to the CLI.

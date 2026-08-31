@@ -17,7 +17,63 @@ from osmosis_ai.platform.api.models import (
     EvalRunImportUploads,
     UploadInfo,
 )
-from osmosis_ai.platform.cli.eval_upload import upload_plan
+from osmosis_ai.platform.cli.eval_upload import _resolve_run_dir, upload_plan
+
+
+def test_run_name_resolves_under_the_default_workspace_eval_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    monkeypatch.chdir(workspace)
+
+    assert (
+        _resolve_run_dir(Path("patient-finch-73"), workspace_directory=workspace)
+        == workspace / ".osmosis" / "evals" / "patient-finch-73"
+    )
+
+
+def test_explicit_run_directory_remains_supported(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workspace = tmp_path / "workspace"
+    custom = workspace / "custom-evals" / "run-1"
+    custom.mkdir(parents=True)
+    monkeypatch.chdir(workspace)
+
+    assert (
+        _resolve_run_dir(Path("custom-evals/run-1"), workspace_directory=workspace)
+        == custom
+    )
+
+
+def test_explicit_run_directory_is_relative_to_the_invocation_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workspace = tmp_path / "workspace"
+    nested = workspace / "tools"
+    custom = nested / "custom-evals" / "run-1"
+    custom.mkdir(parents=True)
+    monkeypatch.chdir(nested)
+
+    assert (
+        _resolve_run_dir(Path("custom-evals/run-1"), workspace_directory=workspace)
+        == custom
+    )
+
+
+def test_single_segment_is_unambiguously_a_run_name(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workspace = tmp_path / "workspace"
+    direct = workspace / "run-1"
+    direct.mkdir(parents=True)
+    monkeypatch.chdir(workspace)
+
+    assert (
+        _resolve_run_dir(Path("run-1"), workspace_directory=workspace)
+        == workspace / ".osmosis" / "evals" / "run-1"
+    )
 
 
 def _local_file(tmp_path: Path, name: str, body: bytes) -> EvalUploadFile:

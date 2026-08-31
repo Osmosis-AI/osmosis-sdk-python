@@ -9,7 +9,12 @@ from typing import TYPE_CHECKING, Any
 from osmosis_ai.cli.console import console
 from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.cli.output import OperationResult, get_output_context
-from osmosis_ai.eval.local.state import LOCKS_DIRNAME, RunLock
+from osmosis_ai.eval.local.state import (
+    LOCKS_DIRNAME,
+    LocalEvalStateError,
+    RunLock,
+    validate_run_name,
+)
 from osmosis_ai.eval.local.upload import (
     EvalUploadFile,
     EvalUploadPlan,
@@ -203,10 +208,25 @@ def _result(
     )
 
 
+def _resolve_run_dir(requested: Path, *, workspace_directory: Path) -> Path:
+    """Resolve a run name from the default eval root, or preserve an explicit path."""
+    requested = requested.expanduser()
+    direct = Path(os.path.abspath(requested))
+    if requested.is_absolute() or len(requested.parts) != 1:
+        return direct
+    try:
+        run_name = validate_run_name(str(requested))
+    except LocalEvalStateError:
+        return direct
+    return Path(os.path.abspath(workspace_directory / ".osmosis" / "evals" / run_name))
+
+
 def upload(run_dir: Path) -> OperationResult:
-    """Upload one completed local evaluation run directory."""
+    """Upload one completed local evaluation by run name or directory."""
     context = require_git_workspace_directory_context()
-    candidate = Path(os.path.abspath(run_dir.expanduser()))
+    candidate = _resolve_run_dir(
+        run_dir, workspace_directory=context.workspace_directory
+    )
     lock_path = candidate.parent / LOCKS_DIRNAME / f"{candidate.name}.lock"
     try:
         with RunLock(lock_path):

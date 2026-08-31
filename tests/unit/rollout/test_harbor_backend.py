@@ -95,6 +95,60 @@ class TestPublicSurface:
 
         assert backend.health()["backend"] == "harbor"
 
+    @pytest.mark.parametrize(
+        ("environment_type", "host_system", "requires_public_url"),
+        [
+            ("docker", "Darwin", False),
+            ("docker", "Linux", True),
+            ("singularity", "Linux", False),
+            ("daytona", "Darwin", True),
+            ("skypilot", "Linux", True),
+        ],
+    )
+    def test_health_reports_chat_endpoint_reachability(
+        self,
+        template_task,
+        monkeypatch,
+        environment_type,
+        host_system,
+        requires_public_url,
+    ):
+        from harbor.models.environment_type import EnvironmentType
+        from harbor.models.trial.config import EnvironmentConfig
+
+        from osmosis_ai.rollout.backend.harbor import environment as environment_module
+
+        monkeypatch.setattr(environment_module.platform, "system", lambda: host_system)
+        backend = HarborBackend(
+            orchestrator=TrialQueue(n_concurrent=1),
+            tasks_dir=template_task,
+            agent="terminus-2",
+            environment_config=EnvironmentConfig(
+                type=EnvironmentType(environment_type)
+            ),
+        )
+
+        assert backend.health()["chat_endpoint"] == {
+            "environment": environment_type,
+            "requires_public_url": requires_public_url,
+        }
+
+    def test_oracle_never_requires_a_public_chat_endpoint(self, template_task):
+        from harbor.models.environment_type import EnvironmentType
+        from harbor.models.trial.config import EnvironmentConfig
+
+        backend = HarborBackend(
+            orchestrator=TrialQueue(n_concurrent=1),
+            tasks_dir=template_task,
+            agent="oracle",
+            environment_config=EnvironmentConfig(type=EnvironmentType.DAYTONA),
+        )
+
+        assert backend.health()["chat_endpoint"] == {
+            "environment": "daytona",
+            "requires_public_url": False,
+        }
+
 
 class TestContract:
     def test_spec_round_trip(self, tmp_path):
