@@ -429,6 +429,40 @@ def test_reap_of_a_missing_record_is_a_no_op(tmp_path: Path) -> None:
     assert reap_orphan_server(tmp_path / "server.json", grace_sec=0.5) is None
 
 
+def test_reap_does_not_follow_a_run_directory_symlink(
+    tmp_path: Path, sleeper: subprocess.Popen[bytes]
+) -> None:
+    protected_dir = tmp_path / "protected"
+    protected_dir.mkdir()
+    protected_path = protected_dir / "server.json"
+    _state_for(sleeper).write(protected_path)
+    alias_dir = tmp_path / "alias"
+    alias_dir.symlink_to(protected_dir, target_is_directory=True)
+
+    assert reap_orphan_server(alias_dir / "server.json", grace_sec=0.5) is None
+    assert sleeper.poll() is None
+    assert protected_path.exists()
+    assert alias_dir.is_symlink()
+
+
+def test_reap_does_not_follow_a_state_file_symlink(
+    tmp_path: Path, sleeper: subprocess.Popen[bytes]
+) -> None:
+    protected_dir = tmp_path / "protected"
+    protected_dir.mkdir()
+    protected_path = protected_dir / "server.json"
+    _state_for(sleeper).write(protected_path)
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    alias_path = run_dir / "server.json"
+    alias_path.symlink_to(protected_path)
+
+    assert reap_orphan_server(alias_path, grace_sec=0.5) is None
+    assert sleeper.poll() is None
+    assert protected_path.exists()
+    assert alias_path.is_symlink()
+
+
 def test_reap_terminates_a_verified_orphan_group(
     tmp_path: Path, sleeper: subprocess.Popen[bytes]
 ) -> None:

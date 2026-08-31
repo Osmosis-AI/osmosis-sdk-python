@@ -707,7 +707,6 @@ class _FakeTunnel:
         self._returncode: int | None = None
         self.stopped = False
         self.public_url: str | None = None
-        self.verified = True
         _FakeTunnel.instances.append(self)
 
     async def start(self) -> str:

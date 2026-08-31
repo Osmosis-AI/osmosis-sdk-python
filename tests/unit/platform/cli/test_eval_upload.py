@@ -62,7 +62,7 @@ def test_explicit_run_directory_is_relative_to_the_invocation_directory(
     )
 
 
-def test_single_segment_is_unambiguously_a_run_name(
+def test_existing_single_segment_run_directory_remains_supported(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     workspace = tmp_path / "workspace"
@@ -70,10 +70,32 @@ def test_single_segment_is_unambiguously_a_run_name(
     direct.mkdir(parents=True)
     monkeypatch.chdir(workspace)
 
-    assert (
-        _resolve_run_dir(Path("run-1"), workspace_directory=workspace)
-        == workspace / ".osmosis" / "evals" / "run-1"
-    )
+    assert _resolve_run_dir(Path("run-1"), workspace_directory=workspace) == direct
+
+
+def test_existing_single_segment_directory_is_relative_to_invocation_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workspace = tmp_path / "workspace"
+    nested = workspace / "tools"
+    direct = nested / "run-1"
+    direct.mkdir(parents=True)
+    monkeypatch.chdir(nested)
+
+    assert _resolve_run_dir(Path("run-1"), workspace_directory=workspace) == direct
+
+
+def test_existing_direct_directory_wins_over_default_run_name(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workspace = tmp_path / "workspace"
+    direct = workspace / "run-1"
+    default = workspace / ".osmosis" / "evals" / "run-1"
+    direct.mkdir(parents=True)
+    default.mkdir(parents=True)
+    monkeypatch.chdir(workspace)
+
+    assert _resolve_run_dir(Path("run-1"), workspace_directory=workspace) == direct
 
 
 def _local_file(tmp_path: Path, name: str, body: bytes) -> EvalUploadFile:

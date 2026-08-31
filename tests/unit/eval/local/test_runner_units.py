@@ -733,6 +733,40 @@ def test_an_output_root_equal_to_the_rollout_dir_is_refused(tmp_path: Path) -> N
         runner._source_digest()
 
 
+@pytest.mark.parametrize("fresh", [False, True])
+async def test_run_refuses_a_named_run_directory_symlink(
+    tmp_path: Path, fresh: bool
+) -> None:
+    output_root = tmp_path / "evals"
+    output_root.mkdir()
+    target = tmp_path / "outside-output"
+    target.mkdir()
+    (target / "sentinel.txt").write_text("untouched")
+    if fresh:
+        # Without the guard, --fresh would archive the alias before creating a
+        # new run in its place.
+        (target / "manifest.json").write_text("existing manifest")
+    before = {path.name: path.read_bytes() for path in target.iterdir()}
+    alias = output_root / "run-1"
+    alias.symlink_to(target, target_is_directory=True)
+    runner = _runner(
+        _spec(),
+        tmp_path,
+        output_root=output_root,
+        options=LocalEvalOptions(
+            name="run-1", fresh=fresh, server_interpreter=sys.executable
+        ),
+    )
+
+    with pytest.raises(LocalEvalError, match=r"run directory .* symbolic link"):
+        await runner.run()
+
+    assert runner._run_dir is None
+    assert alias.is_symlink()
+    assert not list(output_root.glob("run-1.archive-*"))
+    assert {path.name: path.read_bytes() for path in target.iterdir()} == before
+
+
 def test_the_redactor_replaces_secrets_and_keeps_context() -> None:
     from osmosis_ai.eval.local.runner import SecretRedactor
 
@@ -756,6 +790,77 @@ def test_the_redactor_prefers_the_longest_overlapping_value() -> None:
     redactor = SecretRedactor(["token-abcdef", "token-abcdef-longer"])
     scrubbed = redactor.scrub("value=token-abcdef-longer")
     assert scrubbed == "value=[REDACTED]"
+
+
+@pytest.mark.parametrize("error_at", ["bridge", "preflight"])
+async def test_execute_temporarily_overrides_and_restores_secret_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, error_at: str
+) -> None:
+    from osmosis_ai.eval.local import runner as runner_module
+
+    existing_name = "OSMOSIS_TEST_EXISTING_PROVIDER_KEY"
+    added_name = "OSMOSIS_TEST_ADDED_PROVIDER_KEY"
+    monkeypatch.setenv(existing_name, "from-parent")
+    monkeypatch.delenv(added_name, raising=False)
+    observed: dict[str, str | None] = {}
+
+    class _Bridge:
+        def __init__(self, *, model: str) -> None:
+            observed[existing_name] = os.environ.get(existing_name)
+            observed[added_name] = os.environ.get(added_name)
+            if error_at == "bridge":
+                raise RuntimeError("bridge exploded")
+
+    async def fail_preflight(bridge: Any) -> None:
+        raise RuntimeError(f"{error_at} exploded")
+
+    runner = _runner(_spec(), tmp_path)
+    runner._run_dir = tmp_path / "evals" / "run-1"
+    monkeypatch.setattr(runner_module, "LiteLLMBridge", _Bridge)
+    monkeypatch.setattr(runner, "_model_preflight", fail_preflight)
+
+    with pytest.raises(RuntimeError, match=f"{error_at} exploded"):
+        await runner._execute(
+            [],
+            secrets={
+                existing_name: "from-secrets-file",
+                added_name: "new-from-secrets-file",
+            },
+        )
+
+    assert observed == {
+        existing_name: "from-secrets-file",
+        added_name: "new-from-secrets-file",
+    }
+    assert os.environ[existing_name] == "from-parent"
+    assert added_name not in os.environ
+
+
+async def test_execute_restores_environment_when_secret_update_partially_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    existing_name = "OSMOSIS_TEST_EXISTING_PARTIAL_PROVIDER_KEY"
+    added_name = "OSMOSIS_TEST_ADDED_PARTIAL_PROVIDER_KEY"
+    invalid_name = "OSMOSIS_TEST_INVALID_PARTIAL_PROVIDER_KEY"
+    monkeypatch.setenv(existing_name, "from-parent")
+    monkeypatch.delenv(added_name, raising=False)
+    monkeypatch.delenv(invalid_name, raising=False)
+    runner = _runner(_spec(), tmp_path)
+    runner._run_dir = tmp_path / "evals" / "run-1"
+
+    with pytest.raises(ValueError):
+        await runner._execute(
+            [],
+            secrets={
+                existing_name: "from-secrets-file",
+                added_name: "new-from-secrets-file",
+                invalid_name: "contains\x00nul",
+            },
+        )
+
+    assert os.environ[existing_name] == "from-parent"
+    assert added_name not in os.environ
+    assert invalid_name not in os.environ
 
 
 # --------------------------------------------------------------------------- #
@@ -1326,6 +1431,101 @@ async def test_orphan_sweep_reaps_other_runs_but_skips_a_locked_run(
             if child.poll() is None:
                 child.kill()
             child.wait(timeout=10)
+
+
+async def test_orphan_sweep_does_not_follow_a_run_directory_symlink(
+    tmp_path: Path,
+) -> None:
+    import subprocess
+
+    from osmosis_ai.eval.local.state import (
+        LOCKS_DIRNAME,
+        SERVER_STATE_FILENAME,
+        RunLock,
+        ServerProcessState,
+        process_start_token,
+        utc_now,
+    )
+
+    output_root = tmp_path / "evals"
+    runner = _runner(_spec(), tmp_path, output_root=output_root)
+    active_dir = output_root / "active-run"
+    active_dir.mkdir(parents=True)
+    alias_dir = output_root / "alias-run"
+    alias_dir.symlink_to(active_dir, target_is_directory=True)
+    active = subprocess.Popen(["sleep", "60"], start_new_session=True)
+    try:
+        token = process_start_token(active.pid)
+        assert token is not None
+        ServerProcessState(
+            pid=active.pid,
+            pgid=active.pid,
+            start_token=token,
+            instance_id="test",
+            port=4242,
+            created_at=utc_now(),
+        ).write(active_dir / SERVER_STATE_FILENAME)
+
+        with RunLock(output_root / LOCKS_DIRNAME / "active-run.lock"):
+            await runner._reap_orphan_runs()
+        await runner._reap_orphan_server(alias_dir)
+
+        assert active.poll() is None
+        assert (active_dir / SERVER_STATE_FILENAME).exists()
+        assert alias_dir.is_symlink()
+    finally:
+        if active.poll() is None:
+            active.kill()
+        active.wait(timeout=10)
+
+
+@pytest.mark.parametrize("state_filename", ["server.json", "tunnel.json"])
+async def test_orphan_reaping_does_not_follow_a_state_file_symlink(
+    tmp_path: Path, state_filename: str
+) -> None:
+    import subprocess
+
+    from osmosis_ai.eval.local.state import (
+        LOCKS_DIRNAME,
+        RunLock,
+        ServerProcessState,
+        process_start_token,
+        utc_now,
+    )
+
+    output_root = tmp_path / "evals"
+    runner = _runner(_spec(), tmp_path, output_root=output_root)
+    active_dir = output_root / "active-run"
+    alias_dir = output_root / "alias-run"
+    active_dir.mkdir(parents=True)
+    alias_dir.mkdir()
+    active = subprocess.Popen(["sleep", "60"], start_new_session=True)
+    state_path = active_dir / state_filename
+    alias_path = alias_dir / state_filename
+    try:
+        token = process_start_token(active.pid)
+        assert token is not None
+        ServerProcessState(
+            pid=active.pid,
+            pgid=active.pid,
+            start_token=token,
+            instance_id="test",
+            port=4242,
+            created_at=utc_now(),
+        ).write(state_path)
+        alias_path.symlink_to(state_path)
+
+        with RunLock(output_root / LOCKS_DIRNAME / "active-run.lock"):
+            await runner._reap_orphan_runs()
+        await runner._reap_orphan_server(alias_dir)
+
+        assert active.poll() is None
+        assert state_path.exists()
+        assert alias_path.is_symlink()
+    finally:
+        if active.poll() is None:
+            active.kill()
+        active.wait(timeout=10)
 
 
 async def test_reap_terminates_an_orphaned_tunnel_record(tmp_path: Path) -> None:

@@ -214,6 +214,8 @@ def _resolve_run_dir(requested: Path, *, workspace_directory: Path) -> Path:
     direct = Path(os.path.abspath(requested))
     if requested.is_absolute() or len(requested.parts) != 1:
         return direct
+    if direct.is_dir():
+        return direct
     try:
         run_name = validate_run_name(str(requested))
     except LocalEvalStateError:

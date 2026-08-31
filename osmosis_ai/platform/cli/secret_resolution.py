@@ -54,6 +54,7 @@ def resolve_run_secrets(
     names: list[str],
     secrets_file: str | None,
     stored_names: set[str],
+    suggest_secret_store: bool = True,
 ) -> dict[str, str]:
     """Values for ``names``, by first hit: secrets file, process environment,
     interactive prompt. A name already in the secret store is omitted so the
@@ -63,7 +64,9 @@ def resolve_run_secrets(
     never on ``stdin.isatty()`` alone: ``--json`` / ``--plain`` on a developer
     terminal must not dead-end on ``getpass``. Outside an interactive session
     every unresolved name is reported at once as ``INTERACTIVE_REQUIRED``.
-    Empty prompted values are rejected.
+    Empty prompted values are rejected. ``suggest_secret_store`` is disabled
+    by local eval, where platform-stored secrets cannot satisfy the local
+    process; platform submit keeps the default store guidance.
     """
     from_file = _read_dotenv(secrets_file) if secrets_file else {}
     resolved: dict[str, str] = {}
@@ -92,11 +95,11 @@ def resolve_run_secrets(
         missing.append(name)
 
     if missing:
+        remediation = "Export them or pass --secrets-file"
+        if suggest_secret_store:
+            remediation += ", or save them with `osmosis secret set <NAME>`"
         raise CLIError(
-            "No value found for: "
-            + ", ".join(missing)
-            + ". Export them, pass --secrets-file, or save them with "
-            "`osmosis secret set <NAME>`.",
+            "No value found for: " + ", ".join(missing) + f". {remediation}.",
             code="INTERACTIVE_REQUIRED",
             details={"missing": missing, "flags": ["--secrets-file"]},
         )

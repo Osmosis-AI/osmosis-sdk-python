@@ -30,6 +30,7 @@ import hashlib
 import json
 import os
 import signal
+import stat
 import subprocess
 import tempfile
 import time
@@ -650,6 +651,11 @@ class ServerProcessState:
             payload = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError, UnicodeDecodeError):
             return None
+        return cls._from_payload(payload)
+
+    @classmethod
+    def _from_payload(cls, payload: Any) -> ServerProcessState | None:
+        """Parse one ownership record without coupling it to an I/O path."""
         if not isinstance(payload, dict):
             return None
         pid = payload.get("pid")
@@ -696,11 +702,44 @@ def reap_orphan_server(path: Path, *, grace_sec: float) -> ServerProcessState | 
     ``asyncio.to_thread`` from async code. The tunnel record
     (``TUNNEL_STATE_FILENAME``) uses the same shape and the same reap.
     """
-    state = ServerProcessState.read(path)
-    reaped: ServerProcessState | None = None
-    if state is not None and state.is_owner_alive():
-        terminate_process_group(state.pgid, grace_sec=grace_sec)
-        reaped = state
-    with contextlib.suppress(OSError):
-        path.unlink(missing_ok=True)
-    return reaped
+    # Anchor both lookups to directory descriptors. The outer sweep's
+    # ``is_symlink`` checks are only an optimization: either directory entry
+    # can be replaced after that check. O_NOFOLLOW makes the actual opens the
+    # security boundary, while dir_fd keeps the read and unlink in the exact
+    # run directory that was opened.
+    directory_flags = os.O_RDONLY | os.O_DIRECTORY
+    try:
+        run_fd = os.open(path.parent, directory_flags | os.O_NOFOLLOW)
+    except OSError:
+        return None
+
+    try:
+        try:
+            state_fd = os.open(
+                path.name,
+                os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK,
+                dir_fd=run_fd,
+            )
+        except OSError:
+            # Missing records and symlinks are both safe no-ops. In
+            # particular, do not unlink a symlink that was never opened.
+            return None
+        if not stat.S_ISREG(os.fstat(state_fd).st_mode):
+            os.close(state_fd)
+            state = None
+        else:
+            try:
+                with os.fdopen(state_fd, encoding="utf-8") as handle:
+                    state = ServerProcessState._from_payload(json.load(handle))
+            except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+                state = None
+
+        reaped: ServerProcessState | None = None
+        if state is not None and state.is_owner_alive():
+            terminate_process_group(state.pgid, grace_sec=grace_sec)
+            reaped = state
+        with contextlib.suppress(OSError):
+            os.unlink(path.name, dir_fd=run_fd)
+        return reaped
+    finally:
+        os.close(run_fd)

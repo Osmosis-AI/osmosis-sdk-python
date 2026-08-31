@@ -28,6 +28,7 @@ Requires **Python 3.12+**.
 ```bash
 pip install osmosis-ai                     # CLI + framework-neutral rollout core
 pip install "osmosis-ai[server]"            # + generic FastAPI rollout server
+pip install "osmosis-ai[eval]"              # + local evaluation runner and dataset support
 pip install "osmosis-ai[strands]"           # + Strands integration
 pip install "osmosis-ai[openai-agents]"     # + OpenAI Agents integration
 pip install "osmosis-ai[harbor]"            # + Harbor backend (uses an externally provided SkyPilot runtime)
