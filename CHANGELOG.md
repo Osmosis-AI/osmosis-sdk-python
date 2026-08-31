@@ -2,6 +2,23 @@
 
 This file records changes to `osmosis-ai`. For earlier versions, see [GitHub Releases](https://github.com/Osmosis-AI/osmosis-sdk-python/releases).
 
+## 0.3.2rc2 - 2026-08-31
+
+### Added
+
+- Local evaluations now automatically start a Cloudflare tunnel when the resolved Harbor sandbox cannot reach host loopback, while direct backends stay tunnel-free ([#335](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/335)).
+- `osmosis eval upload <run-name>` now resolves completed runs from `.osmosis/evals`, while explicit custom directories remain supported ([#335](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/335)).
+
+### Changed
+
+- Local eval output, retry, resume, and upload paths are now shown relative to the invocation directory when possible, keeping generated commands copyable from workspace subdirectories ([#335](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/335)).
+
+### Fixed
+
+- Local eval startup now validates the model and rollout server before opening a tunnel, reports rollout-environment SDK mismatches and redacted subprocess errors, and avoids probing quick-tunnel DNS before edge registration ([#335](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/335)).
+
+[Full changelog](https://github.com/Osmosis-AI/osmosis-sdk-python/compare/v0.3.2rc1...v0.3.2rc2)
+
 ## 0.3.2rc1 - 2026-08-28
 
 ### Breaking Changes
