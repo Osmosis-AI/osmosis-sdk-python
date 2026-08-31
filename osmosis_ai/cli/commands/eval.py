@@ -175,9 +175,9 @@ def eval_run(
         None,
         "--tunnel",
         help=(
-            "Expose the model bridge through an auto-managed tunnel so cloud "
-            "sandboxes (Daytona, SkyPilot, ...) can call back to this machine. "
-            "Providers: cloudflared."
+            "Force an auto-managed tunnel for the model bridge. Current Harbor "
+            "backends select one automatically when their sandbox cannot reach "
+            "this machine. Providers: cloudflared."
         ),
     ),
     rollout_port: int | None = typer.Option(

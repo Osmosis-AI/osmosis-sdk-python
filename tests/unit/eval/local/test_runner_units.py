@@ -35,6 +35,7 @@ from osmosis_ai.eval.local.runner import (
     build_subprocess_env,
     changed_input_keys,
     compute_source_digest,
+    public_chat_endpoint_environment,
     reserve_free_port,
 )
 from osmosis_ai.eval.local.state import digest_of
@@ -903,6 +904,34 @@ def test_logs_path_is_relative_to_the_cli_display_root(tmp_path: Path) -> None:
     runner._display_root = tmp_path.resolve()
 
     assert runner._logs_path() == Path("evals/run-1/logs.txt")
+
+
+@pytest.mark.parametrize(
+    ("health", "expected"),
+    [
+        (
+            {
+                "chat_endpoint": {
+                    "environment": "daytona",
+                    "requires_public_url": True,
+                }
+            },
+            "daytona",
+        ),
+        (
+            {"chat_endpoint": {"environment": "", "requires_public_url": True}},
+            "remote",
+        ),
+        ({"chat_endpoint": {"requires_public_url": False}}, None),
+        ({"chat_endpoint": {"requires_public_url": "true"}}, None),
+        ({"chat_endpoint": "remote"}, None),
+        ({}, None),
+    ],
+)
+def test_public_chat_endpoint_environment_is_capability_based(
+    health: dict[str, Any], expected: str | None
+) -> None:
+    assert public_chat_endpoint_environment(health) == expected
 
 
 async def test_the_default_path_syncs_then_runs_the_rollout_project(

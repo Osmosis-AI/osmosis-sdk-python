@@ -184,8 +184,10 @@ class LocalEvalOptions:
     # Cloud-sandbox reachability (tunnel plan §5.2/§5.3). ``listener_port``
     # fixes the controller listener's local port; ``advertise_url`` is a
     # public base URL that already reaches it (a tunnel the user runs);
-    # ``tunnel`` auto-manages one ("cloudflared" is the only provider).
-    # Either of the last two also turns on the bridge's non-stream keepalive.
+    # ``tunnel`` forces an auto-managed one ("cloudflared" is the only
+    # provider). A current Harbor backend also advertises when its sandbox
+    # cannot reach host loopback, letting the runner select cloudflared without
+    # a flag. Any non-loopback path turns on the bridge's non-stream keepalive.
     listener_port: int | None = None
     advertise_url: str | None = None
     tunnel: str | None = None
@@ -608,6 +610,24 @@ def health_capacity(health: Mapping[str, Any]) -> int | None:
     return None
 
 
+def public_chat_endpoint_environment(health: Mapping[str, Any]) -> str | None:
+    """Return the sandbox label when it requires a non-loopback chat URL.
+
+    This is capability detection, not backend-name inference: old SDKs and
+    third-party backends that omit the object retain the explicit
+    ``--tunnel``/``--advertise-url`` behavior.
+    """
+    endpoint = health.get("chat_endpoint")
+    if not isinstance(endpoint, Mapping):
+        return None
+    if endpoint.get("requires_public_url") is not True:
+        return None
+    environment = endpoint.get("environment")
+    if isinstance(environment, str) and environment.strip():
+        return environment.strip()
+    return "remote"
+
+
 # --------------------------------------------------------------------------- #
 # Supervisor
 # --------------------------------------------------------------------------- #
@@ -657,6 +677,7 @@ class LocalEvalRunner:
         self._child: asyncio.subprocess.Process | None = None
         self._child_reader: asyncio.Task[None] | None = None
         self._last_child_output: str | None = None
+        self._rollout_health: dict[str, Any] = {}
         self._sdk_mismatch_warned = False
         self._tunnel: CloudflaredTunnel | None = None
         self._cancelled = asyncio.Event()
@@ -876,41 +897,57 @@ class LocalEvalRunner:
         bridge = LiteLLMBridge(model=self._spec.model_path)
         self._bridge = bridge
         advertise_url = self._options.advertise_url
-        listener = CallbackListener(
-            store,
-            auth_token=controller_token,
-            bridge=bridge,
-            bridge_token=bridge_token,
-            port=self._options.listener_port,
-            advertised_base_url=advertise_url,
-            # Any non-loopback path may sit behind a proxy with idle-read
-            # timeouts, so the bridge keeps non-streaming responses warm.
-            bridge_keepalive=advertise_url is not None
-            or self._options.tunnel is not None,
-        )
+        listener: CallbackListener | None = None
         cancelled = False
         try:
-            try:
-                await listener.start()
-            except OSError as exc:
-                port = self._options.listener_port
-                raise LocalEvalError(
-                    "could not bind the callback listener on 127.0.0.1"
-                    f"{f':{port}' if port else ''}: {exc}"
-                ) from exc
-            self._write_log("info", "listener", "callback listener started")
             self._stage("preflight", f"checking model {self._spec.model_path}")
             await self._model_preflight(bridge)
             async with httpx.AsyncClient() as client:
                 base_url = await self._start_rollout_server(
                     secrets=secrets, client=client
                 )
+                auto_tunnel_environment = None
+                if self._options.tunnel is None and advertise_url is None:
+                    auto_tunnel_environment = public_chat_endpoint_environment(
+                        self._rollout_health
+                    )
+                use_managed_tunnel = (
+                    self._options.tunnel is not None
+                    or auto_tunnel_environment is not None
+                )
+                if auto_tunnel_environment is not None:
+                    self._stage(
+                        "tunnel",
+                        f"detected {auto_tunnel_environment} sandbox; "
+                        "enabling cloudflared automatically",
+                        environment=auto_tunnel_environment,
+                    )
+                listener = CallbackListener(
+                    store,
+                    auth_token=controller_token,
+                    bridge=bridge,
+                    bridge_token=bridge_token,
+                    port=self._options.listener_port,
+                    advertised_base_url=advertise_url,
+                    # Any non-loopback path may sit behind a proxy with
+                    # idle-read timeouts, so keep non-streaming responses warm.
+                    bridge_keepalive=advertise_url is not None or use_managed_tunnel,
+                )
+                try:
+                    await listener.start()
+                except OSError as exc:
+                    port = self._options.listener_port
+                    raise LocalEvalError(
+                        "could not bind the callback listener on 127.0.0.1"
+                        f"{f':{port}' if port else ''}: {exc}"
+                    ) from exc
+                self._write_log("info", "listener", "callback listener started")
                 concurrency = await self._resolve_concurrency(client, base_url)
                 # A quick tunnel can spend the full startup budget waiting for
                 # fresh public DNS. Prove the model and local rollout server
                 # first so dependency/import/health failures do not create a
                 # tunnel that the run will immediately tear down.
-                if self._options.tunnel is not None:
+                if use_managed_tunnel:
                     await self._start_tunnel(listener)
                 elif advertise_url is not None:
                     self._stage(
@@ -951,8 +988,9 @@ class LocalEvalRunner:
         finally:
             await self._stop_rollout_server()
             await self._stop_tunnel()
-            with contextlib.suppress(Exception):
-                await listener.stop()
+            if listener is not None:
+                with contextlib.suppress(Exception):
+                    await listener.stop()
         return self._finalize(cancelled=cancelled)
 
     async def _start_tunnel(self, listener: CallbackListener) -> None:
@@ -1757,6 +1795,7 @@ class LocalEvalRunner:
         self, *, secrets: Mapping[str, str], client: httpx.AsyncClient
     ) -> str:
         assert self._run_dir is not None
+        self._rollout_health = {}
         entrypoint = self._rollout_dir / self._spec.entrypoint
         if not entrypoint.is_file():
             raise LocalEvalError(
@@ -1874,6 +1913,7 @@ class LocalEvalRunner:
                         f"different --rollout-port"
                     )
                 self._warn_sdk_mismatch(health.sdk_version)
+                self._rollout_health = dict(health.payload)
                 return
             remaining = deadline - time.monotonic()
             if remaining <= 0:

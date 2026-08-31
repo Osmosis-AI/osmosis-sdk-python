@@ -781,6 +781,36 @@ async def test_tunnel_mode_runs_the_full_path_and_stops_the_tunnel(
     assert any("tunnel ready" in stage for stage in harness.hooks.stages)
 
 
+async def test_remote_sandbox_health_automatically_enables_a_tunnel(
+    harness: RunnerHarness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from osmosis_ai.eval.local import runner as runner_module
+
+    _FakeTunnel.instances.clear()
+    monkeypatch.setattr(runner_module, "CloudflaredTunnel", _FakeTunnel)
+    runner = harness.runner()
+    start_rollout_server = runner._start_rollout_server
+
+    async def start_remote_rollout_server(**kwargs: Any) -> str:
+        base_url = await start_rollout_server(**kwargs)
+        runner._rollout_health["chat_endpoint"] = {
+            "environment": "daytona",
+            "requires_public_url": True,
+        }
+        return base_url
+
+    monkeypatch.setattr(runner, "_start_rollout_server", start_remote_rollout_server)
+    summary = await runner.run()
+
+    assert summary.succeeded == 4
+    (tunnel,) = _FakeTunnel.instances
+    assert tunnel.stopped
+    assert any(
+        "detected daytona sandbox; enabling cloudflared automatically" in stage
+        for stage in harness.hooks.stages
+    )
+
+
 async def test_rollout_server_failure_does_not_start_a_tunnel(
     harness: RunnerHarness, monkeypatch: pytest.MonkeyPatch
 ) -> None:

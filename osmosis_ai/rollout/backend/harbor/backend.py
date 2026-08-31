@@ -299,6 +299,13 @@ class HarborBackend(ExecutionBackend):
         return self.finished.get(rollout_id)
 
     def health(self) -> dict[str, Any]:
+        environment_type = self.environment_config.type
+        environment = (
+            environment_type.value if environment_type is not None else "custom"
+        )
+        uses_chat_endpoint = not (
+            self.native is not None and self.native.wiring == "none"
+        )
         return {
             "status": "ok",
             "backend": "harbor",
@@ -309,6 +316,14 @@ class HarborBackend(ExecutionBackend):
             "running": self.running,
             "queued": self.queued(),
             "max_queue_depth": self.max_queue_depth,
+            # The local-eval CLI runs outside this environment. Advertising
+            # reachability here lets it choose ingress from the backend's
+            # resolved placement instead of guessing from rollout source.
+            "chat_endpoint": {
+                "environment": environment,
+                "requires_public_url": uses_chat_endpoint
+                and not sandbox_reaches_host_loopback(self.environment_config),
+            },
         }
 
     async def resolve_task(self, request: ExecutionRequest) -> HarborTask:

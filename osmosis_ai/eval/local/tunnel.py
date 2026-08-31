@@ -37,7 +37,8 @@ _TERM_GRACE_SEC = 5.0
 _CONNECTION_REGISTERED_MARKER = "Registered tunnel connection"
 
 _INSTALL_HINT = (
-    "--tunnel cloudflared requires the `cloudflared` binary on PATH. Install "
+    "This rollout needs a public chat endpoint, but the `cloudflared` binary "
+    "is not on PATH. Install "
     "it (macOS: `brew install cloudflared`; other platforms: "
     "https://developers.cloudflare.com/cloudflare-one/connections/"
     "connect-networks/downloads/), or run your own tunnel and pass "
