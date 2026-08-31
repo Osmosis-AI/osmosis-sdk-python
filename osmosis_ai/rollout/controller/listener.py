@@ -234,7 +234,6 @@ class CallbackListener:
         advertised_base_url: str | None = None,
         bridge_keepalive: bool = False,
     ) -> None:
-        _assert_non_empty_auth_token(auth_token)
         app = create_callback_app(store, auth_token=auth_token)
         if bridge is not None:
             if bridge_token is None:

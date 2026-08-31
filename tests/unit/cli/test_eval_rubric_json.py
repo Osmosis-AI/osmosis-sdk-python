@@ -52,8 +52,46 @@ def test_eval_rubric_json_returns_operation_result(
     assert payload["schema_version"] == 1
     assert payload["status"] == "success"
     assert payload["operation"] == "eval.rubric"
-    assert payload["resource"]["statistics"]["average"] == pytest.approx(0.8)
-    assert payload["resource"]["records"][0]["scores"] == [0.8]
+    resource = payload["resource"]
+    assert list(resource) == [
+        "model",
+        "data_path",
+        "number",
+        "statistics",
+        "record_count",
+        "error_count",
+        "records",
+    ]
+    assert resource == {
+        "model": "openai/gpt-5.4",
+        "data_path": str(data_path),
+        "number": 1,
+        "statistics": {
+            "average": 0.8,
+            "variance": 0.0,
+            "stdev": 0.0,
+            "min": 0.8,
+            "max": 0.8,
+        },
+        "record_count": 1,
+        "error_count": 0,
+        "records": [
+            {
+                "index": 1,
+                "label": "record[1]",
+                "scores": [0.8],
+                "explanations": ["good"],
+                "errors": [],
+                "statistics": {
+                    "average": 0.8,
+                    "variance": 0.0,
+                    "stdev": 0.0,
+                    "min": 0.8,
+                    "max": 0.8,
+                },
+            }
+        ],
+    }
 
 
 def test_eval_rubric_json_output_file_omits_records(
@@ -91,9 +129,21 @@ def test_eval_rubric_json_output_file_omits_records(
     captured = capsys.readouterr()
     assert exit_code == 0
     payload = json.loads(captured.out)
-    assert payload["resource"]["output_path"] == str(output_path)
-    assert "records" not in payload["resource"]
+    resource = payload["resource"]
+    assert list(resource) == [
+        "model",
+        "data_path",
+        "number",
+        "statistics",
+        "record_count",
+        "error_count",
+        "output_path",
+    ]
+    assert resource["output_path"] == str(output_path)
+    assert "records" not in resource
     assert output_path.exists()
+    written = json.loads(output_path.read_text(encoding="utf-8"))
+    assert written["records"][0]["label"] == "row-1"
 
 
 def test_eval_rubric_json_suppresses_tty_progress(
@@ -169,6 +219,7 @@ def test_eval_rubric_plain_allows_tty_progress(
 
     captured = capsys.readouterr()
     assert exit_code == 0
+    assert captured.out == "Rubric evaluation completed.\n"
     assert captured.err != ""
 
 

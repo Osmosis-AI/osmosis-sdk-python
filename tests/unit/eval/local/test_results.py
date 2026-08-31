@@ -208,23 +208,6 @@ def _row(
     return payload
 
 
-def test_pass_rate_excludes_skipped_from_scored() -> None:
-    summary = aggregate_metrics(
-        [
-            _row(0, 0, "success", 1.0),
-            _row(1, 0, "success", 0.0),
-            _row(2, 0, "skipped", None),
-        ],
-        pass_threshold=1.0,
-    )
-    assert summary["total_samples"] == 3
-    assert summary["skipped"] == 1
-    assert summary["completed_samples"] == 2
-    assert summary["graded"] == 2
-    assert summary["passed"] == 1
-    assert summary["pass_rate"] == 0.5
-
-
 def test_passed_uses_a_greater_or_equal_threshold() -> None:
     summary = aggregate_metrics([_row(0, 0, "success", 0.7)], pass_threshold=0.7)
     assert summary["passed"] == 1
@@ -545,28 +528,23 @@ def test_a_cancelled_attempt_is_never_projected_as_success(tmp_path: Path) -> No
 # --------------------------------------------------------------------------- #
 
 
-def test_reward_less_failures_stay_in_the_pass_rate_denominator() -> None:
-    # Excluding them would report pass_rate 1.0 for a run where half the rows
-    # failed -- the metric would hide exactly what the user needs to see.
-    summary = aggregate_metrics(
-        [_row(0, 0, "success", 1.0), _row(1, 0, "failed", None)], pass_threshold=1.0
-    )
-    assert summary["graded"] == 1
-    assert summary["completed_samples"] == 2
-    assert summary["pass_rate"] == 0.5
-
-
 def test_skipped_rows_are_the_only_thing_excluded_from_scored() -> None:
     summary = aggregate_metrics(
         [
             _row(0, 0, "success", 1.0),
-            _row(1, 0, "failed", None),
-            _row(2, 0, "skipped", None),
+            _row(1, 0, "success", 0.0),
+            _row(2, 0, "failed", None),
+            _row(3, 0, "skipped", None),
         ],
         pass_threshold=1.0,
     )
-    assert summary["completed_samples"] == 2
-    assert summary["pass_rate"] == 0.5
+    assert summary["total_samples"] == 4
+    assert summary["skipped"] == 1
+    assert summary["failed"] == 1
+    assert summary["completed_samples"] == 3
+    assert summary["graded"] == 2
+    assert summary["passed"] == 1
+    assert summary["pass_rate"] == 1 / 3
 
 
 def test_pass_at_k_counts_a_reward_less_failure_as_a_non_pass() -> None:

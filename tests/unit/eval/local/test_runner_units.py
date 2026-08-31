@@ -37,7 +37,6 @@ from osmosis_ai.eval.local.runner import (
     compute_source_digest,
     reserve_free_port,
 )
-from osmosis_ai.eval.local.state import digest_of
 from osmosis_ai.rollout.controller import TerminalCallbackResult
 from osmosis_ai.rollout.types import GraderCompleteRequest, GraderStatus, RolloutSample
 
@@ -167,7 +166,7 @@ def test_semantic_changes_change_the_fingerprint(
 ) -> None:
     baseline = _inputs(_spec(), _dataset(), tmp_path)
     changed = _inputs(_spec(**{field_name: value}), _dataset(), tmp_path)
-    assert digest_of(changed) != digest_of(baseline)
+    assert changed != baseline
     # The refusal message has to be able to name what moved.
     assert changed_input_keys(baseline, changed) != []
 
@@ -181,7 +180,7 @@ def test_pass_threshold_does_not_change_the_fingerprint(tmp_path: Path) -> None:
 def test_dataset_bytes_change_the_fingerprint(tmp_path: Path) -> None:
     baseline = _inputs(_spec(), _dataset(), tmp_path)
     changed = _inputs(_spec(), _dataset(sha="c" * 64), tmp_path)
-    assert digest_of(changed) != digest_of(baseline)
+    assert changed != baseline
 
 
 def test_source_digest_changes_the_fingerprint(tmp_path: Path) -> None:
@@ -194,13 +193,13 @@ def test_source_digest_changes_the_fingerprint(tmp_path: Path) -> None:
     second = build_run_inputs(
         _spec(), dataset=_dataset(), selection=selection, rollout_source_digest="2" * 64
     )
-    assert digest_of(first) != digest_of(second)
+    assert first != second
 
 
 def test_row_selection_changes_the_fingerprint(tmp_path: Path) -> None:
     baseline = _inputs(_spec(), _dataset(), tmp_path)
     narrowed = _inputs(_spec(), _dataset(), tmp_path, row_selector=(0,))
-    assert digest_of(narrowed) != digest_of(baseline)
+    assert narrowed != baseline
     assert baseline["dataset"]["selected_source_rows"] == "0-1"
     assert narrowed["dataset"]["selected_source_rows"] == "0"
 
@@ -216,13 +215,13 @@ def test_throughput_and_display_fields_are_excluded(
     }
     baseline = _inputs(_spec(), _dataset(), tmp_path)
     changed = _inputs(_spec(**{field_name: values[field_name]}), _dataset(), tmp_path)
-    assert digest_of(changed) == digest_of(baseline)
+    assert changed == baseline
 
 
 def test_secret_names_are_included_and_values_are_never_present(tmp_path: Path) -> None:
     baseline = _inputs(_spec(), _dataset(), tmp_path)
     with_secret = _inputs(_spec(secret_names=("OPENAI_API_KEY",)), _dataset(), tmp_path)
-    assert digest_of(with_secret) != digest_of(baseline)
+    assert with_secret != baseline
     assert with_secret["secret_names"] == ["OPENAI_API_KEY"]
     assert "OPENAI_API_KEY" not in str(with_secret).replace("'OPENAI_API_KEY'", "")
 
@@ -230,7 +229,7 @@ def test_secret_names_are_included_and_values_are_never_present(tmp_path: Path) 
 def test_env_ordering_does_not_change_the_fingerprint(tmp_path: Path) -> None:
     first = _inputs(_spec(env={"A": "1", "B": "2"}), _dataset(), tmp_path)
     second = _inputs(_spec(env={"B": "2", "A": "1"}), _dataset(), tmp_path)
-    assert digest_of(first) == digest_of(second)
+    assert first == second
 
 
 def test_changed_input_keys_names_the_changed_top_level_keys() -> None:

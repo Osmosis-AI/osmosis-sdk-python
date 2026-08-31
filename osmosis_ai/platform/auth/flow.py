@@ -355,11 +355,10 @@ def poll_device_token(
         except HTTPError as e:
             if e.code in (426, 429, 500, 502, 503, 504):
                 raise _login_error_from_http(e, "Polling failed") from e
-            try:
-                error_data = json.loads(e.read().decode())
-                error_code = error_data.get("error", "")
-            except Exception:
+            error_data = _read_error_body(e)
+            if not error_data:
                 raise LoginError(f"Polling failed: HTTP {e.code}") from e
+            error_code = error_data.get("error", "")
 
             if error_code == "authorization_pending":
                 if on_poll:

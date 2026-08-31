@@ -122,6 +122,8 @@ def test_console_print_warning_is_structured_json_on_stderr() -> None:
 
     assert out.getvalue() == ""
     payload = json.loads(err.getvalue())
+    assert list(payload) == ["schema_version", "cli_version", "warning"]
+    assert list(payload["warning"]) == ["code", "message"]
     assert payload["schema_version"] == 1
     assert "cli_version" in payload
     assert payload["warning"] == {
