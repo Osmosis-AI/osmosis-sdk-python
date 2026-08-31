@@ -2,6 +2,25 @@
 
 This file records changes to `osmosis-ai`. For earlier versions, see [GitHub Releases](https://github.com/Osmosis-AI/osmosis-sdk-python/releases).
 
+## 0.3.2rc3 - 2026-08-31
+
+### Added
+
+- Documented the `eval` installation extra and declared Python 3.14 support ([#337](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/337)).
+
+### Changed
+
+- Newly scaffolded rollouts now depend on the stable `osmosis-ai[server]>=0.3.0,<0.4` release line instead of an RC baseline ([#337](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/337)).
+
+### Fixed
+
+- Local eval now accepts a registered Cloudflare connection when the developer host cannot reach the tunnel URL, while still failing before dispatch if the tunnel never registers, never passes its host probe, or exits during startup ([#337](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/337)).
+- Secrets-file values now override the process environment only for the local eval run and are restored on every exit path, with local-only remediation when required secrets are missing ([#337](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/337)).
+- Orphan cleanup now rejects symlinked run directories and state files and anchors cleanup to the opened run directory ([#337](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/337)).
+- Verbose local-eval logs now render literally, and `osmosis eval upload` continues to prefer an existing single-segment directory over interpreting it as a run name ([#337](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/337)).
+
+[Full changelog](https://github.com/Osmosis-AI/osmosis-sdk-python/compare/v0.3.2rc2...v0.3.2rc3)
+
 ## 0.3.2rc2 - 2026-08-31
 
 ### Added
