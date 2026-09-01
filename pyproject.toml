@@ -91,7 +91,7 @@ openai-agents = [
 # never install Harbor's [skypilot] extra because its skypilot-nightly package
 # claims the same `sky` namespace as that runtime.
 harbor = [
-    "harbor[daytona]>=0.20.0,<0.21",
+    "harbor[daytona]>=0.20.0,<0.23",
     # Harbor's SkyPilot environment parses Dockerfile WORKDIR itself, but the
     # parser is otherwise declared only by Harbor's conflicting [skypilot]
     # extra. Supply that narrow dependency without installing SkyPilot.
