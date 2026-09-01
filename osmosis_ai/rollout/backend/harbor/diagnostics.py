@@ -74,7 +74,8 @@ def trial_timings(result: Any) -> dict[str, float]:
 
 
 def _as_utc(dt: datetime) -> datetime:
-    """Naive datetimes are host-local (harbor's ExceptionInfo.occurred_at)."""
+    """Normalize to UTC. Harbor <0.21 recorded ``ExceptionInfo.occurred_at``
+    as a naive host-local datetime; 0.21+ records it timezone-aware."""
     return dt.astimezone(UTC)
 
 
@@ -82,8 +83,8 @@ def agent_phase_failure(result: Any) -> Any | None:
     """The recorded exception, when it struck before verification started.
 
     Harbor records agent failures and still runs the verifier, so both can
-    coexist; the timestamps (UTC-normalized: ``occurred_at`` is naive-local)
-    separate them, since harbor's exception class names are open-ended.
+    coexist; the UTC-normalized timestamps separate them, since harbor's
+    exception class names are open-ended.
     """
     err = getattr(result, "exception_info", None)
     if err is None:
