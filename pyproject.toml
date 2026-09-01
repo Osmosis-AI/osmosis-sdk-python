@@ -77,7 +77,7 @@ strands = [
 # OpenAI Agents adapter. >=0.18.1 supports OpenAI Python 2.45's
 # cache_write_tokens usage field.
 openai-agents = [
-    "openai-agents[litellm]>=0.18.1,<0.19",
+    "openai-agents[litellm]>=0.18.1,<0.23",
     "litellm>=1.91.1,!=1.95.0,<2.0.0",
     "orjson>=3.11.6,<4.0",
     "aiohttp>=3.14.3",
