@@ -148,7 +148,7 @@ dev = [
     "pytest-asyncio>=1.4.0,<2.0.0",
     "pytest-cov>=7.1.0",
     "pytest-timeout>=2.4.0,<3.0.0",
-    "ruff==0.16.0",  # Keep in sync with pre-commit and CI
+    "ruff==0.16.5",  # Keep in sync with pre-commit and CI
     "pre-commit>=4.6.0,<5.0.0",
     "pyright[nodejs]==1.1.411",
 ]
