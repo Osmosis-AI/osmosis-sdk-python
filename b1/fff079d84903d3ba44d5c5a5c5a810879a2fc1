@@ -1,0 +1,25 @@
+osmosis_ai/rollout/backend/harbor/backend.py
+  s_9475720bb51b95::t_898e02582809ec 16
+pyproject.toml
+  s_9475720bb51b95::t_898e02582809ec 73-76,81-83,85,89-90,94-96,100,102-103,113-114,157
+.pre-commit-config.yaml
+  s_9475720bb51b95::t_898e02582809ec 15
+osmosis_ai/rollout/backend/harbor/diagnostics.py
+  s_9475720bb51b95::t_898e02582809ec 77-78,86-87
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "b1fff079d84903d3ba44d5c5a5c5a810879a2fc1",
+  "prompts": {},
+  "sessions": {
+    "s_9475720bb51b95": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ec4d8b4c-d947-4506-8067-ec1698077fdc",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}
