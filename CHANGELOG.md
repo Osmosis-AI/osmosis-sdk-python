@@ -2,43 +2,7 @@
 
 This file records changes to `osmosis-ai`. For earlier versions, see [GitHub Releases](https://github.com/Osmosis-AI/osmosis-sdk-python/releases).
 
-## 0.3.2rc3 - 2026-08-31
-
-### Added
-
-- Documented the `eval` installation extra and declared Python 3.14 support ([#337](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/337)).
-
-### Changed
-
-- Newly scaffolded rollouts now depend on the stable `osmosis-ai[server]>=0.3.0,<0.4` release line instead of an RC baseline ([#337](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/337)).
-
-### Fixed
-
-- Local eval now accepts a registered Cloudflare connection when the developer host cannot reach the tunnel URL, while still failing before dispatch if the tunnel never registers, never passes its host probe, or exits during startup ([#337](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/337)).
-- Secrets-file values now override the process environment only for the local eval run and are restored on every exit path, with local-only remediation when required secrets are missing ([#337](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/337)).
-- Orphan cleanup now rejects symlinked run directories and state files and anchors cleanup to the opened run directory ([#337](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/337)).
-- Verbose local-eval logs now render literally, and `osmosis eval upload` continues to prefer an existing single-segment directory over interpreting it as a run name ([#337](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/337)).
-
-[Full changelog](https://github.com/Osmosis-AI/osmosis-sdk-python/compare/v0.3.2rc2...v0.3.2rc3)
-
-## 0.3.2rc2 - 2026-08-31
-
-### Added
-
-- Local evaluations now automatically start a Cloudflare tunnel when the resolved Harbor sandbox cannot reach host loopback, while direct backends stay tunnel-free ([#335](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/335)).
-- `osmosis eval upload <run-name>` now resolves completed runs from `.osmosis/evals`, while explicit custom directories remain supported ([#335](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/335)).
-
-### Changed
-
-- Local eval output, retry, resume, and upload paths are now shown relative to the invocation directory when possible, keeping generated commands copyable from workspace subdirectories ([#335](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/335)).
-
-### Fixed
-
-- Local eval startup now validates the model and rollout server before opening a tunnel, reports rollout-environment SDK mismatches and redacted subprocess errors, and avoids probing quick-tunnel DNS before edge registration ([#335](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/335)).
-
-[Full changelog](https://github.com/Osmosis-AI/osmosis-sdk-python/compare/v0.3.2rc1...v0.3.2rc2)
-
-## 0.3.2rc1 - 2026-08-28
+## 0.3.2 - 2026-08-31
 
 ### Breaking Changes
 
@@ -47,20 +11,37 @@ This file records changes to `osmosis-ai`. For earlier versions, see [GitHub Rel
 
 ### Added
 
-- Added managed `cloudflared` and bring-your-own tunnel support to `osmosis eval run` so Daytona, SkyPilot, and other cloud sandboxes can reach the local model bridge ([#327](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/327)).
+- `osmosis eval run` now reaches Daytona, SkyPilot, and other cloud sandboxes through a managed `cloudflared` or bring-your-own tunnel, started automatically when the sandbox cannot reach host loopback ([#327](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/327), [#335](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/335)).
 - Added a root `--workspace <name>` selector for workspace-scoped platform commands; benchmark operations can now run without a local repository, while training and evaluation submit accept an absolute config path when its Git repository matches the selected workspace ([#332](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/332)).
+- `osmosis eval upload <run-name>` now resolves completed runs from `.osmosis/evals`, while explicit custom directories remain supported ([#335](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/335)).
+- Documented the `eval` installation extra and declared Python 3.14 support ([#337](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/337)).
 
 ### Changed
 
 - Local `osmosis eval run --dataset-file ...` no longer loads platform credentials unless `--upload` is also requested ([#332](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/332)).
+- Local eval output, retry, resume, and upload paths are now shown relative to the invocation directory when possible, keeping generated commands copyable from workspace subdirectories ([#335](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/335)).
+- Newly scaffolded rollouts now depend on the stable `osmosis-ai[server]>=0.3.0,<0.4` release line instead of an RC baseline ([#337](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/337)).
 
 ### Fixed
 
-- Local evaluation now keeps slow non-streaming tunnel responses alive, avoids cancellation deadlocks, and reports unreachable loopback endpoints instead of hanging ([#327](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/327)).
+- Hardened local eval startup and tunneling: the model and rollout server are validated before a tunnel opens, slow non-streaming responses stay alive, a registered Cloudflare connection is accepted when the host cannot probe the tunnel URL, and unreachable endpoints fail fast instead of hanging ([#327](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/327), [#335](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/335), [#337](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/337)).
 - Local evaluation now warns when the CLI and rollout environments use different `osmosis-ai` versions ([#330](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/330)).
 - The `harbor` extra now installs Harbor's Daytona dependencies so Daytona environments work without separate dependency setup ([#331](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/331)).
+- Secrets-file values now override the process environment only for the local eval run and are restored on every exit path, and orphan cleanup rejects symlinked run directories and state files ([#337](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/337)).
 
-[Full changelog](https://github.com/Osmosis-AI/osmosis-sdk-python/compare/v0.3.1...v0.3.2rc1)
+[Full changelog](https://github.com/Osmosis-AI/osmosis-sdk-python/compare/v0.3.1...v0.3.2)
+
+## 0.3.2rc3 - 2026-08-31
+
+[Incremental release notes](https://github.com/Osmosis-AI/osmosis-sdk-python/releases/tag/v0.3.2rc3)
+
+## 0.3.2rc2 - 2026-08-31
+
+[Incremental release notes](https://github.com/Osmosis-AI/osmosis-sdk-python/releases/tag/v0.3.2rc2)
+
+## 0.3.2rc1 - 2026-08-28
+
+[Incremental release notes](https://github.com/Osmosis-AI/osmosis-sdk-python/releases/tag/v0.3.2rc1)
 
 ## 0.3.1 - 2026-08-24
 
