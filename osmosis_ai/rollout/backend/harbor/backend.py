@@ -13,10 +13,7 @@ or a git checkout (with ``metadata["git_url"]`` and, ideally, a pinned
 ``metadata["git_commit_id"]``). ``metadata["harbor_model"]`` overrides the
 model per rollout.
 
-Task images stay pure task environments either way; with the pinned harbor
-0.20.0 each trial builds its own compose-named tag (fast via docker's layer
-cache, removed at trial teardown), and newer harbor releases share one
-content-addressed hb__ image across trials.
+Task images stay pure task environments either way.
 """
 
 from __future__ import annotations
