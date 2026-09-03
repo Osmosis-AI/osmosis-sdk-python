@@ -322,19 +322,19 @@ def test_extra_modules_table_matches_pyproject_extras() -> None:
             "rubric",
         ),
         (
-            "osmosis_ai.rollout.controller.listener",
-            "create_callback_app",
+            "osmosis_ai.eval.local.listener",
+            "create_llm_bridge_app",
             "fastapi",
             "eval",
         ),
         (
-            "osmosis_ai.rollout.controller",
+            "osmosis_ai.eval.local",
             "LiteLLMBridge",
             "fastapi",
             "eval",
         ),
         (
-            "osmosis_ai.rollout.controller.llm_bridge",
+            "osmosis_ai.eval.local.llm_bridge",
             "create_bridge_router",
             "fastapi",
             "eval",
