@@ -18,7 +18,7 @@ GIT_IDENTITY = "acme/rollouts"
 FAKE_CREDENTIALS = object()
 FAKE_SERVER = {
     "id": "r1",
-    "url": "https://r1.rollout-staging.gulp.dev",
+    "url": "https://r1.rollout.svc.staging.osmosis.ai",
     "expires_at": None,
 }
 FAKE_HEAD_SHA = "abc123def456abc123def456abc123def456abc1"
@@ -416,7 +416,7 @@ class TestDevServerList:
             {
                 "id": "r1",
                 "name": "multiply",
-                "url": "https://r1.rollout-staging.gulp.dev",
+                "url": "https://r1.rollout.svc.staging.osmosis.ai",
                 "expires_at": None,
                 "started_at": None,
                 "status": "running",
@@ -467,7 +467,7 @@ class TestDevServerList:
             {
                 "id": "r2",
                 "name": "my-rollout",
-                "url": "https://r2.rollout-staging.gulp.dev",
+                "url": "https://r2.rollout.svc.staging.osmosis.ai",
                 "expires_at": None,
                 "started_at": None,
                 "status": "running",
@@ -512,7 +512,7 @@ class TestDevServerList:
             {
                 "id": "r3",
                 "name": "timed-rollout",
-                "url": "https://r3.rollout-staging.gulp.dev",
+                "url": "https://r3.rollout.svc.staging.osmosis.ai",
                 "expires_at": "2026-06-25T12:00:00Z",
                 "started_at": None,
                 "status": "running",
