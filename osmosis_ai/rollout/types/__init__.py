@@ -6,16 +6,15 @@ from .config import (
 )
 from .output import AgentWorkflowOutput, Messages
 from .protocol import (
+    POLLING_LEASE_HEADER,
     CancelRolloutsRequest,
     CancelRolloutsResponse,
-    GraderCompleteRequest,
-    GraderStatus,
-    RolloutCompleteRequest,
     RolloutInitRequest,
     RolloutInitResponse,
-    RolloutStatusResponse,
+    RolloutResultResponse,
 )
 from .sample import (
+    ExecutionOutcome,
     ExecutionRequest,
     ExecutionResult,
     MessageDict,
@@ -25,24 +24,23 @@ from .sample import (
 )
 
 __all__ = [
+    "POLLING_LEASE_HEADER",
     "AgentWorkflowConfig",
     "AgentWorkflowOutput",
     "BaseConfig",
     "CancelRolloutsRequest",
     "CancelRolloutsResponse",
     "ConcurrencyConfig",
+    "ExecutionOutcome",
     "ExecutionRequest",
     "ExecutionResult",
-    "GraderCompleteRequest",
     "GraderConfig",
-    "GraderStatus",
     "MessageDict",
     "Messages",
-    "RolloutCompleteRequest",
     "RolloutErrorCategory",
     "RolloutInitRequest",
     "RolloutInitResponse",
+    "RolloutResultResponse",
     "RolloutSample",
     "RolloutStatus",
-    "RolloutStatusResponse",
 ]

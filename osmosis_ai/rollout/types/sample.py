@@ -25,9 +25,7 @@ def _json_ready_scalar(value: Any) -> bool:
     Exact builtin types only: NumPy's ``float64`` is a ``float`` subclass, so
     an ``isinstance`` check would pass it through untouched and leave a foreign
     scalar in the ``Any`` telemetry map. Non-finite floats are excluded too —
-    ``json.dumps`` emits the non-standard ``NaN``/``Infinity`` literals and
-    HTTPX's encoder raises outright, so one is enough to cost a callback its
-    whole payload.
+    ``json.dumps`` emits the non-standard ``NaN``/``Infinity`` literals.
     """
     if value is None or isinstance(value, (bool, str)):
         return True
@@ -181,6 +179,7 @@ class RolloutStatus(StrEnum):
 
 class RolloutErrorCategory(StrEnum):
     TIMEOUT = "timeout"
+    LEASE_EXPIRED = "lease_expired"
     VALIDATION_ERROR = "validation_error"
     HTTP_ERROR = "http_error"
     AGENT_ERROR = "agent_error"
@@ -193,6 +192,7 @@ class ExecutionRequest(BaseModel):
     metadata: dict[str, Any] | None = None
     agent_timeout_sec: float | None = None
     grader_timeout_sec: float | None = None
+    grade: bool = True
 
     @field_validator("id")
     @classmethod
@@ -219,3 +219,20 @@ class ExecutionResult(BaseModel):
     err_category: RolloutErrorCategory | None = None
     # Backend diagnostics (failure phase, timings); not part of the wire protocol.
     extra_fields: dict[str, Any] | None = None
+
+
+class ExecutionOutcome(BaseModel):
+    """Workflow result and optional grader result from one execution."""
+
+    workflow: ExecutionResult
+    grader: ExecutionResult | None = None
+
+    @property
+    def result(self) -> ExecutionResult:
+        return self.grader or self.workflow
+
+    @property
+    def result_to_save(self) -> ExecutionResult:
+        if self.grader is not None and self.grader.sample is not None:
+            return self.grader
+        return self.workflow

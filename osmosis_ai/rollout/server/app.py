@@ -1,44 +1,44 @@
+from __future__ import annotations
+
 import asyncio
 import logging
 import os
 import traceback
-import uuid
 from collections.abc import AsyncIterator
 from contextlib import AsyncExitStack, asynccontextmanager
 from functools import partial
 from typing import Any
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, Header, HTTPException
 
 from osmosis_ai.rollout.backend.base import ExecutionBackend
 from osmosis_ai.rollout.context import RolloutContext
-from osmosis_ai.rollout.server.auth import ControllerAuth
-from osmosis_ai.rollout.trajectory import (
-    TrajectoryReport,
-    report_from_response,
-    save_trajectory,
+from osmosis_ai.rollout.server.lease import InvalidLeaseError
+from osmosis_ai.rollout.server.result_registry import (
+    DuplicateRolloutError,
+    RolloutFutureRegistry,
+    UnknownRolloutError,
 )
+from osmosis_ai.rollout.trajectory import save_trajectory
 from osmosis_ai.rollout.types import (
+    POLLING_LEASE_HEADER,
     CancelRolloutsRequest,
     CancelRolloutsResponse,
+    ExecutionOutcome,
     ExecutionRequest,
     ExecutionResult,
-    GraderCompleteRequest,
-    GraderStatus,
-    RolloutCompleteRequest,
     RolloutInitRequest,
     RolloutInitResponse,
-    RolloutSample,
+    RolloutResultResponse,
     RolloutStatus,
-    RolloutStatusResponse,
 )
-from osmosis_ai.rollout.utils.http import post_json_with_retry
+from osmosis_ai.rollout.utils.errors import categorize_exception
 
 logger: logging.Logger = logging.getLogger(__name__)
 
-# Graceful shutdown waits this long for in-flight rollouts before cancelling
-# them. Uvicorn closes its listeners before lifespan shutdown, so nothing new
-# is admitted while draining.
+DEFAULT_RESULT_WAIT_TIMEOUT_SEC = 30.0
+DEFAULT_POLLING_LEASE_TIMEOUT_SEC = 120.0
+DEFAULT_RESULT_RETENTION_SEC = 900.0
 _SHUTDOWN_DRAIN_SEC = 10.0
 
 
@@ -56,6 +56,9 @@ def create_rollout_server(
     backend: ExecutionBackend,
     lifespan: Any = None,
     configure_logging: bool = True,
+    result_wait_timeout_sec: float = DEFAULT_RESULT_WAIT_TIMEOUT_SEC,
+    polling_lease_timeout_sec: float = DEFAULT_POLLING_LEASE_TIMEOUT_SEC,
+    result_retention_sec: float = DEFAULT_RESULT_RETENTION_SEC,
 ) -> FastAPI:
     """Build the FastAPI app a rollout entrypoint serves.
 
@@ -65,8 +68,18 @@ def create_rollout_server(
     """
     if configure_logging:
         _configure_default_logging()
-    # Strong references so eagerly scheduled rollout tasks are never GC'd.
+
     scheduled_tasks: set[asyncio.Task[None]] = set()
+
+    def _cancel_expired_rollout(rollout_id: str) -> None:
+        backend.cancel_rollouts(ids=[rollout_id])
+
+    registry = RolloutFutureRegistry(
+        result_wait_timeout_sec=result_wait_timeout_sec,
+        polling_lease_timeout_sec=polling_lease_timeout_sec,
+        result_retention_sec=result_retention_sec,
+        cancel_rollout=_cancel_expired_rollout,
+    )
 
     async def _drain_scheduled_tasks() -> None:
         if not scheduled_tasks:
@@ -82,8 +95,6 @@ def create_rollout_server(
 
     @asynccontextmanager
     async def _lifespan_with_drain(app: FastAPI) -> AsyncIterator[None]:
-        # The drain runs inside the caller's lifespan: in-flight rollouts may
-        # still use resources that lifespan owns.
         async with AsyncExitStack() as stack:
             if lifespan is not None:
                 await stack.enter_async_context(lifespan(app))
@@ -91,9 +102,10 @@ def create_rollout_server(
                 yield
             finally:
                 await _drain_scheduled_tasks()
+                await registry.close()
 
     app = FastAPI(lifespan=_lifespan_with_drain)
-    # The instance id env var is immutable for the process lifetime.
+    app.state.rollout_futures = registry
     instance_id = os.environ.get("_OSMOSIS_ROLLOUT_INSTANCE_ID")
 
     @app.get("/health")
@@ -103,17 +115,31 @@ def create_rollout_server(
             payload["instance_id"] = instance_id
         return payload
 
-    def _finish_rollout_task(rollout_id: str | None, task: asyncio.Task[None]) -> None:
+    def _finish_rollout_task(rollout_id: str, task: asyncio.Task[None]) -> None:
         scheduled_tasks.discard(task)
         exc = None if task.cancelled() else task.exception()
         if exc is not None:
             logger.error("Rollout task for %s crashed", rollout_id, exc_info=exc)
 
-    # 202: the rollout is scheduled before this response is sent, so a
-    # failed/disconnected response still leaves the execution running.
+    async def _run_rollout(request: RolloutInitRequest) -> None:
+        await registry.set_status(request.rollout_id, RolloutStatus.RUNNING)
+        try:
+            response = await _handle_rollout(backend, request)
+        except asyncio.CancelledError:
+            response = RolloutResultResponse(
+                rollout_id=request.rollout_id,
+                status=RolloutStatus.CANCELLED,
+                err_message="cancelled",
+            )
+            await registry.complete(request.rollout_id, response)
+            raise
+        await registry.complete(request.rollout_id, response)
+
     @app.post("/rollout", status_code=202)
-    async def rollout(request: RolloutInitRequest) -> RolloutInitResponse:
-        rollout_id = request.rollout_id or None
+    async def rollout(
+        request: RolloutInitRequest,
+        lease_token: str = Header(alias=POLLING_LEASE_HEADER, min_length=1),
+    ) -> RolloutInitResponse:
         if not backend.has_capacity():
             raise HTTPException(
                 status_code=429,
@@ -121,22 +147,57 @@ def create_rollout_server(
                 headers={"Retry-After": "5"},
             )
         try:
-            task = asyncio.create_task(_handle_rollout(backend, request))
-        except Exception as e:
-            logger.error(traceback.format_exc())
-            raise HTTPException(status_code=500, detail=str(e)) from e
+            await registry.register(request.rollout_id, lease_token)
+        except DuplicateRolloutError as exc:
+            raise HTTPException(
+                status_code=409, detail="rollout_id is already registered"
+            ) from exc
+        try:
+            task = asyncio.create_task(_run_rollout(request))
+            await registry.bind_task(request.rollout_id, task)
+        except Exception:
+            await registry.discard(request.rollout_id)
+            raise
         scheduled_tasks.add(task)
-        task.add_done_callback(partial(_finish_rollout_task, rollout_id))
-        return RolloutInitResponse()
-
-    @app.get("/rollout/{rollout_id}/status")
-    async def rollout_status(rollout_id: str) -> RolloutStatusResponse:
-        state = backend.rollout_status(rollout_id)
-        if state is not None:
-            return RolloutStatusResponse(rollout_id=rollout_id, **state)
-        return RolloutStatusResponse(
-            rollout_id=rollout_id, status=RolloutStatus.UNKNOWN
+        task.add_done_callback(partial(_finish_rollout_task, request.rollout_id))
+        return RolloutInitResponse(
+            rollout_id=request.rollout_id,
+            status=RolloutStatus.QUEUED,
+            result_wait_timeout_sec=result_wait_timeout_sec,
+            polling_lease_timeout_sec=polling_lease_timeout_sec,
         )
+
+    @app.get("/rollout/{rollout_id}/result")
+    async def rollout_result(
+        rollout_id: str,
+        lease_token: str = Header(alias=POLLING_LEASE_HEADER, min_length=1),
+    ) -> RolloutResultResponse:
+        def _current_status() -> RolloutStatus:
+            state = backend.rollout_status(rollout_id)
+            if state is not None:
+                try:
+                    status = RolloutStatus(state.get("status"))
+                except (TypeError, ValueError):
+                    pass
+                else:
+                    if status in {
+                        RolloutStatus.QUEUED,
+                        RolloutStatus.RUNNING,
+                        RolloutStatus.GRADING,
+                    }:
+                        return status
+            return RolloutStatus.RUNNING
+
+        try:
+            return await registry.wait_for_result(
+                rollout_id, lease_token, _current_status
+            )
+        except UnknownRolloutError as exc:
+            raise HTTPException(status_code=404, detail="unknown rollout_id") from exc
+        except InvalidLeaseError as exc:
+            raise HTTPException(
+                status_code=403, detail="invalid polling lease"
+            ) from exc
 
     @app.post("/rollout/cancel")
     async def cancel(request: CancelRolloutsRequest) -> CancelRolloutsResponse:
@@ -153,7 +214,11 @@ def create_rollout_server(
         )
         logger.info(
             "Cancelled %d rollout(s) (%s)",
-            sum(1 for d in dispositions.values() if d.startswith("cancelled")),
+            sum(
+                1
+                for disposition in dispositions.values()
+                if disposition.startswith("cancelled")
+            ),
             "all" if request.all else request.prefix or f"{len(request.ids or [])} ids",
         )
         return CancelRolloutsResponse(dispositions=dispositions)
@@ -163,149 +228,17 @@ def create_rollout_server(
 
 async def _handle_rollout(
     backend: ExecutionBackend, request: RolloutInitRequest
-) -> None:
-    """Execute one rollout and deliver its terminal callbacks."""
-    # Routing identity is in the URLs; ``rollout_id`` in the body is debug
-    # metadata. We prefer the caller's id (so logs/cache rows correlate
-    # across systems) and synthesize one only if the caller omits it.
-    rollout_id = request.rollout_id or uuid.uuid4().hex
-    auth = ControllerAuth(api_key=request.controller_api_key)
-
-    llm_api_key = (
-        request.controller_api_key
-        if request.llm_api_key is None
-        else request.llm_api_key
-    )
+) -> RolloutResultResponse:
+    rollout_id = request.rollout_id
     rollout_ctx = RolloutContext(
         chat_completions_url=request.chat_completions_url,
-        api_key=llm_api_key,
+        api_key=request.llm_api_key,
         rollout_id=rollout_id,
     )
-
-    # Two retention slots: the best sample-bearing result for the archive, and
-    # the latest diagnostics so a sample-less failure still leaves a record.
-    result_to_save: ExecutionResult | None = None
-    last_diagnostics: dict[str, Any] | None = None
-    # Latest metrics from callback acks.
-    report: TrajectoryReport | None = None
-    # A terminal callback is a promise the controller acts on: it closes out
-    # ``rollout_id``. Posting a second one contradicts the first, so track what
-    # has already been delivered and let the error path below skip it.
-    completion_posted = False
-    grader_posted = False
-
-    def record_result_to_save(result: ExecutionResult) -> None:
-        nonlocal result_to_save, last_diagnostics
-        if result.extra_fields is not None:
-            last_diagnostics = result.extra_fields
-        if result_to_save is None or result.sample is not None:
-            result_to_save = result
-
-    async def on_workflow_complete(result: ExecutionResult) -> None:
-        nonlocal report, completion_posted
-        record_result_to_save(result)
-        resp = await post_json_with_retry(
-            url=request.completion_callback_url,
-            payload=RolloutCompleteRequest(
-                status=result.status,
-                rollout_id=rollout_id,
-                err_message=result.err_message,
-                err_category=result.err_category,
-            ).model_dump(),
-            headers=auth.as_bearer_headers(),
-        )
-        completion_posted = True
-        report = report_from_response(resp) or report
-
-    async def on_grader_complete(result: ExecutionResult) -> None:
-        nonlocal report, grader_posted
-        record_result_to_save(result)
-        if not request.grader_callback_url:
-            logger.info(
-                "Skipping grader callback for %s: no grader_callback_url",
-                rollout_id,
-            )
-            return
-        logger.info(
-            "Posting grader callback for %s to %s (status=%s, has_sample=%s)",
-            rollout_id,
-            request.grader_callback_url,
-            result.status,
-            result.sample is not None,
-        )
-        status = (
-            GraderStatus.SUCCESS
-            if result.status == RolloutStatus.SUCCESS
-            else GraderStatus.FAILURE
-        )
-        wire_sample = result.sample
-        if wire_sample is not None:
-            # Callers mutate ``metrics`` in place, past every validator;
-            # this is the last point before the payload has to be JSON.
-            wire_sample = wire_sample.json_safe_copy()
-            # Consumers attach any numeric reward they see to eval metrics and
-            # training trajectories, checking neither status nor remove_sample.
-            # So the wire reward has to stand for exactly one thing: a kept,
-            # successfully-graded sample. A failed grade or a sample the grader
-            # marked for removal must not carry one. The archived trajectory
-            # keeps the original sample, reward included.
-            reward_is_trainable = (
-                status is GraderStatus.SUCCESS and not wire_sample.remove_sample
-            )
-            if not reward_is_trainable and wire_sample.reward is not None:
-                wire_sample = wire_sample.model_copy(update={"reward": None})
-
-        def grader_payload(sample: RolloutSample | None) -> dict[str, Any]:
-            return GraderCompleteRequest(
-                rollout_id=rollout_id,
-                status=status,
-                sample=sample,
-                err_message=result.err_message,
-                err_category=result.err_category,
-            ).model_dump(exclude={"sample": {"trajectory_messages"}})
-
-        try:
-            resp = await post_json_with_retry(
-                url=request.grader_callback_url,
-                payload=grader_payload(wire_sample),
-                headers=auth.as_bearer_headers(),
-            )
-        except (TypeError, ValueError):
-            # Encoding failed despite sanitization. Telemetry is optional;
-            # the reward is not — retry with a minimal sample so an earned
-            # reward still arrives instead of a fabricated grader failure.
-            logger.exception(
-                "Grader callback payload for %s is not JSON-encodable; "
-                "retrying without telemetry",
-                rollout_id,
-            )
-            minimal = (
-                RolloutSample(
-                    messages=[],
-                    trajectory_messages=None,
-                    label=wire_sample.label,
-                    reward=wire_sample.reward,
-                    remove_sample=wire_sample.remove_sample,
-                )
-                if wire_sample is not None
-                else None
-            )
-            resp = await post_json_with_retry(
-                url=request.grader_callback_url,
-                payload=grader_payload(minimal),
-                headers=auth.as_bearer_headers(),
-            )
-        grader_posted = True
-        report = report_from_response(resp) or report
-        logger.info(
-            "Grader callback for %s completed: status=%d",
-            rollout_id,
-            resp.status_code,
-        )
-
+    outcome: ExecutionOutcome | None = None
     try:
         with rollout_ctx:
-            await backend.execute(
+            outcome = await backend.execute(
                 ExecutionRequest(
                     id=rollout_id,
                     prompt=request.initial_messages,
@@ -313,57 +246,61 @@ async def _handle_rollout(
                     metadata=request.metadata,
                     agent_timeout_sec=request.agent_timeout_sec,
                     grader_timeout_sec=request.grader_timeout_sec,
-                ),
-                on_workflow_complete=on_workflow_complete,
-                on_grader_complete=on_grader_complete
-                if request.grader_callback_url or backend.capture_final_result
-                else None,
+                    grade=request.grade,
+                )
             )
-        logger.info("Rollout %s completed successfully", rollout_id)
-    except Exception:
+        result = _terminal_result(outcome)
+        logger.info("Rollout %s finished with status %s", rollout_id, result.status)
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:
         logger.error("Rollout %s failed: %s", rollout_id, traceback.format_exc())
-        if completion_posted:
-            # The workflow already reported a terminal status; whatever failed
-            # afterwards (grading, callback encoding) belongs to the grader
-            # callback below, not to a second, contradicting completion.
-            logger.info(
-                "Rollout %s already reported completion; not posting a second one",
-                rollout_id,
-            )
-        else:
-            try:
-                resp = await post_json_with_retry(
-                    url=request.completion_callback_url,
-                    payload=RolloutCompleteRequest(
-                        status=RolloutStatus.FAILURE,
-                        rollout_id=rollout_id,
-                        err_message="Internal server error",
-                    ).model_dump(),
-                    headers=auth.as_bearer_headers(),
-                )
-                completion_posted = True
-                report = report_from_response(resp) or report
-            except Exception:
-                logger.error(
-                    "Failed to post error callback: %s", traceback.format_exc()
-                )
-        if request.grader_callback_url and not grader_posted:
-            try:
-                await on_grader_complete(ExecutionResult(status=RolloutStatus.FAILURE))
-            except Exception:
-                logger.error(
-                    "Failed to post grader error callback: %s",
-                    traceback.format_exc(),
-                )
+        result = ExecutionResult(
+            status=RolloutStatus.FAILURE,
+            err_message=str(exc) or "Internal server error",
+            err_category=categorize_exception(exc),
+        )
     finally:
-        # Best-effort archive once execute() has finished.
-        if result_to_save is not None or last_diagnostics is not None:
+        if outcome is not None:
+            result_to_save = outcome.result_to_save
             await save_trajectory(
                 rollout_id=rollout_id,
-                result=result_to_save or ExecutionResult(status=RolloutStatus.FAILURE),
+                result=result_to_save,
                 request_label=request.label,
                 request_metadata=request.metadata,
                 request_extra_fields=request.extra_fields,
-                report=report,
-                diagnostics=last_diagnostics,
+                diagnostics=result_to_save.extra_fields,
             )
+
+    wire_sample = result.sample.json_safe_copy() if result.sample is not None else None
+    if wire_sample is not None and (
+        result.status is not RolloutStatus.SUCCESS or wire_sample.remove_sample
+    ):
+        wire_sample = wire_sample.model_copy(update={"reward": None})
+    return RolloutResultResponse(
+        rollout_id=rollout_id,
+        status=result.status,
+        sample=wire_sample,
+        err_message=result.err_message,
+        err_category=result.err_category,
+    )
+
+
+def _terminal_result(outcome: ExecutionOutcome) -> ExecutionResult:
+    if (
+        outcome.grader is not None
+        and outcome.grader.status is not RolloutStatus.SUCCESS
+    ):
+        return outcome.grader
+    if outcome.workflow.status is not RolloutStatus.SUCCESS:
+        return outcome.workflow
+    return outcome.result
+
+
+__all__ = [
+    "DEFAULT_POLLING_LEASE_TIMEOUT_SEC",
+    "DEFAULT_RESULT_RETENTION_SEC",
+    "DEFAULT_RESULT_WAIT_TIMEOUT_SEC",
+    "POLLING_LEASE_HEADER",
+    "create_rollout_server",
+]
