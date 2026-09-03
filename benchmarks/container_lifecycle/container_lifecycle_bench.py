@@ -1,8 +1,7 @@
 """Benchmark the Harbor rollout backend end to end on local Docker.
 
-Starts a stub OpenAI endpoint, a controller that receives the protocol
-callbacks, and a real rollout server, then drives concurrent rollouts through
-the full container pipeline for several consecutive runs.
+Starts a stub OpenAI endpoint and a real rollout server, then drives concurrent
+rollouts through the full container pipeline for several consecutive runs.
 
 Usage:
     uv run benchmarks/container_lifecycle/container_lifecycle_bench.py \\
@@ -39,6 +38,7 @@ from fastapi import FastAPI, Request
 from harbor.trial.queue import TrialQueue
 
 from osmosis_ai.rollout.backend.harbor import HarborBackend
+from osmosis_ai.rollout.client import RolloutClient
 from osmosis_ai.rollout.server import create_rollout_server
 
 HARNESS_DIR = Path(__file__).resolve().parent / "bench_harness"
@@ -79,55 +79,28 @@ def stub_llm(latency: float) -> FastAPI:
     return app
 
 
-class Controller:
-    """The protocol's controller half: submits rollouts, receives callbacks."""
-
-    def __init__(self, port: int, rollout_url: str, stub_url: str):
-        self.port = port
-        self.rollout_url = rollout_url
-        self.stub_url = stub_url
-        self.outcomes: dict[str, asyncio.Future[str]] = {}
-        self.app = FastAPI()
-
-        @self.app.post("/rollout/{rollout_id}/completed")
-        async def completed(rollout_id: str, request: Request) -> dict:
-            return {"status": "ok"}
-
-        @self.app.post("/grader/{rollout_id}/completed")
-        async def graded(rollout_id: str, request: Request) -> dict:
-            body = await request.json()
-            future = self.outcomes.get(rollout_id)
-            if future and not future.done():
-                future.set_result(body.get("status", "unknown"))
-            return {"status": "ok"}
-
-    async def submit(
-        self, client: httpx.AsyncClient, rollout_id: str, timeout: float
-    ) -> tuple[str, float]:
-        """Run one rollout; return its outcome status and wall time."""
-        self.outcomes[rollout_id] = asyncio.get_running_loop().create_future()
-        base = f"http://127.0.0.1:{self.port}"
-        start = time.monotonic()
-        response = await client.post(
-            f"{self.rollout_url}/rollout",
-            json={
-                "rollout_id": rollout_id,
-                "initial_messages": [{"role": "user", "content": "bench"}],
-                "label": "bench",
-                "chat_completions_url": f"{self.stub_url}/v1",
-                "completion_callback_url": f"{base}/rollout/{rollout_id}/completed",
-                "grader_callback_url": f"{base}/grader/{rollout_id}/completed",
-                "controller_api_key": "bench",
-                "agent_timeout_sec": timeout,
-                "grader_timeout_sec": timeout,
-            },
-        )
-        response.raise_for_status()
-        try:
-            status = await asyncio.wait_for(self.outcomes[rollout_id], timeout)
-        except TimeoutError:
-            status = "timeout"
-        return status, time.monotonic() - start
+async def run_rollout(
+    client: RolloutClient,
+    rollout_id: str,
+    chat_completions_url: str,
+    timeout: float,
+) -> tuple[str, float]:
+    start = time.monotonic()
+    try:
+        async with asyncio.timeout(timeout * 2):
+            future = await client.request_rollout_async(
+                initial_messages=[{"role": "user", "content": "bench"}],
+                chat_completions_url=chat_completions_url,
+                rollout_id=rollout_id,
+                label="bench",
+                agent_timeout_sec=timeout,
+                grader_timeout_sec=timeout,
+            )
+            result = await future
+            status = str(result.status)
+    except TimeoutError:
+        status = "timeout"
+    return status, time.monotonic() - start
 
 
 async def serve(app: FastAPI, port: int) -> tuple[uvicorn.Server, asyncio.Task]:
@@ -180,14 +153,8 @@ async def run_series(
     )
     setup = time.monotonic() - setup_start
 
-    controller_port, rollout_port = free_port(), free_port()
-    controller = Controller(
-        controller_port,
-        rollout_url=f"http://127.0.0.1:{rollout_port}",
-        stub_url=stub_url,
-    )
+    rollout_port = free_port()
     servers = [
-        await serve(controller.app, controller_port),
         await serve(create_rollout_server(backend=backend), rollout_port),
     ]
 
@@ -198,13 +165,20 @@ async def run_series(
     # and trial dirs, so two overlapping bench runs must never share them.
     nonce = uuid.uuid4().hex[:6]
     try:
-        async with httpx.AsyncClient(timeout=30) as client:
+        async with httpx.AsyncClient(timeout=30) as http_client:
+            client = RolloutClient(
+                url=f"http://127.0.0.1:{rollout_port}",
+                http_client=http_client,
+            )
             for run in range(1, runs + 1):
                 start = time.monotonic()
                 outcomes = await asyncio.gather(
                     *(
-                        controller.submit(
-                            client, f"bench-{nonce}-run{run}-{i}", timeout
+                        run_rollout(
+                            client,
+                            f"bench-{nonce}-run{run}-{i}",
+                            f"{stub_url}/v1",
+                            timeout,
                         )
                         for i in range(concurrency)
                     )
