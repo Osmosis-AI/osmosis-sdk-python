@@ -230,7 +230,7 @@ async def _handle_rollout(
     rollout_id = request.rollout_id
     rollout_ctx = RolloutContext(
         chat_completions_url=request.chat_completions_url,
-        api_key=request.chat_completions_api_key,
+        api_key=request.llm_api_key,
         rollout_id=rollout_id,
     )
     outcome: ExecutionOutcome | None = None
