@@ -24,9 +24,6 @@ from osmosis_ai.rollout.types import (
     RolloutStatus,
 )
 
-LEASE = "test-lease"
-HEADERS = {POLLING_LEASE_HEADER: LEASE}
-
 
 @pytest.fixture(autouse=True)
 def no_archive(monkeypatch):
@@ -93,15 +90,14 @@ def init_body() -> dict[str, Any]:
     }
 
 
-def test_admission_requires_a_polling_lease() -> None:
-    client = TestClient(create_rollout_server(backend=StubBackend()))
-    assert client.post("/rollout", json=init_body()).status_code == 422
+def lease_headers(response: Any) -> dict[str, str]:
+    return {POLLING_LEASE_HEADER: response.json()["polling_lease_token"]}
 
 
 def test_full_backend_rejects_with_429() -> None:
     backend = StubBackend(capacity=False)
     client = TestClient(create_rollout_server(backend=backend))
-    response = client.post("/rollout", json=init_body(), headers=HEADERS)
+    response = client.post("/rollout", json=init_body())
     assert response.status_code == 429
     assert response.headers["Retry-After"] == "5"
     assert backend.executed is False
@@ -110,9 +106,11 @@ def test_full_backend_rejects_with_429() -> None:
 def test_admission_reports_server_poll_configuration() -> None:
     backend = StubBackend()
     with TestClient(create_rollout_server(backend=backend)) as client:
-        response = client.post("/rollout", json=init_body(), headers=HEADERS)
+        response = client.post("/rollout", json=init_body())
     assert response.status_code == 202
-    assert response.json() == {
+    body = response.json()
+    assert isinstance(body.pop("polling_lease_token"), str)
+    assert body == {
         "rollout_id": "r1",
         "status": "queued",
         "result_wait_timeout_sec": 30.0,
@@ -123,18 +121,23 @@ def test_admission_reports_server_poll_configuration() -> None:
 
 def test_result_returns_finished_outcome() -> None:
     with TestClient(create_rollout_server(backend=StubBackend())) as client:
-        assert (
-            client.post("/rollout", json=init_body(), headers=HEADERS).status_code
-            == 202
-        )
-        response = client.get("/rollout/r1/result", headers=HEADERS)
+        admission = client.post("/rollout", json=init_body())
+        assert admission.status_code == 202
+        response = client.get("/rollout/r1/result", headers=lease_headers(admission))
     assert response.status_code == 200
     assert response.json()["status"] == "success"
 
 
+def test_result_requires_a_polling_lease() -> None:
+    with TestClient(create_rollout_server(backend=StubBackend())) as client:
+        client.post("/rollout", json=init_body())
+        response = client.get("/rollout/r1/result")
+    assert response.status_code == 422
+
+
 def test_result_rejects_an_invalid_lease() -> None:
     with TestClient(create_rollout_server(backend=StubBackend())) as client:
-        client.post("/rollout", json=init_body(), headers=HEADERS)
+        client.post("/rollout", json=init_body())
         response = client.get(
             "/rollout/r1/result",
             headers={POLLING_LEASE_HEADER: "wrong"},
@@ -144,17 +147,17 @@ def test_result_rejects_an_invalid_lease() -> None:
 
 def test_result_returns_404_for_unknown_rollout() -> None:
     client = TestClient(create_rollout_server(backend=StubBackend()))
-    response = client.get("/rollout/missing/result", headers=HEADERS)
+    response = client.get(
+        "/rollout/missing/result",
+        headers={POLLING_LEASE_HEADER: "unknown-lease"},
+    )
     assert response.status_code == 404
 
 
 def test_duplicate_rollout_id_is_rejected() -> None:
     with TestClient(create_rollout_server(backend=BlockingBackend())) as client:
-        assert (
-            client.post("/rollout", json=init_body(), headers=HEADERS).status_code
-            == 202
-        )
-        duplicate = client.post("/rollout", json=init_body(), headers=HEADERS)
+        assert client.post("/rollout", json=init_body()).status_code == 202
+        duplicate = client.post("/rollout", json=init_body())
     assert duplicate.status_code == 409
 
 
@@ -169,9 +172,11 @@ async def test_result_wait_uses_server_configuration() -> None:
         async with httpx.AsyncClient(
             transport=ASGITransport(app=app), base_url="http://rollout"
         ) as client:
-            await client.post("/rollout", json=init_body(), headers=HEADERS)
+            admission = await client.post("/rollout", json=init_body())
             started = time.monotonic()
-            response = await client.get("/rollout/r1/result", headers=HEADERS)
+            response = await client.get(
+                "/rollout/r1/result", headers=lease_headers(admission)
+            )
             elapsed = time.monotonic() - started
     assert response.json()["status"] == "running"
     assert elapsed >= 0.015
@@ -188,10 +193,12 @@ async def test_expired_lease_fails_and_cancels_the_rollout() -> None:
         async with httpx.AsyncClient(
             transport=ASGITransport(app=app), base_url="http://rollout"
         ) as client:
-            await client.post("/rollout", json=init_body(), headers=HEADERS)
+            admission = await client.post("/rollout", json=init_body())
             await backend.started.wait()
             await asyncio.wait_for(backend.cancelled.wait(), timeout=1.0)
-            response = await client.get("/rollout/r1/result", headers=HEADERS)
+            response = await client.get(
+                "/rollout/r1/result", headers=lease_headers(admission)
+            )
     assert response.json()["status"] == "failure"
     assert response.json()["err_category"] == "lease_expired"
     assert backend.cancel_args == (["r1"], None, False)
@@ -229,7 +236,6 @@ async def post_rollout_with_failing_send(app: Any, body: dict) -> None:
         "headers": [
             (b"content-type", b"application/json"),
             (b"content-length", str(len(payload)).encode()),
-            (POLLING_LEASE_HEADER.lower().encode(), LEASE.encode()),
         ],
         "client": ("127.0.0.1", 1234),
         "server": ("127.0.0.1", 80),
@@ -287,7 +293,7 @@ async def test_lifespan_drains_before_caller_lifespan_closes() -> None:
         transport=ASGITransport(app=app), base_url="http://rollout"
     ) as client:
         async with app.router.lifespan_context(app):
-            await client.post("/rollout", json=init_body(), headers=HEADERS)
+            await client.post("/rollout", json=init_body())
             await asyncio.sleep(0)
     assert events == ["rollout-finished", "lifespan-closed"]
 
@@ -301,7 +307,7 @@ async def test_lifespan_cancels_work_past_drain_limit(monkeypatch) -> None:
         transport=ASGITransport(app=app), base_url="http://rollout"
     ) as client:
         async with app.router.lifespan_context(app):
-            await client.post("/rollout", json=init_body(), headers=HEADERS)
+            await client.post("/rollout", json=init_body())
             await asyncio.sleep(0)
     assert events == ["rollout-cancelled"]
 

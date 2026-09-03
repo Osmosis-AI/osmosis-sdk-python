@@ -50,9 +50,9 @@ def test_invalid_registry_timeouts_are_rejected(
 async def test_wait_returns_finished_result_early() -> None:
     cancelled: list[str] = []
     store = registry(cancelled)
-    await store.register("r1", "lease")
+    lease = await store.register("r1")
     waiter = asyncio.create_task(
-        store.wait_for_result("r1", "lease", lambda: RolloutStatus.RUNNING)
+        store.wait_for_result("r1", lease, lambda: RolloutStatus.RUNNING)
     )
     await asyncio.sleep(0)
     expected = RolloutResultResponse(rollout_id="r1", status=RolloutStatus.SUCCESS)
@@ -63,13 +63,13 @@ async def test_wait_returns_finished_result_early() -> None:
 
 async def test_wait_timeout_does_not_cancel_shared_future() -> None:
     store = registry([])
-    await store.register("r1", "lease")
-    pending = await store.wait_for_result("r1", "lease", lambda: RolloutStatus.GRADING)
+    lease = await store.register("r1")
+    pending = await store.wait_for_result("r1", lease, lambda: RolloutStatus.GRADING)
     assert pending.status is RolloutStatus.GRADING
     expected = RolloutResultResponse(rollout_id="r1", status=RolloutStatus.SUCCESS)
     await store.complete("r1", expected)
     assert (
-        await store.wait_for_result("r1", "lease", lambda: RolloutStatus.RUNNING)
+        await store.wait_for_result("r1", lease, lambda: RolloutStatus.RUNNING)
         == expected
     )
     await store.close()
@@ -78,11 +78,11 @@ async def test_wait_timeout_does_not_cancel_shared_future() -> None:
 async def test_poll_renews_the_lease() -> None:
     cancelled: list[str] = []
     store = registry(cancelled, wait=0.005, lease=0.04)
-    await store.register("r1", "lease")
+    lease_token = await store.register("r1")
     for _ in range(3):
         await asyncio.sleep(0.02)
         result = await store.wait_for_result(
-            "r1", "lease", lambda: RolloutStatus.RUNNING
+            "r1", lease_token, lambda: RolloutStatus.RUNNING
         )
         assert result.status is RolloutStatus.RUNNING
     assert cancelled == []
@@ -92,9 +92,9 @@ async def test_poll_renews_the_lease() -> None:
 async def test_expiry_publishes_failure_and_cancels() -> None:
     cancelled: list[str] = []
     store = registry(cancelled, lease=0.02)
-    await store.register("r1", "lease")
+    lease = await store.register("r1")
     await asyncio.sleep(0.04)
-    result = await store.wait_for_result("r1", "lease", lambda: RolloutStatus.RUNNING)
+    result = await store.wait_for_result("r1", lease, lambda: RolloutStatus.RUNNING)
     assert result.status is RolloutStatus.FAILURE
     assert result.err_category == "lease_expired"
     assert cancelled == ["r1"]
@@ -105,9 +105,9 @@ async def test_unknown_invalid_and_duplicate_are_distinct() -> None:
     store = registry([])
     with pytest.raises(UnknownRolloutError):
         await store.wait_for_result("missing", "lease", lambda: RolloutStatus.RUNNING)
-    await store.register("r1", "lease")
+    await store.register("r1")
     with pytest.raises(InvalidLeaseError):
         await store.wait_for_result("r1", "wrong", lambda: RolloutStatus.RUNNING)
     with pytest.raises(DuplicateRolloutError):
-        await store.register("r1", "lease")
+        await store.register("r1")
     await store.close()
