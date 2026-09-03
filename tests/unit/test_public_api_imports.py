@@ -38,20 +38,19 @@ def test_rollout_root_exports_only_framework_neutral_core() -> None:
             "BaseConfig",
             "ConcurrencyConfig",
             "ExecutionBackend",
+            "ExecutionOutcome",
             "ExecutionRequest",
             "ExecutionResult",
             "Grader",
-            "GraderCompleteRequest",
             "GraderConfig",
             "GraderContext",
-            "GraderStatus",
             "LocalBackend",
             "MessageDict",
-            "RolloutCompleteRequest",
             "RolloutContext",
             "RolloutErrorCategory",
             "RolloutInitRequest",
             "RolloutInitResponse",
+            "RolloutResultResponse",
             "RolloutSample",
             "RolloutStatus",
             "SampleSource",
@@ -181,8 +180,7 @@ def test_facades_resolve_each_symbol_from_its_leaf_module() -> None:
         assert "osmosis_ai.eval.rubric.engine" not in sys.modules
 
         assert "osmosis_ai.rollout.server.app" not in sys.modules
-        assert server.ControllerAuth.__module__ == "osmosis_ai.rollout.server.auth"
-        assert "osmosis_ai.rollout.server.app" not in sys.modules
+        assert server.create_rollout_server.__module__ == "osmosis_ai.rollout.server.app"
         """
     )
     assert result.returncode == 0, result.stderr

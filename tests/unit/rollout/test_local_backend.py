@@ -1,7 +1,6 @@
 """Tests for osmosis_ai.rollout.backend.local.backend."""
 
 from typing import Any
-from unittest.mock import AsyncMock
 
 import pytest
 from pydantic import ValidationError
@@ -143,7 +142,7 @@ class TestLocalBackend:
         request = ExecutionRequest(
             id="r1", prompt=[{"role": "user", "content": "hi"}], label="x"
         )
-        await backend.execute(request, AsyncMock(), AsyncMock())
+        await backend.execute(request)
 
         root = tmp_path / ".osmosis"
         artifacts_dir = root / "r1" / "artifacts"
@@ -182,23 +181,18 @@ class TestLocalBackend:
         request = ExecutionRequest(
             id="r1", prompt=[{"role": "user", "content": "hi"}], label="x"
         )
-        on_complete = AsyncMock()
-        await backend.execute(request, on_complete, AsyncMock())
+        outcome = await backend.execute(request)
 
         # mkdir failure degrades to "artifacts unavailable"; rollout still succeeds.
-        on_complete.assert_awaited_once()
-        assert on_complete.call_args[0][0].status == RolloutStatus.SUCCESS
+        assert outcome.workflow.status == RolloutStatus.SUCCESS
 
-    async def test_execute_success_calls_callback(self):
+    async def test_execute_returns_success(self):
         backend = self._make_backend()
-        on_complete = AsyncMock()
 
         request = ExecutionRequest(id="r1", prompt=[{"role": "user", "content": "hi"}])
-        await backend.execute(request, on_workflow_complete=on_complete)
+        outcome = await backend.execute(request)
 
-        on_complete.assert_awaited_once()
-        result = on_complete.call_args[0][0]
-        assert result.status == RolloutStatus.SUCCESS
+        assert outcome.workflow.status == RolloutStatus.SUCCESS
 
     async def test_explicit_output_is_primary_sample_source(self):
         class ReturningWorkflow(AgentWorkflow):
@@ -279,18 +273,15 @@ class TestLocalBackend:
         assert result.err_message is not None
         assert "finite" in result.err_message
 
-    async def test_execute_failure_calls_callback_with_error(self):
+    async def test_execute_returns_failure_with_error(self):
         backend = LocalBackend(
             workflow=FailingWorkflow,
             workflow_config=AgentWorkflowConfig(name="test"),
         )
-        on_complete = AsyncMock()
-
         request = ExecutionRequest(id="r1", prompt=[{"role": "user", "content": "hi"}])
-        await backend.execute(request, on_workflow_complete=on_complete)
+        outcome = await backend.execute(request)
 
-        on_complete.assert_awaited_once()
-        result = on_complete.call_args[0][0]
+        result = outcome.workflow
         assert result.status == RolloutStatus.FAILURE
         assert "workflow error" in result.err_message
         assert result.err_category == RolloutErrorCategory.VALIDATION_ERROR
@@ -321,24 +312,16 @@ class TestLocalBackend:
             grader=CapturingGrader,
             grader_config=GraderConfig(name="test-grader"),
         )
-        on_complete = AsyncMock()
-        on_grader = AsyncMock()
-
         request = ExecutionRequest(
             id="r1",
             prompt=[{"role": "user", "content": "hi"}],
             label="test-label",
             metadata={"input_only": True},
         )
-        await backend.execute(
-            request,
-            on_workflow_complete=on_complete,
-            on_grader_complete=on_grader,
-        )
+        outcome = await backend.execute(request)
 
-        on_complete.assert_awaited_once()
-        on_grader.assert_awaited_once()
-        grader_result = on_grader.call_args[0][0]
+        assert outcome.grader is not None
+        grader_result = outcome.grader
         assert grader_result.status == RolloutStatus.SUCCESS
         assert grader_result.sample is not None
         assert grader_result.sample.reward == 1.0
@@ -349,27 +332,20 @@ class TestLocalBackend:
             "metadata": {"input_only": True},
         }
 
-    async def test_grader_callback_reports_failure_without_label(self):
+    async def test_grader_result_reports_failure_without_label(self):
         backend = LocalBackend(
             workflow=StubWorkflow,
             workflow_config=AgentWorkflowConfig(name="test"),
             grader=StubGrader,
         )
-        on_complete = AsyncMock()
-        on_grader = AsyncMock()
-
         request = ExecutionRequest(
             id="r1",
             prompt=[{"role": "user", "content": "hi"}],
             label=None,  # no label → grader should be skipped
         )
-        await backend.execute(
-            request,
-            on_workflow_complete=on_complete,
-            on_grader_complete=on_grader,
-        )
-        on_grader.assert_awaited_once()
-        grader_result = on_grader.call_args[0][0]
+        outcome = await backend.execute(request)
+        assert outcome.grader is not None
+        grader_result = outcome.grader
         assert grader_result.status == RolloutStatus.FAILURE
 
     async def test_grader_runs_with_metadata_only(self):
@@ -380,23 +356,16 @@ class TestLocalBackend:
             grader=StubGrader,
             grader_config=GraderConfig(name="test-grader"),
         )
-        on_complete = AsyncMock()
-        on_grader = AsyncMock()
-
         request = ExecutionRequest(
             id="r1",
             prompt=[{"role": "user", "content": "hi"}],
             label=None,
             metadata={"tools": ["search"]},
         )
-        await backend.execute(
-            request,
-            on_workflow_complete=on_complete,
-            on_grader_complete=on_grader,
-        )
+        outcome = await backend.execute(request)
 
-        on_grader.assert_awaited_once()
-        grader_result = on_grader.call_args[0][0]
+        assert outcome.grader is not None
+        grader_result = outcome.grader
         assert grader_result.status == RolloutStatus.SUCCESS
         assert grader_result.sample is not None
         assert grader_result.sample.reward == 1.0
@@ -409,23 +378,16 @@ class TestLocalBackend:
             grader=StubGrader,
             grader_config=GraderConfig(name="test-grader"),
         )
-        on_complete = AsyncMock()
-        on_grader = AsyncMock()
-
         request = ExecutionRequest(
             id="r1",
             prompt=[{"role": "user", "content": "hi"}],
             label="test-label",
             metadata=None,
         )
-        await backend.execute(
-            request,
-            on_workflow_complete=on_complete,
-            on_grader_complete=on_grader,
-        )
+        outcome = await backend.execute(request)
 
-        on_grader.assert_awaited_once()
-        grader_result = on_grader.call_args[0][0]
+        assert outcome.grader is not None
+        grader_result = outcome.grader
         assert grader_result.status == RolloutStatus.SUCCESS
 
     async def test_metadata_reaches_both_contexts(self):
@@ -455,19 +417,12 @@ class TestLocalBackend:
             grader=CapturingGrader,
             grader_config=GraderConfig(name="test-grader"),
         )
-        on_complete = AsyncMock()
-        on_grader = AsyncMock()
-
         request = ExecutionRequest(
             id="r1",
             prompt=[{"role": "user", "content": "hi"}],
             metadata=metadata,
         )
-        await backend.execute(
-            request,
-            on_workflow_complete=on_complete,
-            on_grader_complete=on_grader,
-        )
+        await backend.execute(request)
 
         assert captured["workflow_metadata"] == metadata
         assert captured["grader_metadata"] == metadata
@@ -479,22 +434,15 @@ class TestLocalBackend:
             grader=FailingGrader,
             grader_config=GraderConfig(name="test-grader"),
         )
-        on_complete = AsyncMock()
-        on_grader = AsyncMock()
-
         request = ExecutionRequest(
             id="r1",
             prompt=[{"role": "user", "content": "hi"}],
             label="test-label",
         )
-        await backend.execute(
-            request,
-            on_workflow_complete=on_complete,
-            on_grader_complete=on_grader,
-        )
+        outcome = await backend.execute(request)
 
-        on_grader.assert_awaited_once()
-        grader_result = on_grader.call_args[0][0]
+        assert outcome.grader is not None
+        grader_result = outcome.grader
         assert grader_result.status == RolloutStatus.FAILURE
         assert "grading failed" in grader_result.err_message
 
@@ -516,14 +464,12 @@ class TestLocalBackend:
             workflow=CapturingWorkflow,
             workflow_config=AgentWorkflowConfig(name="passthrough"),
         )
-        on_complete = AsyncMock()
-
         original_prompt = [
             {"role": "system", "content": "you are helpful"},
             {"role": "user", "content": "hi"},
         ]
         request = ExecutionRequest(id="r1", prompt=original_prompt)
-        await backend.execute(request, on_workflow_complete=on_complete)
+        await backend.execute(request)
 
         # Byte-for-byte identical: no content-block conversion, no copy-and-mutate.
         assert captured["prompt"] == original_prompt
@@ -578,24 +524,18 @@ class TestDeadlines:
         # but keeps running — that limitation is inherent to asyncio.timeout.
         assert HangingWorkflow.cancelled
 
-    async def test_workflow_deadline_reports_through_the_callback(self):
+    async def test_workflow_deadline_returns_failure(self):
         backend = LocalBackend(
             workflow=HangingWorkflow,
             workflow_config=AgentWorkflowConfig(name="test"),
         )
-        on_complete = AsyncMock()
         request = ExecutionRequest(
             id="r1", prompt=[{"role": "user", "content": "hi"}], agent_timeout_sec=0.05
         )
 
-        await backend.execute(request, on_workflow_complete=on_complete)
+        outcome = await backend.execute(request)
 
-        # A deadline is a terminal result, not an exception the server has to
-        # rescue: the callback still fires and the slot is released.
-        on_complete.assert_awaited_once()
-        assert on_complete.await_args.args[0].err_category == (
-            RolloutErrorCategory.TIMEOUT
-        )
+        assert outcome.workflow.err_category == RolloutErrorCategory.TIMEOUT
         assert backend.limiter.snapshot()["running"] == 0
 
     async def test_grader_deadline_is_independent_of_the_agent_deadline(self):
@@ -740,16 +680,15 @@ class TestDeadlines:
         hog = asyncio.create_task(hog_the_only_slot())
         await asyncio.sleep(0.05)  # ensure the hog holds the slot first
 
-        on_complete = AsyncMock()
         request = ExecutionRequest(
             id="r1", prompt=[{"role": "user", "content": "hi"}], agent_timeout_sec=0.1
         )
-        await backend.execute(request, on_workflow_complete=on_complete)
+        outcome = await backend.execute(request)
         await hog
 
         # The controller's clock covered the ~0.2s queue wait, which exceeded
         # the whole 0.1s budget; reporting success after it would be a lie.
-        result = on_complete.await_args.args[0]
+        result = outcome.workflow
         assert result.status == RolloutStatus.FAILURE
         assert result.err_category == RolloutErrorCategory.TIMEOUT
         assert "queued" in (result.err_message or "")
