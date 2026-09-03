@@ -17,16 +17,17 @@ A rollout has two halves you provide: an `AgentWorkflow` (the agent loop) and a 
 | `AgentWorkflowOutput` | [types/output.py](../osmosis_ai/rollout/types/output.py) | Single-sample workflow return model |
 | `RolloutSample`, `RolloutStatus`, `RolloutErrorCategory` | [types/sample.py](../osmosis_ai/rollout/types/sample.py) | Sample + status types |
 | `ExecutionBackend`, `LocalBackend` | [backend/](../osmosis_ai/rollout/backend/) | Execution backends |
+| `RolloutClient` | [client/](../osmosis_ai/rollout/client/) | Admission and long-poll result client |
 
 Optional features use these canonical modules:
 
 | Extra | Import | Purpose |
 |-------|--------|---------|
-| `server` | `from osmosis_ai.rollout.server import create_rollout_server, ControllerAuth` | Generic FastAPI rollout server |
+| `server` | `from osmosis_ai.rollout.server import create_rollout_server` | Generic FastAPI rollout server |
 | `harbor` | `from osmosis_ai.rollout.backend.harbor import HarborBackend, TaskMode` | Harbor execution backend |
 | `strands` | `from osmosis_ai.rollout.integrations.agents.strands import OsmosisStrandsAgent, OsmosisRolloutModel` | Strands integration |
 | `openai-agents` | `from osmosis_ai.rollout.integrations.agents.openai_agents import OsmosisAgent` | OpenAI Agents integration |
-| `eval` | `from osmosis_ai.rollout.controller import CallbackListener` | Localhost callback listener + in-process LiteLLM bridge. Install with `pip install "osmosis-ai[eval]"` (includes `[server]` and LiteLLM). `CallbackStore` and `HttpRolloutDriver` ship in the base install, but a local eval run needs the listener to receive callbacks and the bridge to serve model calls. |
+| `eval` | `from osmosis_ai.eval.local import LlmBridgeListener` | Localhost in-process LiteLLM bridge. Install with `pip install "osmosis-ai[eval]"` (includes `[server]` and LiteLLM). `RolloutClient` ships in the base install. |
 
 The `Messages` return type is available from `osmosis_ai.rollout.types`.
 
@@ -63,7 +64,7 @@ class Grader(ABC):
 
 - `ctx.sample` is the single `RolloutSample` produced by the workflow; it is `None` when an explicit output contains no sample or when a `None` return has no registered ambient source.
 - Attach its scalar reward with `ctx.set_reward(reward)`; this raises `ValueError` when `ctx.sample` is `None` ([context.py](../osmosis_ai/rollout/context.py)).
-- The reward must be a finite number. `NaN`, infinity, and non-numeric values raise `pydantic.ValidationError`, because a reward that cannot be encoded as JSON reaches the controller as no reward at all. Leaving it unset (`None`) still means "not graded".
+- The reward must be a finite number. `NaN`, infinity, and non-numeric values raise `pydantic.ValidationError`, because a result containing one cannot be encoded as JSON. Leaving it unset (`None`) still means "not graded".
 - `ctx.label` carries the dataset row's label (the ground-truth string).
 - `ctx.metadata` is the read-only input-side dataset row metadata.
 
@@ -131,45 +132,18 @@ Layout per rollout, keyed by `rollout_id` (callers that need position semantics 
 └── artifacts/...            # file artifacts (see above)
 ```
 
-Each document carries a normalized, controller-compatible transcript as ATIF steps (tool calls fold into agent-step observations) and namespaces platform context under `extra.osmosis`: `rollout_id`, `label`, `reward`, sample `metrics`/`extra_fields`, and the request's `metadata`/`extra_fields` (the natural channel for run identity such as an eval run id).
+Each document carries a normalized transcript as ATIF steps (tool calls fold into agent-step observations) and namespaces platform context under `extra.osmosis`: `rollout_id`, `label`, `reward`, sample `metrics`/`extra_fields`, and the request's `metadata`/`extra_fields` (the natural channel for run identity such as an eval run id).
 
-Non-finite values in a sample's `metrics`/`extra_fields` are **dropped** from the grader callback rather than failing it: they cannot be encoded as JSON, and losing one telemetry value beats losing the reward with it. This is deliberately the opposite of `AgentWorkflowOutput.metrics` above, which *rejects* them — an output is authored by the workflow and can be fixed, whereas a callback payload is the last chance to deliver a reward that was already earned. `messages` content is not scanned; keep numeric telemetry in `metrics`.
+Non-finite values in a sample's `metrics`/`extra_fields` are **dropped** from the result rather than failing it: they cannot be encoded as JSON, and losing one telemetry value is preferable to losing the reward. This is deliberately the opposite of `AgentWorkflowOutput.metrics` above, which *rejects* them because workflow-authored output can be fixed. `messages` content is not scanned; keep numeric telemetry in `metrics`.
 
-Built-in sample sources keep their framework-native `RolloutSample.messages` for graders and callbacks and prepare a separate `trajectory_messages` copy through the framework converter used for OpenAI-compatible `/chat/completions` traffic. `trajectory_messages` is SDK-internal: it crosses backend boundaries for persistence but is omitted from grader callbacks. This is not an exact wire replay because call-specific conversion arguments and separately supplied system instructions are not retained. Framework-native items omitted by the framework converter are outside the persisted transcript contract. Custom sample sources whose native history is already OpenAI chat-completions-shaped get the same behavior by default. A source with another native shape sets `RolloutSample.trajectory_messages` itself from `get_sample` (an explicit `None` marks conversion as unavailable and skips trajectory persistence for that sample). Like artifacts, conversion and saving are best-effort: failures are logged and never affect rewards, callbacks, or rollout status.
+Built-in sample sources keep their framework-native `RolloutSample.messages` for graders and prepare a separate `trajectory_messages` copy through the framework converter used for OpenAI-compatible `/chat/completions` traffic. `trajectory_messages` is SDK-internal and crosses backend boundaries for persistence. This is not an exact wire replay because call-specific conversion arguments and separately supplied system instructions are not retained. Framework-native items omitted by the framework converter are outside the persisted transcript contract. Custom sample sources whose native history is already OpenAI chat-completions-shaped get the same behavior by default. A source with another native shape sets `RolloutSample.trajectory_messages` itself from `get_sample` (an explicit `None` marks conversion as unavailable and skips trajectory persistence for that sample). Like artifacts, conversion and saving are best-effort: failures are logged and never affect rewards or rollout status.
 
 ### Per-call metrics (model, tokens, cost, logprobs)
 
-ATIF has first-class slots for LLM operational data (`Step.metrics`, `Step.model_name`, `final_metrics`), but agent frameworks drop response metadata (usage, model, logprobs) when they append to the conversation. Neither the native `messages` nor the normalized `trajectory_messages` can recover that data. Two opt-in channels feed those slots; both are best-effort and change nothing when unused:
+ATIF has first-class slots for LLM operational data (`Step.metrics`, `Step.model_name`, `final_metrics`), but agent frameworks may drop response metadata when they append to the conversation. The trajectory package retains two optional ways to provide it:
 
-1. **Controller report (callback ack)** — the controller may attach a `trajectory` object to the JSON body of its completion/grader callback response ([report.py](../osmosis_ai/rollout/trajectory/report.py) defines the shape). Its LLM bridge serves every completion, so it is the party that has per-call usage.
-   - **When to report**: snapshot the agent-phase calls into the **completion** ack, before resolving any internal future that triggers controller-side cleanup. Omit `trajectory` from the grader ack — an ack without a report keeps the earlier one, and grader-phase LLM calls (an LLM judge) would skew call counts and totals. A grader ack that does carry a report replaces the completion one entirely (no merge).
-   - **Attribution**: `llm_call_metrics` map onto agent steps in dispatch order only when the counts match exactly; on a mismatch they are preserved under `extra.osmosis.unmatched_llm_call_metrics` instead of being mis-attributed, and totals still aggregate into `final_metrics`. The SDK always fills `final_metrics.total_steps` from the emitted ATIF steps.
-   - **Sample keys**: the SDK no longer has sample ids. For a single-sample rollout, one `samples` entry is accepted regardless of its key. Multiple entries cannot be attributed; they are logged and preserved under `extra.osmosis.unmatched_sample_reports`.
-
-```jsonc
-// response body of POST <completion_callback_url> or <grader_callback_url>
-{
-  "status": "ok",
-  "trajectory": {
-    "model_name": "openai/gpt-5-mini",
-    "samples": {
-      "<arbitrary-key>": {
-        "llm_call_metrics": [
-          {"prompt_tokens": 120, "completion_tokens": 40, "cached_tokens": 0,
-           "cost_usd": 0.0003, "logprobs": [-0.1], "model_name": "...",
-           // exact engine tokenization (TITO); field names mirror ATIF Metrics
-           "prompt_token_ids": [101, 102], "completion_token_ids": [103]}
-        ],
-        "final_metrics": {"total_prompt_tokens": 120}   // optional token/cost overrides; total_steps is SDK-owned
-      }
-    }
-  }
-}
-```
-
-   The server reads only the `trajectory` key off the ack body; the surrounding ack fields — `status`, `ok`, or anything else the controller returns — are accepted and ignored.
-
-2. **Inline message metadata** — custom workflows that manage their own message list can copy `response.usage` / `response.model` onto the assistant message (top-level `usage`/`model` keys, or a compatible `extra.response` shape). Both chat-completions (`prompt_tokens`) and Responses API (`input_tokens`) field names are accepted, and `created_at`/`timestamp` fields become `Step.timestamp`. The controller report overrides inline metadata when both are present.
+1. **Trajectory reports** — callers with externally collected metrics can construct the `TrajectoryReport`, `SampleReport`, and `LlmCallMetrics` models from [report.py](../osmosis_ai/rollout/trajectory/report.py). Pass a `TrajectoryReport` to `save_trajectory`, or a `SampleReport` directly to `convert_sample_to_trajectory`. Per-call metrics map onto agent steps in dispatch order only when the counts match exactly; unmatched data is preserved under `extra.osmosis` instead of being guessed. The long-poll protocol does not currently transport these reports.
+2. **Inline message metadata** — custom workflows that manage their own message list can copy `response.usage` / `response.model` onto the assistant message using top-level `usage`/`model` keys or a compatible `extra.response` shape. Both chat-completions (`prompt_tokens`) and Responses API (`input_tokens`) field names are accepted, and `created_at`/`timestamp` fields become `Step.timestamp`. An explicit trajectory report overrides inline metadata when both are present.
 
 ## Configs
 
@@ -190,6 +164,40 @@ class AgentWorkflowConfig(BaseConfig):  # also GraderConfig
 - `name` becomes the resolved agent name.
 - `concurrency.max_concurrent` caps in-flight executions — raise/lower it to avoid saturating an MCP-based rollout server (see [troubleshooting.md](./troubleshooting.md)).
 
+## Client
+
+`RolloutClient` takes only server connection settings. The chat completions URL, `llm_api_key`, grading choice, metadata, and phase timeouts belong to each rollout request:
+
+```python
+import httpx
+
+from osmosis_ai.rollout.client import RolloutClient
+
+async with httpx.AsyncClient() as http_client:
+    client = RolloutClient(url="http://127.0.0.1:8000", http_client=http_client)
+    result = await client.request_rollout(
+        initial_messages=[{"role": "user", "content": "Solve this task"}],
+        chat_completions_url="http://127.0.0.1:9000/v1",
+        rollout_id="run-123",
+        llm_api_key="chat-endpoint-key",
+        grade=True,
+    )
+```
+
+`request_rollout()` returns the terminal `RolloutResultResponse`. When the caller needs a handle immediately after admission, `request_rollout_async()` returns the polling task:
+
+```python
+future = await client.request_rollout_async(
+    initial_messages=[{"role": "user", "content": "Solve this task"}],
+    chat_completions_url="http://127.0.0.1:9000/v1",
+    rollout_id="run-124",
+    grade=False,
+)
+result = await future
+```
+
+The server creates the polling lease and chooses both the long-poll wait and lease timeout. The client carries the returned lease between result requests; callers do not supply a lease token or wait duration. Admission retries on HTTP 429 until `admission_timeout_sec` when that client option is set. `cancel_rollout(rollout_id)` is available for explicit cancellation.
+
 ## Server and backends
 
 `LocalBackend.__init__` is keyword-only and takes `workflow` / `grader` (a class or a dotted import string), plus optional `workflow_config` / `grader_config` ([backend/local/backend.py](../osmosis_ai/rollout/backend/local/backend.py)):
@@ -204,11 +212,10 @@ backend = LocalBackend(
     grader=MyGrader,
     grader_config=GraderConfig(name="my-grader"),
 )
-app = create_rollout_server(backend=backend)  # FastAPI: POST /rollout, GET /health
+app = create_rollout_server(backend=backend)
 ```
 
-- `create_rollout_server` ([server/app.py](../osmosis_ai/rollout/server/app.py)) is provided by the `server` extra. It wires the protocol: it schedules the backend execution task before the 202 response is sent (so a dropped response cannot lose the rollout), posts the completion + grader callbacks, and drains in-flight rollouts on shutdown. Admission does not deduplicate `rollout_id`s — dispatchers mint a fresh id per attempt and own their retries. It has no Harbor dependency.
-- `ControllerAuth` ([server/auth.py](../osmosis_ai/rollout/server/auth.py)) supplies the bearer headers for callbacks.
+- `create_rollout_server` ([server/app.py](../osmosis_ai/rollout/server/app.py)) is provided by the `server` extra. `POST /rollout` registers a result future, schedules execution, and returns the server-generated polling lease. `GET /rollout/{id}/result` sends that lease as `X-Osmosis-Rollout-Lease`, waits up to 30 seconds by default, and returns either the terminal result or the current state. Each result request renews the 120-second lease; expiry records a `lease_expired` failure and cancels the execution task. `result_wait_timeout_sec`, `polling_lease_timeout_sec`, and `result_retention_sec` are server configuration only. Duplicate active or retained `rollout_id`s return 409. The app drains in-flight rollouts on shutdown and has no Harbor dependency.
 - `ExecutionBackend` ([backend/base.py](../osmosis_ai/rollout/backend/base.py)) is the ABC; pick one:
   - `LocalBackend` ([backend/local/](../osmosis_ai/rollout/backend/local/)) — runs workflow + grader in-process. Re-exported from `osmosis_ai.rollout`. Used by the scaffold and eval.
   - `HarborBackend` ([backend/harbor/backend.py](../osmosis_ai/rollout/backend/harbor/backend.py)) — runs the agent inside a Harbor container. It is **not** re-exported from `osmosis_ai.rollout`; import it from its canonical module (`from osmosis_ai.rollout.backend.harbor import HarborBackend`), which requires the `harbor` extra.
@@ -240,7 +247,7 @@ app = create_rollout_server(backend=backend, lifespan=backend.prewarm_lifespan()
 - Reward precedence is deterministic: a task-provided `tests/test.sh` wins over `grader=`. To use the SDK grader, supply a task without that file; the backend never overwrites a benchmark's native verifier.
 - `prewarm()` builds every task image and runs agent setup before the server accepts traffic; `prewarm_lifespan()` wraps it as an ASGI lifespan.
 - `max_queue_depth` bounds admission (`has_capacity()`), and `cancel_rollouts()` cancels queued or running rollouts by id, prefix, or all.
-- Keep Harbor's `TrialQueue` at its default `RetryConfig(max_retries=0)`. The SDK treats Harbor's `END` event as the terminal rollout result, so queue-level attempt retries are not supported; resubmit with a new rollout id if controller-level retry is required.
+- Keep Harbor's `TrialQueue` at its default `RetryConfig(max_retries=0)`. The SDK treats Harbor's `END` event as the terminal rollout result, so queue-level attempt retries are not supported; resubmit with a new rollout id if client-level retry is required.
 - Bundle wheels are content-addressed and retained under `platformdirs.user_cache_path("osmosis") / "bundles"` (by default `~/Library/Caches/osmosis/bundles` on macOS and `~/.cache/osmosis/bundles` on Linux; Windows and environment overrides follow `platformdirs`). The SDK does not prune them automatically; stop rollout servers before deleting that directory to reclaim space.
 
 #### Migrating from the pre-v0.3 Harbor backend
@@ -300,7 +307,7 @@ class MyConfig(AgentWorkflowConfig):
 class MyWorkflow(AgentWorkflow[MyConfig]):
     async def run(self, ctx: AgentWorkflowContext[MyConfig]) -> Any:
         # OsmosisRolloutModel is a placeholder; at sample time it binds to the
-        # controller's model via the active RolloutContext (no model id needed here).
+        # active rollout model via RolloutContext (no model id needed here).
         agent = OsmosisStrandsAgent(name="solver", model=OsmosisRolloutModel())
         await agent.invoke_async(ctx.prompt[-1]["content"])
 
