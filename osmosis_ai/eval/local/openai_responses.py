@@ -1,6 +1,6 @@
 """Chat Completions compatibility adapter for OpenAI's Responses API.
 
-Local rollout clients speak Chat Completions. Official OpenAI models with
+Local eval rollouts speak Chat Completions. Official OpenAI models with
 function tools need the native Responses API, so this module owns the protocol
 translation while :mod:`llm_bridge` remains responsible for HTTP and routing.
 """

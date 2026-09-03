@@ -2,14 +2,10 @@
 
 Owns run state and resume, the rollout-server subprocess, bounded row x run
 scheduling, cancellation, and result materialization (design
-``local-eval-run-plan.md`` §3.1). Model calls stay on this machine: the
-callback listener also mounts an in-process LiteLLM bridge, mirroring the
-hosted eval controller, and litellm resolves provider credentials from the
-environment (a ``--secrets-file`` entry reaches it the same way).
-
-The one ordering invariant everything else serves: a terminal callback is
-acknowledged **only after** its journal record is fully written and ``fsync``-ed,
-so a durably acknowledged work item never runs again after ``kill -9``.
+``local-eval-run-plan.md`` §3.1). Model calls stay on this machine: an
+in-process LiteLLM bridge mirrors the hosted eval controller, and litellm
+resolves provider credentials from the environment (a ``--secrets-file``
+entry reaches it the same way).
 """
 
 from __future__ import annotations
@@ -31,6 +27,10 @@ import httpx
 
 from osmosis_ai._uv import _uv_executable
 from osmosis_ai.consts import PACKAGE_VERSION
+from osmosis_ai.eval.local import (
+    LiteLLMBridge,
+    LlmBridgeListener,
+)
 from osmosis_ai.eval.local._server_bootstrap import (
     ROLLOUT_INSTANCE_HEADER,
     ROLLOUT_SDK_VERSION_HEADER,
@@ -78,20 +78,12 @@ from osmosis_ai.eval.local.state import (
 )
 from osmosis_ai.eval.local.tunnel import CloudflaredTunnel, TunnelError
 from osmosis_ai.rollout.backend.harbor.diagnostics import REDACTED
-from osmosis_ai.rollout.controller import (
-    CallbackListener,
-    CallbackStore,
-    LiteLLMBridge,
-    TerminalCallbackResult,
-)
-from osmosis_ai.rollout.driver import RolloutOutcome, RolloutRunRequest
-from osmosis_ai.rollout.http_driver import (
-    HttpRolloutDriver,
+from osmosis_ai.rollout.client import (
     RolloutAdmissionTimeoutError,
+    RolloutClient,
     RolloutProtocolError,
 )
-from osmosis_ai.rollout.types.protocol import GraderStatus
-from osmosis_ai.rollout.types.sample import RolloutStatus
+from osmosis_ai.rollout.types import RolloutResultResponse, RolloutStatus
 from osmosis_ai.source_scan import reject_directory_symlinks, source_digest
 
 logger: logging.Logger = logging.getLogger(__name__)
@@ -109,13 +101,9 @@ _PORT_ATTEMPTS = 2
 _SERVER_TERM_GRACE_SEC = 5.0
 _TRAJECTORY_GRACE_SEC = 30.0
 _TRAJECTORY_POLL_INTERVAL_SEC = 0.2
-_CALLBACK_NETWORK_GRACE_SEC = 60.0
+_RESULT_NETWORK_GRACE_SEC = 60.0
 # Floor for the per-item supervisor deadline when the config sets no timeouts.
 _DEFAULT_ITEM_DEADLINE_SEC = 3600.0
-# How long a cancelled run waits for the backend to unwind before the server is
-# terminated. Sandboxed backends need real time here to destroy a container.
-_CANCEL_SETTLE_SEC = 120.0
-_CANCEL_POLL_INTERVAL_SEC = 0.5
 
 #: Supervisor-owned subprocess variables a config must never set (§8).
 RESERVED_ENV_NAMES: frozenset[str] = frozenset(
@@ -184,7 +172,7 @@ class LocalEvalOptions:
     rollout_port: int | None = None
     verbose: bool = False
     # Cloud-sandbox reachability (tunnel plan §5.2/§5.3). ``listener_port``
-    # fixes the controller listener's local port; ``advertise_url`` is a
+    # fixes the LLM bridge listener's local port; ``advertise_url`` is a
     # public base URL that already reaches it (a tunnel the user runs);
     # ``tunnel`` forces an auto-managed one ("cloudflared" is the only
     # provider). A current Harbor backend also advertises when its sandbox
@@ -565,10 +553,10 @@ class _HealthProbe:
 
 
 async def _probe_health(
-    client: httpx.AsyncClient, base_url: str
+    http_client: httpx.AsyncClient, base_url: str
 ) -> _HealthProbe | None:
     try:
-        response = await client.get(f"{base_url}/health", timeout=5.0)
+        response = await http_client.get(f"{base_url}/health", timeout=5.0)
     except httpx.HTTPError:
         return None
     if response.status_code >= 400:
@@ -587,10 +575,10 @@ async def _probe_health(
 
 
 async def probe_health(
-    client: httpx.AsyncClient, base_url: str
+    http_client: httpx.AsyncClient, base_url: str
 ) -> dict[str, Any] | None:
     """Return ``/health`` when reachable, else ``None``."""
-    probe = await _probe_health(client, base_url)
+    probe = await _probe_health(http_client, base_url)
     return probe.payload if probe is not None else None
 
 
@@ -891,10 +879,8 @@ class LocalEvalRunner:
         self, pending: Sequence[WorkItem], *, secrets: Mapping[str, str]
     ) -> RunSummary:
         assert self._run_dir is not None
-        controller_token = uuid.uuid4().hex
         bridge_token = uuid.uuid4().hex
-        self._redactor.extend([controller_token, bridge_token])
-        store = CallbackStore(on_terminal_commit=self._commit_terminal)
+        self._redactor.extend([bridge_token])
 
         # litellm resolves provider credentials from the environment; values
         # explicitly supplied through --secrets-file take precedence for this
@@ -903,7 +889,7 @@ class LocalEvalRunner:
         missing_env_names = set(secrets).difference(os.environ)
 
         advertise_url = self._options.advertise_url
-        listener: CallbackListener | None = None
+        listener: LlmBridgeListener | None = None
         cancelled = False
         try:
             os.environ.update(secrets)
@@ -911,9 +897,9 @@ class LocalEvalRunner:
             self._bridge = bridge
             self._stage("preflight", f"checking model {self._spec.model_path}")
             await self._model_preflight(bridge)
-            async with httpx.AsyncClient() as client:
+            async with httpx.AsyncClient() as http_client:
                 base_url = await self._start_rollout_server(
-                    secrets=secrets, client=client
+                    secrets=secrets, http_client=http_client
                 )
                 auto_tunnel_environment = None
                 if self._options.tunnel is None and advertise_url is None:
@@ -931,11 +917,9 @@ class LocalEvalRunner:
                         "enabling cloudflared automatically",
                         environment=auto_tunnel_environment,
                     )
-                listener = CallbackListener(
-                    store,
-                    auth_token=controller_token,
-                    bridge=bridge,
-                    bridge_token=bridge_token,
+                listener = LlmBridgeListener(
+                    bridge,
+                    auth_token=bridge_token,
                     port=self._options.listener_port,
                     advertised_base_url=advertise_url,
                     # Any non-loopback path may sit behind a proxy with
@@ -947,11 +931,11 @@ class LocalEvalRunner:
                 except OSError as exc:
                     port = self._options.listener_port
                     raise LocalEvalError(
-                        "could not bind the callback listener on 127.0.0.1"
+                        "could not bind the LLM bridge on 127.0.0.1"
                         f"{f':{port}' if port else ''}: {exc}"
                     ) from exc
-                self._write_log("info", "listener", "callback listener started")
-                concurrency = await self._resolve_concurrency(client, base_url)
+                self._write_log("info", "listener", "LLM bridge started")
+                concurrency = await self._resolve_concurrency(http_client, base_url)
                 # A quick tunnel can spend the full startup budget waiting for
                 # fresh public DNS. Prove the model and local rollout server
                 # first so dependency/import/health failures do not create a
@@ -963,25 +947,15 @@ class LocalEvalRunner:
                         "tunnel",
                         f"advertising chat endpoint through {advertise_url}",
                     )
-                item_deadline = self._callback_deadline()
-                driver = HttpRolloutDriver(
-                    rollout_base_url=base_url,
-                    callback_store=store,
-                    completion_url_for=listener.completion_url,
-                    grader_url_for=listener.grader_url,
-                    chat_completions_url_for=listener.chat_completions_url,
-                    chat_api_key=bridge_token,
-                    controller_api_key=controller_token,
-                    http_client=client,
-                    # The shared client's pool can hold a just-cancelled
-                    # request's connection lock; cancels must not ride it.
-                    fresh_cancel_client=True,
+                item_deadline = self._item_deadline()
+                client = RolloutClient(
+                    url=base_url,
+                    http_client=http_client,
                     # Admission waits are queue waits: an item may legitimately
                     # sit behind every other in-flight item, so its budget is
                     # one item deadline per worker. Beyond that the server is
                     # wedged, not busy, and the run halts with work pending.
                     admission_timeout_sec=item_deadline * concurrency,
-                    callback_timeout_sec=item_deadline,
                 )
                 self._stage(
                     "schedule",
@@ -991,9 +965,13 @@ class LocalEvalRunner:
                 # it: a rollout can take minutes, and that wait is exactly when
                 # the user needs to see that something is running.
                 self._report_progress()
-                cancelled = await self._schedule(pending, driver, concurrency)
-                if cancelled:
-                    await self._settle_cancellations(base_url)
+                cancelled = await self._schedule(
+                    pending,
+                    client,
+                    listener,
+                    bridge_token,
+                    concurrency,
+                )
         finally:
             try:
                 await self._stop_rollout_server()
@@ -1013,7 +991,7 @@ class LocalEvalRunner:
                     os.environ.pop(name, None)
         return self._finalize(cancelled=cancelled)
 
-    async def _start_tunnel(self, listener: CallbackListener) -> None:
+    async def _start_tunnel(self, listener: LlmBridgeListener) -> None:
         listener_port = int(listener.base_url.rsplit(":", 1)[1])
         tunnel = CloudflaredTunnel(
             local_url=listener.base_url,
@@ -1093,109 +1071,6 @@ class LocalEvalRunner:
         with contextlib.suppress(OSError):
             (self._run_dir / TUNNEL_STATE_FILENAME).unlink(missing_ok=True)
 
-    async def _settle_cancellations(
-        self,
-        base_url: str,
-        *,
-        http_transport: httpx.AsyncBaseTransport | None = None,
-    ) -> None:
-        """Give the rollout server a bounded grace to unwind cancelled work (§8).
-
-        Without this the supervisor terminates the server milliseconds after the
-        cancel is acknowledged, and a backend that owns real resources never
-        reaches its teardown -- a Harbor trial leaves its sandbox container
-        running with nothing left to stop it. Polling per-rollout status is the
-        signal that the backend's own cancellation handler has finished.
-
-        Polls through its own client, never the run's shared one: the workers
-        were just cancelled mid-request, which can leave the shared pool's
-        connection locks held (see HttpRolloutDriver._cancel_rollout) — a wait
-        no per-request timeout bounds.
-        """
-        rollout_ids = list(self._dispatch_context)
-        if not rollout_ids:
-            return
-        self._stage(
-            "cancel",
-            f"waiting for {len(rollout_ids)} cancelled rollouts to unwind",
-        )
-        try:
-            async with httpx.AsyncClient(transport=http_transport) as client:
-                observed = await asyncio.wait_for(
-                    asyncio.gather(
-                        *(
-                            self._wait_settled(client, base_url, rollout_id)
-                            for rollout_id in rollout_ids
-                        )
-                    ),
-                    timeout=_CANCEL_SETTLE_SEC,
-                )
-        except TimeoutError:
-            observed = None
-        if observed is not None and all(observed):
-            self._write_log("info", "cancel", "cancelled work unwound")
-            return
-        self._write_log(
-            "warning",
-            "cancel",
-            "cancelled work did not unwind within the grace period; the backend "
-            "may have left resources behind",
-            grace_sec=_CANCEL_SETTLE_SEC,
-        )
-
-    async def _wait_settled(
-        self, client: httpx.AsyncClient, base_url: str, rollout_id: str
-    ) -> bool:
-        """Poll one rollout until it stops running; False when unobservable.
-
-        Nothing observed is no evidence the backend unwound -- the caller must
-        not report it as such.
-        """
-        while True:
-            running = await self._rollout_is_running(client, base_url, rollout_id)
-            if running is None:
-                return False
-            if not running:
-                return True
-            await asyncio.sleep(_CANCEL_POLL_INTERVAL_SEC)
-
-    async def _rollout_is_running(
-        self, client: httpx.AsyncClient, base_url: str, rollout_id: str
-    ) -> bool | None:
-        """Whether the rollout is still working; ``None`` when unobservable.
-
-        A status the supervisor cannot read leaves nothing to wait on, but it is
-        also no evidence that the backend unwound -- callers must not report it
-        as one. UNKNOWN is different: terminal records are retained for far
-        longer than a teardown takes, so an id the server no longer knows is
-        not in flight.
-        """
-        try:
-            response = await client.get(
-                f"{base_url}/rollout/{rollout_id}/status", timeout=5.0
-            )
-        except httpx.HTTPError:
-            # An unreachable server cannot be waited on any further.
-            return None
-        if response.status_code >= 400:
-            return None
-        try:
-            payload = response.json()
-        except ValueError:
-            return None
-        if not isinstance(payload, dict):
-            return None
-        try:
-            status = RolloutStatus(payload.get("status"))
-        except ValueError:
-            # An unrecognized status is no evidence the backend unwound.
-            return None
-        return status in (
-            RolloutStatus.QUEUED,
-            RolloutStatus.RUNNING,
-            RolloutStatus.GRADING,
-        )
-
     async def _model_preflight(self, bridge: LiteLLMBridge) -> None:
         """One-shot completion so a bad model or key fails once, loudly,
         before any dispatch instead of failing every work item."""
@@ -1225,15 +1100,7 @@ class LocalEvalRunner:
         )
         self._hooks.note(f"stopping dispatch: {reason}")
 
-    def _callback_deadline(self) -> float:
-        """Supervisor deadline = server timeout + callback/network grace (§10).
-
-        Timeouts are optional in the config, but an unbounded wait is not an
-        option: a lost callback would hang every worker forever with no output.
-        A ``None`` phase means "run unbounded", so summing only the phases that
-        are bounded would stamp still-running work ``callback_timeout``. With
-        anything unbounded, fall back to a generous floor.
-        """
+    def _item_deadline(self) -> float:
         agent = self._spec.agent_timeout_sec
         grader = self._spec.grader_timeout_sec
         if agent is None or grader is None:
@@ -1241,13 +1108,13 @@ class LocalEvalRunner:
         server_budget = agent + grader
         if server_budget <= 0:
             return _DEFAULT_ITEM_DEADLINE_SEC
-        return server_budget + _CALLBACK_NETWORK_GRACE_SEC
+        return server_budget + _RESULT_NETWORK_GRACE_SEC
 
     async def _resolve_concurrency(
-        self, client: httpx.AsyncClient, base_url: str
+        self, http_client: httpx.AsyncClient, base_url: str
     ) -> int:
         """``--max-in-flight`` -> ``batch_size`` -> ``/health`` capacity -> 1 (§10)."""
-        health = await probe_health(client, base_url) or {}
+        health = await probe_health(http_client, base_url) or {}
         hard_cap = health_capacity(health)
         for candidate in (self._options.max_in_flight, self._spec.batch_size):
             if isinstance(candidate, int) and candidate > 0:
@@ -1255,7 +1122,12 @@ class LocalEvalRunner:
         return hard_cap or 1
 
     async def _schedule(
-        self, pending: Sequence[WorkItem], driver: HttpRolloutDriver, concurrency: int
+        self,
+        pending: Sequence[WorkItem],
+        client: RolloutClient,
+        listener: LlmBridgeListener,
+        llm_api_key: str,
+        concurrency: int,
     ) -> bool:
         """Feed work through a bounded worker pool. Returns True when cancelled.
 
@@ -1267,7 +1139,7 @@ class LocalEvalRunner:
         for item in pending:
             queue.put_nowait(item)
         workers = [
-            asyncio.create_task(self._worker(queue, driver))
+            asyncio.create_task(self._worker(queue, client, listener, llm_api_key))
             for _ in range(max(1, min(concurrency, len(pending))))
         ]
         loop = asyncio.get_running_loop()
@@ -1303,12 +1175,6 @@ class LocalEvalRunner:
         return self._cancelled.is_set() or self._halt_reason is not None
 
     async def _watch_child(self, workers: Sequence[asyncio.Task[None]]) -> None:
-        """Abort in-flight waits when the rollout server dies (§10 deadline).
-
-        Without this, every worker sits on a callback that can no longer arrive
-        until its deadline expires -- minutes of silence per item, and each one
-        then looks like a per-item timeout rather than one dead server.
-        """
         child = self._child
         if child is None:
             return
@@ -1365,7 +1231,11 @@ class LocalEvalRunner:
             worker.cancel()
 
     async def _worker(
-        self, queue: asyncio.Queue[WorkItem], driver: HttpRolloutDriver
+        self,
+        queue: asyncio.Queue[WorkItem],
+        client: RolloutClient,
+        listener: LlmBridgeListener,
+        llm_api_key: str,
     ) -> None:
         while not self._cancelled.is_set() and self._halt_reason is None:
             try:
@@ -1373,7 +1243,7 @@ class LocalEvalRunner:
             except asyncio.QueueEmpty:
                 return
             try:
-                await self._run_work_item(item, driver)
+                await self._run_work_item(item, client, listener, llm_api_key)
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
@@ -1399,22 +1269,16 @@ class LocalEvalRunner:
                 )
                 return
 
-    async def _run_work_item(self, item: WorkItem, driver: HttpRolloutDriver) -> None:
+    async def _run_work_item(
+        self,
+        item: WorkItem,
+        client: RolloutClient,
+        listener: LlmBridgeListener,
+        llm_api_key: str,
+    ) -> None:
         rollout_id = uuid.uuid4().hex
         self._dispatch_context[rollout_id] = item
         self._dispatch_started[rollout_id] = time.monotonic()
-        request = RolloutRunRequest(
-            messages=list(item.row.initial_messages),
-            label=item.row.label,
-            metadata=dict(item.row.metadata) if item.row.metadata else None,
-            rollout_id=rollout_id,
-            agent_timeout_sec=self._spec.agent_timeout_sec,
-            grader_timeout_sec=self._spec.grader_timeout_sec,
-            extra_fields={
-                "row_index": item.row.row_index,
-                "run_index": item.run_index,
-            },
-        )
         self._write_log(
             "info",
             "dispatch",
@@ -1424,12 +1288,28 @@ class LocalEvalRunner:
             run_index=item.run_index,
         )
         try:
-            outcome = await driver.run(request)
+            future = await client.request_rollout_async(
+                initial_messages=list(item.row.initial_messages),
+                chat_completions_url=listener.chat_completions_url(rollout_id),
+                rollout_id=rollout_id,
+                llm_api_key=llm_api_key,
+                label=item.row.label,
+                metadata=dict(item.row.metadata) if item.row.metadata else None,
+                grade=True,
+                agent_timeout_sec=self._spec.agent_timeout_sec,
+                grader_timeout_sec=self._spec.grader_timeout_sec,
+                extra_fields={
+                    "row_index": item.row.row_index,
+                    "run_index": item.run_index,
+                },
+            )
+            outcome = await future
         except RolloutAdmissionTimeoutError:
-            # The timeout is proof the server never admitted this rollout --
-            # unlike other dispatch faults, there is nothing for cancellation
-            # settling to poll or warn about.
             self._forget(rollout_id)
+            raise
+        except asyncio.CancelledError:
+            with contextlib.suppress(Exception):
+                await client.cancel_rollout(rollout_id)
             raise
         finally:
             self._dispatched += 1
@@ -1440,6 +1320,7 @@ class LocalEvalRunner:
                 "warning", "cancel", "rollout cancelled", rollout_id=rollout_id
             )
             return
+        await self._commit_outcome(item, outcome)
         await self._await_trajectory(rollout_id)
         with contextlib.suppress(Exception):
             self._refresh_snapshots(project_keys={item.key})
@@ -1448,7 +1329,7 @@ class LocalEvalRunner:
         self._log_outcome(item, rollout_id, outcome)
 
     def _log_outcome(
-        self, item: WorkItem, rollout_id: str, outcome: RolloutOutcome
+        self, item: WorkItem, rollout_id: str, outcome: RolloutResultResponse
     ) -> None:
         record = self._latest.get(item.key)
         self._write_log(
@@ -1462,43 +1343,22 @@ class LocalEvalRunner:
             reward=record.reward if record else None,
         )
 
-    # ------------------------------------------------------------------ #
-    # Terminal commit -- the durability boundary
-    # ------------------------------------------------------------------ #
-
-    async def _commit_terminal(
-        self, result: TerminalCallbackResult
-    ) -> Mapping[str, Any] | None:
-        """Journal the terminal result, then let the callback be acknowledged.
-
-        Everything the record needs is gathered *before* the append, and the
-        append ``fsync``s before returning, so an HTTP 200 on the grader callback
-        means the result is durable (§9.3).
-        """
-        item = self._dispatch_context.get(result.rollout_id)
-        if item is None:
-            # Returning here would let the store ack a callback with nothing
-            # journaled, breaking "HTTP 200 on the grader callback means the
-            # result is durable". Raising makes the listener 500 and leaves the
-            # terminal slot open, so the work item simply stays pending.
-            raise LocalEvalError(
-                f"terminal callback for rollout {result.rollout_id} has no "
-                "dispatch context; refusing to acknowledge it"
-            )
-        status, reward, error_type = _classify_terminal(result)
+    async def _commit_outcome(
+        self, item: WorkItem, outcome: RolloutResultResponse
+    ) -> None:
+        status, reward, error_type = _classify_outcome(outcome)
         record = TerminalRecord(
             row_index=item.row.row_index,
             run_index=item.run_index,
-            rollout_id=result.rollout_id,
+            rollout_id=outcome.rollout_id or "",
             status=status,
             source_row_index=item.row.source_row_index,
             reward=reward,
-            tokens=self._collect_tokens(result.rollout_id),
-            duration_ms=self._elapsed_ms(result.rollout_id),
+            tokens=self._collect_tokens(outcome.rollout_id or ""),
+            duration_ms=self._elapsed_ms(outcome.rollout_id or ""),
             error_type=error_type,
         )
         await self._append_record(record)
-        return None
 
     async def _append_record(self, record: TerminalRecord) -> None:
         assert self._journal is not None
@@ -1511,7 +1371,6 @@ class LocalEvalRunner:
     async def _journal_supervisor_failure(
         self, item: WorkItem, exc: BaseException
     ) -> None:
-        """Journal an unambiguous per-item failure that produced no callback (§9.3)."""
         rollout_id = next(
             (
                 candidate
@@ -1529,7 +1388,7 @@ class LocalEvalRunner:
         self._write_log(
             "error",
             "result",
-            "work item failed before a terminal callback",
+            "work item failed before a terminal result",
             rollout_id=rollout_id,
             row_index=item.row.row_index,
             run_index=item.run_index,
@@ -1570,13 +1429,6 @@ class LocalEvalRunner:
             self._bridge.discard(rollout_id)
 
     async def _await_trajectory(self, rollout_id: str) -> None:
-        """Poll for a parseable ``trajectory.json`` after the durable result (§11.3).
-
-        The server writes the trajectory in ``finally``, *after* the grader
-        callback is acknowledged, and ``save_trajectory`` never raises -- so the
-        file can arrive late or never. Waiting here, after the journal append,
-        is the only ordering in which the server can reach its own write.
-        """
         assert self._run_dir is not None
         path = (
             self._run_dir / TRIALS_DIRNAME / rollout_id / CANONICAL_TRAJECTORY_FILENAME
@@ -1820,7 +1672,7 @@ class LocalEvalRunner:
         self._hooks.warning(message)
 
     async def _start_rollout_server(
-        self, *, secrets: Mapping[str, str], client: httpx.AsyncClient
+        self, *, secrets: Mapping[str, str], http_client: httpx.AsyncClient
     ) -> str:
         assert self._run_dir is not None
         self._rollout_health = {}
@@ -1875,7 +1727,7 @@ class LocalEvalRunner:
             base_url = f"http://127.0.0.1:{port}"
             try:
                 await self._wait_for_health(
-                    client, base_url, instance_id=instance_id, child=child
+                    http_client, base_url, instance_id=instance_id, child=child
                 )
             except LocalEvalError as exc:
                 last_error = exc
@@ -1895,7 +1747,7 @@ class LocalEvalRunner:
 
     async def _wait_for_health(
         self,
-        client: httpx.AsyncClient,
+        http_client: httpx.AsyncClient,
         base_url: str,
         *,
         instance_id: str,
@@ -1926,7 +1778,7 @@ class LocalEvalRunner:
                     f"rollout server exited with code {child.returncode} "
                     f"before becoming healthy{detail}\nLogs: {self._logs_path()}"
                 )
-            health = await _probe_health(client, base_url)
+            health = await _probe_health(http_client, base_url)
             if health is not None:
                 # The compatibility bootstrap writes the ownership id to a
                 # response header even when the rollout's independently-resolved
@@ -2135,27 +1987,19 @@ class LocalEvalRunner:
             self._hooks.note(message)
 
 
-def _classify_terminal(
-    result: TerminalCallbackResult,
+def _classify_outcome(
+    result: RolloutResultResponse,
 ) -> tuple[TerminalStatus, float | None, str | None]:
-    """Map a callback-store terminal result onto the index status vocabulary."""
-    if result.source == "timeout":
-        return "failed", None, "callback_timeout"
-    grader = result.grader
-    if grader is None:
-        return "failed", None, "missing_grader_callback"
-    sample = grader.sample
+    sample = result.sample
     reward = sample.reward if sample is not None else None
-    # A crashed grader is a failure even when it asked to drop the sample:
-    # "skipped" would leave the row out of the scored denominator entirely.
-    if grader.status is not GraderStatus.SUCCESS:
-        return "failed", reward, grader.err_category or "grader_failed"
+    if result.status is not RolloutStatus.SUCCESS:
+        return (
+            "failed",
+            reward,
+            result.err_category or result.err_message or "rollout_failed",
+        )
     if sample is not None and sample.remove_sample:
-        # ``remove_sample`` is the workflow saying "do not score this row".
         return "skipped", None, None
-    completion = result.completion
-    if completion is not None and completion.status is not RolloutStatus.SUCCESS:
-        return "failed", reward, completion.err_category or "workflow_failed"
     return "success", reward, None
 
 
