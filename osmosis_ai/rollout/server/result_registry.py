@@ -62,7 +62,7 @@ class RolloutFutureRegistry:
             on_expired=self.expire,
         )
 
-    async def register(self, rollout_id: str, lease_token: str) -> None:
+    async def register(self, rollout_id: str) -> str:
         async with self.lock:
             if rollout_id in self.entries:
                 raise DuplicateRolloutError(rollout_id)
@@ -71,7 +71,7 @@ class RolloutFutureRegistry:
                 result=asyncio.get_running_loop().create_future(),
             )
             self.entries[rollout_id] = entry
-            self.leases.register(rollout_id, lease_token)
+            return self.leases.register(rollout_id)
 
     async def bind_task(self, rollout_id: str, task: asyncio.Task[None]) -> None:
         async with self.lock:
