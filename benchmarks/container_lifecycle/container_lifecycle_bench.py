@@ -88,7 +88,7 @@ async def run_rollout(
     start = time.monotonic()
     try:
         async with asyncio.timeout(timeout * 2):
-            future = await client.request_rollout_async(
+            future = await client.run_rollout_async(
                 initial_messages=[{"role": "user", "content": "bench"}],
                 chat_completions_url=chat_completions_url,
                 rollout_id=rollout_id,
