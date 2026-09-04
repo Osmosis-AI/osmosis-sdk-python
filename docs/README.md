@@ -27,7 +27,7 @@ The single `osmosis-ai` distribution always includes the CLI and framework-neutr
 
 ## Pages
 
-- [architecture.md](./architecture.md) — package layout, domain boundaries, import paths, lazy-loading rules, and the remote rollout protocol (controller <-> rollout server). Start here.
+- [architecture.md](./architecture.md) — package layout, domain boundaries, import paths, lazy-loading rules, and the remote rollout protocol (client <-> rollout server). Start here.
 - [rollout-sdk.md](./rollout-sdk.md) — the library API you implement against: `AgentWorkflow`, `Grader`, contexts, configs, server/backends, and framework integrations.
 - [migrating-to-0.3.md](./migrating-to-0.3.md) — the source and behavior changes required when upgrading an SDK integration from 0.2.31.
 - [eval.md](./eval.md) — the `osmosis eval submit` config contract (SDK-vs-backend validation, submit flow), plus a brief note on the `evaluate_rubric` / `osmosis eval rubric` LLM-as-judge API.
