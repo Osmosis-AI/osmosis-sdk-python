@@ -479,11 +479,11 @@ def run(
     def _upload_completed(summary: Any) -> None:
         nonlocal imported
 
-        from osmosis_ai.eval.local.upload import (
-            LocalEvalUploadError,
-            build_eval_upload_plan,
+        from osmosis_ai.eval.local.upload import LocalEvalUploadError
+        from osmosis_ai.platform.cli.eval_upload import (
+            prepare_eval_upload_plan,
+            upload_plan,
         )
-        from osmosis_ai.platform.cli.eval_upload import upload_plan
 
         hooks.display.close()
         if platform_context is None:
@@ -496,7 +496,7 @@ def run(
         run_path = display_path(summary.run_dir, base=display_root)
         try:
             imported = upload_plan(
-                build_eval_upload_plan(summary.run_dir), context=platform_context
+                prepare_eval_upload_plan(summary.run_dir), context=platform_context
             )
         except KeyboardInterrupt as exc:
             raise CLIError(

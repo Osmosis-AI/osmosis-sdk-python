@@ -417,6 +417,70 @@ class SecretRedactor:
         return text
 
 
+# Provider and platform keys that often live in the process environment
+# without being listed in [secrets]. Skip GOOGLE_APPLICATION_CREDENTIALS:
+# that value is a filesystem path, not the credential.
+AMBIENT_SECRET_ENV_NAMES: frozenset[str] = frozenset(
+    {
+        "OPENAI_API_KEY",
+        "ANTHROPIC_API_KEY",
+        "XAI_API_KEY",
+        "GEMINI_API_KEY",
+        "GOOGLE_API_KEY",
+        "OPENROUTER_API_KEY",
+        "CEREBRAS_API_KEY",
+        "AZURE_API_KEY",
+        "TOGETHER_API_KEY",
+        "FIREWORKS_API_KEY",
+        "GROQ_API_KEY",
+        "MISTRAL_API_KEY",
+        "COHERE_API_KEY",
+        "DEEPSEEK_API_KEY",
+        "HUGGINGFACE_API_KEY",
+        "HF_TOKEN",
+        "WANDB_API_KEY",
+        "AWS_ACCESS_KEY_ID",
+        "AWS_SECRET_ACCESS_KEY",
+        "AWS_SESSION_TOKEN",
+        "OSMOSIS_TOKEN",
+        "OSMOSIS_API_KEY",
+        "DAYTONA_API_KEY",
+        "CURSOR_API_KEY",
+        "MSWEA_API_KEY",
+    }
+)
+MIN_AMBIENT_SECRET_LEN = 8
+
+
+def ambient_secret_values(env: Mapping[str, str]) -> list[str]:
+    """Non-empty ambient env values long enough to redact without collateral."""
+    values: list[str] = []
+    for name in AMBIENT_SECRET_ENV_NAMES:
+        value = env.get(name)
+        if value and len(value) >= MIN_AMBIENT_SECRET_LEN:
+            values.append(value)
+    return values
+
+
+def scrub_logs_file(path: Path, *, env: Mapping[str, str]) -> None:
+    """Rewrite *path* when ambient env secrets appear in it.
+
+    No-op when the file is missing. ``[secrets]`` values are already redacted
+    at write time; this pass covers provider keys still in the environment.
+    """
+    if path.is_symlink() or not path.is_file():
+        return
+    values = ambient_secret_values(env)
+    if not values:
+        return
+    text = path.read_text(encoding="utf-8")
+    scrubbed = SecretRedactor(values).scrub(text)
+    if scrubbed == text:
+        return
+    path.write_text(scrubbed, encoding="utf-8")
+    os.chmod(path, 0o600)
+
+
 class RunLog:
     """Appends download-format lines to the run's combined ``logs.txt`` (§2.4).
 
@@ -771,6 +835,7 @@ class LocalEvalRunner:
         await self._reap_orphan_server(run_dir)
         inputs = self._build_inputs()
         manifest = self._open_or_create_run(run_dir, inputs=inputs, run_name=run_name)
+        self._redactor.extend(ambient_secret_values(os.environ))
         self._log = RunLog(
             run_dir / LOGS_FILENAME,
             echo=self._hooks.note if self._options.verbose else None,
@@ -907,6 +972,7 @@ class LocalEvalRunner:
         cancelled = False
         try:
             os.environ.update(secrets)
+            self._redactor.extend(ambient_secret_values(os.environ))
             bridge = LiteLLMBridge(model=self._spec.model_path)
             self._bridge = bridge
             self._stage("preflight", f"checking model {self._spec.model_path}")

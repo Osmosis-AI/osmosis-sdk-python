@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any
 from osmosis_ai.cli.console import console
 from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.cli.output import OperationResult, get_output_context
+from osmosis_ai.eval.local.runner import LOGS_FILENAME, scrub_logs_file
 from osmosis_ai.eval.local.state import (
     LOCKS_DIRNAME,
     LocalEvalStateError,
@@ -104,6 +105,12 @@ def _upload_one(
         credentials=context.credentials,
         git_identity=context.git_identity,
     )
+
+
+def prepare_eval_upload_plan(run_dir: Path) -> EvalUploadPlan:
+    """Scrub ambient env secrets from logs.txt, then build the import plan."""
+    scrub_logs_file(run_dir / LOGS_FILENAME, env=os.environ)
+    return build_eval_upload_plan(run_dir)
 
 
 def upload_plan(
@@ -232,7 +239,7 @@ def upload(run_dir: Path) -> OperationResult:
     lock_path = candidate.parent / LOCKS_DIRNAME / f"{candidate.name}.lock"
     try:
         with RunLock(lock_path):
-            plan = build_eval_upload_plan(candidate)
+            plan = prepare_eval_upload_plan(candidate)
             imported = upload_plan(plan, context=context)
     except LocalEvalUploadError as exc:
         raise CLIError(str(exc)) from exc

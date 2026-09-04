@@ -621,7 +621,6 @@ def test_upload_flag_uploads_after_finalize_and_surfaces_platform_url(
     console_capture: StringIO,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import osmosis_ai.eval.local.upload as local_upload_module
     import osmosis_ai.platform.cli.eval_upload as eval_upload_module
 
     events: list[str] = []
@@ -652,8 +651,8 @@ def test_upload_flag_uploads_after_finalize_and_surfaces_platform_url(
     monkeypatch.setattr(eval_run_module._ProgressDisplay, "close", close_display)
     monkeypatch.setattr(_CapturedRunner, "run", run_with_callback)
     monkeypatch.setattr(
-        local_upload_module,
-        "build_eval_upload_plan",
+        eval_upload_module,
+        "prepare_eval_upload_plan",
         lambda run_dir: SimpleNamespace(run_dir=run_dir),
     )
     monkeypatch.setattr(
@@ -676,7 +675,6 @@ def test_upload_failure_says_local_results_are_complete_and_gives_retry_command(
     console_capture: StringIO,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import osmosis_ai.eval.local.upload as local_upload_module
     import osmosis_ai.platform.cli.eval_upload as eval_upload_module
 
     original_run = _CapturedRunner.run
@@ -688,8 +686,8 @@ def test_upload_failure_says_local_results_are_complete_and_gives_retry_command(
 
     monkeypatch.setattr(_CapturedRunner, "run", run_with_callback)
     monkeypatch.setattr(
-        local_upload_module,
-        "build_eval_upload_plan",
+        eval_upload_module,
+        "prepare_eval_upload_plan",
         lambda run_dir: SimpleNamespace(run_dir=run_dir),
     )
     monkeypatch.setattr(
@@ -715,6 +713,7 @@ def test_upload_plan_error_reports_local_problem_without_retry_guidance(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import osmosis_ai.eval.local.upload as local_upload_module
+    import osmosis_ai.platform.cli.eval_upload as eval_upload_module
 
     original_run = _CapturedRunner.run
 
@@ -725,8 +724,8 @@ def test_upload_plan_error_reports_local_problem_without_retry_guidance(
 
     monkeypatch.setattr(_CapturedRunner, "run", run_with_callback)
     monkeypatch.setattr(
-        local_upload_module,
-        "build_eval_upload_plan",
+        eval_upload_module,
+        "prepare_eval_upload_plan",
         lambda _run_dir: (_ for _ in ()).throw(
             local_upload_module.LocalEvalUploadError("index.jsonl is invalid")
         ),
@@ -746,7 +745,6 @@ def test_unexpected_upload_error_keeps_internal_classification(
     console_capture: StringIO,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import osmosis_ai.eval.local.upload as local_upload_module
     import osmosis_ai.platform.cli.eval_upload as eval_upload_module
 
     class UnexpectedUploadError(Exception):
@@ -761,8 +759,8 @@ def test_unexpected_upload_error_keeps_internal_classification(
 
     monkeypatch.setattr(_CapturedRunner, "run", run_with_callback)
     monkeypatch.setattr(
-        local_upload_module,
-        "build_eval_upload_plan",
+        eval_upload_module,
+        "prepare_eval_upload_plan",
         lambda run_dir: SimpleNamespace(run_dir=run_dir),
     )
     monkeypatch.setattr(
@@ -787,7 +785,6 @@ def test_upload_platform_error_keeps_auth_code_and_retry_context(
     console_capture: StringIO,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import osmosis_ai.eval.local.upload as local_upload_module
     import osmosis_ai.platform.cli.eval_upload as eval_upload_module
     from osmosis_ai.platform.auth.platform_client import PlatformAPIError
 
@@ -800,8 +797,8 @@ def test_upload_platform_error_keeps_auth_code_and_retry_context(
 
     monkeypatch.setattr(_CapturedRunner, "run", run_with_callback)
     monkeypatch.setattr(
-        local_upload_module,
-        "build_eval_upload_plan",
+        eval_upload_module,
+        "prepare_eval_upload_plan",
         lambda run_dir: SimpleNamespace(run_dir=run_dir),
     )
     monkeypatch.setattr(

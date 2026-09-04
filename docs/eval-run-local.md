@@ -159,7 +159,7 @@ Throughput knobs (`--max-in-flight`, `evaluation.batch_size`) are excluded from 
 
 ## Uploading completed results
 
-`eval upload` validates and hashes the local run under the same sibling `.locks/<run-name>.lock` used by the supervisor. Only `index.jsonl`, `progress.json`, index-referenced canonical trajectories, and safe artifacts belonging to the selected rollout ids are sent. The immutable local manifest, journal, metrics projection, summaries, logs, top-level projections, superseded attempts, per-trial logs, control files, and secret-bearing inputs are never uploaded. Local `logs.txt` is intentionally excluded because an older SDK may have written it without redacting short configured secrets.
+`eval upload` validates and hashes the local run under the same sibling `.locks/<run-name>.lock` used by the supervisor. `index.jsonl`, `progress.json`, the combined `logs.txt`, index-referenced canonical trajectories, and safe artifacts belonging to the selected rollout ids are sent. The immutable local manifest, journal, metrics projection, summaries, top-level projections, superseded attempts, per-trial logs, control files, and secret-bearing inputs are never uploaded. Harbor per-trial logs stay on disk; they are not the run Logs tab.
 
 The platform owns resumability. Each retry starts the same import from `local_run_id` plus the exact manifest digest, skips files the server already has, and finalizes once all declared hashes are present; the SDK writes no local upload-state file and does not abort a session when interrupted. A run must be complete: failed and skipped samples count as terminal, but pending work does not.
 
@@ -169,9 +169,9 @@ The platform owns resumability. Each retry starts the same import from `local_ru
 
 `[secrets]` names are **workflow** secrets, consumed by your rollout, grader, or tool code. They resolve locally in this order: `--secrets-file`, then the process environment, then an interactive prompt. A name existing in the platform secret store does **not** satisfy them locally.
 
-LLM provider keys resolve the same way — a `--secrets-file` entry is exported to the environment where LiteLLM reads it — but they stay on your machine: the container only ever sees the bridge's loopback URL and a per-run bearer, never the provider key. Everything that lands in the run log is redacted.
+LLM provider keys resolve the same way — a `--secrets-file` entry is exported to the environment where LiteLLM reads it — but they stay on your machine: the container only ever sees the bridge's loopback URL and a per-run bearer, never the provider key. Known provider and platform keys already in the process environment (`OPENAI_API_KEY`, `OSMOSIS_TOKEN`, …) are redacted from `logs.txt` the same way, including a second pass at `eval upload` before the file is hashed.
 
-Secret values never appear in `manifest.json` or `events.jsonl`. The current SDK redacts every non-empty configured secret value from rollout-server output on the way into `logs.txt`; the log and journal are owner-only, and local logs are not uploaded because runs produced by older SDKs cannot prove the same short-secret redaction.
+Secret values never appear in `manifest.json` or `events.jsonl`. Every non-empty configured `[secrets]` value is redacted from rollout-server output on the way into `logs.txt`. Ambient environment values shorter than 8 characters are left unchanged so a stub like `OPENAI_API_KEY=test` cannot punch holes in the log.
 
 ## Harbor (sandboxed) rollouts
 

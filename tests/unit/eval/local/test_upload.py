@@ -164,15 +164,42 @@ def test_build_plan_selects_only_canonical_upload_files(tmp_path: Path) -> None:
     }
     assert [file.path for file in plan.files] == [
         "index.jsonl",
+        "logs.txt",
         "progress.json",
         f"rollout_trials/{ROLLOUT_ID}/artifacts/answer.txt",
         f"rollout_trials/{ROLLOUT_ID}/trajectory.json",
     ]
-    assert (run_dir / "logs.txt").is_file()
     assert all(
         file.sha256 == hashlib.sha256(file.source.read_bytes()).hexdigest()
         for file in plan.files
     )
+
+
+def test_missing_logs_txt_is_omitted_from_the_plan(tmp_path: Path) -> None:
+    run_dir = _run_dir(tmp_path)
+    (run_dir / "logs.txt").unlink()
+
+    plan = build_eval_upload_plan(run_dir)
+
+    assert "logs.txt" not in [file.path for file in plan.files]
+
+
+def test_prepare_eval_upload_plan_scrubs_logs_before_hashing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from osmosis_ai.platform.cli.eval_upload import prepare_eval_upload_plan
+
+    run_dir = _run_dir(tmp_path)
+    (run_dir / "logs.txt").write_text("using sk-live-abcdef123456\n", encoding="utf-8")
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-live-abcdef123456")
+
+    plan = prepare_eval_upload_plan(run_dir)
+
+    logs = next(file for file in plan.files if file.path == "logs.txt")
+    body = logs.source.read_bytes()
+    assert b"sk-live-abcdef123456" not in body
+    assert b"[REDACTED]" in body
+    assert logs.sha256 == hashlib.sha256(body).hexdigest()
 
 
 def test_absent_trajectory_filename_is_valid_and_never_inferred(
