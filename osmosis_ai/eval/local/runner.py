@@ -1288,7 +1288,7 @@ class LocalEvalRunner:
             run_index=item.run_index,
         )
         try:
-            future = await client.request_rollout_async(
+            future = await client.run_rollout_async(
                 initial_messages=list(item.row.initial_messages),
                 chat_completions_url=listener.chat_completions_url(rollout_id),
                 rollout_id=rollout_id,

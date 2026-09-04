@@ -556,7 +556,7 @@ def _refuse_admission(monkeypatch: pytest.MonkeyPatch, status_code: int) -> None
             status_code=status_code,
         )
 
-    monkeypatch.setattr(RolloutClient, "request_rollout_async", refused)
+    monkeypatch.setattr(RolloutClient, "run_rollout_async", refused)
 
 
 @pytest.mark.parametrize(
@@ -587,7 +587,7 @@ async def test_a_process_wide_admission_fault_halts_and_the_rows_resume(
         raise admission_fault
 
     with monkeypatch.context() as admission_patch:
-        admission_patch.setattr(RolloutClient, "request_rollout_async", failing)
+        admission_patch.setattr(RolloutClient, "run_rollout_async", failing)
         hooks = RecordingHooks()
         summary = await harness.runner(hooks=hooks).run()
 
