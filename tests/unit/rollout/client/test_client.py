@@ -57,14 +57,14 @@ def client(handler: Any, **kwargs: Any) -> RolloutClient:
 
 
 async def completed(rollout_client: RolloutClient):
-    return await rollout_client.request_rollout(**request())
+    return await rollout_client.run_rollout(**request())
 
 
 def json_body(value: httpx.Request) -> dict[str, Any]:
     return json.loads(value.content)
 
 
-async def test_request_rollout_async_returns_completion_task() -> None:
+async def test_run_rollout_async_returns_completion_task() -> None:
     requests: list[httpx.Request] = []
     polls = 0
 
@@ -88,7 +88,7 @@ async def test_request_rollout_async_returns_completion_task() -> None:
         )
 
     rollout_client = client(handler)
-    future = await rollout_client.request_rollout_async(**request())
+    future = await rollout_client.run_rollout_async(**request())
 
     assert polls == 0
     assert isinstance(future, asyncio.Task)
@@ -152,7 +152,7 @@ async def test_admission_timeout_does_not_cancel_unaccepted_work() -> None:
         return httpx.Response(429, headers={"Retry-After": "60"})
 
     with pytest.raises(RolloutAdmissionTimeoutError):
-        await client(handler, admission_timeout_sec=0.01).request_rollout(**request())
+        await client(handler, admission_timeout_sec=0.01).run_rollout(**request())
 
 
 async def test_invalid_admission_response_is_a_protocol_error() -> None:
@@ -160,7 +160,7 @@ async def test_invalid_admission_response_is_a_protocol_error() -> None:
         return httpx.Response(202, json={})
 
     with pytest.raises(RolloutProtocolError, match="invalid response"):
-        await client(handler).request_rollout(**request())
+        await client(handler).run_rollout(**request())
 
 
 async def test_cancel_rollout_posts_cancel() -> None:
@@ -176,7 +176,7 @@ async def test_cancel_rollout_posts_cancel() -> None:
     assert cancelled == [{"ids": [ROLLOUT_ID], "prefix": None, "all": False}]
 
 
-async def test_request_rollout_waits_for_completion() -> None:
+async def test_run_rollout_waits_for_completion() -> None:
     def handler(http_request: httpx.Request) -> httpx.Response:
         if http_request.method == "POST":
             return httpx.Response(202, json=admission())
@@ -185,7 +185,7 @@ async def test_request_rollout_waits_for_completion() -> None:
             json={"rollout_id": ROLLOUT_ID, "status": "success"},
         )
 
-    outcome = await client(handler).request_rollout(**request())
+    outcome = await client(handler).run_rollout(**request())
     assert outcome.status is RolloutStatus.SUCCESS
 
 

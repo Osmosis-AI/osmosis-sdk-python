@@ -118,7 +118,7 @@ class RolloutClient:
         if self.owns_http_client:
             await self.http_client.aclose()
 
-    async def request_rollout(
+    async def run_rollout(
         self,
         initial_messages: list[MessageDict],
         chat_completions_url: str,
@@ -131,7 +131,7 @@ class RolloutClient:
         grader_timeout_sec: float | None = None,
         extra_fields: dict[str, Any] | None = None,
     ) -> RolloutResultResponse:
-        future = await self.request_rollout_async(
+        future = await self.run_rollout_async(
             initial_messages=initial_messages,
             chat_completions_url=chat_completions_url,
             rollout_id=rollout_id,
@@ -145,7 +145,7 @@ class RolloutClient:
         )
         return await future
 
-    async def request_rollout_async(
+    async def run_rollout_async(
         self,
         initial_messages: list[MessageDict],
         chat_completions_url: str,
