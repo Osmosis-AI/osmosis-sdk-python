@@ -103,7 +103,7 @@ Anchors:
 - Execution contract: [../osmosis_ai/rollout/backend/base.py](../osmosis_ai/rollout/backend/base.py) — `ExecutionBackend.execute(request) -> ExecutionOutcome`.
 - Sample/result types: [../osmosis_ai/rollout/types/sample.py](../osmosis_ai/rollout/types/sample.py) (`RolloutSample`, `RolloutStatus`, `RolloutErrorCategory`, `ExecutionRequest`, `ExecutionResult`, `ExecutionOutcome`).
 
-The server owns the result futures. A result request waits up to the server-configured timeout (30 seconds by default), then returns either the terminal result or the current state. Each valid result request renews the server-configured polling lease (120 seconds by default). Missing the lease deadline publishes a `lease_expired` failure and cancels the rollout task. The client cannot override either timeout. `RolloutClient.request_rollout()` waits for a terminal result; `await RolloutClient.request_rollout_async()` returns a task after admission so callers can await completion later.
+The server owns the result futures. A result request waits up to the server-configured timeout (30 seconds by default), then returns either the terminal result or the current state. Each valid result request renews the server-configured polling lease (120 seconds by default). Missing the lease deadline publishes a `lease_expired` failure and cancels the rollout task. The client cannot override either timeout. `RolloutClient.run_rollout()` waits for a terminal result; `await RolloutClient.run_rollout_async()` returns a task after admission so callers can await completion later.
 
 ### Eval path
 

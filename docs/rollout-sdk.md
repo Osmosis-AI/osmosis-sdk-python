@@ -175,7 +175,7 @@ from osmosis_ai.rollout.client import RolloutClient
 
 async with httpx.AsyncClient() as http_client:
     client = RolloutClient(url="http://127.0.0.1:8000", http_client=http_client)
-    result = await client.request_rollout(
+    result = await client.run_rollout(
         initial_messages=[{"role": "user", "content": "Solve this task"}],
         chat_completions_url="http://127.0.0.1:9000/v1",
         rollout_id="run-123",
@@ -184,10 +184,10 @@ async with httpx.AsyncClient() as http_client:
     )
 ```
 
-`request_rollout()` returns the terminal `RolloutResultResponse`. When the caller needs a handle immediately after admission, `request_rollout_async()` returns the polling task:
+`run_rollout()` returns the terminal `RolloutResultResponse`. When the caller needs a handle immediately after admission, `run_rollout_async()` returns the polling task:
 
 ```python
-future = await client.request_rollout_async(
+future = await client.run_rollout_async(
     initial_messages=[{"role": "user", "content": "Solve this task"}],
     chat_completions_url="http://127.0.0.1:9000/v1",
     rollout_id="run-124",
