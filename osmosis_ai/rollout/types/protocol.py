@@ -1,7 +1,7 @@
 import math
 from typing import Any, Self
 
-from pydantic import BaseModel, field_validator, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from osmosis_ai.rollout.types.sample import (
     MessageDict,
@@ -55,6 +55,7 @@ class RolloutInitRequest(BaseModel):
 class RolloutInitResponse(BaseModel):
     rollout_id: str
     status: RolloutStatus
+    polling_lease_token: str = Field(min_length=1)
     result_wait_timeout_sec: float
     polling_lease_timeout_sec: float
 

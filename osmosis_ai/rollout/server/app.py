@@ -136,10 +136,7 @@ def create_rollout_server(
         await registry.complete(request.rollout_id, response)
 
     @app.post("/rollout", status_code=202)
-    async def rollout(
-        request: RolloutInitRequest,
-        lease_token: str = Header(alias=POLLING_LEASE_HEADER, min_length=1),
-    ) -> RolloutInitResponse:
+    async def rollout(request: RolloutInitRequest) -> RolloutInitResponse:
         if not backend.has_capacity():
             raise HTTPException(
                 status_code=429,
@@ -147,7 +144,7 @@ def create_rollout_server(
                 headers={"Retry-After": "5"},
             )
         try:
-            await registry.register(request.rollout_id, lease_token)
+            lease_token = await registry.register(request.rollout_id)
         except DuplicateRolloutError as exc:
             raise HTTPException(
                 status_code=409, detail="rollout_id is already registered"
@@ -163,6 +160,7 @@ def create_rollout_server(
         return RolloutInitResponse(
             rollout_id=request.rollout_id,
             status=RolloutStatus.QUEUED,
+            polling_lease_token=lease_token,
             result_wait_timeout_sec=result_wait_timeout_sec,
             polling_lease_timeout_sec=polling_lease_timeout_sec,
         )

@@ -38,15 +38,17 @@ class LeaseManager:
         self._on_expired = on_expired
         self._leases: dict[str, PollingLease] = {}
 
-    def register(self, rollout_id: str, token: str) -> None:
+    def register(self, rollout_id: str) -> str:
         if rollout_id in self._leases:
             raise ValueError(f"lease already registered for {rollout_id}")
+        token = secrets.token_urlsafe(32)
         lease = PollingLease(
             digest=self._digest(token),
             deadline=asyncio.get_running_loop().time() + self._timeout_sec,
         )
         self._leases[rollout_id] = lease
         lease.watcher = asyncio.create_task(self._watch(rollout_id, lease))
+        return token
 
     def authenticate(self, rollout_id: str, token: str) -> None:
         self._authenticated_lease(rollout_id, token)

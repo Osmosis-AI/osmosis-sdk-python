@@ -158,8 +158,7 @@ def test_framework_neutral_core_imports_without_optional_dependencies() -> None:
             "osmosis_ai.rollout.types.protocol",
             "osmosis_ai.rollout.utils.errors",
             "osmosis_ai.rollout.utils.ttl_cache",
-            "osmosis_ai.rollout.controller.store",
-            "osmosis_ai.rollout.driver",
+            "osmosis_ai.rollout.client",
         ):
             importlib.import_module(module_name)
         """
@@ -437,15 +436,9 @@ def test_local_eval_runner_imports_without_harbor_extra() -> None:
     assert result.returncode == 0, result.stderr
 
 
-def test_driver_core_imports_without_eval_run_extra() -> None:
-    """The localhost callback listener and the LiteLLM bridge need `[eval]`.
-
-    The store and the HTTP driver speak httpx and are part of the base install,
-    so a bare environment must reach both of them.
-    """
+def test_rollout_client_imports_without_eval_run_extra() -> None:
     result = _run_python(
         """
-        import asyncio
         import builtins
         import sys
 
@@ -459,13 +452,9 @@ def test_driver_core_imports_without_eval_run_extra() -> None:
             return real_import(name, globals, locals, fromlist, level)
 
         builtins.__import__ = guarded_import
-        from osmosis_ai.rollout.controller import CallbackStore
-        from osmosis_ai.rollout.driver import RolloutRunRequest
-        from osmosis_ai.rollout.http_driver import HttpRolloutDriver
+        from osmosis_ai.rollout.client import RolloutClient
 
-        CallbackStore(on_terminal_commit=lambda result: asyncio.sleep(0))
-        RolloutRunRequest(messages=[])
-        assert HttpRolloutDriver is not None
+        assert RolloutClient is not None
         loaded_roots = {name.partition(".")[0] for name in sys.modules}
         assert not (blocked & loaded_roots)
         """
