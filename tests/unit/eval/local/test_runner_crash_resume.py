@@ -1,7 +1,7 @@
 """The crash-recovery acceptance gates (§17).
 
-A durably acknowledged terminal result must never run again across ``kill -9``
-or Ctrl-C; unacknowledged work must. Both are exercised against a real
+A durable terminal result must never run again across ``kill -9`` or Ctrl-C;
+uncommitted work must. Both are exercised against a real
 supervisor in its own process, because that is the only way to remove the
 supervisor without letting it clean up after itself.
 """

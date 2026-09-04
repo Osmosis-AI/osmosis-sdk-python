@@ -2,7 +2,7 @@
 
 These tests spawn the rollout server the way ``osmosis eval run`` does, so they
 cover the parts no in-process fake can: artifact-root override, HTTP dispatch,
-callback delivery, journal-before-ack ordering, and resume across processes.
+result delivery, durable journalling, and resume across processes.
 """
 
 from __future__ import annotations
@@ -18,9 +18,9 @@ import pytest
 from osmosis_ai.eval.local.dataset import select_rows
 from osmosis_ai.eval.local.runner import LocalEvalOptions, ResumeRefusedError
 from osmosis_ai.eval.local.state import TerminalJournal, TerminalRecord
-from osmosis_ai.rollout.http_driver import (
-    HttpRolloutDriver,
+from osmosis_ai.rollout.client import (
     RolloutAdmissionTimeoutError,
+    RolloutClient,
     RolloutProtocolError,
 )
 
@@ -525,10 +525,12 @@ async def test_a_dead_rollout_server_halts_instead_of_waiting_out_deadlines(
     original_run_item = runner._run_work_item
     killed = {"done": False}
 
-    async def kill_after_first(item: Any, driver: Any) -> None:
+    async def kill_after_first(
+        item: Any, client: Any, listener: Any, llm_api_key: str
+    ) -> None:
         if killed["done"]:
-            return await original_run_item(item, driver)
-        result = await original_run_item(item, driver)
+            return await original_run_item(item, client, listener, llm_api_key)
+        result = await original_run_item(item, client, listener, llm_api_key)
         killed["done"] = True
         child = runner._child
         assert child is not None
@@ -538,8 +540,6 @@ async def test_a_dead_rollout_server_halts_instead_of_waiting_out_deadlines(
     runner._run_work_item = kill_after_first  # type: ignore[method-assign]
     summary = await runner.run()
 
-    # One item completed; the rest are pending, not failed, and the run did not
-    # sit on a callback that can no longer arrive.
     assert summary.succeeded == 1
     assert summary.failed == 0
     assert len(harness.journal_lines()) == 1
@@ -550,13 +550,13 @@ async def test_a_dead_rollout_server_halts_instead_of_waiting_out_deadlines(
 def _refuse_admission(monkeypatch: pytest.MonkeyPatch, status_code: int) -> None:
     """Refuse every admission the way a POST /rollout *status_code* would."""
 
-    async def refused(self: Any, init: Any) -> None:
+    async def refused(self: Any, *args: Any, **kwargs: Any) -> None:
         raise RolloutProtocolError(
             f"POST /rollout returned {status_code}; only 202 and 429 are accepted",
             status_code=status_code,
         )
 
-    monkeypatch.setattr(HttpRolloutDriver, "_admit", refused)
+    monkeypatch.setattr(RolloutClient, "run_rollout_async", refused)
 
 
 @pytest.mark.parametrize(
@@ -583,11 +583,11 @@ async def test_a_process_wide_admission_fault_halts_and_the_rows_resume(
     # A restarting server or backpressure that outlives the admission budget
     # says nothing about the rows themselves: they must stay pending rather
     # than earn durable failed records, and a later invocation picks them up.
-    async def failing(self: Any, init: Any) -> None:
+    async def failing(self: Any, *args: Any, **kwargs: Any) -> None:
         raise admission_fault
 
     with monkeypatch.context() as admission_patch:
-        admission_patch.setattr(HttpRolloutDriver, "_admit", failing)
+        admission_patch.setattr(RolloutClient, "run_rollout_async", failing)
         hooks = RecordingHooks()
         summary = await harness.runner(hooks=hooks).run()
 

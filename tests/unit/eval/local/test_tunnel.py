@@ -19,8 +19,8 @@ from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 
 from osmosis_ai.eval.local import tunnel as tunnel_module
+from osmosis_ai.eval.local.listener import LocalhostUvicornServer
 from osmosis_ai.eval.local.tunnel import CloudflaredTunnel, TunnelError
-from osmosis_ai.rollout.controller.listener import LocalhostUvicornServer
 
 FAKE_URL = "https://fake-name.trycloudflare.com"
 
