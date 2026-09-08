@@ -198,6 +198,8 @@ BARE_IMPORTABLE_MODULES = (
     "osmosis_ai.rollout.utils.ttl_cache",
     "osmosis_ai.rollout.controller.store",
     "osmosis_ai.rollout.http_driver",
+    "osmosis_ai.rollout.client",
+    "osmosis_ai.rollout.client.client",
 )
 
 # Leaf modules that must stay unimportable until their extra is installed.
