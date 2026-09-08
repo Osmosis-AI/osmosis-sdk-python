@@ -1,10 +1,8 @@
 from abc import ABC, abstractmethod
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Sequence
 from typing import Any
 
-from osmosis_ai.rollout.types import ExecutionRequest, ExecutionResult
-
-ResultCallback = Callable[[ExecutionResult], Awaitable[None]]
+from osmosis_ai.rollout.types import ExecutionOutcome, ExecutionRequest
 
 
 class ExecutionBackend(ABC):
@@ -12,16 +10,8 @@ class ExecutionBackend(ABC):
     async def execute(
         self,
         request: ExecutionRequest,
-        on_workflow_complete: ResultCallback,
-        on_grader_complete: ResultCallback | None = None,
-    ) -> None:
+    ) -> ExecutionOutcome:
         raise NotImplementedError
-
-    @property
-    def capture_final_result(self) -> bool:
-        """Accept the grader result for archival even without a grader
-        callback URL. True for backends that compute the reward themselves."""
-        return False
 
     def has_capacity(self) -> bool:
         """Whether the backend can admit another rollout right now.

@@ -27,7 +27,6 @@ def _init_payload(**overrides: Any) -> dict[str, Any]:
         "rollout_id": "r1",
         "initial_messages": [{"role": "user", "content": "hi"}],
         "chat_completions_url": "http://controller/chat/completions",
-        "completion_callback_url": "http://controller/v1/rollout/completed",
     }
     payload.update(overrides)
     return payload

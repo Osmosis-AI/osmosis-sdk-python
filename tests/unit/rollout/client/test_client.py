@@ -60,6 +60,27 @@ async def completed(rollout_client: RolloutClient):
     return await rollout_client.run_rollout(**request())
 
 
+async def test_cancel_bounds_waits_outside_http_timeouts(monkeypatch) -> None:
+    from osmosis_ai.rollout.client import client as client_module
+
+    monkeypatch.setattr(client_module, "_CANCEL_REQUEST_TIMEOUT_SEC", 0.01)
+    cancelled = asyncio.Event()
+
+    async def handler(http_request: httpx.Request) -> httpx.Response:
+        try:
+            await asyncio.Event().wait()
+        finally:
+            cancelled.set()
+        raise AssertionError("unreachable")
+
+    rollout_client = client(handler)
+    async with asyncio.timeout(1.0):
+        with pytest.raises(TimeoutError):
+            await rollout_client.cancel_rollout(ROLLOUT_ID)
+    assert cancelled.is_set()
+    await rollout_client.http_client.aclose()
+
+
 def json_body(value: httpx.Request) -> dict[str, Any]:
     return json.loads(value.content)
 

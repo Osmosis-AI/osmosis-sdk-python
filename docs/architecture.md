@@ -20,17 +20,16 @@ osmosis_ai/
 │   ├── agent_workflow.py  # AgentWorkflow ABC
 │   ├── grader.py          # Grader ABC
 │   ├── context.py         # RolloutContext / AgentWorkflowContext / GraderContext
-│   ├── driver.py          # RolloutOutcome / RolloutRunRequest — eval-facing execution types
-│   ├── http_driver.py     # HttpRolloutDriver over the callback protocol
-│   ├── controller/        # callback store (core); localhost listener + LiteLLM bridge (`[eval]`)
-│   ├── server/            # optional generic FastAPI server (`[server]`) + ControllerAuth
+│   ├── client/            # client for the long-poll protocol
+│   ├── server/            # optional generic FastAPI server (`[server]`)
 │   ├── backend/           # ExecutionBackend ABC + Local / optional Harbor backend
 │   ├── container/         # in-container agent + grader runner and its file contract
 │   ├── trajectory/        # ATIF models, conversion, and best-effort persistence
 │   ├── types/             # protocol.py, config.py, output.py, sample.py
-│   ├── utils/             # framework-neutral helpers (errors, http, ttl_cache, …)
+│   ├── utils/             # framework-neutral helpers (errors, ttl_cache, …)
 │   └── integrations/agents/  # Strands / OpenAI Agents adapters
 ├── eval/              # Eval helpers
+│   ├── local/         # local runner and localhost LiteLLM bridge (`[eval]`)
 │   └── rubric/        # evaluate_rubric() LLM-as-judge engine
 ├── templates/         # `osmosis template` recipe catalog + source resolution
 ├── packaging.py       # Build an installable wheel bundle from a rollout project
@@ -58,15 +57,11 @@ from osmosis_ai.rollout.server import create_rollout_server
 from osmosis_ai.rollout.backend.harbor import HarborBackend
 from osmosis_ai.rollout.integrations.agents.strands import OsmosisStrandsAgent
 from osmosis_ai.rollout.integrations.agents.openai_agents import OsmosisAgent
-from osmosis_ai.rollout.controller import (
-    CallbackStore,
-    CallbackListener,
-    LiteLLMBridge,
-)
-from osmosis_ai.rollout.http_driver import HttpRolloutDriver
+from osmosis_ai.eval.local import LlmBridgeListener, LiteLLMBridge
+from osmosis_ai.rollout.client import RolloutClient
 ```
 
-`osmosis_ai.rollout` is **not** re-exported at the package top level — import it directly. Its public surface is framework-neutral core only; it does not export the server or Strands integration. `server`, `harbor`, `strands`, `openai-agents`, and `eval` each require their matching installation extra. The generic server has no Harbor dependency. `CallbackStore` and `HttpRolloutDriver` only need the base install; `[eval]` covers the localhost callback listener and the in-process LiteLLM bridge that serve a local eval run (callbacks in, model calls out).
+`osmosis_ai.rollout` is **not** re-exported at the package top level — import it directly. Its public surface is framework-neutral core only; it does not export the server or Strands integration. `server`, `harbor`, `strands`, `openai-agents`, and `eval` each require their matching installation extra. The generic server has no Harbor dependency. `RolloutClient` only needs the base install; `[eval]` covers the localhost in-process LiteLLM bridge used by local eval.
 
 ## Lazy loading
 
@@ -78,37 +73,41 @@ CLI startup must stay fast (~150 ms vs ~1 s), so heavy dependencies load on firs
 
 ## Remote rollout protocol
 
-The core design separates **LLM inference** (on the training cluster) from **agent logic** (on your RolloutServer). The controller (Traingate/slime) drives inference; your `AgentWorkflow` runs the agent and your `Grader` attaches rewards. Inference weights stay on the training cluster so PPO sees consistent model weights, while agent/tool code can run anywhere.
+The core design separates **LLM inference** (on the training cluster) from **agent logic** (on your RolloutServer). The training or evaluation service supplies the inference endpoint; your `AgentWorkflow` runs the agent and your `Grader` attaches rewards. Inference weights stay on the training cluster so PPO sees consistent model weights, while agent/tool code can run anywhere.
 
 ```mermaid
 sequenceDiagram
-    participant C as RolloutController
+    participant C as RolloutClient
     participant S as RolloutServer (create_rollout_server)
     participant W as AgentWorkflow.run
     participant G as Grader.grade
+    participant L as chat_completions_url
     C->>S: POST /rollout (RolloutInitRequest)
-    Note over S: schedules the execution task, then returns 202 immediately
+    Note over S: registers a result future, schedules execution, returns 202
+    S-->>C: RolloutInitResponse + polling lease
     S->>W: backend.execute(ExecutionRequest)
-    W->>C: POST chat_completions_url (messages + tools)
-    C-->>W: LLM response (tool_calls)
+    W->>L: POST /chat/completions (messages + tools)
+    L-->>W: LLM response (tool_calls)
     Note over W: repeat until done
-    S->>C: POST completion_callback_url (RolloutCompleteRequest)
     S->>G: grade collected samples
-    S->>C: POST grader_callback_url (GraderCompleteRequest)
+    loop Until terminal
+        C->>S: GET /rollout/{id}/result + polling lease
+        S-->>C: finished result, or current state after server wait timeout
+    end
 ```
 
 Anchors:
 
-- Server + endpoints + callbacks: [../osmosis_ai/rollout/server/app.py](../osmosis_ai/rollout/server/app.py) (`create_rollout_server`, `POST /rollout`, `GET /health`, `_handle_rollout`).
-- Wire types: [../osmosis_ai/rollout/types/protocol.py](../osmosis_ai/rollout/types/protocol.py) (`RolloutInitRequest`, `RolloutCompleteRequest`, `GraderCompleteRequest`, `GraderStatus`). Callbacks use `controller_api_key`; the optional `llm_api_key` is the chat/proxy bearer. When `llm_api_key` is omitted (`None`) the server falls back to the controller key; an explicit empty string is rejected. `GET /rollout/{id}/status` is backend-authoritative (`LocalBackend` may report `UNKNOWN`).
-- Execution contract: [../osmosis_ai/rollout/backend/base.py](../osmosis_ai/rollout/backend/base.py) — `ExecutionBackend.execute(request, on_workflow_complete, on_grader_complete)`, where the two callbacks are `ResultCallback` parameters (not methods).
-- Sample/result types: [../osmosis_ai/rollout/types/sample.py](../osmosis_ai/rollout/types/sample.py) (`RolloutSample`, `RolloutStatus`, `RolloutErrorCategory`, `ExecutionRequest`, `ExecutionResult`).
+- Server + endpoints: [../osmosis_ai/rollout/server/app.py](../osmosis_ai/rollout/server/app.py) (`create_rollout_server`, `POST /rollout`, `GET /rollout/{id}/result`, `GET /health`).
+- Wire types: [../osmosis_ai/rollout/types/protocol.py](../osmosis_ai/rollout/types/protocol.py) (`RolloutInitRequest`, `RolloutInitResponse`, `RolloutResultResponse`). Admission returns an opaque polling lease token; the client sends it as `X-Osmosis-Rollout-Lease` on every result request. `llm_api_key` is only the chat/proxy bearer.
+- Execution contract: [../osmosis_ai/rollout/backend/base.py](../osmosis_ai/rollout/backend/base.py) — `ExecutionBackend.execute(request) -> ExecutionOutcome`.
+- Sample/result types: [../osmosis_ai/rollout/types/sample.py](../osmosis_ai/rollout/types/sample.py) (`RolloutSample`, `RolloutStatus`, `RolloutErrorCategory`, `ExecutionRequest`, `ExecutionResult`, `ExecutionOutcome`).
 
-The controller delivers results asynchronously via the two callback URLs, so it can manage many concurrent rollouts. `grader_callback_url` is optional; when omitted, grading is skipped.
+The server owns the result futures. A result request waits up to the server-configured timeout (30 seconds by default), then returns either the terminal result or the current state. Each valid result request renews the server-configured polling lease (120 seconds by default). Missing the lease deadline publishes a `lease_expired` failure and cancels the rollout task. The client cannot override either timeout. `RolloutClient.run_rollout()` waits for a terminal result; `await RolloutClient.run_rollout_async()` returns a task after admission so callers can await completion later.
 
 ### Eval path
 
-The eval-facing types are `RolloutRunRequest` / `RolloutOutcome` in [../osmosis_ai/rollout/driver.py](../osmosis_ai/rollout/driver.py). The HTTP implementation is [../osmosis_ai/rollout/http_driver.py](../osmosis_ai/rollout/http_driver.py), with a generic callback store and localhost listener under [../osmosis_ai/rollout/controller/](../osmosis_ai/rollout/controller/). The store exposes a single `wait_terminal` rendezvous; a completion callback is recorded on the live session for duplicate detection but is not awaited separately. Eval supplies data + an LLM endpoint and consumes trace + reward.
+The HTTP client lives under [../osmosis_ai/rollout/client/](../osmosis_ai/rollout/client/). The local runner and localhost LLM bridge live under [../osmosis_ai/eval/local/](../osmosis_ai/eval/local/). Eval supplies data + an LLM endpoint, keeps the polling lease alive, and consumes the finished trace + reward.
 
 ## Backend validation
 
