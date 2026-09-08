@@ -1,14 +1,8 @@
-"""Per-call LLM data the controller reports back in its callback acks.
+"""Optional per-call LLM metrics supplied to trajectory persistence.
 
-Only the controller (whose LLM bridge serves every completion) sees
-per-call usage, cost, and logprobs. It MAY attach a ``trajectory``
-object -- the ``TrajectoryReport`` shape below -- to the JSON body of a
-callback response; the server folds it into the saved ATIF document and
-ignores anything else in the body.
-
-Report in the completion ack: a grader ack without a report keeps the
-earlier one, one with a report replaces it wholesale. A worked example
-plus timing and sample-key guidance live in docs/rollout-sdk.md.
+Callers can pass reports directly to ``save_trajectory`` or the converter.
+The long-polling protocol does not exchange reports; ``report_from_response``
+remains available for parsing legacy callback acknowledgements.
 """
 
 import logging

@@ -1,16 +1,15 @@
-"""In-process LiteLLM bridge: the model-call half of the local eval controller.
+"""In-process LiteLLM bridge for local evaluation.
 
-Port of the monolith eval controller's ``LiteLLMBridge``: an OpenAI-compatible
-chat-completions surface served on the controller's loopback listener, with
+An OpenAI-compatible chat-completions surface served on a loopback listener, with
 LiteLLM doing the provider conversion in-process. Provider credentials stay on
 the host; the container only ever sees the loopback URL and a per-run bearer.
 
 The bridge is non-streaming toward the provider. When a client requests
 ``stream=true`` it gets a valid SSE stream — heartbeat comments while the
 completion is in flight, then a single chunk carrying the full delta,
-``finish_reason`` and usage, then ``[DONE]`` — the same shape the hosted eval
-controller serves. Per-rollout token totals are accumulated for the run index
-and read once with :meth:`LiteLLMBridge.collect_tokens`.
+``finish_reason`` and usage, then ``[DONE]``. Per-rollout token totals are
+accumulated for the run index and read once with
+:meth:`LiteLLMBridge.collect_tokens`.
 """
 
 from __future__ import annotations
@@ -26,12 +25,12 @@ from contextlib import suppress
 from typing import Any
 
 from osmosis_ai._imports import raise_optional_dependency_error
-from osmosis_ai.rollout.controller.openai_responses import (
+from osmosis_ai.eval.local.openai_responses import (
     _compact_json,
     build_responses_kwargs,
     to_chat_response,
 )
-from osmosis_ai.rollout.controller.openai_responses import (
+from osmosis_ai.eval.local.openai_responses import (
     _field as _getattr_or_key,
 )
 
@@ -58,9 +57,6 @@ _LITELLM_CONSUMED_FIELDS = frozenset(
 )
 _OPENAI_SAMPLING_FIELDS = frozenset({"temperature", "top_p"})
 
-# The preflight probes once, so a 4xx client error there is a persistent
-# config/account problem, not a per-row fluke. Mid-run errors are not
-# classified here: they fail their row and surface through the callbacks.
 _PREFLIGHT_FATAL_EXCEPTIONS = frozenset(
     {
         "AuthenticationError",
@@ -454,8 +450,6 @@ def create_bridge_router(
 ) -> APIRouter:
     """Chat-completions routes for :class:`LiteLLMBridge`.
 
-    Mounted on the controller's callback app; guarded by its own bearer so the
-    container-held credential cannot drive the callback surface.
     ``non_stream_keepalive`` turns on the tunnel-mode keepalive for
     non-streaming calls; pure-loopback runs leave it off and keep exact
     current behavior.

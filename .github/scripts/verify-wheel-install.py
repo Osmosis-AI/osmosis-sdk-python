@@ -196,8 +196,8 @@ BARE_IMPORTABLE_MODULES = (
     "osmosis_ai.rollout.types.protocol",
     "osmosis_ai.rollout.utils.errors",
     "osmosis_ai.rollout.utils.ttl_cache",
-    "osmosis_ai.rollout.controller.store",
-    "osmosis_ai.rollout.http_driver",
+    "osmosis_ai.rollout.client",
+    "osmosis_ai.rollout.client.client",
 )
 
 # Leaf modules that must stay unimportable until their extra is installed.
@@ -210,8 +210,8 @@ EXTRA_ONLY_MODULES = (
     "osmosis_ai.rollout.integrations.agents.openai_agents",
     "osmosis_ai.rollout.integrations.agents.strands",
     "osmosis_ai.rollout.server.app",
-    "osmosis_ai.rollout.controller.listener",
-    "osmosis_ai.rollout.controller.llm_bridge",
+    "osmosis_ai.eval.local.listener",
+    "osmosis_ai.eval.local.llm_bridge",
 )
 
 
@@ -225,8 +225,8 @@ def _assert_extra_only_modules_absent() -> None:
             if module_name == "osmosis_ai.packaging":
                 assert 'pip install "osmosis-ai[harbor]"' in str(error), str(error)
             elif module_name in (
-                "osmosis_ai.rollout.controller.listener",
-                "osmosis_ai.rollout.controller.llm_bridge",
+                "osmosis_ai.eval.local.listener",
+                "osmosis_ai.eval.local.llm_bridge",
             ):
                 assert 'pip install "osmosis-ai[eval]"' in str(error), str(error)
             continue
@@ -273,7 +273,7 @@ def _smoke_bare() -> None:
 def _smoke_server() -> None:
     _assert_public_exports(
         "osmosis_ai.rollout.server",
-        ("ControllerAuth", "create_rollout_server"),
+        ("create_rollout_server",),
     )
 
 
@@ -335,12 +335,12 @@ def _smoke_parquet() -> None:
 
 def _smoke_eval_run() -> None:
     _assert_public_exports(
-        "osmosis_ai.rollout.controller",
-        ("CallbackStore", "CallbackListener", "LiteLLMBridge"),
+        "osmosis_ai.eval.local",
+        ("LlmBridgeListener", "LiteLLMBridge"),
     )
     _assert_public_exports(
-        "osmosis_ai.rollout.http_driver",
-        ("HttpRolloutDriver",),
+        "osmosis_ai.rollout.client",
+        ("RolloutClient",),
     )
     _smoke_parquet()
 

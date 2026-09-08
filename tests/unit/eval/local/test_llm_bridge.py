@@ -11,8 +11,8 @@ import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport
 
-from osmosis_ai.rollout.controller import llm_bridge
-from osmosis_ai.rollout.controller.llm_bridge import (
+from osmosis_ai.eval.local import llm_bridge
+from osmosis_ai.eval.local.llm_bridge import (
     LiteLLMBridge,
     create_bridge_router,
 )

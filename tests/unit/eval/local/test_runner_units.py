@@ -30,7 +30,7 @@ from osmosis_ai.eval.local.runner import (
     LocalEvalError,
     LocalEvalOptions,
     _available_generated_run_name,
-    _classify_terminal,
+    _classify_outcome,
     build_run_inputs,
     build_subprocess_env,
     changed_input_keys,
@@ -38,8 +38,7 @@ from osmosis_ai.eval.local.runner import (
     public_chat_endpoint_environment,
     reserve_free_port,
 )
-from osmosis_ai.rollout.controller import TerminalCallbackResult
-from osmosis_ai.rollout.types import GraderCompleteRequest, GraderStatus, RolloutSample
+from osmosis_ai.rollout.types import RolloutResultResponse, RolloutSample, RolloutStatus
 
 
 def _spec(**overrides: Any) -> EvalRunSpec:
@@ -407,9 +406,9 @@ async def test_a_foreign_rollout_server_on_a_pinned_port_is_refused(
     )
     runner._run_dir = tmp_path / "evals" / "run-1"
     try:
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient() as http_client:
             with pytest.raises(LocalEvalError, match="already listening"):
-                await runner._start_rollout_server(secrets={}, client=client)
+                await runner._start_rollout_server(secrets={}, http_client=http_client)
     finally:
         server.close()
         await server.wait_closed()
@@ -429,9 +428,9 @@ async def test_probe_health_reads_the_ownership_header() -> None:
     )
     port = int(server.sockets[0].getsockname()[1])
     try:
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient() as http_client:
             probe = await runner_module._probe_health(
-                client, f"http://127.0.0.1:{port}"
+                http_client, f"http://127.0.0.1:{port}"
             )
     finally:
         server.close()
@@ -448,9 +447,9 @@ async def test_probe_health_rejects_a_non_object_json_body() -> None:
     server = await _serve_health(["not", "an", "object"])
     port = int(server.sockets[0].getsockname()[1])
     try:
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient() as http_client:
             probe = await runner_module._probe_health(
-                client, f"http://127.0.0.1:{port}"
+                http_client, f"http://127.0.0.1:{port}"
             )
     finally:
         server.close()
@@ -473,9 +472,9 @@ async def test_wait_for_health_accepts_header_ownership_without_json_id(
     port = int(server.sockets[0].getsockname()[1])
     runner = _runner(_spec(), tmp_path)
     try:
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient() as http_client:
             await runner._wait_for_health(
-                client,
+                http_client,
                 f"http://127.0.0.1:{port}",
                 instance_id="owned",
                 child=_LiveChild(),
@@ -510,9 +509,9 @@ async def test_wait_for_health_warns_when_the_server_sdk_differs(
     runner._hooks.warning = warnings.append
     runner._log = RunLog(tmp_path / "logs.txt")
     try:
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient() as http_client:
             await runner._wait_for_health(
-                client,
+                http_client,
                 f"http://127.0.0.1:{port}",
                 instance_id="owned",
                 child=_LiveChild(),
@@ -543,8 +542,8 @@ async def _resolved_concurrency(
         return health
 
     monkeypatch.setattr(runner_module, "probe_health", fake_probe)
-    async with httpx.AsyncClient() as client:
-        return await runner._resolve_concurrency(client, "http://127.0.0.1:1")
+    async with httpx.AsyncClient() as http_client:
+        return await runner._resolve_concurrency(http_client, "http://127.0.0.1:1")
 
 
 @pytest.mark.parametrize(
@@ -693,16 +692,28 @@ def _runner(
     )
 
 
-def test_configured_timeouts_set_the_supervisor_deadline(tmp_path: Path) -> None:
-    runner = _runner(_spec(agent_timeout_sec=450.0, grader_timeout_sec=150.0), tmp_path)
-    # Server budget plus the callback/network grace (§10).
-    assert runner._callback_deadline() == 450.0 + 150.0 + 60.0
+@pytest.mark.parametrize(
+    ("agent", "grader", "expected"),
+    [
+        (450.0, 150.0, 660.0),
+        (0.0, 0.0, 60.0),
+        (-5.0, -10.0, 60.0),
+        (-5.0, 30.0, 90.0),
+        (30.0, -5.0, 90.0),
+    ],
+)
+def test_configured_timeouts_set_the_supervisor_deadline(
+    tmp_path: Path, agent: float, grader: float, expected: float
+) -> None:
+    runner = _runner(
+        _spec(agent_timeout_sec=agent, grader_timeout_sec=grader), tmp_path
+    )
+    assert runner._item_deadline() == expected
 
 
 def test_an_unconfigured_timeout_still_yields_a_finite_deadline(tmp_path: Path) -> None:
-    # An unbounded wait would hang every worker forever on a lost callback.
     runner = _runner(_spec(), tmp_path)
-    deadline = runner._callback_deadline()
+    deadline = runner._item_deadline()
     assert deadline is not None
     assert deadline > 0
 
@@ -714,15 +725,12 @@ def test_an_unconfigured_timeout_still_yields_a_finite_deadline(tmp_path: Path) 
 def test_an_unbounded_phase_keeps_the_default_deadline(
     tmp_path: Path, agent: float | None, grader: float | None
 ) -> None:
-    # ``None`` means "run unbounded", so bounding the item to the phase that is
-    # configured would stamp still-running work `callback_timeout` -- a durable
-    # failed record that a plain resume then skips.
     from osmosis_ai.eval.local.runner import _DEFAULT_ITEM_DEADLINE_SEC
 
     runner = _runner(
         _spec(agent_timeout_sec=agent, grader_timeout_sec=grader), tmp_path
     )
-    assert runner._callback_deadline() == _DEFAULT_ITEM_DEADLINE_SEC
+    assert runner._item_deadline() == _DEFAULT_ITEM_DEADLINE_SEC
 
 
 def test_an_output_root_equal_to_the_rollout_dir_is_refused(tmp_path: Path) -> None:
@@ -909,23 +917,19 @@ async def test_execute_restores_environment_when_secret_update_partially_fails(
 # --------------------------------------------------------------------------- #
 
 
-def _terminal(
+def _outcome(
     *,
-    status: GraderStatus = GraderStatus.SUCCESS,
+    status: RolloutStatus = RolloutStatus.SUCCESS,
     reward: float | None = 1.0,
     remove_sample: bool = False,
-) -> TerminalCallbackResult:
-    return TerminalCallbackResult(
+) -> RolloutResultResponse:
+    return RolloutResultResponse(
         rollout_id="f" * 32,
-        source="grader",
-        grader=GraderCompleteRequest(
-            status=status,
-            rollout_id="f" * 32,
-            sample=RolloutSample(
-                messages=[{"role": "assistant", "content": "ok"}],
-                reward=reward,
-                remove_sample=remove_sample,
-            ),
+        status=status,
+        sample=RolloutSample(
+            messages=[{"role": "assistant", "content": "ok"}],
+            reward=reward,
+            remove_sample=remove_sample,
         ),
     )
 
@@ -933,13 +937,17 @@ def _terminal(
 def test_a_crashed_grader_that_removed_the_sample_is_a_failure() -> None:
     # "skipped" would drop the row from the scored denominator, so a run whose
     # graders all crashed would report a clean pass rate and exit 0.
-    assert _classify_terminal(
-        _terminal(status=GraderStatus.FAILURE, reward=None, remove_sample=True)
-    ) == ("failed", None, "grader_failed")
+    assert _classify_outcome(
+        _outcome(
+            status=RolloutStatus.FAILURE,
+            reward=None,
+            remove_sample=True,
+        )
+    ) == ("failed", None, "rollout_failed")
 
 
 def test_remove_sample_from_a_successful_grader_is_still_skipped() -> None:
-    assert _classify_terminal(_terminal(remove_sample=True)) == ("skipped", None, None)
+    assert _classify_outcome(_outcome(remove_sample=True)) == ("skipped", None, None)
 
 
 async def test_a_retried_failure_writes_its_own_terminal_record(tmp_path: Path) -> None:
@@ -1088,9 +1096,9 @@ async def test_the_default_path_syncs_then_runs_the_rollout_project(
     spawns = _record_spawns(monkeypatch)
     runner = _uv_runner(tmp_path)
 
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient() as http_client:
         with pytest.raises(LocalEvalError, match="before becoming healthy"):
-            await runner._start_rollout_server(secrets={}, client=client)
+            await runner._start_rollout_server(secrets={}, http_client=http_client)
 
     argvs = [argv for argv, _ in spawns]
     assert argvs[0] == ["/fake/bin/uv", "sync", "--project", str(tmp_path)]
@@ -1124,9 +1132,9 @@ async def test_sdk_mismatch_warns_before_a_server_import_failure(
     warnings: list[str] = []
     runner._hooks.warning = warnings.append
 
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient() as http_client:
         with pytest.raises(LocalEvalError, match="before becoming healthy"):
-            await runner._start_rollout_server(secrets={}, client=client)
+            await runner._start_rollout_server(secrets={}, http_client=http_client)
 
     assert len(warnings) == 1
     assert "rollout server uses osmosis-ai 0.3.0" in warnings[0]
@@ -1186,9 +1194,9 @@ async def test_startup_error_surfaces_the_redacted_last_child_line(
     runner = _uv_runner(tmp_path)
     runner._redactor.extend([secret])
 
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient() as http_client:
         with pytest.raises(LocalEvalError) as exc_info:
-            await runner._start_rollout_server(secrets={}, client=client)
+            await runner._start_rollout_server(secrets={}, http_client=http_client)
 
     message = str(exc_info.value)
     assert "ModuleNotFoundError: [REDACTED]" in message
@@ -1233,11 +1241,11 @@ async def test_bootstrap_marks_old_server_health_as_supervisor_owned(
         stderr=asyncio.subprocess.STDOUT,
     )
     try:
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient() as http_client:
             response = None
             for _ in range(50):
                 try:
-                    response = await client.get(f"http://127.0.0.1:{port}/health")
+                    response = await http_client.get(f"http://127.0.0.1:{port}/health")
                     break
                 except httpx.HTTPError:
                     await asyncio.sleep(0.05)
@@ -1268,9 +1276,9 @@ async def test_a_failing_uv_sync_is_reported_as_a_dependency_failure(
     runner = _uv_runner(tmp_path)
     runner._redactor.extend([secret])
 
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient() as http_client:
         with pytest.raises(LocalEvalError) as exc_info:
-            await runner._start_rollout_server(secrets={}, client=client)
+            await runner._start_rollout_server(secrets={}, http_client=http_client)
 
     message = str(exc_info.value)
     assert "uv sync failed for rollouts/echo-rollout with exit code 2" in message
@@ -1337,9 +1345,9 @@ async def test_a_missing_uv_is_reported_against_eval_run(
     monkeypatch.setattr(runner_module, "_uv_executable", _no_uv)
     runner = _uv_runner(tmp_path)
 
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient() as http_client:
         with pytest.raises(LocalEvalError, match="uv is required to launch"):
-            await runner._start_rollout_server(secrets={}, client=client)
+            await runner._start_rollout_server(secrets={}, http_client=http_client)
 
 
 # --------------------------------------------------------------------------- #
@@ -1378,6 +1386,80 @@ async def test_a_spawned_server_is_recorded_and_a_stopped_one_is_cleared(
             child.kill()
         with contextlib.suppress(Exception):
             await child.wait()
+
+
+@pytest.mark.parametrize("interruption", [None, "user", "halt", "task", "orphan"])
+async def test_server_shutdown_only_waits_for_cleanup_when_interrupted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, interruption: str | None
+) -> None:
+    from osmosis_ai.eval.local import runner as runner_module
+    from osmosis_ai.eval.local import state as state_module
+    from osmosis_ai.rollout.server import app as server_app
+
+    terminate = runner_module.terminate_process_group
+
+    def terminate_with_scaled_budget(pgid: int, *, grace_sec: float) -> None:
+        if interruption is not None:
+            server_budget = (
+                2 * server_app._SHUTDOWN_DRAIN_SEC + server_app._SHUTDOWN_CLEANUP_SEC
+            )
+            assert grace_sec > server_budget
+        else:
+            assert grace_sec == 5.0
+        terminate(pgid, grace_sec=2.0 if interruption is not None else 0.05)
+
+    monkeypatch.setattr(
+        runner_module, "terminate_process_group", terminate_with_scaled_budget
+    )
+    monkeypatch.setattr(
+        state_module, "terminate_process_group", terminate_with_scaled_budget
+    )
+    marker = tmp_path / "cleaned"
+    child = await asyncio.create_subprocess_exec(
+        sys.executable,
+        "-c",
+        "import signal, sys, time\n"
+        "from pathlib import Path\n"
+        "def stop(*args):\n"
+        "    time.sleep(0.2)\n"
+        "    Path(sys.argv[1]).touch()\n"
+        "    sys.exit(0)\n"
+        "signal.signal(signal.SIGTERM, stop)\n"
+        "print('ready', flush=True)\n"
+        "time.sleep(120)\n",
+        str(marker),
+        stdout=asyncio.subprocess.PIPE,
+        start_new_session=True,
+    )
+    runner = _uv_runner(tmp_path)
+    runner._child = child
+    if interruption == "user":
+        runner._cancelled.set()
+    elif interruption == "halt":
+        runner._halt_reason = "tunnel exited"
+
+    async def stop_server() -> None:
+        if interruption == "orphan":
+            runner._record_server_state(child, instance_id="iid", port=4242)
+            await runner._reap_orphan_server(runner._run_dir)
+            return
+        if interruption == "task":
+            task = asyncio.current_task()
+            assert task is not None
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await asyncio.sleep(0)
+        await runner._stop_rollout_server()
+
+    try:
+        assert child.stdout is not None
+        assert await child.stdout.readline() == b"ready\n"
+        await asyncio.create_task(stop_server())
+        assert marker.exists() is (interruption is not None)
+    finally:
+        if child.returncode is None:
+            child.kill()
+        await child.wait()
 
 
 async def test_server_record_failure_is_fatal(
@@ -1423,10 +1505,11 @@ async def test_a_child_that_died_at_spawn_leaves_no_record(tmp_path: Path) -> No
 
 
 async def test_orphan_sweep_reaps_other_runs_but_skips_a_locked_run(
-    tmp_path: Path,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     import subprocess
 
+    from osmosis_ai.eval.local import runner as runner_module
     from osmosis_ai.eval.local.state import (
         LOCKS_DIRNAME,
         SERVER_STATE_FILENAME,
@@ -1436,6 +1519,7 @@ async def test_orphan_sweep_reaps_other_runs_but_skips_a_locked_run(
         utc_now,
     )
 
+    monkeypatch.setattr(runner_module, "_SERVER_INTERRUPTED_TERM_GRACE_SEC", 0.1)
     output_root = tmp_path / "evals"
     runner = _runner(_spec(), tmp_path, output_root=output_root)
     orphan_dir = output_root / "old-run"

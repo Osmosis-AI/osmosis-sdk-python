@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from osmosis_ai.rollout.agent_workflow import AgentWorkflow
-from osmosis_ai.rollout.backend.base import ExecutionBackend, ResultCallback
+from osmosis_ai.rollout.backend.base import ExecutionBackend
 from osmosis_ai.rollout.context import (
     AgentWorkflowContext,
     GraderContext,
@@ -17,6 +17,7 @@ from osmosis_ai.rollout.context import (
 from osmosis_ai.rollout.grader import Grader
 from osmosis_ai.rollout.types import (
     AgentWorkflowConfig,
+    ExecutionOutcome,
     ExecutionRequest,
     ExecutionResult,
     GraderConfig,
@@ -119,29 +120,24 @@ class LocalBackend(ExecutionBackend):
     async def execute(
         self,
         request: ExecutionRequest,
-        on_workflow_complete: ResultCallback,
-        on_grader_complete: ResultCallback | None = None,
-    ) -> None:
+    ) -> ExecutionOutcome:
         # The controller's clock started at submission, not at slot admission;
         # time spent queued here has to come out of the workflow's budget.
         enqueued = time.monotonic()
         async with self.limiter.acquire():
             queued_sec = time.monotonic() - enqueued
             result = await self.run_workflow(request, queued_sec=queued_sec)
-            await on_workflow_complete(result)
 
-            if not on_grader_complete:
-                return
+            if not request.grade or result.status is not RolloutStatus.SUCCESS:
+                return ExecutionOutcome(workflow=result)
 
-            if (
-                self.grader_cls
-                and (request.label is not None or request.metadata is not None)
-                and result.status == RolloutStatus.SUCCESS
+            if self.grader_cls and (
+                request.label is not None or request.metadata is not None
             ):
                 graded = await self.run_grader(request, result)
-                await on_grader_complete(graded)
             else:
-                await on_grader_complete(ExecutionResult(status=RolloutStatus.FAILURE))
+                graded = ExecutionResult(status=RolloutStatus.FAILURE)
+            return ExecutionOutcome(workflow=result, grader=graded)
 
     async def run_workflow(
         self, request: ExecutionRequest, *, queued_sec: float = 0.0

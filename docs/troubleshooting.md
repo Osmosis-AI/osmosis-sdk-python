@@ -4,9 +4,9 @@
 
 ## Rollout timeouts
 
-The controller sends per-rollout `agent_timeout_sec` / `grader_timeout_sec` in the `RolloutInitRequest` ([../osmosis_ai/rollout/types/protocol.py](../osmosis_ai/rollout/types/protocol.py)), and both backends enforce them. The Harbor backend applies them per execution via `override_timeout_sec` ([../osmosis_ai/rollout/backend/harbor/backend.py](../osmosis_ai/rollout/backend/harbor/backend.py)). `LocalBackend` wraps the two phases in independent `asyncio.timeout()` scopes — the agent deadline around `AgentWorkflow.run()`, the grader deadline around `Grader.grade()` — so a workflow that finishes just inside its budget still gets its full grading window ([../osmosis_ai/rollout/backend/local/backend.py](../osmosis_ai/rollout/backend/local/backend.py)).
+The client sends per-rollout `agent_timeout_sec` / `grader_timeout_sec` in the `RolloutInitRequest` ([../osmosis_ai/rollout/types/protocol.py](../osmosis_ai/rollout/types/protocol.py)), and both backends enforce them. The Harbor backend applies them per execution via `override_timeout_sec` ([../osmosis_ai/rollout/backend/harbor/backend.py](../osmosis_ai/rollout/backend/harbor/backend.py)). `LocalBackend` wraps the two phases in independent `asyncio.timeout()` scopes — the agent deadline around `AgentWorkflow.run()`, the grader deadline around `Grader.grade()` — so a workflow that finishes just inside its budget still gets its full grading window ([../osmosis_ai/rollout/backend/local/backend.py](../osmosis_ai/rollout/backend/local/backend.py)).
 
-An expired deadline is a normal terminal result, not a crash: the rollout is reported with `err_category=timeout` and `err_message="workflow exceeded its <N>s deadline"`, and the concurrency slot is released. A `TimeoutError` your own code raises keeps its own message and is still categorized as `RolloutErrorCategory.TIMEOUT` ([../osmosis_ai/rollout/utils/errors.py](../osmosis_ai/rollout/utils/errors.py)). `None` means the controller sent no deadline, and that phase runs unbounded.
+An expired deadline is a normal terminal result, not a crash: the rollout is reported with `err_category=timeout` and `err_message="workflow exceeded its <N>s deadline"`, and the concurrency slot is released. A `TimeoutError` your own code raises keeps its own message and is still categorized as `RolloutErrorCategory.TIMEOUT` ([../osmosis_ai/rollout/utils/errors.py](../osmosis_ai/rollout/utils/errors.py)). `None` means the client sent no deadline, and that phase runs unbounded.
 
 The deadline cancels a *cooperatively cancellable* workflow. Code that swallows `CancelledError`, or that blocks the event loop in synchronous work, still runs to completion — the rollout is reported as a timeout either way, but the slot is not freed until that code returns.
 
@@ -14,7 +14,7 @@ The deadline cancels a *cooperatively cancellable* workflow. Code that swallows 
 
 If a training run completes with `rollout/raw_reward = 0` and `rollout/response_len/mean = 0`, every rollout timed out before producing output — usually the inference engine was overwhelmed by too many concurrent requests.
 
-**Cause:** a high `rollout_batch_size`. With `rollout_batch_size = 64` and `n_samples_per_prompt = 8`, the controller fires `64 × 8 = 512` concurrent calls at the rollout server, saturating the SGLang engine so every rollout exceeds its timeout.
+**Cause:** a high `rollout_batch_size`. With `rollout_batch_size = 64` and `n_samples_per_prompt = 8`, the caller sends `64 × 8 = 512` concurrent requests to the rollout server, saturating the SGLang engine so every rollout exceeds its timeout.
 
 **Fix:** lower `rollout_batch_size` (a `[training]` field owned by the backend):
 

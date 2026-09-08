@@ -6,9 +6,7 @@ Four concepts, and deliberately no more (design ``local-eval-run-plan.md`` §9):
   once at run creation and compared on resume, so a semantic change refuses
   by name instead of silently mixing versions.
 * ``events.jsonl`` -- the resume authority. One newline-terminated JSON record
-  per terminal attempt. The record is written in full, ``fsync``-ed, and only
-  then may the terminal callback be acknowledged, so a durably acknowledged
-  work item never runs again after ``kill -9``.
+  per terminal attempt.
 * ``server.json`` -- the rollout-server ownership record. Present only while
   a spawned server may be running; a record that survives a supervisor death
   is how the next invocation finds -- and proves ownership of -- the orphan.
@@ -46,8 +44,7 @@ from osmosis_ai.rollout.utils.identifiers import is_single_path_segment
 LOCAL_STATE_SCHEMA_VERSION = 1
 # Bumped when dataset row normalization changes what a row_index means.
 DATASET_NORMALIZATION_VERSION = 1
-# The rollout HTTP/callback protocol this runner speaks.
-ROLLOUT_PROTOCOL_VERSION = "0.3"
+ROLLOUT_PROTOCOL_VERSION = "0.4"
 
 MANIFEST_FILENAME = "manifest.json"
 JOURNAL_FILENAME = "events.jsonl"
@@ -311,8 +308,7 @@ class TerminalJournal:
     """Append-only journal of terminal results; the resume authority.
 
     The commit unit is a complete newline-terminated record. ``append`` writes
-    every byte, then ``fsync``s, before returning -- callers may only
-    acknowledge a terminal callback after it returns.
+    every byte, then ``fsync``s, before returning.
     """
 
     def __init__(self, path: Path) -> None:
