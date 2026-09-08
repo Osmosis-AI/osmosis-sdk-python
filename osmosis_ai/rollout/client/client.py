@@ -49,7 +49,7 @@ def _retry_after_seconds(response: httpx.Response, default: float = 1.0) -> floa
     return min(max(_RETRY_AFTER_FLOOR_SEC, value), _MAX_RETRY_AFTER_SEC)
 
 
-def _admission(response: httpx.Response) -> RolloutInitResponse:
+def _admission(response: httpx.Response, rollout_id: str) -> RolloutInitResponse:
     if response.status_code != 202:
         raise RolloutProtocolError(
             f"POST /rollout returned {response.status_code}; "
@@ -57,12 +57,18 @@ def _admission(response: httpx.Response) -> RolloutInitResponse:
             status_code=response.status_code,
         )
     try:
-        return RolloutInitResponse.model_validate(response.json())
+        admission = RolloutInitResponse.model_validate(response.json())
     except ValueError as exc:
         raise RolloutProtocolError(
             "POST /rollout returned an invalid response",
             status_code=response.status_code,
         ) from exc
+    if admission.rollout_id != rollout_id:
+        raise RolloutProtocolError(
+            "POST /rollout returned a different rollout_id",
+            status_code=response.status_code,
+        )
+    return admission
 
 
 def _result(response: httpx.Response, rollout_id: str) -> RolloutResultResponse:
@@ -109,6 +115,12 @@ class RolloutClient:
         http_client: httpx.AsyncClient | None = None,
         admission_timeout_sec: float | None = None,
     ) -> None:
+        if admission_timeout_sec is not None and not math.isfinite(
+            admission_timeout_sec
+        ):
+            raise ValueError(
+                "admission_timeout_sec must be finite; omit it to wait unbounded"
+            )
         self.url: str = url.rstrip("/")
         self.owns_http_client: bool = http_client is None
         self.http_client: httpx.AsyncClient = http_client or httpx.AsyncClient()
@@ -170,27 +182,36 @@ class RolloutClient:
             grader_timeout_sec=grader_timeout_sec,
             extra_fields=extra_fields,
         )
-        loop = asyncio.get_running_loop()
-        deadline = (
-            loop.time() + self.admission_timeout_sec
-            if self.admission_timeout_sec is not None
-            else None
-        )
-        while True:
-            response = await self.http_client.post(
-                f"{self.url}/rollout",
-                json=request.model_dump(mode="json"),
+        deadline = asyncio.timeout(self.admission_timeout_sec)
+        response_pending = False
+        try:
+            async with deadline:
+                while True:
+                    response_pending = True
+                    response = await self.http_client.post(
+                        f"{self.url}/rollout",
+                        json=request.model_dump(mode="json"),
+                    )
+                    response_pending = False
+                    if response.status_code != 429:
+                        admission = _admission(response, rollout_id)
+                        return asyncio.create_task(self._wait_for_completion(admission))
+                    await asyncio.sleep(_retry_after_seconds(response))
+        except TimeoutError as exc:
+            if not deadline.expired():
+                raise
+            message = (
+                f"admission for rollout {rollout_id} timed out after "
+                f"{self.admission_timeout_sec} seconds"
             )
-            if response.status_code != 429:
-                admission = _admission(response)
-                return asyncio.create_task(self._wait_for_completion(admission))
-            delay = _retry_after_seconds(response)
-            if deadline is not None and loop.time() + delay > deadline:
-                raise RolloutAdmissionTimeoutError(
-                    f"rollout {rollout_id} was not admitted within "
-                    f"{self.admission_timeout_sec} seconds"
+            if response_pending:
+                # A lost response may be either an acceptance or a duplicate-ID
+                # rejection. Cancelling by ID could terminate somebody else's work.
+                message += (
+                    "; admission may have succeeded; the server requests cancellation "
+                    "when an unobserved rollout's polling lease expires"
                 )
-            await asyncio.sleep(delay)
+            raise RolloutAdmissionTimeoutError(message) from exc
 
     async def _wait_for_completion(
         self, admission: RolloutInitResponse

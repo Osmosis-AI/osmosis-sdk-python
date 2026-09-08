@@ -196,7 +196,9 @@ future = await client.run_rollout_async(
 result = await future
 ```
 
-The server creates the polling lease and chooses both the long-poll wait and lease timeout. The client carries the returned lease between result requests; callers do not supply a lease token or wait duration. Admission retries on HTTP 429 until `admission_timeout_sec` when that client option is set. `cancel_rollout(rollout_id)` requests cancellation with a five-second wall-clock bound. Cancellation is idempotent for all backends, including LocalBackend; the result becomes terminal after execution cleanup finishes. To observe cleanup after cancellation, keep awaiting the completion task while requesting cancellation separately. Result responses omit the persistence-only `trajectory_messages` field.
+The server creates the polling lease and chooses both the long-poll wait and lease timeout. The client carries the returned lease between result requests; callers do not supply a lease token or wait duration. Admission retries on HTTP 429. When set, `admission_timeout_sec` must be finite and bounds the entire admission operation, including HTTP requests and retry delays; it does not limit execution after admission. `cancel_rollout(rollout_id)` requests cancellation with a five-second wall-clock bound. Cancellation is idempotent for all backends, including LocalBackend; the result becomes terminal after execution cleanup finishes. To observe cleanup after cancellation, keep awaiting the completion task while requesting cancellation separately. Result responses omit the persistence-only `trajectory_messages` field.
+
+An admission deadline that expires during an HTTP request does not prove the server rejected the rollout. `RolloutAdmissionTimeoutError` reports that admission may have succeeded; the server requests cancellation of unobserved work when its polling lease expires. The client does not automatically cancel by ID: a lost duplicate-ID rejection could otherwise cancel another active rollout. Use a fresh rollout ID for each new attempt. A deadline reached while waiting to retry an explicit 429 reports only the admission timeout.
 
 ## Server and backends
 

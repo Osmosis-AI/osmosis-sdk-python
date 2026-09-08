@@ -168,12 +168,139 @@ async def test_429_retries_using_retry_after() -> None:
 
 
 async def test_admission_timeout_does_not_cancel_unaccepted_work() -> None:
+    paths: list[str] = []
+
     def handler(http_request: httpx.Request) -> httpx.Response:
+        paths.append(http_request.url.path)
         assert http_request.url.path == "/rollout"
         return httpx.Response(429, headers={"Retry-After": "60"})
 
     with pytest.raises(RolloutAdmissionTimeoutError):
         await client(handler, admission_timeout_sec=0.01).run_rollout(**request())
+    assert paths == ["/rollout"]
+
+
+async def test_admission_timeout_bounds_the_http_request() -> None:
+    cancelled = asyncio.Event()
+    paths: list[str] = []
+
+    async def handler(http_request: httpx.Request) -> httpx.Response:
+        paths.append(http_request.url.path)
+        try:
+            await asyncio.Event().wait()
+        finally:
+            cancelled.set()
+        raise AssertionError("unreachable")
+
+    rollout_client = client(handler, admission_timeout_sec=0.01)
+    try:
+        async with asyncio.timeout(1.0):
+            with pytest.raises(RolloutAdmissionTimeoutError) as error:
+                await rollout_client.run_rollout(**request())
+        assert cancelled.is_set()
+        assert paths == ["/rollout"]
+        assert isinstance(error.value.__cause__, TimeoutError)
+        assert "admission may have succeeded" in str(error.value)
+    finally:
+        await rollout_client.http_client.aclose()
+
+
+@pytest.mark.parametrize("existing_rollout", [False, True])
+async def test_lost_admission_response_preserves_lease_ownership(
+    existing_rollout: bool,
+) -> None:
+    from osmosis_ai.rollout.backend.base import ExecutionBackend
+    from osmosis_ai.rollout.server.app import create_rollout_server
+
+    started = asyncio.Event()
+    cancelled = asyncio.Event()
+
+    class BlockingBackend(ExecutionBackend):
+        async def execute(self, request):
+            started.set()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                cancelled.set()
+
+    app = create_rollout_server(
+        backend=BlockingBackend(),
+        result_wait_timeout_sec=0.01,
+        polling_lease_timeout_sec=0.2,
+    )
+    transport = httpx.ASGITransport(app=app)
+    paths: list[str] = []
+
+    async def handler(http_request: httpx.Request) -> httpx.Response:
+        paths.append(http_request.url.path)
+        response = await transport.handle_async_request(http_request)
+        if http_request.url.path == "/rollout":
+            assert response.status_code == (409 if existing_rollout else 202)
+            await started.wait()
+            await asyncio.Event().wait()
+        return response
+
+    async with app.router.lifespan_context(app):
+        async with httpx.AsyncClient(
+            transport=transport, base_url="http://rollout"
+        ) as owner:
+            if existing_rollout:
+                accepted = await owner.post("/rollout", json=request())
+                assert accepted.status_code == 202
+            rollout_client = client(handler, admission_timeout_sec=0.05)
+            try:
+                async with asyncio.timeout(1.0):
+                    with pytest.raises(RolloutAdmissionTimeoutError):
+                        await rollout_client.run_rollout(**request())
+                    assert started.is_set()
+                    assert not cancelled.is_set()
+                    if existing_rollout:
+                        result = await owner.get(
+                            f"/rollout/{ROLLOUT_ID}/result",
+                            headers={
+                                POLLING_LEASE_HEADER: accepted.json()[
+                                    "polling_lease_token"
+                                ]
+                            },
+                        )
+                        assert result.json()["status"] == "running"
+                        await owner.post("/rollout/cancel", json={"ids": [ROLLOUT_ID]})
+                    assert paths == ["/rollout"]
+                    await cancelled.wait()
+            finally:
+                await rollout_client.http_client.aclose()
+
+
+async def test_admission_rejects_a_different_rollout_id() -> None:
+    def handler(http_request: httpx.Request) -> httpx.Response:
+        assert http_request.method == "POST"
+        return httpx.Response(202, json=admission() | {"rollout_id": "another-run"})
+
+    rollout_client = client(handler)
+    try:
+        with pytest.raises(RolloutProtocolError, match="different rollout_id"):
+            await rollout_client.run_rollout(**request())
+    finally:
+        await rollout_client.http_client.aclose()
+
+
+@pytest.mark.parametrize("timeout", [float("nan"), float("inf"), float("-inf")])
+def test_admission_timeout_must_be_finite(timeout: float) -> None:
+    with pytest.raises(ValueError, match="admission_timeout_sec must be finite"):
+        RolloutClient(url="http://rollout", admission_timeout_sec=timeout)
+
+
+async def test_transport_timeout_is_not_reported_as_admission_deadline() -> None:
+    def handler(http_request: httpx.Request) -> httpx.Response:
+        raise TimeoutError("transport timed out")
+
+    rollout_client = client(handler, admission_timeout_sec=1.0)
+    try:
+        with pytest.raises(TimeoutError, match="transport timed out") as error:
+            await rollout_client.run_rollout(**request())
+        assert not isinstance(error.value, RolloutAdmissionTimeoutError)
+    finally:
+        await rollout_client.http_client.aclose()
 
 
 async def test_invalid_admission_response_is_a_protocol_error() -> None:
