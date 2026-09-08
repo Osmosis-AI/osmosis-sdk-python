@@ -2,7 +2,7 @@
 
 The E2E fixtures build a real rollout project on disk and let the supervisor
 spawn it as a subprocess, so the tests exercise the same path a user does:
-subprocess lifecycle, artifact-root override, HTTP dispatch, callbacks,
+subprocess lifecycle, artifact-root override, HTTP dispatch, long polling,
 journalling, and materialization.
 """
 
@@ -27,7 +27,7 @@ from osmosis_ai.eval.local.runner import (
 )
 
 # A self-contained rollout project. The workflow makes one real chat call
-# through the controller's LiteLLM bridge so the whole LLM path is exercised
+# through the local LiteLLM bridge so the whole LLM path is exercised
 # (bridge -> litellm -> OpenAI-compatible upstream stub), and the grader
 # rewards an exact match against the row's label.
 ROLLOUT_MAIN = """\
@@ -262,7 +262,7 @@ def dataset_file(tmp_path: Path) -> Path:
 @pytest.fixture
 async def openai_stub() -> AsyncIterator[str]:
     """A running OpenAI-compatible upstream. Yields its base URL."""
-    from osmosis_ai.rollout.controller.listener import LocalhostUvicornServer
+    from osmosis_ai.eval.local.listener import LocalhostUvicornServer
     from tests.unit.rollout.openai_stub import create_openai_stub_app
 
     async with LocalhostUvicornServer(create_openai_stub_app()) as server:

@@ -51,7 +51,7 @@ from osmosis_ai.packaging import (
     inspect_bundle,
     project_dir_for,
 )
-from osmosis_ai.rollout.backend.base import ExecutionBackend, ResultCallback
+from osmosis_ai.rollout.backend.base import ExecutionBackend
 from osmosis_ai.rollout.backend.harbor.artifacts import (
     merge_grader_artifacts,
     relocate_trial_artifacts,
@@ -96,6 +96,7 @@ from osmosis_ai.rollout.container.files import ContainerInput, ContainerResult
 from osmosis_ai.rollout.container.trajectories import messages_from_trajectory
 from osmosis_ai.rollout.context import get_rollout_context
 from osmosis_ai.rollout.types import (
+    ExecutionOutcome,
     ExecutionRequest,
     ExecutionResult,
     RolloutErrorCategory,
@@ -259,12 +260,6 @@ class HarborBackend(ExecutionBackend):
         orchestrator.add_hook(TrialEvent.START, self.on_trial_started)
         orchestrator.add_hook(TrialEvent.VERIFICATION_START, self.on_verification_start)
         orchestrator.add_hook(TrialEvent.END, self.on_trial_end)
-
-    @property
-    def capture_final_result(self) -> bool:
-        # The reward is computed backend-side; archive it even without a
-        # grader callback URL.
-        return True
 
     def queued(self) -> int:
         return max(0, len(self.pending) - self.running)
@@ -442,7 +437,9 @@ class HarborBackend(ExecutionBackend):
         if self.agent_setup_timeout_sec is not None:
             agent_config.override_setup_timeout_sec = self.agent_setup_timeout_sec
 
-        verifier_config = VerifierConfig(disable=not (task_dir / "tests").is_dir())
+        verifier_config = VerifierConfig(
+            disable=not request.grade or not (task_dir / "tests").is_dir()
+        )
         if request.grader_timeout_sec is not None:
             verifier_config.override_timeout_sec = request.grader_timeout_sec
 
@@ -487,12 +484,12 @@ class HarborBackend(ExecutionBackend):
     async def execute(
         self,
         request: ExecutionRequest,
-        on_workflow_complete: ResultCallback,
-        on_grader_complete: ResultCallback | None = None,
-    ) -> None:
-        pending = PendingTrial(on_workflow_complete, on_grader_complete)
+    ) -> ExecutionOutcome:
+        pending = PendingTrial()
         pending.label = request.label
+        pending.grade = request.grade
         self.pending[request.id] = pending
+        outcome: ExecutionOutcome | None = None
         try:
             container_input = self.build_input(request)
             pending.api_key = container_input.api_key
@@ -519,9 +516,8 @@ class HarborBackend(ExecutionBackend):
                 )
             )
             trial_result = await pending.task
-            await pending.done
+            outcome = await pending.done
         except asyncio.CancelledError:
-            # The canceller owns the outcome; no callbacks are due.
             self.pending.pop(request.id, None)
             self.record_outcome(request.id, RolloutStatus.CANCELLED)
             self.cleanup_rollout_residue(request.id, include_trial=True)
@@ -530,14 +526,14 @@ class HarborBackend(ExecutionBackend):
                 # this; swallowing it would corrupt its bookkeeping.
                 raise
             logger.info("Rollout %s cancelled", request.id)
+            cancelled = ExecutionResult(status=RolloutStatus.CANCELLED)
+            return ExecutionOutcome(workflow=cancelled)
         except Exception as e:
+            if pending.done.done() and not pending.done.cancelled():
+                return pending.done.result()
             self.pending.pop(request.id, None)
             category = categorize_exception(e)
             self.record_outcome(request.id, RolloutStatus.FAILURE, err_message=str(e))
-            # A setup failure keeps the trial directory for debugging; scrub the
-            # controller key out of it first. A scrub failure must not stop the
-            # terminal callbacks below — the scrub already deleted whatever it
-            # could, and there is no archive step here to hold back.
             try:
                 self.scrub_trial_credentials(request.id, pending.api_key)
             except CredentialScrubError:
@@ -555,24 +551,17 @@ class HarborBackend(ExecutionBackend):
                     timings={},
                 ),
             )
-            # Both channels get a terminal outcome, so a controller waiting on
-            # the grader callback does not burn its full deadline.
-            if not pending.workflow_complete_called:
-                await self.try_callback(
-                    on_workflow_complete,
-                    pending.workflow_result or failure,
-                    request.id,
-                    "workflow",
-                )
-            if on_grader_complete is not None and not pending.grader_complete_called:
-                await self.try_callback(
-                    on_grader_complete, failure, request.id, "grader"
-                )
+            workflow = pending.workflow_result or failure
+            return ExecutionOutcome(
+                workflow=workflow,
+                grader=failure if request.grade else None,
+            )
         else:
             if trial_cancelled(getattr(trial_result, "exception_info", None)):
                 self.cleanup_rollout_residue(request.id, include_trial=True)
             else:
                 self.archive_trial(request.id, trial_result, pending)
+            return outcome
 
     def scrub_trial_credentials(self, rollout_id: str, api_key: str | None) -> None:
         """Remove the rollout controller key from every retained trial file.
@@ -778,26 +767,6 @@ class HarborBackend(ExecutionBackend):
 
         return lifespan
 
-    async def try_callback(
-        self,
-        callback: ResultCallback,
-        result: ExecutionResult,
-        rollout_id: str,
-        label: str,
-    ) -> bool:
-        """Callback delivery failures must never abort trial archival."""
-        try:
-            await callback(result)
-            return True
-        except Exception:
-            logger.error(
-                "%s callback for rollout %s failed: %s",
-                label,
-                rollout_id,
-                traceback.format_exc(),
-            )
-            return False
-
     async def on_trial_started(self, event: TrialHookEvent) -> None:
         self.running += 1
         if event.config.trial_name in self.prewarm_trials:
@@ -990,28 +959,28 @@ class HarborBackend(ExecutionBackend):
             logger.error("No pending trial found for rollout %s", rollout_id)
             return
         pending.grading = True
+        pending.workflow_result = self.workflow_outcome(event, rollout_id, pending)
+
+    def workflow_outcome(
+        self, event: TrialHookEvent, rollout_id: str, pending: PendingTrial
+    ) -> ExecutionResult:
+        """Build the agent-phase result before optional grading."""
 
         succeeded, err_message = self.agent_succeeded(event)
         sample = self.primary_sample(event, rollout_id, pending)
         if succeeded:
-            outcome = ExecutionResult(
+            return ExecutionResult(
                 status=RolloutStatus.SUCCESS,
                 sample=sample,
                 extra_fields=self.event_diagnostics(event),
             )
-        else:
-            outcome = ExecutionResult(
-                status=RolloutStatus.FAILURE,
-                err_message=err_message,
-                err_category=RolloutErrorCategory.AGENT_ERROR,
-                extra_fields=self.event_diagnostics(
-                    event, RolloutErrorCategory.AGENT_ERROR
-                ),
-            )
-
-        pending.workflow_result = outcome
-        pending.workflow_complete_called = await self.try_callback(
-            pending.on_workflow_complete, outcome, rollout_id, "workflow"
+        return ExecutionResult(
+            status=RolloutStatus.FAILURE,
+            err_message=err_message,
+            err_category=RolloutErrorCategory.AGENT_ERROR,
+            extra_fields=self.event_diagnostics(
+                event, RolloutErrorCategory.AGENT_ERROR
+            ),
         )
 
     def grader_outcome(
@@ -1110,28 +1079,26 @@ class HarborBackend(ExecutionBackend):
         if trial_cancelled(err):
             self.record_outcome(rollout_id, RolloutStatus.CANCELLED)
             if not pending.done.done():
-                pending.done.set_result(None)
+                cancelled = ExecutionResult(status=RolloutStatus.CANCELLED)
+                pending.done.set_result(ExecutionOutcome(workflow=cancelled))
             return
 
+        outcome: ExecutionOutcome | None = None
         try:
-            grader_result = self.grader_outcome(event, rollout_id, pending)
-            self.record_outcome(
-                rollout_id,
-                RolloutStatus(grader_result.status.value),
-                reward=grader_result.sample.reward if grader_result.sample else None,
-                err_message=grader_result.err_message,
+            grader_result = (
+                self.grader_outcome(event, rollout_id, pending)
+                if pending.grade
+                else None
             )
-
-            if not pending.workflow_complete_called:
-                # A cached outcome means delivery failed at verification
-                # start; resend it byte-identical instead of fabricating.
-                result = pending.workflow_result
-                if result is None:
+            pending.grader_result = grader_result
+            workflow_result = pending.workflow_result
+            if workflow_result is None:
+                if pending.grade:
                     if err:
                         log_trial_exception(
                             rollout_id, err, phase="before the agent completed"
                         )
-                    result = ExecutionResult(
+                    workflow_result = ExecutionResult(
                         status=RolloutStatus.FAILURE,
                         err_message=err.exception_message
                         if err
@@ -1141,18 +1108,23 @@ class HarborBackend(ExecutionBackend):
                             event, RolloutErrorCategory.AGENT_ERROR
                         ),
                     )
-                    pending.workflow_result = result
-                pending.workflow_complete_called = await self.try_callback(
-                    pending.on_workflow_complete, result, rollout_id, "workflow"
-                )
-
-            if pending.on_grader_complete:
-                pending.grader_complete_called = await self.try_callback(
-                    pending.on_grader_complete, grader_result, rollout_id, "grader"
-                )
+                else:
+                    workflow_result = self.workflow_outcome(event, rollout_id, pending)
+                pending.workflow_result = workflow_result
+            outcome = ExecutionOutcome(
+                workflow=workflow_result,
+                grader=grader_result,
+            )
+            final_result = outcome.result
+            self.record_outcome(
+                rollout_id,
+                RolloutStatus(final_result.status.value),
+                reward=final_result.sample.reward if final_result.sample else None,
+                err_message=final_result.err_message,
+            )
         finally:
             timings = trial_timings(event.result)
             if timings:
                 logger.info("rollout %s phase timings: %s", rollout_id, timings)
-            if not pending.done.done():
-                pending.done.set_result(None)
+            if outcome is not None and not pending.done.done():
+                pending.done.set_result(outcome)

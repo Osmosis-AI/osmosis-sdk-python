@@ -4,18 +4,15 @@ from __future__ import annotations
 
 import logging
 
-from osmosis_ai.rollout.backend.base import ExecutionBackend, ResultCallback
+from osmosis_ai.rollout.backend.base import ExecutionBackend
 from osmosis_ai.rollout.server.app import create_rollout_server
-from osmosis_ai.rollout.types import ExecutionRequest
+from osmosis_ai.rollout.types import ExecutionOutcome, ExecutionRequest
 
 
 class _Backend(ExecutionBackend):
     async def execute(
-        self,
-        request: ExecutionRequest,
-        on_workflow_complete: ResultCallback,
-        on_grader_complete: ResultCallback | None = None,
-    ) -> None:  # pragma: no cover - never invoked
+        self, request: ExecutionRequest
+    ) -> ExecutionOutcome:  # pragma: no cover - never invoked
         raise AssertionError("execute should not be called")
 
 

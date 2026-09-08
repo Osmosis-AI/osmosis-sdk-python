@@ -189,7 +189,7 @@ def eval_run(
     listener_port: int | None = typer.Option(
         None,
         "--listener-port",
-        help="Fixed local port for the controller listener (default: ephemeral).",
+        help="Fixed local port for the LLM bridge listener (default: ephemeral).",
         rich_help_panel="Advanced",
     ),
     advertise_url: str | None = typer.Option(

@@ -5,7 +5,6 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
 
 import pytest
 
@@ -31,10 +30,6 @@ def _trial_dir(trials_dir: Path) -> Path:
     (trial_dir / "agent" / "agent.log").write_text("agent said hi\n")
     (trial_dir / "verifier" / "test-stdout.txt").write_text("1 passed\n")
     return trial_dir
-
-
-async def _noop_callback(result: Any) -> None:
-    pass
 
 
 def _backend(tmp_path: Path, trials_dir: Path, artifact_root: Path) -> HarborBackend:
@@ -211,7 +206,7 @@ async def test_a_failed_retention_keeps_the_trial_directory(tmp_path: Path) -> N
     backend.archive_trial(
         ROLLOUT_ID,
         SimpleNamespace(exception_info=None),
-        PendingTrial(_noop_callback, None),
+        PendingTrial(),
     )
 
     assert (trial_dir / "trial.log").read_text() == "trial started\n"

@@ -532,6 +532,15 @@ class TestBundleBackend:
         config = backend.build_trial_config(task_dir, request, container_input)
         assert config.verifier.disable is True
 
+    def test_verifier_disabled_when_grading_is_not_requested(self, backend):
+        request = request_for([{"role": "user", "content": "x"}]).model_copy(
+            update={"grade": False}
+        )
+        task_dir, container_input = self.prepare(backend, request)
+        config = backend.build_trial_config(task_dir, request, container_input)
+
+        assert config.verifier.disable is True
+
     def test_build_input_carries_request_fields(self, backend):
         request = ExecutionRequest(
             id="r9",
@@ -765,7 +774,7 @@ class TestGraderOutcome:
             verifier=self.verifier_span(),
         )
 
-        outcome = backend.grader_outcome(event, "r1", PendingTrial(noop, None))
+        outcome = backend.grader_outcome(event, "r1", PendingTrial())
 
         assert outcome.status == RolloutStatus.FAILURE
         assert outcome.err_category == RolloutErrorCategory.AGENT_ERROR
@@ -789,7 +798,7 @@ class TestGraderOutcome:
             verifier=self.verifier_span(),
         )
 
-        outcome = backend.grader_outcome(event, "r1", PendingTrial(noop, None))
+        outcome = backend.grader_outcome(event, "r1", PendingTrial())
 
         assert outcome.err_category == RolloutErrorCategory.AGENT_ERROR
 
@@ -807,7 +816,7 @@ class TestGraderOutcome:
             verifier=self.verifier_span(),
         )
 
-        outcome = backend.grader_outcome(event, "r1", PendingTrial(noop, None))
+        outcome = backend.grader_outcome(event, "r1", PendingTrial())
 
         assert outcome.status == RolloutStatus.FAILURE
         assert outcome.err_category == RolloutErrorCategory.VALIDATION_ERROR
@@ -829,7 +838,7 @@ class TestGraderOutcome:
             verifier=self.verifier_span(start_offset_sec=30, duration_sec=30),
         )
 
-        outcome = backend.grader_outcome(event, "r1", PendingTrial(noop, None))
+        outcome = backend.grader_outcome(event, "r1", PendingTrial())
 
         assert outcome.err_category == RolloutErrorCategory.VALIDATION_ERROR
 
@@ -844,7 +853,7 @@ class TestGraderOutcome:
         backend = self.backend_for(template_task, tmp_path)
         event = self.event_with(exception_info=self.exception_at(0))
 
-        outcome = backend.grader_outcome(event, "r1", PendingTrial(noop, None))
+        outcome = backend.grader_outcome(event, "r1", PendingTrial())
 
         assert outcome.status == RolloutStatus.FAILURE
         assert outcome.err_category == RolloutErrorCategory.AGENT_ERROR
@@ -902,7 +911,7 @@ class TestTaskResolution:
             pass
 
         with caplog.at_level(logging.WARNING):
-            await backend.execute(request, noop)
+            await backend.execute(request)
 
         assert any(
             "template mode replaces the instruction.md" in record.getMessage()
@@ -935,7 +944,7 @@ class TestTaskResolution:
             pass
 
         with caplog.at_level(logging.WARNING):
-            await backend.execute(request, noop)
+            await backend.execute(request)
 
         assert not any(
             "template mode replaces the instruction.md" in record.getMessage()
@@ -1088,15 +1097,15 @@ class TestCancellation:
         async def noop(result):
             pass
 
-        queued = PendingTrial(noop, None)
+        queued = PendingTrial()
         queued.task = asyncio.create_task(self.hang())
-        running = PendingTrial(noop, None)
+        running = PendingTrial()
         running.task = asyncio.create_task(self.hang())
         running.started = True
         backend.pending = {
             "job1-a": queued,
             "job1-b": running,
-            "other": PendingTrial(noop, None),
+            "other": PendingTrial(),
         }
 
         assert backend.cancel_rollouts(ids=["missing"]) == {"missing": "not_found"}
@@ -1118,7 +1127,7 @@ class TestCancellation:
 
         assert backend.rollout_status("r1") is None
 
-        pending = PendingTrial(noop, None)
+        pending = PendingTrial()
         backend.pending["r1"] = pending
         assert backend.rollout_status("r1") == {"status": "queued"}
         pending.started = True
@@ -1144,7 +1153,7 @@ class TestCancellation:
         async def noop(result):
             pass
 
-        finished = PendingTrial(noop, None)
+        finished = PendingTrial()
         finished.task = asyncio.create_task(asyncio.sleep(0))
         await finished.task
         backend.pending = {"done": finished}
@@ -1223,10 +1232,6 @@ def trial_result(**overrides):
     }
     fields.update(overrides)
     return SimpleNamespace(**fields)
-
-
-async def noop_callback(result):
-    pass
 
 
 class TestConfigValidation:
@@ -1340,7 +1345,7 @@ class TestArtifactLifecycle:
         with RolloutContext(
             chat_completions_url="http://t/v1", api_key="rk-secret", rollout_id="r1"
         ):
-            await backend.execute(request, noop_callback, noop_callback)
+            await backend.execute(request)
 
         relocated = tmp_path / "durable" / "r1" / "artifacts" / "out.txt"
         assert relocated.read_text() == "[REDACTED]"
@@ -1369,7 +1374,7 @@ class TestArtifactLifecycle:
             with RolloutContext(
                 chat_completions_url="http://t/v1", api_key="rk-1", rollout_id="r1"
             ):
-                await backend.execute(request, noop_callback)
+                await backend.execute(request)
 
         task = asyncio.create_task(execute())
         await started.wait()
@@ -1393,18 +1398,13 @@ class TestArtifactLifecycle:
         queue = FakeQueue(run)
         backend = self.backend_for(template_task, tmp_path, queue)
         request = ExecutionRequest(id="r1", prompt=[{"role": "user", "content": "go"}])
-        delivered = []
-
-        async def on_workflow_complete(result):
-            delivered.append(result)
-
         with RolloutContext(
             chat_completions_url="http://t/v1", api_key="rk-1", rollout_id="r1"
         ):
-            await backend.execute(request, on_workflow_complete)
+            outcome = await backend.execute(request)
 
         assert not (tmp_path / "rollouts" / "r1").exists()
-        assert delivered and delivered[0].status == RolloutStatus.FAILURE
+        assert outcome.workflow.status == RolloutStatus.FAILURE
 
     async def test_failed_trial_keeps_trial_dir_for_debugging(
         self, template_task, tmp_path
@@ -1435,7 +1435,7 @@ class TestArtifactLifecycle:
         with RolloutContext(
             chat_completions_url="http://t/v1", api_key="rk-1", rollout_id="r1"
         ):
-            await backend.execute(request, noop_callback)
+            await backend.execute(request)
 
         # Artifacts still copied for inspection; source retained on failure.
         assert (tmp_path / "durable" / "r1" / "artifacts" / "log.txt").exists()
@@ -1480,7 +1480,7 @@ class TestArtifactLifecycle:
         with RolloutContext(
             chat_completions_url="http://t/v1", api_key=secret, rollout_id="r1"
         ):
-            await backend.execute(request, noop_callback)
+            await backend.execute(request)
 
         trial_dir = tmp_path / "trials" / "trial-r1"
         assert trial_dir.exists(), "failed trial is kept for debugging"
@@ -1508,7 +1508,7 @@ class TestArtifactLifecycle:
         with RolloutContext(
             chat_completions_url="http://t/v1", api_key=secret, rollout_id="r1"
         ):
-            await backend.execute(request, noop_callback)
+            await backend.execute(request)
 
         config_path = tmp_path / "trials" / "trial-r1" / "config.json"
         if config_path.exists():
@@ -1651,7 +1651,7 @@ class TestCredentialScrubFailsClosed:
                     api_key=secret,
                     rollout_id="r1",
                 ):
-                    await backend.execute(request, noop_callback, noop_callback)
+                    await backend.execute(request)
         finally:
             if locked_dir.exists():
                 locked_dir.chmod(0o700)
@@ -1668,8 +1668,6 @@ class TestCredentialScrubFailsClosed:
     async def test_setup_failure_with_unscrubbable_trial_still_reports(
         self, template_task, tmp_path
     ):
-        # On the setup-failure path there is no archive to hold back; a scrub
-        # failure must not eat the terminal callbacks the controller waits on.
         from osmosis_ai.rollout.context import RolloutContext
 
         secret = self.SECRET
@@ -1696,20 +1694,11 @@ class TestCredentialScrubFailsClosed:
         backend.artifact_root = tmp_path / "durable"
         request = ExecutionRequest(id="r1", prompt=[{"role": "user", "content": "go"}])
         locked_dir = tmp_path / "trials" / "trial-r1" / "agent"
-        workflow_delivered = []
-        grader_delivered = []
-
-        async def on_workflow_complete(result):
-            workflow_delivered.append(result)
-
-        async def on_grader_complete(result):
-            grader_delivered.append(result)
-
         try:
             with RolloutContext(
                 chat_completions_url="http://t/v1", api_key=secret, rollout_id="r1"
             ):
-                await backend.execute(request, on_workflow_complete, on_grader_complete)
+                outcome = await backend.execute(request)
         finally:
             if locked_dir.exists():
                 locked_dir.chmod(0o700)
@@ -1717,10 +1706,9 @@ class TestCredentialScrubFailsClosed:
                 if locked.exists():
                     locked.chmod(0o600)
 
-        assert len(workflow_delivered) == 1
-        assert workflow_delivered[0].status == RolloutStatus.FAILURE
-        assert len(grader_delivered) == 1
-        assert grader_delivered[0].status == RolloutStatus.FAILURE
+        assert outcome.workflow.status == RolloutStatus.FAILURE
+        assert outcome.grader is not None
+        assert outcome.grader.status == RolloutStatus.FAILURE
         assert not (tmp_path / "rollouts" / "r1").exists()
 
 
@@ -1766,7 +1754,7 @@ class TestPrewarmIdentity:
             tasks_dir=template_task,
             agent="oracle",
         )
-        pending = PendingTrial(noop_callback, None)
+        pending = PendingTrial()
         backend.pending["prewarm-abc"] = pending
 
         event = SimpleNamespace(
@@ -1889,7 +1877,7 @@ class TestContainerInputGating:
         assert (task_dir / "tests" / "container_input.json").exists()
 
 
-class TestCallbackOutcomes:
+class TestExecutionOutcomes:
     """A channel's outcome is produced once; retries resend it byte-identical."""
 
     def backend_for(self, template_task, tmp_path, queue):
@@ -1911,81 +1899,7 @@ class TestCallbackOutcomes:
             chat_completions_url="http://t/v1", api_key="rk-1", rollout_id="r1"
         )
 
-    async def test_workflow_delivery_failure_resends_same_outcome(
-        self, template_task, tmp_path
-    ):
-        """The END-hook retry must resend the cached outcome, not fabricate."""
-        from types import SimpleNamespace
-
-        attempts = []
-        fail_first = [True]
-
-        async def flaky_workflow(result):
-            attempts.append(result)
-            if fail_first[0]:
-                fail_first[0] = False
-                raise RuntimeError("transient network failure")
-
-        async def run(queue, config):
-            result = trial_result(
-                verifier_result=SimpleNamespace(rewards={"reward": 1.0})
-            )
-            event = SimpleNamespace(config=config, result=result)
-            await queue.fire("verification-start", event)
-            await queue.fire("end", event)
-            return result
-
-        queue = FakeQueue(run)
-        backend = self.backend_for(template_task, tmp_path, queue)
-        request = ExecutionRequest(id="r1", prompt=[{"role": "user", "content": "x"}])
-        with self.execute_ctx():
-            await backend.execute(request, flaky_workflow, noop_callback)
-
-        assert len(attempts) == 2
-        assert attempts[0] is attempts[1]
-        assert attempts[0].status == RolloutStatus.SUCCESS
-
-    async def test_permanent_delivery_failure_never_fabricates(
-        self, template_task, tmp_path
-    ):
-        from types import SimpleNamespace
-
-        attempts = []
-
-        async def dead_workflow(result):
-            attempts.append(result)
-            raise RuntimeError("controller unreachable")
-
-        async def run(queue, config):
-            result = trial_result(
-                verifier_result=SimpleNamespace(rewards={"reward": 1.0})
-            )
-            event = SimpleNamespace(config=config, result=result)
-            await queue.fire("verification-start", event)
-            await queue.fire("end", event)
-            return result
-
-        queue = FakeQueue(run)
-        backend = self.backend_for(template_task, tmp_path, queue)
-        request = ExecutionRequest(id="r1", prompt=[{"role": "user", "content": "x"}])
-        with self.execute_ctx():
-            await backend.execute(request, dead_workflow)
-
-        # Every attempt carried the same semantic outcome; no fabrication.
-        assert len({id(result) for result in attempts}) == 1
-        assert all(r.status == RolloutStatus.SUCCESS for r in attempts)
-
-    async def test_setup_failure_reaches_both_channels(self, template_task, tmp_path):
-        """Pre-submit failures must reach the grader channel too."""
-        workflow_results = []
-        grader_results = []
-
-        async def on_workflow(result):
-            workflow_results.append(result)
-
-        async def on_grader(result):
-            grader_results.append(result)
-
+    async def test_setup_failure_returns_both_results(self, template_task, tmp_path):
         async def failing_resolve(request):
             raise ValueError("harbor_task metadata is malformed")
 
@@ -1999,53 +1913,19 @@ class TestCallbackOutcomes:
         backend.rollouts_dir = tmp_path / "rollouts"
         request = ExecutionRequest(id="r1", prompt=[{"role": "user", "content": "x"}])
         with self.execute_ctx():
-            await backend.execute(request, on_workflow, on_grader)
+            outcome = await backend.execute(request)
 
-        assert workflow_results and grader_results
-        assert workflow_results[0] is grader_results[0]
-        failure = workflow_results[0]
+        assert outcome.grader is not None
+        failure = outcome.grader
         assert failure.status == RolloutStatus.FAILURE
         assert failure.err_category == RolloutErrorCategory.VALIDATION_ERROR
         assert failure.extra_fields["phase"] == "setup"
         assert failure.extra_fields["harbor_exception_type"] == "ValueError"
 
-    async def test_setup_failure_callback_exception_stays_contained(
+    async def test_post_end_exception_preserves_finished_outcome(
         self, template_task, tmp_path
     ):
-        """Delivery exceptions must not escape into the fabrication path."""
-
-        async def raising_workflow(result):
-            raise RuntimeError("delivery failed")
-
-        async def failing_resolve(request):
-            raise RuntimeError("setup failed")
-
-        backend = HarborBackend(
-            orchestrator=FakeQueue(),
-            tasks_dir=template_task,
-            agent="terminus-2",
-            trials_dir=tmp_path / "trials",
-        )
-        backend.resolve_task = failing_resolve
-        backend.rollouts_dir = tmp_path / "rollouts"
-        request = ExecutionRequest(id="r1", prompt=[{"role": "user", "content": "x"}])
-        with self.execute_ctx():
-            await backend.execute(request, raising_workflow, raising_workflow)
-
-    async def test_post_end_exception_does_not_double_deliver(
-        self, template_task, tmp_path
-    ):
-        """A post-delivery exception must not double-post either channel."""
         from types import SimpleNamespace
-
-        workflow_results = []
-        grader_results = []
-
-        async def on_workflow(result):
-            workflow_results.append(result)
-
-        async def on_grader(result):
-            grader_results.append(result)
 
         async def run(queue, config):
             result = trial_result(
@@ -2060,10 +1940,10 @@ class TestCallbackOutcomes:
         backend = self.backend_for(template_task, tmp_path, queue)
         request = ExecutionRequest(id="r1", prompt=[{"role": "user", "content": "x"}])
         with self.execute_ctx():
-            await backend.execute(request, on_workflow, on_grader)
+            outcome = await backend.execute(request)
 
-        assert len(workflow_results) == 1
-        assert len(grader_results) == 1
+        assert outcome.result.status == RolloutStatus.FAILURE
+        assert outcome.result.err_category == RolloutErrorCategory.VALIDATION_ERROR
 
     async def test_external_cancellation_reraises(self, template_task, tmp_path):
         """Only requested cancellations may be swallowed."""
@@ -2079,7 +1959,7 @@ class TestCallbackOutcomes:
 
         async def execute():
             with self.execute_ctx():
-                await backend.execute(request, noop_callback)
+                await backend.execute(request)
 
         task = asyncio.create_task(execute())
         await started.wait()
@@ -2118,7 +1998,6 @@ class TestFailureCategorization:
         )
 
     def test_failure_phase_blames_agent_for_pre_verifier_exception(self):
-        """Both callbacks must attribute the same failure to the agent side."""
         from types import SimpleNamespace
 
         from osmosis_ai.rollout.backend.harbor.diagnostics import failure_phase
@@ -2159,7 +2038,7 @@ class TestFailureCategorization:
         event = SimpleNamespace(
             config=SimpleNamespace(trial_name="trial-r1"), result=trial_result()
         )
-        outcome = backend.grader_outcome(event, "r1", PendingTrial(noop_callback, None))
+        outcome = backend.grader_outcome(event, "r1", PendingTrial())
 
         assert outcome.status == RolloutStatus.FAILURE
         assert outcome.err_category == RolloutErrorCategory.VALIDATION_ERROR
@@ -2183,7 +2062,7 @@ class TestFailureCategorization:
                 verifier_result=SimpleNamespace(rewards={"accuracy": 1.0})
             ),
         )
-        outcome = backend.grader_outcome(event, "r1", PendingTrial(noop_callback, None))
+        outcome = backend.grader_outcome(event, "r1", PendingTrial())
 
         assert outcome.err_category == RolloutErrorCategory.VALIDATION_ERROR
         assert outcome.extra_fields["phase"] == "grading"
@@ -2213,7 +2092,7 @@ class TestFailureCategorization:
             ),
         )
 
-        outcome = backend.grader_outcome(event, "r1", PendingTrial(noop_callback, None))
+        outcome = backend.grader_outcome(event, "r1", PendingTrial())
 
         assert outcome.status == RolloutStatus.FAILURE
         assert outcome.err_category == RolloutErrorCategory.VALIDATION_ERROR
@@ -2282,7 +2161,7 @@ class TestNativeAtif:
         (agent_dir / "trajectory.json").write_text(json.dumps(document))
 
     def pending_with_label(self, label=None):
-        pending = PendingTrial(noop_callback, None)
+        pending = PendingTrial()
         pending.label = label
         return pending
 
@@ -2380,7 +2259,7 @@ class TestBundleSampleBoundary:
         )
 
     def pending_with_label(self, label=None):
-        pending = PendingTrial(noop_callback, None)
+        pending = PendingTrial()
         pending.label = label
         return pending
 

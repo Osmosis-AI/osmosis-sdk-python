@@ -6,14 +6,15 @@ from typing import Any
 
 import httpx
 
-from osmosis_ai.rollout.types import MessageDict, RolloutStatus
-from osmosis_ai.rollout.types.polling import (
+from osmosis_ai.rollout.types import (
     POLLING_LEASE_HEADER,
     CancelRolloutsRequest,
     CancelRolloutsResponse,
+    MessageDict,
     RolloutInitRequest,
     RolloutInitResponse,
     RolloutResultResponse,
+    RolloutStatus,
 )
 
 _RETRY_AFTER_FLOOR_SEC = 0.05
@@ -207,11 +208,14 @@ class RolloutClient:
 
     async def cancel_rollout(self, rollout_id: str) -> CancelRolloutsResponse:
         request = CancelRolloutsRequest(ids=[rollout_id])
-        response = await self.http_client.post(
-            f"{self.url}/rollout/cancel",
-            json=request.model_dump(mode="json"),
-            timeout=_CANCEL_REQUEST_TIMEOUT_SEC,
-        )
+        # HTTP timeouts do not bound connection-pool lock acquisition after a
+        # cancelled request. Bound the entire operation as well.
+        async with asyncio.timeout(_CANCEL_REQUEST_TIMEOUT_SEC):
+            response = await self.http_client.post(
+                f"{self.url}/rollout/cancel",
+                json=request.model_dump(mode="json"),
+                timeout=_CANCEL_REQUEST_TIMEOUT_SEC,
+            )
         return _cancelled(response)
 
 

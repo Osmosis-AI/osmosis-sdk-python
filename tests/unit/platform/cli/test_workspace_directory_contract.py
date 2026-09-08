@@ -282,8 +282,8 @@ from osmosis_ai.rollout.server import create_rollout_server
 
 
 class ComponentFreeBackend(ExecutionBackend):
-    async def execute(self, request, on_workflow_complete, on_grader_complete=None):
-        return None
+    async def execute(self, request):
+        raise NotImplementedError
 
 
 app = create_rollout_server(backend=ComponentFreeBackend())
@@ -310,8 +310,8 @@ class InvalidBackend(ExecutionBackend):
     def __init__(self):
         raise ValueError("backend constructor rejected the configuration")
 
-    async def execute(self, request, on_workflow_complete, on_grader_complete=None):
-        return None
+    async def execute(self, request):
+        raise NotImplementedError
 
 
 app = create_rollout_server(backend=InvalidBackend())

@@ -10,10 +10,8 @@ from osmosis_ai._imports import (
 
 if TYPE_CHECKING:
     from osmosis_ai.rollout.server.app import create_rollout_server
-    from osmosis_ai.rollout.server.auth import ControllerAuth
 
 _EXPORTS: dict[str, tuple[str, str]] = {
-    "ControllerAuth": ("osmosis_ai.rollout.server.auth", "ControllerAuth"),
     "create_rollout_server": (
         "osmosis_ai.rollout.server.app",
         "create_rollout_server",
@@ -42,6 +40,5 @@ def __dir__() -> list[str]:
 
 
 __all__ = [
-    "ControllerAuth",
     "create_rollout_server",
 ]
