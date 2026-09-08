@@ -692,9 +692,23 @@ def _runner(
     )
 
 
-def test_configured_timeouts_set_the_supervisor_deadline(tmp_path: Path) -> None:
-    runner = _runner(_spec(agent_timeout_sec=450.0, grader_timeout_sec=150.0), tmp_path)
-    assert runner._item_deadline() == 450.0 + 150.0 + 60.0
+@pytest.mark.parametrize(
+    ("agent", "grader", "expected"),
+    [
+        (450.0, 150.0, 660.0),
+        (0.0, 0.0, 60.0),
+        (-5.0, -10.0, 60.0),
+        (-5.0, 30.0, 90.0),
+        (30.0, -5.0, 90.0),
+    ],
+)
+def test_configured_timeouts_set_the_supervisor_deadline(
+    tmp_path: Path, agent: float, grader: float, expected: float
+) -> None:
+    runner = _runner(
+        _spec(agent_timeout_sec=agent, grader_timeout_sec=grader), tmp_path
+    )
+    assert runner._item_deadline() == expected
 
 
 def test_an_unconfigured_timeout_still_yields_a_finite_deadline(tmp_path: Path) -> None:
@@ -1333,6 +1347,80 @@ async def test_a_spawned_server_is_recorded_and_a_stopped_one_is_cleared(
             await child.wait()
 
 
+@pytest.mark.parametrize("interruption", [None, "user", "halt", "task", "orphan"])
+async def test_server_shutdown_only_waits_for_cleanup_when_interrupted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, interruption: str | None
+) -> None:
+    from osmosis_ai.eval.local import runner as runner_module
+    from osmosis_ai.eval.local import state as state_module
+    from osmosis_ai.rollout.server import app as server_app
+
+    terminate = runner_module.terminate_process_group
+
+    def terminate_with_scaled_budget(pgid: int, *, grace_sec: float) -> None:
+        if interruption is not None:
+            server_budget = (
+                2 * server_app._SHUTDOWN_DRAIN_SEC + server_app._SHUTDOWN_CLEANUP_SEC
+            )
+            assert grace_sec > server_budget
+        else:
+            assert grace_sec == 5.0
+        terminate(pgid, grace_sec=2.0 if interruption is not None else 0.05)
+
+    monkeypatch.setattr(
+        runner_module, "terminate_process_group", terminate_with_scaled_budget
+    )
+    monkeypatch.setattr(
+        state_module, "terminate_process_group", terminate_with_scaled_budget
+    )
+    marker = tmp_path / "cleaned"
+    child = await asyncio.create_subprocess_exec(
+        sys.executable,
+        "-c",
+        "import signal, sys, time\n"
+        "from pathlib import Path\n"
+        "def stop(*args):\n"
+        "    time.sleep(0.2)\n"
+        "    Path(sys.argv[1]).touch()\n"
+        "    sys.exit(0)\n"
+        "signal.signal(signal.SIGTERM, stop)\n"
+        "print('ready', flush=True)\n"
+        "time.sleep(120)\n",
+        str(marker),
+        stdout=asyncio.subprocess.PIPE,
+        start_new_session=True,
+    )
+    runner = _uv_runner(tmp_path)
+    runner._child = child
+    if interruption == "user":
+        runner._cancelled.set()
+    elif interruption == "halt":
+        runner._halt_reason = "tunnel exited"
+
+    async def stop_server() -> None:
+        if interruption == "orphan":
+            runner._record_server_state(child, instance_id="iid", port=4242)
+            await runner._reap_orphan_server(runner._run_dir)
+            return
+        if interruption == "task":
+            task = asyncio.current_task()
+            assert task is not None
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await asyncio.sleep(0)
+        await runner._stop_rollout_server()
+
+    try:
+        assert child.stdout is not None
+        assert await child.stdout.readline() == b"ready\n"
+        await asyncio.create_task(stop_server())
+        assert marker.exists() is (interruption is not None)
+    finally:
+        if child.returncode is None:
+            child.kill()
+        await child.wait()
+
+
 async def test_server_record_failure_is_fatal(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1376,10 +1464,11 @@ async def test_a_child_that_died_at_spawn_leaves_no_record(tmp_path: Path) -> No
 
 
 async def test_orphan_sweep_reaps_other_runs_but_skips_a_locked_run(
-    tmp_path: Path,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     import subprocess
 
+    from osmosis_ai.eval.local import runner as runner_module
     from osmosis_ai.eval.local.state import (
         LOCKS_DIRNAME,
         SERVER_STATE_FILENAME,
@@ -1389,6 +1478,7 @@ async def test_orphan_sweep_reaps_other_runs_but_skips_a_locked_run(
         utc_now,
     )
 
+    monkeypatch.setattr(runner_module, "_SERVER_INTERRUPTED_TERM_GRACE_SEC", 0.1)
     output_root = tmp_path / "evals"
     runner = _runner(_spec(), tmp_path, output_root=output_root)
     orphan_dir = output_root / "old-run"

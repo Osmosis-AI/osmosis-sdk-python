@@ -7,6 +7,7 @@ result delivery, durable journalling, and resume across processes.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import re
@@ -600,6 +601,37 @@ async def test_a_process_wide_admission_fault_halts_and_the_rows_resume(
     assert resumed.succeeded == 4
 
 
+async def test_stalled_result_polling_halts_and_rows_resume(
+    harness: RunnerHarness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from osmosis_ai.eval.local import runner as runner_module
+
+    polling_started = asyncio.Event()
+
+    async def stalled(self, admission):
+        polling_started.set()
+        await asyncio.Event().wait()
+
+    with monkeypatch.context() as stall_patch:
+        stall_patch.setattr(RolloutClient, "_wait_for_completion", stalled)
+        stall_patch.setattr(
+            runner_module.LocalEvalRunner, "_item_deadline", lambda _: 0.1
+        )
+        stall_patch.setattr(runner_module, "_CANCEL_SETTLE_SEC", 0.01)
+        async with asyncio.timeout(10.0):
+            summary = await harness.runner(
+                options=LocalEvalOptions(name="run-1", max_in_flight=1)
+            ).run()
+        assert polling_started.is_set()
+        assert summary.cancelled is True
+        assert summary.failed == 0
+        assert harness.journal_lines() == []
+        assert "TimeoutError" in (harness.run_dir() / "logs.txt").read_text()
+
+    resumed = await harness.runner().run()
+    assert resumed.succeeded == 4
+
+
 async def test_a_4xx_admission_is_a_terminal_row_failure(
     harness: RunnerHarness, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -614,7 +646,32 @@ async def test_a_4xx_admission_is_a_terminal_row_failure(
     }
 
 
-async def test_a_crashed_worker_is_surfaced_instead_of_a_silent_short_run(
+@pytest.mark.parametrize("status_code", [403, 404])
+async def test_a_4xx_result_poll_halts_and_rows_resume(
+    harness: RunnerHarness, monkeypatch: pytest.MonkeyPatch, status_code: int
+) -> None:
+    async def unreadable(self: Any, admission: Any) -> None:
+        raise RolloutProtocolError(
+            f"GET /rollout/{admission.rollout_id}/result returned {status_code}",
+            status_code=status_code,
+        )
+
+    with monkeypatch.context() as polling_patch:
+        polling_patch.setattr(RolloutClient, "_wait_for_completion", unreadable)
+        summary = await harness.runner(
+            options=LocalEvalOptions(name="run-1", max_in_flight=1)
+        ).run()
+
+        assert summary.cancelled is True
+        assert summary.dispatched == 1
+        assert summary.failed == 0
+        assert harness.journal_lines() == []
+
+    resumed = await harness.runner().run()
+    assert resumed.succeeded == 4
+
+
+async def test_a_journal_failure_is_surfaced_instead_of_a_silent_short_run(
     harness: RunnerHarness, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from osmosis_ai.eval.local.runner import LocalEvalRunner
@@ -630,7 +687,9 @@ async def test_a_crashed_worker_is_surfaced_instead_of_a_silent_short_run(
 
     assert harness.journal_lines() == []
     assert summary.cancelled is True
-    assert "a worker failed: OSError" in (harness.run_dir() / "logs.txt").read_text()
+    assert (
+        "OSError: journal write failed" in (harness.run_dir() / "logs.txt").read_text()
+    )
 
 
 async def test_a_retried_item_is_not_marked_resumed(
@@ -834,4 +893,50 @@ async def test_tunnel_death_halts_dispatch_and_leaves_work_pending(
     assert summary.succeeded == 0
     assert any("cloudflared tunnel exited" in note for note in harness.hooks.notes)
     # Nothing was stamped failed: the items stay pending for a resume.
+    assert harness.journal_lines() == []
+
+
+async def test_cancel_settles_cleanup_before_stopping_the_server(
+    harness: RunnerHarness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from osmosis_ai.eval.local import runner as runner_module
+
+    started = harness.rollout_dir / "started"
+    cleaned = harness.rollout_dir / "cleaned"
+    entrypoint = harness.rollout_dir / "main.py"
+    entrypoint.write_text(
+        entrypoint.read_text().replace(
+            "            await asyncio.sleep(delay)",
+            "            from pathlib import Path\n"
+            f"            Path({str(started)!r}).touch()\n"
+            "            try:\n"
+            "                await asyncio.sleep(delay)\n"
+            "            finally:\n"
+            "                await asyncio.sleep(0.3)\n"
+            f"                Path({str(cleaned)!r}).touch()",
+        )
+    )
+    # Cleanup must complete before SIGTERM, even with a short process grace.
+    terminate = runner_module.terminate_process_group
+
+    def stop_after_cleanup(pgid: int, *, grace_sec: float) -> None:
+        assert cleaned.exists()
+        terminate(pgid, grace_sec=0.1)
+
+    monkeypatch.setattr(runner_module, "terminate_process_group", stop_after_cleanup)
+    runner = harness.runner(
+        spec=harness.spec(env={"OSMOSIS_TEST_WORKFLOW_SLEEP": "30"}),
+        options=LocalEvalOptions(name="run-1", max_in_flight=1),
+    )
+
+    async def cancel_when_started(workers) -> None:
+        async with asyncio.timeout(30):
+            while not started.exists():
+                await asyncio.sleep(0.01)
+        runner._request_cancel(workers)
+
+    monkeypatch.setattr(runner, "_watch_child", cancel_when_started)
+    summary = await runner.run()
+    assert cleaned.exists()
+    assert summary.cancelled
     assert harness.journal_lines() == []
