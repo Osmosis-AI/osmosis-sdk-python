@@ -10,6 +10,7 @@ from functools import partial
 from typing import Any
 
 from fastapi import FastAPI, Header, HTTPException
+from fastapi.responses import JSONResponse
 
 from osmosis_ai.rollout.backend.base import ExecutionBackend
 from osmosis_ai.rollout.context import RolloutContext
@@ -30,6 +31,7 @@ from osmosis_ai.rollout.types import (
     RolloutInitRequest,
     RolloutInitResponse,
     RolloutResultResponse,
+    RolloutSample,
     RolloutStatus,
 )
 from osmosis_ai.rollout.utils.errors import categorize_exception
@@ -40,6 +42,7 @@ DEFAULT_RESULT_WAIT_TIMEOUT_SEC = 30.0
 DEFAULT_POLLING_LEASE_TIMEOUT_SEC = 120.0
 DEFAULT_RESULT_RETENTION_SEC = 900.0
 _SHUTDOWN_DRAIN_SEC = 10.0
+_SHUTDOWN_CLEANUP_SEC = 120.0
 
 
 def _configure_default_logging() -> None:
@@ -71,14 +74,25 @@ def create_rollout_server(
 
     scheduled_tasks: set[asyncio.Task[None]] = set()
 
-    def _cancel_expired_rollout(rollout_id: str) -> None:
-        backend.cancel_rollouts(ids=[rollout_id])
+    def _cancel_rollout(rollout_id: str) -> str | None:
+        disposition = backend.cancel_rollouts(ids=[rollout_id]).get(rollout_id)
+        if disposition == "not_found":
+            # Harbor also reports not_found before it creates its trial task.
+            # Only a retained terminal state means result delivery must continue.
+            state = backend.rollout_status(rollout_id)
+            if state is None or state.get("status") not in {
+                RolloutStatus.SUCCESS,
+                RolloutStatus.FAILURE,
+                RolloutStatus.CANCELLED,
+            }:
+                return None
+        return disposition
 
     registry = RolloutFutureRegistry(
         result_wait_timeout_sec=result_wait_timeout_sec,
         polling_lease_timeout_sec=polling_lease_timeout_sec,
         result_retention_sec=result_retention_sec,
-        cancel_rollout=_cancel_expired_rollout,
+        cancel_rollout=_cancel_rollout,
     )
 
     async def _drain_scheduled_tasks() -> None:
@@ -88,10 +102,17 @@ def create_rollout_server(
         _done, pending = await asyncio.wait(
             set(scheduled_tasks), timeout=_SHUTDOWN_DRAIN_SEC
         )
-        for task in pending:
-            task.cancel()
         if pending:
-            await asyncio.gather(*pending, return_exceptions=True)
+            await registry.cancel(all=True)
+            _done, pending = await asyncio.wait(pending, timeout=_SHUTDOWN_CLEANUP_SEC)
+        if pending:
+            logger.warning(
+                "Forcing cancellation of %d rollout(s) after cleanup timed out",
+                len(pending),
+            )
+            for task in pending:
+                task.cancel()
+            await asyncio.wait(pending, timeout=_SHUTDOWN_DRAIN_SEC)
 
     @asynccontextmanager
     async def _lifespan_with_drain(app: FastAPI) -> AsyncIterator[None]:
@@ -165,7 +186,10 @@ def create_rollout_server(
             polling_lease_timeout_sec=polling_lease_timeout_sec,
         )
 
-    @app.get("/rollout/{rollout_id}/result")
+    @app.get(
+        "/rollout/{rollout_id}/result",
+        response_model_exclude={"sample": {"trajectory_messages"}},
+    )
     async def rollout_result(
         rollout_id: str,
         lease_token: str = Header(alias=POLLING_LEASE_HEADER, min_length=1),
@@ -207,7 +231,7 @@ def create_rollout_server(
                 status_code=422,
                 detail="pass exactly one selector: ids, prefix, or all",
             )
-        dispositions = backend.cancel_rollouts(
+        dispositions = await registry.cancel(
             ids=request.ids, prefix=request.prefix, all=request.all
         )
         logger.info(
@@ -247,7 +271,7 @@ async def _handle_rollout(
                     grade=request.grade,
                 )
             )
-        result = _terminal_result(outcome)
+        result = outcome.result
         logger.info("Rollout %s finished with status %s", rollout_id, result.status)
     except asyncio.CancelledError:
         raise
@@ -270,7 +294,29 @@ async def _handle_rollout(
                 diagnostics=result_to_save.extra_fields,
             )
 
-    wire_sample = result.sample.json_safe_copy() if result.sample is not None else None
+    wire_sample = result.sample
+    if wire_sample is not None:
+        try:
+            wire_sample = wire_sample.model_copy(
+                update={"trajectory_messages": None}
+            ).json_safe_copy()
+            # Any-valued messages may still contain objects or non-finite
+            # numbers. A diagnostic payload must never make a reward unpollable.
+            JSONResponse(wire_sample.model_dump(mode="json"))
+        except (TypeError, ValueError, RecursionError):
+            logger.warning(
+                "Rollout %s sample cannot be serialized; returning its reward only",
+                rollout_id,
+                exc_info=True,
+            )
+            wire_sample = RolloutSample(
+                reward=wire_sample.reward,
+                label=wire_sample.label.encode("utf-8", errors="replace").decode()
+                if wire_sample.label is not None
+                else None,
+                remove_sample=wire_sample.remove_sample,
+                trajectory_messages=None,
+            )
     if wire_sample is not None and (
         result.status is not RolloutStatus.SUCCESS or wire_sample.remove_sample
     ):
@@ -279,20 +325,11 @@ async def _handle_rollout(
         rollout_id=rollout_id,
         status=result.status,
         sample=wire_sample,
-        err_message=result.err_message,
+        err_message=result.err_message.encode("utf-8", errors="replace").decode()
+        if result.err_message is not None
+        else None,
         err_category=result.err_category,
     )
-
-
-def _terminal_result(outcome: ExecutionOutcome) -> ExecutionResult:
-    if (
-        outcome.grader is not None
-        and outcome.grader.status is not RolloutStatus.SUCCESS
-    ):
-        return outcome.grader
-    if outcome.workflow.status is not RolloutStatus.SUCCESS:
-        return outcome.workflow
-    return outcome.result
 
 
 __all__ = [

@@ -5,7 +5,9 @@ from typing import Any
 import pytest
 from pydantic import BaseModel, ValidationError
 
+from osmosis_ai.rollout.agent_workflow import AgentWorkflow
 from osmosis_ai.rollout.backend.base import ExecutionBackend
+from osmosis_ai.rollout.backend.local.backend import LocalBackend
 from osmosis_ai.rollout.context import get_rollout_context
 from osmosis_ai.rollout.server import app as app_module
 from osmosis_ai.rollout.server.app import _handle_rollout
@@ -13,6 +15,7 @@ from osmosis_ai.rollout.types import (
     ExecutionOutcome,
     ExecutionRequest,
     ExecutionResult,
+    RolloutErrorCategory,
     RolloutInitRequest,
     RolloutStatus,
 )
@@ -83,6 +86,21 @@ async def test_backend_exception_becomes_a_failure_result() -> None:
     response = await _handle_rollout(FailingBackend(), make_request())
     assert response.status is RolloutStatus.FAILURE
     assert response.err_message == "boom"
+
+
+async def test_failed_local_workflow_keeps_its_error_with_grading_enabled(
+    tmp_path,
+) -> None:
+    class FailingWorkflow(AgentWorkflow):
+        async def run(self, ctx):
+            raise TimeoutError("upstream model deadline")
+
+    backend = LocalBackend(workflow=FailingWorkflow)
+    backend.artifact_root = tmp_path
+    response = await _handle_rollout(backend, make_request())
+    assert response.status is RolloutStatus.FAILURE
+    assert response.err_message == "upstream model deadline"
+    assert response.err_category is RolloutErrorCategory.TIMEOUT
 
 
 def test_empty_llm_api_key_is_rejected() -> None:

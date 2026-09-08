@@ -229,6 +229,14 @@ class ExecutionOutcome(BaseModel):
 
     @property
     def result(self) -> ExecutionResult:
+        if self.workflow.status is not RolloutStatus.SUCCESS:
+            if (
+                self.workflow.sample is None
+                and self.grader is not None
+                and self.grader.sample is not None
+            ):
+                return self.workflow.model_copy(update={"sample": self.grader.sample})
+            return self.workflow
         return self.grader or self.workflow
 
     @property

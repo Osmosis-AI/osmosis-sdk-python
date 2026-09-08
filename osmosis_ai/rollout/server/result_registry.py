@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import math
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
 from osmosis_ai.rollout.server.lease import LeaseManager
@@ -31,6 +31,8 @@ class RolloutFuture:
     status: RolloutStatus = RolloutStatus.QUEUED
     task: asyncio.Task[None] | None = None
     cleanup_task: asyncio.Task[None] | None = None
+    cancel_disposition: str | None = None
+    cancel_task_on_bind: bool = False
 
 
 class RolloutFutureRegistry:
@@ -40,7 +42,7 @@ class RolloutFutureRegistry:
         result_wait_timeout_sec: float,
         polling_lease_timeout_sec: float,
         result_retention_sec: float,
-        cancel_rollout: Callable[[str], None],
+        cancel_rollout: Callable[[str], str | None],
     ) -> None:
         if not math.isfinite(result_wait_timeout_sec) or result_wait_timeout_sec <= 0:
             raise ValueError(
@@ -52,9 +54,9 @@ class RolloutFutureRegistry:
             raise ValueError(
                 "polling_lease_timeout_sec must exceed result_wait_timeout_sec"
             )
-        self.result_wait_timeout_sec: float = result_wait_timeout_sec
-        self.result_retention_sec: float = result_retention_sec
-        self.cancel_rollout: Callable[[str], None] = cancel_rollout
+        self.result_wait_timeout_sec = result_wait_timeout_sec
+        self.result_retention_sec = result_retention_sec
+        self.cancel_rollout: Callable[[str], str | None] = cancel_rollout
         self.entries: dict[str, RolloutFuture] = {}
         self.lock: asyncio.Lock = asyncio.Lock()
         self.leases: LeaseManager = LeaseManager(
@@ -77,6 +79,25 @@ class RolloutFutureRegistry:
         async with self.lock:
             entry = self.entry(rollout_id)
             entry.task = task
+            if entry.cancel_task_on_bind and not task.cancelling():
+                task.cancel()
+
+        def complete_cancelled(done: asyncio.Task[None]) -> None:
+            # Cancellation before the coroutine's first step never reaches its
+            # CancelledError handler. Done callbacks run atomically on this loop.
+            if (
+                done.cancelled()
+                and self.entries.get(rollout_id) is entry
+                and not entry.result.done()
+            ):
+                self.finish(
+                    entry,
+                    RolloutResultResponse(
+                        rollout_id=rollout_id, status=RolloutStatus.CANCELLED
+                    ),
+                )
+
+        task.add_done_callback(complete_cancelled)
 
     async def discard(self, rollout_id: str) -> None:
         async with self.lock:
@@ -91,7 +112,6 @@ class RolloutFutureRegistry:
                 entry.status = status
 
     async def complete(self, rollout_id: str, response: RolloutResultResponse) -> bool:
-        task_to_cancel: asyncio.Task[None] | None = None
         expired = False
         async with self.lock:
             entry = self.entry(rollout_id)
@@ -99,11 +119,10 @@ class RolloutFutureRegistry:
                 return False
             if self.leases.expired(rollout_id):
                 response = self.lease_failure(rollout_id)
-                task_to_cancel = entry.task
                 expired = True
             self.finish(entry, response)
         if expired:
-            self.cancel_execution(rollout_id, task_to_cancel)
+            self.cancel_execution(entry)
         return not expired
 
     async def wait_for_result(
@@ -112,18 +131,18 @@ class RolloutFutureRegistry:
         lease_token: str,
         current_status: Callable[[], RolloutStatus],
     ) -> RolloutResultResponse:
-        task_to_cancel: asyncio.Task[None] | None = None
+        expired = False
         async with self.lock:
             entry = self.entry(rollout_id)
             if not entry.result.done():
                 if not self.leases.renew(rollout_id, lease_token):
                     self.finish(entry, self.lease_failure(rollout_id))
-                    task_to_cancel = entry.task
+                    expired = True
             else:
                 self.leases.authenticate(rollout_id, lease_token)
             future = entry.result
-        if task_to_cancel is not None:
-            self.cancel_execution(rollout_id, task_to_cancel)
+        if expired:
+            self.cancel_execution(entry)
         if future.done():
             return future.result()
         try:
@@ -144,7 +163,6 @@ class RolloutFutureRegistry:
                 )
 
     async def expire(self, rollout_id: str) -> None:
-        task_to_cancel: asyncio.Task[None] | None = None
         async with self.lock:
             entry = self.entries.get(rollout_id)
             if entry is None or entry.result.done():
@@ -152,8 +170,7 @@ class RolloutFutureRegistry:
             if not self.leases.expired(rollout_id):
                 return
             self.finish(entry, self.lease_failure(rollout_id))
-            task_to_cancel = entry.task
-        self.cancel_execution(rollout_id, task_to_cancel)
+        self.cancel_execution(entry)
 
     async def close(self) -> None:
         async with self.lock:
@@ -177,6 +194,10 @@ class RolloutFutureRegistry:
     async def remove_after_retention(self, entry: RolloutFuture) -> None:
         try:
             await asyncio.sleep(self.result_retention_sec)
+            # Lease expiry publishes before execution cleanup finishes. Keep
+            # the id reserved so late completion cannot affect a new rollout.
+            if entry.task is not None:
+                await asyncio.wait({entry.task})
             async with self.lock:
                 if self.entries.get(entry.rollout_id) is entry:
                     self.entries.pop(entry.rollout_id, None)
@@ -184,15 +205,60 @@ class RolloutFutureRegistry:
         except asyncio.CancelledError:
             return
 
-    def cancel_execution(
-        self, rollout_id: str, task: asyncio.Task[None] | None
-    ) -> None:
-        if task is not None and task is not asyncio.current_task() and not task.done():
-            task.cancel()
+    async def cancel(
+        self,
+        *,
+        ids: Sequence[str] | None = None,
+        prefix: str | None = None,
+        all: bool = False,
+    ) -> dict[str, str]:
+        async with self.lock:
+            selected = (
+                list(self.entries)
+                if all
+                else [rid for rid in self.entries if rid.startswith(prefix)]
+                if prefix is not None
+                else list(ids or [])
+            )
+            dispositions: dict[str, str] = {}
+            for rollout_id in selected:
+                entry = self.entries.get(rollout_id)
+                if entry is None or entry.result.done():
+                    dispositions[rollout_id] = "not_found"
+                    continue
+                dispositions[rollout_id] = self.cancel_execution(entry)
+            return dispositions
+
+    def cancel_execution(self, entry: RolloutFuture) -> str:
+        if entry.cancel_disposition is not None:
+            return entry.cancel_disposition
+        entry.cancel_disposition = (
+            "cancelled_queued"
+            if entry.status is RolloutStatus.QUEUED
+            else "cancelled_running"
+        )
         try:
-            self.cancel_rollout(rollout_id)
+            # A backend may cancel a child task that execute() is awaiting.
+            # Cancelling its parent too would interrupt the child's cleanup.
+            disposition = self.cancel_rollout(entry.rollout_id)
+            if disposition in {"cancelled_queued", "cancelled_running", "not_found"}:
+                entry.cancel_disposition = disposition
+                return disposition
         except Exception:
-            logger.exception("Backend cancellation failed for rollout %s", rollout_id)
+            logger.exception(
+                "Backend cancellation failed for rollout %s", entry.rollout_id
+            )
+        task = entry.task
+        if task is None:
+            entry.cancel_task_on_bind = True
+        if (
+            task is not None
+            and task is not asyncio.current_task()
+            and not task.done()
+            and not task.cancelling()
+        ):
+            task.cancel()
+        return entry.cancel_disposition
 
     def entry(self, rollout_id: str) -> RolloutFuture:
         entry = self.entries.get(rollout_id)

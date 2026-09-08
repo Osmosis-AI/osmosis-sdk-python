@@ -529,17 +529,17 @@ class HarborBackend(ExecutionBackend):
             cancelled = ExecutionResult(status=RolloutStatus.CANCELLED)
             return ExecutionOutcome(workflow=cancelled)
         except Exception as e:
-            if pending.done.done() and not pending.done.cancelled():
-                return pending.done.result()
             self.pending.pop(request.id, None)
-            category = categorize_exception(e)
-            self.record_outcome(request.id, RolloutStatus.FAILURE, err_message=str(e))
             try:
                 self.scrub_trial_credentials(request.id, pending.api_key)
             except CredentialScrubError:
                 logger.exception("Trial %s retains files after scrub", request.id)
             self.cleanup_rollout_residue(request.id, include_trial=False)
             logger.error("Failed trial %s: %s", request.id, traceback.format_exc())
+            if pending.done.done() and not pending.done.cancelled():
+                return pending.done.result()
+            category = categorize_exception(e)
+            self.record_outcome(request.id, RolloutStatus.FAILURE, err_message=str(e))
             failure = ExecutionResult(
                 status=RolloutStatus.FAILURE,
                 err_message=str(e),
