@@ -99,6 +99,10 @@ _SDK_VERSION_TIMEOUT_SEC = 10.0
 # hung server cost another full health timeout before the run gives up.
 _PORT_ATTEMPTS = 2
 _SERVER_TERM_GRACE_SEC = 5.0
+# Cover server drain (10s), cleanup (120s), final cancellation (10s), and exit.
+_SERVER_INTERRUPTED_TERM_GRACE_SEC = 150.0
+# Let cooperative workflows and remote sandboxes finish cancellation cleanup.
+_CANCEL_SETTLE_SEC = 120.0
 _TRAJECTORY_GRACE_SEC = 30.0
 _TRAJECTORY_POLL_INTERVAL_SEC = 0.2
 _RESULT_NETWORK_GRACE_SEC = 60.0
@@ -1105,9 +1109,7 @@ class LocalEvalRunner:
         grader = self._spec.grader_timeout_sec
         if agent is None or grader is None:
             return _DEFAULT_ITEM_DEADLINE_SEC
-        server_budget = agent + grader
-        if server_budget <= 0:
-            return _DEFAULT_ITEM_DEADLINE_SEC
+        server_budget = max(agent, 0.0) + max(grader, 0.0)
         return server_budget + _RESULT_NETWORK_GRACE_SEC
 
     async def _resolve_concurrency(
@@ -1247,21 +1249,9 @@ class LocalEvalRunner:
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
-                if (
-                    isinstance(exc, RolloutProtocolError)
-                    and 400 <= exc.status_code < 500
-                ):
-                    # The rollout server actively refused *this* request, so the
-                    # failure is attributable to the work item and gets a
-                    # terminal record.
-                    await self._journal_supervisor_failure(item, exc)
-                    continue
-                # Everything else -- a 5xx from a restarting server, proxy
-                # errors, transport failures, an indeterminate admission, a
-                # supervisor bug -- is process-wide as far as this item is
-                # concerned. Halt dispatch and leave it pending rather than
-                # durably recording a failure that says nothing about the row
-                # (§9.3).
+                # An unreadable result, transport failure, indeterminate
+                # admission, or supervisor bug says nothing about the row's
+                # outcome. Leave it pending for resume (§9.3).
                 self._halt_dispatch(
                     f"{type(exc).__name__}: {exc}",
                     row_index=item.row.row_index,
@@ -1287,6 +1277,7 @@ class LocalEvalRunner:
             row_index=item.row.row_index,
             run_index=item.run_index,
         )
+        future: asyncio.Task[RolloutResultResponse] | None = None
         try:
             future = await client.run_rollout_async(
                 initial_messages=list(item.row.initial_messages),
@@ -1303,11 +1294,19 @@ class LocalEvalRunner:
                     "run_index": item.run_index,
                 },
             )
-            outcome = await future
+            async with asyncio.timeout(self._item_deadline()):
+                outcome = await asyncio.shield(future)
         except RolloutAdmissionTimeoutError:
             self._forget(rollout_id)
             raise
-        except asyncio.CancelledError:
+        except RolloutProtocolError as exc:
+            if future is not None or not 400 <= exc.status_code < 500:
+                raise
+            # Only an admission refusal is attributable to the item. A 4xx
+            # while polling does not establish whether the rollout failed.
+            await self._journal_supervisor_failure(item, exc)
+            return
+        except (asyncio.CancelledError, TimeoutError):
             with contextlib.suppress(Exception):
                 # The interrupted admission may leave the shared HTTP pool
                 # locked. This supervisor talks directly to a local server.
@@ -1315,8 +1314,15 @@ class LocalEvalRunner:
                     await RolloutClient(
                         url=client.url, http_client=cancel_http_client
                     ).cancel_rollout(rollout_id)
+                if future is not None:
+                    async with asyncio.timeout(_CANCEL_SETTLE_SEC):
+                        await asyncio.shield(future)
             raise
         finally:
+            if future is not None and not future.done():
+                future.cancel()
+                with contextlib.suppress(asyncio.CancelledError, Exception):
+                    await future
             self._dispatched += 1
         if outcome.status is RolloutStatus.CANCELLED:
             # Supervisor-requested cancellation writes no terminal event, so the
@@ -1502,7 +1508,13 @@ class LocalEvalRunner:
                 continue
             try:
                 reaped = await asyncio.to_thread(
-                    reap_orphan_server, path, grace_sec=_SERVER_TERM_GRACE_SEC
+                    reap_orphan_server,
+                    path,
+                    grace_sec=(
+                        _SERVER_INTERRUPTED_TERM_GRACE_SEC
+                        if filename == SERVER_STATE_FILENAME
+                        else _SERVER_TERM_GRACE_SEC
+                    ),
                 )
             except Exception as exc:  # cleanup is a safety net; never block the run
                 logger.warning("orphaned %s cleanup failed: %s", label, exc)
@@ -1834,12 +1846,24 @@ class LocalEvalRunner:
         if child is None:
             return
         self._child = None
+        task = asyncio.current_task()
+        interrupted = (
+            self._cancelled.is_set()
+            or self._halt_reason is not None
+            or (task is not None and task.cancelling() > 0)
+        )
         if child.returncode is None:
             with contextlib.suppress(ProcessLookupError, PermissionError, OSError):
                 await asyncio.to_thread(
                     terminate_process_group,
                     process_group_of(child.pid),
-                    grace_sec=_SERVER_TERM_GRACE_SEC,
+                    # Admission may have been interrupted before a polling
+                    # lease arrived. Allow server drain/cleanup in that case too.
+                    grace_sec=(
+                        _SERVER_INTERRUPTED_TERM_GRACE_SEC
+                        if interrupted
+                        else _SERVER_TERM_GRACE_SEC
+                    ),
                 )
         with contextlib.suppress(Exception):
             await child.wait()
