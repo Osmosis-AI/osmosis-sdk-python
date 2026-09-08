@@ -800,6 +800,83 @@ def test_the_redactor_prefers_the_longest_overlapping_value() -> None:
     assert scrubbed == "value=[REDACTED]"
 
 
+def test_ambient_secret_values_skip_short_and_empty() -> None:
+    from osmosis_ai.eval.local.runner import ambient_secret_values
+
+    assert ambient_secret_values(
+        {
+            "OPENAI_API_KEY": "sk-live-abcdef123456",
+            "ANTHROPIC_API_KEY": "short",
+            "GEMINI_API_KEY": "",
+            "NOT_A_SECRET": "sk-live-abcdef123456",
+        }
+    ) == ["sk-live-abcdef123456"]
+
+
+def test_scrub_logs_file_redacts_ambient_env_keys(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from osmosis_ai.eval.local.runner import LOGS_FILENAME, scrub_logs_file
+
+    path = tmp_path / LOGS_FILENAME
+    path.write_text("using sk-live-abcdef123456 and leftover\n", encoding="utf-8")
+    os.chmod(path, 0o600)
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-live-abcdef123456")
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+
+    scrub_logs_file(path, env=os.environ)
+
+    text = path.read_text(encoding="utf-8")
+    assert "sk-live-abcdef123456" not in text
+    assert "[REDACTED]" in text
+    assert "leftover" in text
+    assert path.stat().st_mode & 0o077 == 0
+
+
+def test_scrub_logs_file_is_noop_when_missing(tmp_path: Path) -> None:
+    from osmosis_ai.eval.local.runner import LOGS_FILENAME, scrub_logs_file
+
+    scrub_logs_file(
+        tmp_path / LOGS_FILENAME, env={"OPENAI_API_KEY": "sk-live-abcdef123456"}
+    )
+
+
+@pytest.mark.parametrize(
+    ("env", "contents"),
+    [
+        ({}, "plain log line\n"),
+        ({"OPENAI_API_KEY": "sk-live-abcdef123456"}, "plain log line\n"),
+    ],
+)
+def test_scrub_logs_file_leaves_unchanged_logs_untouched(
+    tmp_path: Path, env: dict[str, str], contents: str
+) -> None:
+    from osmosis_ai.eval.local.runner import LOGS_FILENAME, scrub_logs_file
+
+    path = tmp_path / LOGS_FILENAME
+    path.write_text(contents, encoding="utf-8")
+    os.chmod(path, 0o644)
+
+    scrub_logs_file(path, env=env)
+
+    assert path.read_text(encoding="utf-8") == contents
+    assert path.stat().st_mode & 0o777 == 0o644
+
+
+def test_scrub_logs_file_does_not_follow_a_symlink(tmp_path: Path) -> None:
+    from osmosis_ai.eval.local.runner import LOGS_FILENAME, scrub_logs_file
+
+    target = tmp_path / "outside-logs.txt"
+    target.write_text("using sk-live-abcdef123456\n", encoding="utf-8")
+    path = tmp_path / LOGS_FILENAME
+    path.symlink_to(target)
+
+    scrub_logs_file(path, env={"OPENAI_API_KEY": "sk-live-abcdef123456"})
+
+    assert path.is_symlink()
+    assert target.read_text(encoding="utf-8") == "using sk-live-abcdef123456\n"
+
+
 @pytest.mark.parametrize("error_at", ["bridge", "preflight"])
 async def test_execute_temporarily_overrides_and_restores_secret_environment(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, error_at: str

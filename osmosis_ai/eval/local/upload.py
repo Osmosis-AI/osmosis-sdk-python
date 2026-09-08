@@ -542,6 +542,9 @@ def build_eval_upload_plan(run_dir: Path) -> EvalUploadPlan:
         "index.jsonl": run_dir / "index.jsonl",
         "progress.json": run_dir / "progress.json",
     }
+    logs_path = run_dir / "logs.txt"
+    if not logs_path.is_symlink() and logs_path.is_file():
+        selected["logs.txt"] = logs_path
     for row in rows:
         trajectory = _trajectory_path(run_dir, row)
         if trajectory is not None:
