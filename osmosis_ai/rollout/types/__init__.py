@@ -5,6 +5,7 @@ from .config import (
     GraderConfig,
 )
 from .output import AgentWorkflowOutput, Messages
+from .polling import POLLING_LEASE_HEADER, RolloutResultResponse
 from .protocol import (
     CancelRolloutsRequest,
     CancelRolloutsResponse,
@@ -25,6 +26,7 @@ from .sample import (
 )
 
 __all__ = [
+    "POLLING_LEASE_HEADER",
     "AgentWorkflowConfig",
     "AgentWorkflowOutput",
     "BaseConfig",
@@ -42,6 +44,7 @@ __all__ = [
     "RolloutErrorCategory",
     "RolloutInitRequest",
     "RolloutInitResponse",
+    "RolloutResultResponse",
     "RolloutSample",
     "RolloutStatus",
     "RolloutStatusResponse",
