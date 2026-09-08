@@ -2,6 +2,30 @@
 
 This file records changes to `osmosis-ai`. For earlier versions, see [GitHub Releases](https://github.com/Osmosis-AI/osmosis-sdk-python/releases).
 
+## 0.3.3rc1 - 2026-09-07
+
+### Breaking Changes
+
+- Rollout completion now uses leased long polling instead of callbacks; upgrade callers and rollout servers together, replace `HttpRolloutDriver` and callback models with `RolloutClient`, and supply a unique `rollout_id` plus an explicit `llm_api_key` when the chat endpoint requires authentication ([#347](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/347)).
+- Custom backends must return `ExecutionOutcome` from `execute(request)` instead of invoking result callbacks; move local LLM bridge imports from the removed `osmosis_ai.rollout.controller` package to `osmosis_ai.eval.local` ([#347](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/347)).
+- Local eval's protocol fingerprint is now `0.4`; runs recorded with the previous protocol cannot resume under this release, so use a new run name or finish them with the previous SDK ([#347](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/347)).
+
+### Added
+
+- Added `RolloutClient` with automatic lease renewal, HTTP 429 admission retries, terminal result polling, and explicit cancellation; requests can skip grading with `grade=False` ([#345](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/345), [#346](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/346), [#347](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/347)).
+
+### Changed
+
+- Expanded supported Harbor versions to `>=0.20.0,<0.23` and OpenAI Agents to `>=0.18.1,<0.21`; when upgrading Harbor, remove top-level `trajectory.json` inputs from SDK workflow tasks and ensure the Docker host passes its nftables probe for restricted-network trials ([#344](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/344)).
+
+### Fixed
+
+- Polling results preserve completed rewards and failure details through cancellation and serialization errors, while lease expiry and server shutdown allow bounded workflow and sandbox cleanup ([#348](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/348)).
+- Admission deadlines now cover HTTP requests and retry delays; a lost admission response leaves unobserved work to lease expiry instead of risking cancellation of another rollout with the same ID ([#349](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/349)).
+- Local eval now bounds result polling, waits for cancellation cleanup, and leaves work without a recorded terminal result pending for resume, including polling 403/404 errors ([#351](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/351)).
+
+[Full changelog](https://github.com/Osmosis-AI/osmosis-sdk-python/compare/v0.3.2...v0.3.3rc1)
+
 ## 0.3.2 - 2026-08-31
 
 ### Breaking Changes
