@@ -181,6 +181,7 @@ class RolloutStatus(StrEnum):
 
 class RolloutErrorCategory(StrEnum):
     TIMEOUT = "timeout"
+    LEASE_EXPIRED = "lease_expired"
     VALIDATION_ERROR = "validation_error"
     HTTP_ERROR = "http_error"
     AGENT_ERROR = "agent_error"
