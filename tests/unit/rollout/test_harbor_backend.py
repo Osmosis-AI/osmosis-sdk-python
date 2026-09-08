@@ -26,6 +26,7 @@ from osmosis_ai.rollout.backend.harbor.tasks import (
 from osmosis_ai.rollout.backend.harbor.trial import PendingTrial
 from osmosis_ai.rollout.container.files import ContainerInput, ContainerResult
 from osmosis_ai.rollout.types import (
+    ExecutionOutcome,
     ExecutionRequest,
     RolloutErrorCategory,
     RolloutSample,
@@ -760,7 +761,9 @@ class TestGraderOutcome:
             occurred_at=self.BASE + timedelta(seconds=offset_sec),
         )
 
-    async def test_agent_command_failure_stays_primary(self, template_task, tmp_path):
+    async def test_agent_command_failure_stays_primary(
+        self, template_task, tmp_path, monkeypatch
+    ):
         """The verifier's missing-sample error must not replace the agent error."""
         from types import SimpleNamespace
 
@@ -768,6 +771,8 @@ class TestGraderOutcome:
             pass
 
         backend = self.backend_for(template_task, tmp_path)
+        captured = RolloutSample(messages=[{"role": "assistant", "content": "trace"}])
+        monkeypatch.setattr(backend, "primary_sample", lambda *args: captured)
         event = self.event_with(
             exception_info=self.exception_at(0),
             verifier_result=SimpleNamespace(rewards={"reward": 0.0}),
@@ -779,6 +784,12 @@ class TestGraderOutcome:
         assert outcome.status == RolloutStatus.FAILURE
         assert outcome.err_category == RolloutErrorCategory.AGENT_ERROR
         assert "Command failed" in outcome.err_message
+        combined = ExecutionOutcome(
+            workflow=backend.workflow_outcome(event, "r1", PendingTrial()),
+            grader=outcome,
+        ).result
+        assert combined.err_message == outcome.err_message
+        assert combined.sample is captured
 
     async def test_classified_subclass_failure_stays_primary(
         self, template_task, tmp_path
@@ -1927,7 +1938,14 @@ class TestExecutionOutcomes:
     ):
         from types import SimpleNamespace
 
+        from osmosis_ai.rollout.context import RolloutContext
+
+        secret = "rk-test-post-end-cleanup"
+
         async def run(queue, config):
+            trial_dir = config.trials_dir / config.trial_name
+            trial_dir.mkdir(parents=True)
+            (trial_dir / "config.json").write_text(json.dumps({"api_key": secret}))
             result = trial_result(
                 verifier_result=SimpleNamespace(rewards={"reward": 1.0})
             )
@@ -1939,11 +1957,17 @@ class TestExecutionOutcomes:
         queue = FakeQueue(run)
         backend = self.backend_for(template_task, tmp_path, queue)
         request = ExecutionRequest(id="r1", prompt=[{"role": "user", "content": "x"}])
-        with self.execute_ctx():
+        with RolloutContext(
+            chat_completions_url="http://t/v1", api_key=secret, rollout_id="r1"
+        ):
             outcome = await backend.execute(request)
 
         assert outcome.result.status == RolloutStatus.FAILURE
         assert outcome.result.err_category == RolloutErrorCategory.VALIDATION_ERROR
+        assert not (tmp_path / "rollouts" / "r1").exists()
+        retained = (tmp_path / "trials" / "trial-r1" / "config.json").read_text()
+        assert secret not in retained
+        assert "[REDACTED]" in retained
 
     async def test_external_cancellation_reraises(self, template_task, tmp_path):
         """Only requested cancellations may be swallowed."""

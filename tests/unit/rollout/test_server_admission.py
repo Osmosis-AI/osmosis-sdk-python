@@ -21,6 +21,7 @@ from osmosis_ai.rollout.types import (
     ExecutionOutcome,
     ExecutionRequest,
     ExecutionResult,
+    RolloutSample,
     RolloutStatus,
 )
 
@@ -56,7 +57,7 @@ class StubBackend(ExecutionBackend):
         all: bool = False,
     ) -> dict[str, str]:
         self.cancel_args = (ids, prefix, all)
-        return {rollout_id: "cancelled_running" for rollout_id in ids or []}
+        return {}
 
     def health(self) -> dict:
         return {"status": "ok", "backend": "stub", "max_queue_depth": 2}
@@ -213,12 +214,158 @@ def test_cancel_requires_exactly_one_selector() -> None:
     )
 
 
-def test_cancel_forwards_selector() -> None:
+def test_cancel_unknown_rollout() -> None:
     backend = StubBackend()
     client = TestClient(create_rollout_server(backend=backend))
     response = client.post("/rollout/cancel", json={"ids": ["r1"]})
-    assert response.json() == {"dispositions": {"r1": "cancelled_running"}}
-    assert backend.cancel_args == (["r1"], None, False)
+    assert response.json() == {"dispositions": {"r1": "not_found"}}
+    assert backend.cancel_args is None
+
+
+@pytest.mark.parametrize("selector", [{"ids": ["r1"]}, {"prefix": "r"}, {"all": True}])
+async def test_cancel_waits_for_cleanup_and_is_idempotent(selector) -> None:
+    started = asyncio.Event()
+    cleaning = asyncio.Event()
+    finish_cleanup = asyncio.Event()
+    cleaned = asyncio.Event()
+
+    class CleanupBackend(ExecutionBackend):
+        async def execute(self, request: ExecutionRequest) -> ExecutionOutcome:
+            started.set()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                cleaning.set()
+                await finish_cleanup.wait()
+                cleaned.set()
+            raise AssertionError("unreachable")
+
+    app = create_rollout_server(backend=CleanupBackend(), result_wait_timeout_sec=0.01)
+    async with app.router.lifespan_context(app):
+        async with httpx.AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://rollout"
+        ) as client:
+            admission = await client.post("/rollout", json=init_body())
+            await started.wait()
+            response = await client.post("/rollout/cancel", json=selector)
+            assert response.json() == {"dispositions": {"r1": "cancelled_running"}}
+            await cleaning.wait()
+            await client.post("/rollout/cancel", json=selector)
+            pending = await client.get(
+                "/rollout/r1/result", headers=lease_headers(admission)
+            )
+            assert pending.json()["status"] == "running"
+            finish_cleanup.set()
+            result = await client.get(
+                "/rollout/r1/result", headers=lease_headers(admission)
+            )
+            assert result.json()["status"] == "cancelled"
+            assert cleaned.is_set()
+
+
+async def test_cancel_preserves_native_queued_disposition() -> None:
+    class QueuedBackend(BlockingBackend):
+        task: asyncio.Task | None = None
+
+        async def execute(self, request: ExecutionRequest) -> ExecutionOutcome:
+            self.task = asyncio.current_task()
+            return await super().execute(request)
+
+        def cancel_rollouts(self, ids=None, prefix=None, all=False) -> dict[str, str]:
+            assert self.task is not None
+            self.task.cancel()
+            return {"r1": "cancelled_queued"}
+
+    backend = QueuedBackend()
+    app = create_rollout_server(backend=backend)
+    async with app.router.lifespan_context(app):
+        async with httpx.AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://rollout"
+        ) as client:
+            await client.post("/rollout", json=init_body())
+            await backend.started.wait()
+            response = await client.post("/rollout/cancel", json={"ids": ["r1"]})
+            assert response.json() == {"dispositions": {"r1": "cancelled_queued"}}
+
+
+@pytest.mark.parametrize("status", [RolloutStatus.SUCCESS, RolloutStatus.FAILURE])
+async def test_cancel_preserves_finished_backend_result_during_save(
+    monkeypatch, status: RolloutStatus
+) -> None:
+    saving = asyncio.Event()
+    finish_save = asyncio.Event()
+
+    async def save(**kwargs) -> None:
+        saving.set()
+        await finish_save.wait()
+
+    monkeypatch.setattr(server_app_module, "save_trajectory", save)
+
+    class FinishedBackend(StubBackend):
+        async def execute(self, request: ExecutionRequest) -> ExecutionOutcome:
+            return ExecutionOutcome(
+                workflow=ExecutionResult(
+                    status=status,
+                    sample=RolloutSample(reward=1.0),
+                    err_message="workflow failed"
+                    if status is RolloutStatus.FAILURE
+                    else None,
+                )
+            )
+
+        def rollout_status(self, rollout_id: str) -> dict:
+            return {"status": status}
+
+        def cancel_rollouts(self, ids=None, prefix=None, all=False) -> dict[str, str]:
+            return {"r1": "not_found"}
+
+    app = create_rollout_server(backend=FinishedBackend())
+    async with app.router.lifespan_context(app):
+        async with httpx.AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://rollout"
+        ) as client:
+            admission = await client.post("/rollout", json=init_body())
+            await saving.wait()
+            try:
+                for _ in range(2):
+                    response = await client.post(
+                        "/rollout/cancel", json={"ids": ["r1"]}
+                    )
+                    assert response.json() == {"dispositions": {"r1": "not_found"}}
+            finally:
+                finish_save.set()
+            result = await client.get(
+                "/rollout/r1/result", headers=lease_headers(admission)
+            )
+            assert result.json()["status"] == status
+            assert result.json()["sample"]["reward"] == (
+                1.0 if status is RolloutStatus.SUCCESS else None
+            )
+
+
+async def test_native_not_found_still_cancels_backend_preparation() -> None:
+    class PreparingBackend(BlockingBackend):
+        def cancel_rollouts(self, ids=None, prefix=None, all=False) -> dict[str, str]:
+            return {"r1": "not_found"}
+
+        def rollout_status(self, rollout_id: str) -> dict:
+            return {"status": RolloutStatus.QUEUED}
+
+    backend = PreparingBackend()
+    app = create_rollout_server(backend=backend)
+    async with app.router.lifespan_context(app):
+        async with httpx.AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://rollout"
+        ) as client:
+            admission = await client.post("/rollout", json=init_body())
+            await backend.started.wait()
+            await client.post("/rollout/cancel", json={"ids": ["r1"]})
+            async with asyncio.timeout(1.0):
+                await backend.cancelled.wait()
+            result = await client.get(
+                "/rollout/r1/result", headers=lease_headers(admission)
+            )
+            assert result.json()["status"] == "cancelled"
 
 
 async def post_rollout_with_failing_send(app: Any, body: dict) -> None:
@@ -310,6 +457,58 @@ async def test_lifespan_cancels_work_past_drain_limit(monkeypatch) -> None:
             await client.post("/rollout", json=init_body())
             await asyncio.sleep(0)
     assert events == ["rollout-cancelled"]
+
+
+@pytest.mark.parametrize("cleanup_finishes", [True, False])
+async def test_lifespan_bounds_native_cancellation_cleanup(
+    monkeypatch, cleanup_finishes: bool
+) -> None:
+    monkeypatch.setattr(server_app_module, "_SHUTDOWN_DRAIN_SEC", 0.01)
+    monkeypatch.setattr(server_app_module, "_SHUTDOWN_CLEANUP_SEC", 0.1)
+    started = asyncio.Event()
+    cleaning = asyncio.Event()
+    finished = asyncio.Event()
+
+    async def trial() -> None:
+        try:
+            await asyncio.Event().wait()
+        finally:
+            cleaning.set()
+            try:
+                if cleanup_finishes:
+                    await asyncio.sleep(0.01)
+                else:
+                    await asyncio.Event().wait()
+            finally:
+                finished.set()
+
+    child = asyncio.create_task(trial())
+
+    class NativeBackend(ExecutionBackend):
+        async def execute(self, request: ExecutionRequest) -> ExecutionOutcome:
+            started.set()
+            await child
+            raise AssertionError("unreachable")
+
+        def cancel_rollouts(self, ids=None, prefix=None, all=False) -> dict[str, str]:
+            child.cancel()
+            return {"r1": "cancelled_running"}
+
+    app = create_rollout_server(backend=NativeBackend())
+    try:
+        async with asyncio.timeout(1.0):
+            async with app.router.lifespan_context(app):
+                async with httpx.AsyncClient(
+                    transport=ASGITransport(app=app), base_url="http://rollout"
+                ) as client:
+                    await client.post("/rollout", json=init_body())
+                    await started.wait()
+            await finished.wait()
+        assert cleaning.is_set()
+        assert child.cancelling() == (1 if cleanup_finishes else 2)
+    finally:
+        child.cancel()
+        await asyncio.gather(child, return_exceptions=True)
 
 
 def test_health_preserves_backend_fields(monkeypatch) -> None:

@@ -31,8 +31,12 @@ class ExecutionBackend(ABC):
         prefix: str | None = None,
         all: bool = False,
     ) -> dict[str, str]:
-        """Cancel matching in-flight rollouts; backends without cancellation
-        support report nothing cancelled."""
+        """Cancel matching in-flight rollouts; unsupported backends return {}.
+
+        A backend returning ``not_found`` for finished work must retain its
+        terminal ``rollout_status`` until execute() and result delivery finish.
+        Without a terminal status, the server still cancels its own task.
+        """
         return {}
 
     def health(self) -> dict[str, Any]:

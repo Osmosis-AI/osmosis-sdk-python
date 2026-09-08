@@ -128,13 +128,11 @@ class LocalBackend(ExecutionBackend):
             queued_sec = time.monotonic() - enqueued
             result = await self.run_workflow(request, queued_sec=queued_sec)
 
-            if not request.grade:
+            if not request.grade or result.status is not RolloutStatus.SUCCESS:
                 return ExecutionOutcome(workflow=result)
 
-            if (
-                self.grader_cls
-                and (request.label is not None or request.metadata is not None)
-                and result.status == RolloutStatus.SUCCESS
+            if self.grader_cls and (
+                request.label is not None or request.metadata is not None
             ):
                 graded = await self.run_grader(request, result)
             else:
