@@ -19,7 +19,7 @@ import socket
 import time
 import uuid
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -1989,13 +1989,8 @@ class LocalEvalRunner:
         duration_ms = (time.monotonic() - self._started_monotonic) * 1000.0
         total = len(self._selection.rows) * max(1, self._spec.n)
         complete = len(self._latest) >= total
-        identity = RunIdentity(
-            local_run_id=started.local_run_id,
-            run_name=started.run_name,
-            dataset_name=started.dataset_name,
-            model_name=started.model_name,
-            rollout_name=started.rollout_name,
-            started_at=started.started_at,
+        identity = replace(
+            started,
             status="finished" if complete and not cancelled else "incomplete",
             completed_at=utc_now() if complete and not cancelled else None,
             duration_ms=duration_ms,

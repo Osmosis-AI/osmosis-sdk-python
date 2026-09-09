@@ -438,35 +438,26 @@ def _leaderboard_section(
         agent = _agent_label(entry)
         pass_at_1 = _format_rate_interval(entry.get("pass_at_1"))
         cells: list[Any] = [_rank_cell(entry), Text(agent), pass_at_1]
-        plain_parts = [rank_label, agent, f"pass@1 {pass_at_1}"]
 
         if show_pass_k:
             point = _deepest_pass_at_k(entry)
             pass_at_k = _format_pass_at_k(point)
             cells.append(pass_at_k)
-            if pass_at_k != "–" and point is not None:
-                plain_parts.append(f"pass@{point.get('k')} {pass_at_k}")
 
         if show_cost:
             cost = _format_cost_per_task(entry.get("cost_per_task"))
             cells.append(cost)
-            if cost != "–":
-                plain_parts.append(f"{cost}/task")
 
         if show_time:
             duration = _format_seconds_per_task(entry.get("mean_duration_seconds"))
             cells.append(duration)
-            if duration != "–":
-                plain_parts.append(f"{duration}/task")
 
         if show_tokens:
             tokens = _format_tokens(entry.get("tokens_per_task")) or "–"
             cells.append(tokens)
-            if tokens != "–":
-                plain_parts.append(f"{tokens} tokens/task")
 
         table.add_row(*cells)
-        plain_lines.append(" · ".join(plain_parts))
+        plain_lines.append(" · ".join([rank_label, agent, *_metric_parts(entry)]))
 
     if any_tied:
         plain_lines.append("* tied for first (not distinguishable from the leader)")
