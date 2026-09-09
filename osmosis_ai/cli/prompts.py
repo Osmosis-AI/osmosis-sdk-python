@@ -205,15 +205,7 @@ def pause(message: str) -> bool:
 
     Uses the text prompt because questionary's press-any-key prompt swallows ESC.
     """
-    answer = _add_escape_binding(
-        questionary.text(
-            message,
-            default="",
-            style=OSMOSIS_STYLE,
-            qmark="?",
-        )
-    ).ask()
-    return answer is not None
+    return text_input(message) is not None
 
 
 def password(

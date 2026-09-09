@@ -676,7 +676,9 @@ async def test_a_journal_failure_is_surfaced_instead_of_a_silent_short_run(
 ) -> None:
     from osmosis_ai.eval.local.runner import LocalEvalRunner
 
-    async def exploding_journal(self: Any, item: Any, exc: BaseException) -> None:
+    async def exploding_journal(
+        self: Any, item: Any, rollout_id: str, exc: BaseException
+    ) -> None:
         raise OSError("journal write failed")
 
     _refuse_admission(monkeypatch, 422)

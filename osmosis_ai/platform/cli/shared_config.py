@@ -243,26 +243,6 @@ def config_issues_error(
     )
 
 
-def collect_section_validation_issues(
-    *,
-    section_name: str,
-    model_type: type[BaseModel],
-    data: dict[str, Any],
-) -> list[dict[str, str]]:
-    """Return CLI-friendly issues from instantiating ``model_type`` with ``data``."""
-    try:
-        model_type(**data)
-    except ValidationError as e:
-        return [
-            validation_issue_to_config_issue(
-                error=validation_issue,
-                section_name=section_name,
-            )
-            for validation_issue in e.errors()
-        ]
-    return []
-
-
 def collect_top_level_validation_issues(
     raw: dict[str, Any],
     *,
@@ -274,29 +254,6 @@ def collect_top_level_validation_issues(
         for section_name in raw
         if section_name not in allowed_sections
     ]
-
-
-def parse_section(
-    *,
-    section_name: str,
-    model_type: type[BaseModel],
-    data: dict[str, Any],
-    config_label: str,
-) -> BaseModel:
-    """Instantiate ``model_type`` or raise a labelled :class:`CLIError`."""
-    try:
-        return model_type(**data)
-    except ValidationError as e:
-        raise config_issues_error(
-            issues=[
-                validation_issue_to_config_issue(
-                    error=validation_issue,
-                    section_name=section_name,
-                )
-                for validation_issue in e.errors()
-            ],
-            config_label=config_label,
-        ) from e
 
 
 def validate_env_var_keys(
@@ -500,30 +457,22 @@ def load_submit_config[SubmitConfigT: BaseSubmitConfig](
         ("advanced", AdvancedPassthroughSection, advanced_section),
     ]
 
-    issues = [
-        *collect_top_level_validation_issues(raw, allowed_sections=allowed_sections),
-        *(
-            issue
-            for section_name, model_type, data in section_specs
-            for issue in collect_section_validation_issues(
-                section_name=section_name,
-                model_type=model_type,
-                data=data,
-            )
-        ),
-        *validate_env_values(env=env_section),
-    ]
-    if issues:
-        raise config_issues_error(issues=issues, config_label=config_label)
-
+    issues = collect_top_level_validation_issues(raw, allowed_sections=allowed_sections)
     parsed: dict[str, Any] = {}
     for section_name, model_type, data in section_specs:
-        parsed[section_name] = parse_section(
-            section_name=section_name,
-            model_type=model_type,
-            data=data,
-            config_label=config_label,
-        )
+        try:
+            parsed[section_name] = model_type(**data)
+        except ValidationError as e:
+            issues.extend(
+                validation_issue_to_config_issue(
+                    error=error,
+                    section_name=section_name,
+                )
+                for error in e.errors()
+            )
+    issues.extend(validate_env_values(env=env_section))
+    if issues:
+        raise config_issues_error(issues=issues, config_label=config_label)
 
     env = {key: value for key, value in env_section.items() if isinstance(value, str)}
     validate_env_var_keys(env=env, path=path)

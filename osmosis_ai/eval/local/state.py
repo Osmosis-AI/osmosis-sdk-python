@@ -33,7 +33,7 @@ import subprocess
 import tempfile
 import time
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
@@ -235,19 +235,7 @@ class TerminalRecord:
         return (self.row_index, self.run_index)
 
     def to_payload(self) -> dict[str, Any]:
-        return drop_none_values(
-            {
-                "row_index": self.row_index,
-                "run_index": self.run_index,
-                "rollout_id": self.rollout_id,
-                "status": self.status,
-                "source_row_index": self.source_row_index,
-                "reward": self.reward,
-                "tokens": self.tokens,
-                "duration_ms": self.duration_ms,
-                "error_type": self.error_type,
-            }
-        )
+        return drop_none_values(asdict(self))
 
     def to_journal_line(self) -> bytes:
         return (canonical_json(self.to_payload()) + "\n").encode("utf-8")
@@ -627,14 +615,7 @@ class ServerProcessState:
     created_at: str
 
     def to_payload(self) -> dict[str, Any]:
-        return {
-            "pid": self.pid,
-            "pgid": self.pgid,
-            "start_token": self.start_token,
-            "instance_id": self.instance_id,
-            "port": self.port,
-            "created_at": self.created_at,
-        }
+        return asdict(self)
 
     def write(self, path: Path) -> None:
         atomic_write_json(path, self.to_payload())

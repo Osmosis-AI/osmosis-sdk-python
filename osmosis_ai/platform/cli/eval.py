@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import math
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -22,6 +21,7 @@ from osmosis_ai.cli.output import (
 )
 from osmosis_ai.cli.output.display import (
     format_duration_ms,
+    format_elapsed,
     format_local_date,
     format_local_datetime,
 )
@@ -123,30 +123,6 @@ def _format_avg_reward(results: dict[str, Any] | None, *, precision: int) -> str
     if avg_reward is None:
         return "–"
     return f"{avg_reward:.{precision}f}"
-
-
-def _parse_iso_datetime(value: str | None) -> datetime | None:
-    if not value:
-        return None
-    normalized = value.strip()
-    if normalized.endswith("Z"):
-        normalized = f"{normalized[:-1]}+00:00"
-    try:
-        parsed = datetime.fromisoformat(normalized)
-    except ValueError:
-        return None
-    if parsed.tzinfo is None:
-        return None
-    return parsed
-
-
-def _format_eval_duration(detail: Any) -> str | None:
-    started_at = _parse_iso_datetime(detail.started_at)
-    if started_at is None:
-        return None
-    completed_at = _parse_iso_datetime(detail.completed_at)
-    end = completed_at or datetime.now(UTC)
-    return format_duration_ms((end - started_at).total_seconds() * 1000)
 
 
 def _format_decimal(value: int | float, *, precision: int = 4) -> str:
@@ -494,7 +470,7 @@ def info(name: str, *, output: str | None) -> DetailResult:
     duration = (
         format_duration_ms(metrics_duration_ms)
         if metrics_duration_ms is not None
-        else _format_eval_duration(detail)
+        else format_elapsed(detail.started_at, detail.completed_at)
     )
     if duration:
         rows.append(("Duration", duration))

@@ -1002,9 +1002,8 @@ async def test_a_retried_failure_writes_its_own_terminal_record(tmp_path: Path) 
         status="failed",
         error_type="stale",
     )
-    runner._dispatch_context["b" * 32] = item
     try:
-        await runner._journal_supervisor_failure(item, RuntimeError("boom"))
+        await runner._journal_supervisor_failure(item, "b" * 32, RuntimeError("boom"))
     finally:
         journal.close()
 
