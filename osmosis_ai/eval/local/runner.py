@@ -727,7 +727,6 @@ class LocalEvalRunner:
         self._journal: TerminalJournal | None = None
         self._latest: dict[WorkKey, TerminalRecord] = {}
         self._resumed_keys: set[WorkKey] = set()
-        self._dispatch_context: dict[str, WorkItem] = {}
         self._dispatch_started: dict[str, float] = {}
         self._bridge: LiteLLMBridge | None = None
         self._materializer: Materializer | None = None
@@ -1333,7 +1332,6 @@ class LocalEvalRunner:
         llm_api_key: str,
     ) -> None:
         rollout_id = uuid.uuid4().hex
-        self._dispatch_context[rollout_id] = item
         self._dispatch_started[rollout_id] = time.monotonic()
         self._write_log(
             "info",
@@ -1370,7 +1368,7 @@ class LocalEvalRunner:
                 raise
             # Only an admission refusal is attributable to the item. A 4xx
             # while polling does not establish whether the rollout failed.
-            await self._journal_supervisor_failure(item, exc)
+            await self._journal_supervisor_failure(item, rollout_id, exc)
             return
         except (asyncio.CancelledError, TimeoutError):
             with contextlib.suppress(Exception):
@@ -1446,16 +1444,8 @@ class LocalEvalRunner:
         self._resumed_keys.discard(record.key)
 
     async def _journal_supervisor_failure(
-        self, item: WorkItem, exc: BaseException
+        self, item: WorkItem, rollout_id: str, exc: BaseException
     ) -> None:
-        rollout_id = next(
-            (
-                candidate
-                for candidate, context in self._dispatch_context.items()
-                if context is item
-            ),
-            uuid.uuid4().hex,
-        )
         existing = self._latest.get(item.key)
         # Only *this* attempt's own terminal record makes the failure redundant.
         # A record from an earlier attempt is what --retry-failed is replacing.
@@ -1500,7 +1490,6 @@ class LocalEvalRunner:
         return self._bridge.collect_tokens(rollout_id)
 
     def _forget(self, rollout_id: str) -> None:
-        self._dispatch_context.pop(rollout_id, None)
         self._dispatch_started.pop(rollout_id, None)
         if self._bridge is not None:
             self._bridge.discard(rollout_id)

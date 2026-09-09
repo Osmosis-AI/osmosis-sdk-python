@@ -118,15 +118,3 @@ class AgentWorkflowContext[TConfig: AgentWorkflowConfig]:
     config: TConfig | None = None
     metadata: dict[str, Any] | None = None
     artifacts_dir: Path | None = None
-
-    def __init__(
-        self,
-        prompt: list[dict[str, Any]],
-        config: TConfig | None = None,
-        metadata: dict[str, Any] | None = None,
-        artifacts_dir: Path | None = None,
-    ):
-        self.prompt = prompt
-        self.config = config
-        self.metadata = metadata
-        self.artifacts_dir = artifacts_dir
