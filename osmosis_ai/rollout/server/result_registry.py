@@ -6,6 +6,7 @@ import math
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
+from osmosis_ai.rollout.context import RolloutProgress
 from osmosis_ai.rollout.server.lease import LeaseManager
 from osmosis_ai.rollout.types import (
     RolloutErrorCategory,
@@ -28,9 +29,10 @@ class DuplicateRolloutError(ValueError):
 class RolloutFuture:
     rollout_id: str
     result: asyncio.Future[RolloutResultResponse]
-    status: RolloutStatus = RolloutStatus.QUEUED
+    progress: RolloutProgress
     task: asyncio.Task[None] | None = None
     cleanup_task: asyncio.Task[None] | None = None
+    cancel_result_task: asyncio.Task[None] | None = None
     cancel_disposition: str | None = None
     cancel_task_on_bind: bool = False
 
@@ -71,6 +73,7 @@ class RolloutFutureRegistry:
             entry = RolloutFuture(
                 rollout_id=rollout_id,
                 result=asyncio.get_running_loop().create_future(),
+                progress=RolloutProgress(changed=asyncio.Condition(self.lock)),
             )
             self.entries[rollout_id] = entry
             return self.leases.register(rollout_id)
@@ -82,20 +85,19 @@ class RolloutFutureRegistry:
             if entry.cancel_task_on_bind and not task.cancelling():
                 task.cancel()
 
+        async def publish_cancelled() -> None:
+            async with self.lock:
+                if self.entries.get(rollout_id) is entry and not entry.result.done():
+                    self.finish(
+                        entry,
+                        RolloutResultResponse(
+                            rollout_id=rollout_id, status=RolloutStatus.CANCELLED
+                        ),
+                    )
+
         def complete_cancelled(done: asyncio.Task[None]) -> None:
-            # Cancellation before the coroutine's first step never reaches its
-            # CancelledError handler. Done callbacks run atomically on this loop.
-            if (
-                done.cancelled()
-                and self.entries.get(rollout_id) is entry
-                and not entry.result.done()
-            ):
-                self.finish(
-                    entry,
-                    RolloutResultResponse(
-                        rollout_id=rollout_id, status=RolloutStatus.CANCELLED
-                    ),
-                )
+            if done.cancelled():
+                entry.cancel_result_task = asyncio.create_task(publish_cancelled())
 
         task.add_done_callback(complete_cancelled)
 
@@ -105,11 +107,9 @@ class RolloutFutureRegistry:
             if entry is not None:
                 self.leases.remove(rollout_id)
 
-    async def set_status(self, rollout_id: str, status: RolloutStatus) -> None:
+    async def get_progress(self, rollout_id: str) -> RolloutProgress:
         async with self.lock:
-            entry = self.entry(rollout_id)
-            if not entry.result.done():
-                entry.status = status
+            return self.entry(rollout_id).progress
 
     async def complete(self, rollout_id: str, response: RolloutResultResponse) -> bool:
         expired = False
@@ -129,7 +129,6 @@ class RolloutFutureRegistry:
         self,
         rollout_id: str,
         lease_token: str,
-        current_status: Callable[[], RolloutStatus],
     ) -> RolloutResultResponse:
         expired = False
         async with self.lock:
@@ -141,26 +140,25 @@ class RolloutFutureRegistry:
             else:
                 self.leases.authenticate(rollout_id, lease_token)
             future = entry.result
+            progress = entry.progress
         if expired:
             self.cancel_execution(entry)
         if future.done():
             return future.result()
         try:
-            return await asyncio.wait_for(
-                asyncio.shield(future), self.result_wait_timeout_sec
-            )
+            async with asyncio.timeout(self.result_wait_timeout_sec):
+                await progress.wait_for_status_change()
         except TimeoutError:
-            async with self.lock:
-                entry = self.entry(rollout_id)
-                self.leases.authenticate(rollout_id, lease_token)
-                if entry.result.done():
-                    return entry.result.result()
-                status = current_status()
-                entry.status = status
-                return RolloutResultResponse(
-                    rollout_id=rollout_id,
-                    status=status,
-                )
+            pass
+        async with self.lock:
+            entry = self.entry(rollout_id)
+            self.leases.authenticate(rollout_id, lease_token)
+            if entry.result.done():
+                return entry.result.result()
+            return RolloutResultResponse(
+                rollout_id=rollout_id,
+                status=entry.progress.status,
+            )
 
     async def expire(self, rollout_id: str) -> None:
         async with self.lock:
@@ -175,9 +173,10 @@ class RolloutFutureRegistry:
     async def close(self) -> None:
         async with self.lock:
             tasks = [
-                entry.cleanup_task
+                task
                 for entry in self.entries.values()
-                if entry.cleanup_task is not None and not entry.cleanup_task.done()
+                for task in (entry.cleanup_task, entry.cancel_result_task)
+                if task is not None and not task.done()
             ]
         await self.leases.close()
         for task in tasks:
@@ -186,8 +185,9 @@ class RolloutFutureRegistry:
             await asyncio.gather(*tasks, return_exceptions=True)
 
     def finish(self, entry: RolloutFuture, response: RolloutResultResponse) -> None:
-        entry.status = response.status
         entry.result.set_result(response)
+        entry.progress.status = response.status
+        entry.progress.changed.notify_all()
         self.leases.finish(entry.rollout_id)
         entry.cleanup_task = asyncio.create_task(self.remove_after_retention(entry))
 
@@ -234,7 +234,7 @@ class RolloutFutureRegistry:
             return entry.cancel_disposition
         entry.cancel_disposition = (
             "cancelled_queued"
-            if entry.status is RolloutStatus.QUEUED
+            if entry.progress.status is RolloutStatus.QUEUED
             else "cancelled_running"
         )
         try:

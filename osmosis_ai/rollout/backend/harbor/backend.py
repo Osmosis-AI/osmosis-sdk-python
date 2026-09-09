@@ -488,6 +488,7 @@ class HarborBackend(ExecutionBackend):
         pending = PendingTrial()
         pending.label = request.label
         pending.grade = request.grade
+        pending.rollout_context = get_rollout_context()
         self.pending[request.id] = pending
         outcome: ExecutionOutcome | None = None
         try:
@@ -959,6 +960,8 @@ class HarborBackend(ExecutionBackend):
             logger.error("No pending trial found for rollout %s", rollout_id)
             return
         pending.grading = True
+        if pending.rollout_context is not None:
+            await pending.rollout_context.set_status(RolloutStatus.GRADING)
         pending.workflow_result = self.workflow_outcome(event, rollout_id, pending)
 
     def workflow_outcome(

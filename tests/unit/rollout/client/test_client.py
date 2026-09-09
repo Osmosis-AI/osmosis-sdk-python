@@ -89,8 +89,9 @@ def json_body(value: httpx.Request) -> dict[str, Any]:
 async def test_run_rollout_async_returns_handle() -> None:
     requests: list[httpx.Request] = []
     polls = 0
+    release_completion = asyncio.Event()
 
-    def handler(http_request: httpx.Request) -> httpx.Response:
+    async def handler(http_request: httpx.Request) -> httpx.Response:
         nonlocal polls
         requests.append(http_request)
         if http_request.method == "POST":
@@ -100,6 +101,7 @@ async def test_run_rollout_async_returns_handle() -> None:
             return httpx.Response(
                 200, json={"rollout_id": ROLLOUT_ID, "status": "running"}
             )
+        await release_completion.wait()
         return httpx.Response(
             200,
             json={
@@ -117,7 +119,8 @@ async def test_run_rollout_async_returns_handle() -> None:
     assert rollout.status is RolloutStatus.QUEUED
     assert rollout.latest_result is None
 
-    running = await rollout.wait_for_status_or_completion(RolloutStatus.RUNNING)
+    running = await rollout.wait_for_running()
+    release_completion.set()
     outcome = await rollout
 
     assert running is RolloutStatus.RUNNING
@@ -158,7 +161,7 @@ async def test_failure_result_is_returned() -> None:
     assert outcome.err_category == "lease_expired"
 
 
-async def test_wait_for_status_or_completion_returns_terminal() -> None:
+async def test_wait_for_grading_returns_terminal() -> None:
     def handler(http_request: httpx.Request) -> httpx.Response:
         if http_request.method == "POST":
             return httpx.Response(202, json=admission())
@@ -168,19 +171,22 @@ async def test_wait_for_status_or_completion_returns_terminal() -> None:
         )
 
     rollout = await client(handler).run_rollout_async(**request())
-    status = await rollout.wait_for_status_or_completion(RolloutStatus.GRADING)
+    status = await rollout.wait_for_grading()
 
     assert status is RolloutStatus.SUCCESS
 
 
-async def test_wait_for_status_or_completion_supports_different_waiters() -> None:
+async def test_milestone_waits_support_different_waiters() -> None:
     polls = 0
+    release_completion = asyncio.Event()
 
-    def handler(http_request: httpx.Request) -> httpx.Response:
+    async def handler(http_request: httpx.Request) -> httpx.Response:
         nonlocal polls
         if http_request.method == "POST":
             return httpx.Response(202, json=admission())
         polls += 1
+        if polls > 1:
+            await release_completion.wait()
         return httpx.Response(
             200,
             json={
@@ -190,16 +196,15 @@ async def test_wait_for_status_or_completion_supports_different_waiters() -> Non
         )
 
     rollout = await client(handler).run_rollout_async(**request())
-    grading = asyncio.create_task(
-        rollout.wait_for_status_or_completion(RolloutStatus.GRADING)
-    )
-    success = asyncio.create_task(
-        rollout.wait_for_status_or_completion(RolloutStatus.SUCCESS)
-    )
+    running = asyncio.create_task(rollout.wait_for_running())
+    grading = asyncio.create_task(rollout.wait_for_grading())
+    completion = asyncio.create_task(rollout.wait_for_completion())
 
+    assert await running is RolloutStatus.GRADING
     assert await grading is RolloutStatus.GRADING
-    assert await success is RolloutStatus.SUCCESS
-    assert (await rollout).status is RolloutStatus.SUCCESS
+    release_completion.set()
+    assert (await completion).status is RolloutStatus.SUCCESS
+    assert await rollout is await rollout.wait_for_completion()
 
 
 async def test_429_retries_using_retry_after() -> None:

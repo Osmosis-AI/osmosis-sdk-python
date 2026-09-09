@@ -121,6 +121,7 @@ class LocalBackend(ExecutionBackend):
         self,
         request: ExecutionRequest,
     ) -> ExecutionOutcome:
+        rollout_ctx = get_rollout_context()
         # The controller's clock started at submission, not at slot admission;
         # time spent queued here has to come out of the workflow's budget.
         enqueued = time.monotonic()
@@ -134,6 +135,8 @@ class LocalBackend(ExecutionBackend):
             if self.grader_cls and (
                 request.label is not None or request.metadata is not None
             ):
+                if rollout_ctx is not None:
+                    await rollout_ctx.set_status(RolloutStatus.GRADING)
                 graded = await self.run_grader(request, result)
             else:
                 graded = ExecutionResult(status=RolloutStatus.FAILURE)

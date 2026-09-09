@@ -24,6 +24,12 @@ _RESULT_READ_GRACE_SEC = 10.0
 _FINISHED_STATUSES = frozenset(
     {RolloutStatus.SUCCESS, RolloutStatus.FAILURE, RolloutStatus.CANCELLED}
 )
+_STATUS_ORDER = {
+    RolloutStatus.QUEUED: 0,
+    RolloutStatus.RUNNING: 1,
+    RolloutStatus.GRADING: 2,
+    RolloutStatus.SUCCESS: 3,
+}
 
 
 class RolloutAdmissionTimeoutError(TimeoutError):
@@ -45,7 +51,6 @@ class RolloutHandle:
         self.rollout_id = admission.rollout_id
         self.status = admission.status
         self.latest_result: RolloutResultResponse | None = None
-        self.observed_statuses = [admission.status]
         self.status_changed = asyncio.Condition()
         self.polling_finished = False
         self.result_task = asyncio.create_task(
@@ -61,33 +66,31 @@ class RolloutHandle:
     def done(self) -> bool:
         return self.result_task.done()
 
-    async def wait_for_status_or_completion(
-        self, *statuses: RolloutStatus
-    ) -> RolloutStatus:
-        if not statuses:
-            raise ValueError("at least one status is required")
-        wanted = set(statuses) | _FINISHED_STATUSES
+    async def wait_for_running(self) -> RolloutStatus:
+        return await self._wait_for_status(RolloutStatus.RUNNING)
 
-        def matching_status() -> RolloutStatus | None:
-            return next(
-                (status for status in self.observed_statuses if status in wanted),
-                None,
+    async def wait_for_grading(self) -> RolloutStatus:
+        return await self._wait_for_status(RolloutStatus.GRADING)
+
+    async def wait_for_completion(self) -> RolloutResultResponse:
+        return await self.result_task
+
+    async def _wait_for_status(self, status: RolloutStatus) -> RolloutStatus:
+        def reached() -> bool:
+            return self.status in _FINISHED_STATUSES or (
+                self.status in _STATUS_ORDER
+                and _STATUS_ORDER[self.status] >= _STATUS_ORDER[status]
             )
 
         async with self.status_changed:
             await self.status_changed.wait_for(
-                lambda: matching_status() is not None or self.polling_finished
+                lambda: reached() or self.polling_finished
             )
-            status = matching_status()
+            current = self.status
 
-        if status is not None:
-            return status
-        terminal = await self.result_task
-        expected = ", ".join(status.value for status in statuses)
-        raise RuntimeError(
-            f"rollout {terminal.rollout_id} finished with {terminal.status.value} "
-            f"before reaching any requested status: {expected}"
-        )
+        if reached():
+            return current
+        return (await self.result_task).status
 
     async def _wait_for_completion(
         self,
@@ -100,8 +103,6 @@ class RolloutHandle:
                 async with self.status_changed:
                     self.status = result.status
                     self.latest_result = result
-                    if result.status not in self.observed_statuses:
-                        self.observed_statuses.append(result.status)
                     self.status_changed.notify_all()
                 if result.status in _FINISHED_STATUSES:
                     return result

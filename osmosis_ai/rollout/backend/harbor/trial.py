@@ -12,6 +12,7 @@ from typing import Any
 from harbor.models.trial.result import ExceptionInfo
 from harbor.trial.hooks import TrialHookEvent
 
+from osmosis_ai.rollout.context import RolloutContext
 from osmosis_ai.rollout.types import ExecutionOutcome, ExecutionResult
 
 logger: logging.Logger = logging.getLogger(__name__)
@@ -33,6 +34,7 @@ class PendingTrial:
         self.grading = False
         self.api_key: str | None = None
         self.task: asyncio.Task[Any] | None = None
+        self.rollout_context: RolloutContext | None = None
         self.done: asyncio.Future[ExecutionOutcome] = (
             asyncio.get_event_loop().create_future()
         )
