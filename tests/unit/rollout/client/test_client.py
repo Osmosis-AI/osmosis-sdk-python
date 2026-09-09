@@ -10,6 +10,7 @@ import pytest
 from osmosis_ai.rollout.client import (
     RolloutAdmissionTimeoutError,
     RolloutClient,
+    RolloutHandle,
     RolloutProtocolError,
 )
 from osmosis_ai.rollout.client.client import (
@@ -85,7 +86,7 @@ def json_body(value: httpx.Request) -> dict[str, Any]:
     return json.loads(value.content)
 
 
-async def test_run_rollout_async_returns_completion_task() -> None:
+async def test_run_rollout_async_returns_handle() -> None:
     requests: list[httpx.Request] = []
     polls = 0
 
@@ -109,15 +110,22 @@ async def test_run_rollout_async_returns_completion_task() -> None:
         )
 
     rollout_client = client(handler)
-    future = await rollout_client.run_rollout_async(**request())
+    rollout = await rollout_client.run_rollout_async(**request())
 
     assert polls == 0
-    assert isinstance(future, asyncio.Task)
+    assert isinstance(rollout, RolloutHandle)
+    assert rollout.status is RolloutStatus.QUEUED
+    assert rollout.latest_result is None
 
-    outcome = await future
+    running = await rollout.wait_for_status_or_completion(RolloutStatus.RUNNING)
+    outcome = await rollout
 
+    assert running is RolloutStatus.RUNNING
     assert outcome.status is RolloutStatus.SUCCESS
     assert outcome.sample is not None and outcome.sample.reward == 1.0
+    assert rollout.status is RolloutStatus.SUCCESS
+    assert rollout.latest_result is outcome
+    assert rollout.done()
     assert polls == 2
     assert POLLING_LEASE_HEADER not in requests[0].headers
     lease_values = {item.headers[POLLING_LEASE_HEADER] for item in requests[1:]}
@@ -148,6 +156,50 @@ async def test_failure_result_is_returned() -> None:
     assert outcome.status is RolloutStatus.FAILURE
     assert outcome.err_message == "polling lease expired"
     assert outcome.err_category == "lease_expired"
+
+
+async def test_wait_for_status_or_completion_returns_terminal() -> None:
+    def handler(http_request: httpx.Request) -> httpx.Response:
+        if http_request.method == "POST":
+            return httpx.Response(202, json=admission())
+        return httpx.Response(
+            200,
+            json={"rollout_id": ROLLOUT_ID, "status": "success"},
+        )
+
+    rollout = await client(handler).run_rollout_async(**request())
+    status = await rollout.wait_for_status_or_completion(RolloutStatus.GRADING)
+
+    assert status is RolloutStatus.SUCCESS
+
+
+async def test_wait_for_status_or_completion_supports_different_waiters() -> None:
+    polls = 0
+
+    def handler(http_request: httpx.Request) -> httpx.Response:
+        nonlocal polls
+        if http_request.method == "POST":
+            return httpx.Response(202, json=admission())
+        polls += 1
+        return httpx.Response(
+            200,
+            json={
+                "rollout_id": ROLLOUT_ID,
+                "status": "grading" if polls == 1 else "success",
+            },
+        )
+
+    rollout = await client(handler).run_rollout_async(**request())
+    grading = asyncio.create_task(
+        rollout.wait_for_status_or_completion(RolloutStatus.GRADING)
+    )
+    success = asyncio.create_task(
+        rollout.wait_for_status_or_completion(RolloutStatus.SUCCESS)
+    )
+
+    assert await grading is RolloutStatus.GRADING
+    assert await success is RolloutStatus.SUCCESS
+    assert (await rollout).status is RolloutStatus.SUCCESS
 
 
 async def test_429_retries_using_retry_after() -> None:
