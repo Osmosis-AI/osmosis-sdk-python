@@ -81,6 +81,7 @@ from osmosis_ai.rollout.backend.harbor.diagnostics import REDACTED
 from osmosis_ai.rollout.client import (
     RolloutAdmissionTimeoutError,
     RolloutClient,
+    RolloutHandle,
     RolloutProtocolError,
 )
 from osmosis_ai.rollout.types import RolloutResultResponse, RolloutStatus
@@ -1341,9 +1342,9 @@ class LocalEvalRunner:
             row_index=item.row.row_index,
             run_index=item.run_index,
         )
-        future: asyncio.Task[RolloutResultResponse] | None = None
+        handle: RolloutHandle | None = None
         try:
-            future = await client.run_rollout_async(
+            handle = await client.run_rollout_async(
                 initial_messages=list(item.row.initial_messages),
                 chat_completions_url=listener.chat_completions_url(rollout_id),
                 rollout_id=rollout_id,
@@ -1359,12 +1360,12 @@ class LocalEvalRunner:
                 },
             )
             async with asyncio.timeout(self._item_deadline()):
-                outcome = await asyncio.shield(future)
+                outcome = await asyncio.shield(handle)
         except RolloutAdmissionTimeoutError:
             self._forget(rollout_id)
             raise
         except RolloutProtocolError as exc:
-            if future is not None or not 400 <= exc.status_code < 500:
+            if handle is not None or not 400 <= exc.status_code < 500:
                 raise
             # Only an admission refusal is attributable to the item. A 4xx
             # while polling does not establish whether the rollout failed.
@@ -1378,15 +1379,15 @@ class LocalEvalRunner:
                     await RolloutClient(
                         url=client.url, http_client=cancel_http_client
                     ).cancel_rollout(rollout_id)
-                if future is not None:
+                if handle is not None:
                     async with asyncio.timeout(_CANCEL_SETTLE_SEC):
-                        await asyncio.shield(future)
+                        await asyncio.shield(handle)
             raise
         finally:
-            if future is not None and not future.done():
-                future.cancel()
+            if handle is not None and not handle.done():
+                handle.cancel()
                 with contextlib.suppress(asyncio.CancelledError, Exception):
-                    await future
+                    await handle
             self._dispatched += 1
         if outcome.status is RolloutStatus.CANCELLED:
             # Supervisor-requested cancellation writes no terminal event, so the
