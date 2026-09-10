@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import math
+from collections.abc import Generator
 from typing import Any
 
 import httpx
@@ -42,17 +43,17 @@ class RolloutHandle:
         client: RolloutClient,
         admission: RolloutInitResponse,
     ) -> None:
-        self.rollout_id = admission.rollout_id
-        self.status = admission.status
+        self.rollout_id: str = admission.rollout_id
+        self.status: RolloutStatus = admission.status
         self.latest_result: RolloutResultResponse | None = None
-        self.observed_statuses = [admission.status]
-        self.status_changed = asyncio.Condition()
-        self.polling_finished = False
-        self.result_task = asyncio.create_task(
+        self.observed_statuses: list[RolloutStatus] = [admission.status]
+        self.status_changed: asyncio.Condition = asyncio.Condition()
+        self.polling_finished: bool = False
+        self.result_task: asyncio.Task[RolloutResultResponse] = asyncio.create_task(
             self._wait_for_completion(client, admission)
         )
 
-    def __await__(self):
+    def __await__(self) -> Generator[Any, None, RolloutResultResponse]:
         return self.result_task.__await__()
 
     def cancel(self) -> bool:
