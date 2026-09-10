@@ -171,6 +171,13 @@ async def test_unserializable_diagnostics_do_not_lose_the_reward(
                 "/rollout/r1/result",
                 headers={POLLING_LEASE_HEADER: admission.json()["polling_lease_token"]},
             )
+            while response.json()["status"] in {"queued", "running", "grading"}:
+                response = await client.get(
+                    "/rollout/r1/result",
+                    headers={
+                        POLLING_LEASE_HEADER: admission.json()["polling_lease_token"]
+                    },
+                )
     assert response.status_code == 200
     payload = response.json()
     assert payload["status"] == "success"
@@ -211,6 +218,13 @@ async def test_invalid_unicode_in_labels_and_errors_is_still_pollable(
                 "/rollout/r1/result",
                 headers={POLLING_LEASE_HEADER: admission.json()["polling_lease_token"]},
             )
+            while response.json()["status"] in {"queued", "running", "grading"}:
+                response = await client.get(
+                    "/rollout/r1/result",
+                    headers={
+                        POLLING_LEASE_HEADER: admission.json()["polling_lease_token"]
+                    },
+                )
     assert response.status_code == 200
     payload = response.json()
     assert payload["status"] == "failure"

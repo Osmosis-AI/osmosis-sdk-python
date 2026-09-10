@@ -174,6 +174,7 @@ async def test_result_wait_uses_server_configuration() -> None:
             transport=ASGITransport(app=app), base_url="http://rollout"
         ) as client:
             admission = await client.post("/rollout", json=init_body())
+            await backend.started.wait()
             started = time.monotonic()
             response = await client.get(
                 "/rollout/r1/result", headers=lease_headers(admission)

@@ -13,7 +13,7 @@ from fastapi import FastAPI, Header, HTTPException
 from fastapi.responses import JSONResponse
 
 from osmosis_ai.rollout.backend.base import ExecutionBackend
-from osmosis_ai.rollout.context import RolloutContext
+from osmosis_ai.rollout.context import RolloutContext, RolloutProgress
 from osmosis_ai.rollout.server.lease import InvalidLeaseError
 from osmosis_ai.rollout.server.result_registry import (
     DuplicateRolloutError,
@@ -143,9 +143,14 @@ def create_rollout_server(
             logger.error("Rollout task for %s crashed", rollout_id, exc_info=exc)
 
     async def _run_rollout(request: RolloutInitRequest) -> None:
-        await registry.set_status(request.rollout_id, RolloutStatus.RUNNING)
+        progress = await registry.get_progress(request.rollout_id)
+        await progress.set_status(RolloutStatus.RUNNING)
         try:
-            response = await _handle_rollout(backend, request)
+            response = await _handle_rollout(
+                backend,
+                request,
+                progress=progress,
+            )
         except asyncio.CancelledError:
             response = RolloutResultResponse(
                 rollout_id=request.rollout_id,
@@ -194,26 +199,8 @@ def create_rollout_server(
         rollout_id: str,
         lease_token: str = Header(alias=POLLING_LEASE_HEADER, min_length=1),
     ) -> RolloutResultResponse:
-        def _current_status() -> RolloutStatus:
-            state = backend.rollout_status(rollout_id)
-            if state is not None:
-                try:
-                    status = RolloutStatus(state.get("status"))
-                except (TypeError, ValueError):
-                    pass
-                else:
-                    if status in {
-                        RolloutStatus.QUEUED,
-                        RolloutStatus.RUNNING,
-                        RolloutStatus.GRADING,
-                    }:
-                        return status
-            return RolloutStatus.RUNNING
-
         try:
-            return await registry.wait_for_result(
-                rollout_id, lease_token, _current_status
-            )
+            return await registry.wait_for_result(rollout_id, lease_token)
         except UnknownRolloutError as exc:
             raise HTTPException(status_code=404, detail="unknown rollout_id") from exc
         except InvalidLeaseError as exc:
@@ -249,13 +236,16 @@ def create_rollout_server(
 
 
 async def _handle_rollout(
-    backend: ExecutionBackend, request: RolloutInitRequest
+    backend: ExecutionBackend,
+    request: RolloutInitRequest,
+    progress: RolloutProgress | None = None,
 ) -> RolloutResultResponse:
     rollout_id = request.rollout_id
     rollout_ctx = RolloutContext(
         chat_completions_url=request.chat_completions_url,
         api_key=request.llm_api_key,
         rollout_id=rollout_id,
+        progress=progress,
     )
     outcome: ExecutionOutcome | None = None
     try:

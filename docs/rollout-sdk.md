@@ -194,11 +194,11 @@ rollout = await client.run_rollout_async(
     rollout_id="run-124",
     grade=False,
 )
-phase = await rollout.wait_for_status_or_completion(RolloutStatus.GRADING)
+phase = await rollout.wait_for_grading()
 result = await rollout
 ```
 
-`wait_for_status_or_completion()` returns the first requested `RolloutStatus` observed, or `SUCCESS`, `FAILURE`, or `CANCELLED` if the rollout finishes first. `rollout.status` exposes the latest status, and `rollout.latest_result` exposes the latest result response after the first poll.
+`wait_for_running()` and `wait_for_grading()` return when that milestone is reached or passed, or when the rollout terminates. `wait_for_completion()` is equivalent to awaiting the handle. `rollout.status` exposes the latest status, and `rollout.latest_result` exposes the latest result response after the first poll.
 
 The server creates the polling lease and chooses both the long-poll wait and lease timeout. The client carries the returned lease between result requests; callers do not supply a lease token or wait duration. Admission retries on HTTP 429. When set, `admission_timeout_sec` must be finite and bounds the entire admission operation, including HTTP requests and retry delays; it does not limit execution after admission. `cancel_rollout(rollout_id)` requests cancellation with a five-second wall-clock bound. Cancellation is idempotent for all backends, including LocalBackend; the result becomes terminal after execution cleanup finishes. To observe cleanup after cancellation, keep awaiting the handle while requesting cancellation separately. Result responses omit the persistence-only `trajectory_messages` field.
 

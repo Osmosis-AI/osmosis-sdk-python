@@ -1,13 +1,15 @@
+import asyncio
 import os
 from abc import ABC, abstractmethod
 from contextvars import ContextVar
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from osmosis_ai.rollout.types import (
     AgentWorkflowConfig,
     RolloutSample,
+    RolloutStatus,
 )
 
 
@@ -37,6 +39,35 @@ ROLLOUT_ID_ENV = "OSMOSIS_ROLLOUT_ID"
 
 
 @dataclass
+class RolloutProgress:
+    status: RolloutStatus = RolloutStatus.QUEUED
+    changed: asyncio.Condition = field(default_factory=asyncio.Condition)
+
+    async def set_status(self, status: RolloutStatus) -> None:
+        async with self.changed:
+            if status is self.status or self.status in {
+                RolloutStatus.SUCCESS,
+                RolloutStatus.FAILURE,
+                RolloutStatus.CANCELLED,
+            }:
+                return
+            self.status = status
+            self.changed.notify_all()
+
+    async def wait_for_status_change(self) -> RolloutStatus:
+        async with self.changed:
+            if self.status in {
+                RolloutStatus.SUCCESS,
+                RolloutStatus.FAILURE,
+                RolloutStatus.CANCELLED,
+            }:
+                return self.status
+            status = self.status
+            await self.changed.wait_for(lambda: self.status is not status)
+            return self.status
+
+
+@dataclass
 class RolloutContext:
     """Ambient context for a rollout execution.
 
@@ -48,6 +79,7 @@ class RolloutContext:
     api_key: str | None = None
     rollout_id: str = ""
     sample_source: SampleSource | None = None
+    progress: RolloutProgress | None = None
 
     def __post_init__(self) -> None:
         if not self.chat_completions_url:
@@ -86,6 +118,10 @@ class RolloutContext:
         if self.sample_source is None:
             return None
         return await self.sample_source.get_sample()
+
+    async def set_status(self, status: RolloutStatus) -> None:
+        if self.progress is not None:
+            await self.progress.set_status(status)
 
 
 def get_rollout_context() -> RolloutContext | None:
