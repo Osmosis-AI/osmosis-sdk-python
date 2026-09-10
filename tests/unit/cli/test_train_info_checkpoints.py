@@ -71,11 +71,11 @@ def _make_finished_run() -> TrainingRunDetail:
     )
 
 
-def _make_running_run() -> TrainingRunDetail:
+def _make_pending_run(status: str) -> TrainingRunDetail:
     return TrainingRunDetail(
         id="run_1",
         name="qwen3-run1",
-        status="running",
+        status=status,
         model_name="Qwen/Qwen3",
         created_at="2026-04-01T00:00:00Z",
         platform_url="https://platform.osmosis.ai/ws/training/run_1",
@@ -94,14 +94,17 @@ def _make_stopped_run() -> TrainingRunDetail:
 
 
 class TestStatusCheckpoints:
-    def test_finished_run_shows_checkpoints_section(
-        self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
+    @pytest.mark.parametrize("status", ["running", "finished"])
+    def test_started_run_shows_checkpoints_section(
+        self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO, status: str
     ) -> None:
         class FakeClient:
             def get_training_run(self, name, *, git_identity, credentials=None):
                 assert credentials is FAKE_CREDENTIALS
                 assert git_identity == GIT_IDENTITY
-                return _make_finished_run()
+                run = _make_finished_run()
+                run.status = status
+                return run
 
             def list_training_run_checkpoints(
                 self, name, *, git_identity, credentials=None
@@ -128,6 +131,7 @@ class TestStatusCheckpoints:
         result = train_module.info(name="qwen3-run1")
 
         assert isinstance(result, DetailResult)
+        assert result.data["training_run"]["status"] == status
         checkpoint = result.data["checkpoints"][0]
         assert checkpoint["checkpoint_name"] == "qwen3-run1-step-100"
         assert checkpoint["checkpoint_step"] == 100
@@ -147,8 +151,9 @@ class TestStatusCheckpoints:
         assert "[uploaded]" in checkpoint_line
         assert "cp_1" not in checkpoint_line
 
-    def test_running_run_skips_checkpoints(
-        self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
+    @pytest.mark.parametrize("status", ["pending", "queued"])
+    def test_pending_run_skips_checkpoints(
+        self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO, status: str
     ) -> None:
         called = {"ckpts": False}
 
@@ -156,7 +161,7 @@ class TestStatusCheckpoints:
             def get_training_run(self, name, *, git_identity, credentials=None):
                 assert credentials is FAKE_CREDENTIALS
                 assert git_identity == GIT_IDENTITY
-                return _make_running_run()
+                return _make_pending_run(status)
 
             def list_training_run_checkpoints(
                 self, name, *, git_identity, credentials=None
@@ -164,7 +169,7 @@ class TestStatusCheckpoints:
                 assert credentials is FAKE_CREDENTIALS
                 assert git_identity == GIT_IDENTITY
                 called["ckpts"] = True
-                raise AssertionError("should not call for running run")
+                raise AssertionError("should not call for pending or queued run")
 
             get_training_run_metrics = _raise_metrics_unavailable
 
@@ -220,8 +225,9 @@ class TestStatusCheckpoints:
             "Deploy with: osmosis model deploy <lora-model-name>",
         ]
 
+    @pytest.mark.parametrize("status", ["running", "finished"])
     def test_endpoint_error_is_non_fatal(
-        self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
+        self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO, status: str
     ) -> None:
         from osmosis_ai.platform.auth.platform_client import PlatformAPIError
 
@@ -229,7 +235,9 @@ class TestStatusCheckpoints:
             def get_training_run(self, name, *, git_identity, credentials=None):
                 assert credentials is FAKE_CREDENTIALS
                 assert git_identity == GIT_IDENTITY
-                return _make_finished_run()
+                run = _make_finished_run()
+                run.status = status
+                return run
 
             def list_training_run_checkpoints(
                 self, name, *, git_identity, credentials=None

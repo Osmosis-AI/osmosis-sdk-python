@@ -309,7 +309,7 @@ def info(name: str, *, output: str | None) -> DetailResult:
     if config_section is not None:
         sections.append(config_section)
 
-    if run.status in RUN_STATUSES_TERMINAL:
+    if run.status not in RUN_STATUSES_PENDING:
         try:
             with output_ctx.status("Fetching checkpoints..."):
                 ckpts = client.list_training_run_checkpoints(
