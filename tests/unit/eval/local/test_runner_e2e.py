@@ -613,7 +613,7 @@ async def test_stalled_result_polling_halts_and_rows_resume(
         await asyncio.Event().wait()
 
     with monkeypatch.context() as stall_patch:
-        stall_patch.setattr(RolloutClient, "_wait_for_completion", stalled)
+        stall_patch.setattr(RolloutClient, "_get_result", stalled)
         stall_patch.setattr(
             runner_module.LocalEvalRunner, "_item_deadline", lambda _: 0.1
         )
@@ -657,7 +657,7 @@ async def test_a_4xx_result_poll_halts_and_rows_resume(
         )
 
     with monkeypatch.context() as polling_patch:
-        polling_patch.setattr(RolloutClient, "_wait_for_completion", unreadable)
+        polling_patch.setattr(RolloutClient, "_get_result", unreadable)
         summary = await harness.runner(
             options=LocalEvalOptions(name="run-1", max_in_flight=1)
         ).run()

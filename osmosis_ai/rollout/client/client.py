@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import math
+from collections.abc import Generator
 from typing import Any
 
 import httpx
@@ -34,6 +35,81 @@ class RolloutProtocolError(RuntimeError):
     def __init__(self, message: str, *, status_code: int) -> None:
         super().__init__(message)
         self.status_code: int = status_code
+
+
+class RolloutHandle:
+    def __init__(
+        self,
+        client: RolloutClient,
+        admission: RolloutInitResponse,
+    ) -> None:
+        self.rollout_id: str = admission.rollout_id
+        self.status: RolloutStatus = admission.status
+        self.latest_result: RolloutResultResponse | None = None
+        self.observed_statuses: list[RolloutStatus] = [admission.status]
+        self.status_changed: asyncio.Condition = asyncio.Condition()
+        self.polling_finished: bool = False
+        self.result_task: asyncio.Task[RolloutResultResponse] = asyncio.create_task(
+            self._wait_for_completion(client, admission)
+        )
+
+    def __await__(self) -> Generator[Any, None, RolloutResultResponse]:
+        return self.result_task.__await__()
+
+    def cancel(self) -> bool:
+        return self.result_task.cancel()
+
+    def done(self) -> bool:
+        return self.result_task.done()
+
+    async def wait_for_status_or_completion(
+        self, *statuses: RolloutStatus
+    ) -> RolloutStatus:
+        if not statuses:
+            raise ValueError("at least one status is required")
+        wanted = set(statuses) | _FINISHED_STATUSES
+
+        def matching_status() -> RolloutStatus | None:
+            return next(
+                (status for status in self.observed_statuses if status in wanted),
+                None,
+            )
+
+        async with self.status_changed:
+            await self.status_changed.wait_for(
+                lambda: matching_status() is not None or self.polling_finished
+            )
+            status = matching_status()
+
+        if status is not None:
+            return status
+        terminal = await self.result_task
+        expected = ", ".join(status.value for status in statuses)
+        raise RuntimeError(
+            f"rollout {terminal.rollout_id} finished with {terminal.status.value} "
+            f"before reaching any requested status: {expected}"
+        )
+
+    async def _wait_for_completion(
+        self,
+        client: RolloutClient,
+        admission: RolloutInitResponse,
+    ) -> RolloutResultResponse:
+        try:
+            while True:
+                result = await client._get_result(admission)
+                async with self.status_changed:
+                    self.status = result.status
+                    self.latest_result = result
+                    if result.status not in self.observed_statuses:
+                        self.observed_statuses.append(result.status)
+                    self.status_changed.notify_all()
+                if result.status in _FINISHED_STATUSES:
+                    return result
+        finally:
+            async with self.status_changed:
+                self.polling_finished = True
+                self.status_changed.notify_all()
 
 
 def _retry_after_seconds(response: httpx.Response, default: float = 1.0) -> float:
@@ -143,7 +219,7 @@ class RolloutClient:
         grader_timeout_sec: float | None = None,
         extra_fields: dict[str, Any] | None = None,
     ) -> RolloutResultResponse:
-        future = await self.run_rollout_async(
+        rollout = await self.run_rollout_async(
             initial_messages=initial_messages,
             chat_completions_url=chat_completions_url,
             rollout_id=rollout_id,
@@ -155,7 +231,7 @@ class RolloutClient:
             grader_timeout_sec=grader_timeout_sec,
             extra_fields=extra_fields,
         )
-        return await future
+        return await rollout
 
     async def run_rollout_async(
         self,
@@ -169,7 +245,7 @@ class RolloutClient:
         agent_timeout_sec: float | None = None,
         grader_timeout_sec: float | None = None,
         extra_fields: dict[str, Any] | None = None,
-    ) -> asyncio.Task[RolloutResultResponse]:
+    ) -> RolloutHandle:
         request = RolloutInitRequest(
             initial_messages=initial_messages,
             label=label,
@@ -195,7 +271,7 @@ class RolloutClient:
                     response_pending = False
                     if response.status_code != 429:
                         admission = _admission(response, rollout_id)
-                        return asyncio.create_task(self._wait_for_completion(admission))
+                        return RolloutHandle(self, admission)
                     await asyncio.sleep(_retry_after_seconds(response))
         except TimeoutError as exc:
             if not deadline.expired():
@@ -213,19 +289,16 @@ class RolloutClient:
                 )
             raise RolloutAdmissionTimeoutError(message) from exc
 
-    async def _wait_for_completion(
+    async def _get_result(
         self, admission: RolloutInitResponse
     ) -> RolloutResultResponse:
         timeout = admission.result_wait_timeout_sec + _RESULT_READ_GRACE_SEC
-        while True:
-            response = await self.http_client.get(
-                f"{self.url}/rollout/{admission.rollout_id}/result",
-                headers={POLLING_LEASE_HEADER: admission.polling_lease_token},
-                timeout=timeout,
-            )
-            result = _result(response, admission.rollout_id)
-            if result.status in _FINISHED_STATUSES:
-                return result
+        response = await self.http_client.get(
+            f"{self.url}/rollout/{admission.rollout_id}/result",
+            headers={POLLING_LEASE_HEADER: admission.polling_lease_token},
+            timeout=timeout,
+        )
+        return _result(response, admission.rollout_id)
 
     async def cancel_rollout(self, rollout_id: str) -> CancelRolloutsResponse:
         request = CancelRolloutsRequest(ids=[rollout_id])
@@ -243,5 +316,6 @@ class RolloutClient:
 __all__ = [
     "RolloutAdmissionTimeoutError",
     "RolloutClient",
+    "RolloutHandle",
     "RolloutProtocolError",
 ]

@@ -452,9 +452,10 @@ def test_rollout_client_imports_without_eval_run_extra() -> None:
             return real_import(name, globals, locals, fromlist, level)
 
         builtins.__import__ = guarded_import
-        from osmosis_ai.rollout.client import RolloutClient
+        from osmosis_ai.rollout.client import RolloutClient, RolloutHandle
 
         assert RolloutClient is not None
+        assert RolloutHandle is not None
         loaded_roots = {name.partition(".")[0] for name in sys.modules}
         assert not (blocked & loaded_roots)
         """

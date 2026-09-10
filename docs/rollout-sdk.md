@@ -172,6 +172,7 @@ class AgentWorkflowConfig(BaseConfig):  # also GraderConfig
 import httpx
 
 from osmosis_ai.rollout.client import RolloutClient
+from osmosis_ai.rollout.types import RolloutStatus
 
 async with httpx.AsyncClient() as http_client:
     client = RolloutClient(url="http://127.0.0.1:8000", http_client=http_client)
@@ -184,19 +185,22 @@ async with httpx.AsyncClient() as http_client:
     )
 ```
 
-`run_rollout()` returns the terminal `RolloutResultResponse`. When the caller needs a handle immediately after admission, `run_rollout_async()` returns the polling task:
+`run_rollout()` returns the terminal `RolloutResultResponse`. When the caller needs access immediately after admission, `run_rollout_async()` returns an awaitable `RolloutHandle`:
 
 ```python
-future = await client.run_rollout_async(
+rollout = await client.run_rollout_async(
     initial_messages=[{"role": "user", "content": "Solve this task"}],
     chat_completions_url="http://127.0.0.1:9000/v1",
     rollout_id="run-124",
     grade=False,
 )
-result = await future
+phase = await rollout.wait_for_status_or_completion(RolloutStatus.GRADING)
+result = await rollout
 ```
 
-The server creates the polling lease and chooses both the long-poll wait and lease timeout. The client carries the returned lease between result requests; callers do not supply a lease token or wait duration. Admission retries on HTTP 429. When set, `admission_timeout_sec` must be finite and bounds the entire admission operation, including HTTP requests and retry delays; it does not limit execution after admission. `cancel_rollout(rollout_id)` requests cancellation with a five-second wall-clock bound. Cancellation is idempotent for all backends, including LocalBackend; the result becomes terminal after execution cleanup finishes. To observe cleanup after cancellation, keep awaiting the completion task while requesting cancellation separately. Result responses omit the persistence-only `trajectory_messages` field.
+`wait_for_status_or_completion()` returns the first requested `RolloutStatus` observed, or `SUCCESS`, `FAILURE`, or `CANCELLED` if the rollout finishes first. `rollout.status` exposes the latest status, and `rollout.latest_result` exposes the latest result response after the first poll.
+
+The server creates the polling lease and chooses both the long-poll wait and lease timeout. The client carries the returned lease between result requests; callers do not supply a lease token or wait duration. Admission retries on HTTP 429. When set, `admission_timeout_sec` must be finite and bounds the entire admission operation, including HTTP requests and retry delays; it does not limit execution after admission. `cancel_rollout(rollout_id)` requests cancellation with a five-second wall-clock bound. Cancellation is idempotent for all backends, including LocalBackend; the result becomes terminal after execution cleanup finishes. To observe cleanup after cancellation, keep awaiting the handle while requesting cancellation separately. Result responses omit the persistence-only `trajectory_messages` field.
 
 An admission deadline that expires during an HTTP request does not prove the server rejected the rollout. `RolloutAdmissionTimeoutError` reports that admission may have succeeded; the server requests cancellation of unobserved work when its polling lease expires. The client does not automatically cancel by ID: a lost duplicate-ID rejection could otherwise cancel another active rollout. Use a fresh rollout ID for each new attempt. A deadline reached while waiting to retry an explicit 429 reports only the admission timeout.
 
