@@ -101,7 +101,7 @@ class _FakeSubmitClient:
             workflow_id="benchmark-run/benchmark-run-1",
             task_count=10,
             created_at="2026-07-25T00:00:00Z",
-            platform_url="https://platform.osmosis.ai/acme/benchmarks/benchmark-run-1",
+            platform_url="https://platform.example.test/acme/benchmarks/benchmark-run-1",
         )
 
 
@@ -124,7 +124,7 @@ def test_submit_sends_benchmark_config_and_returns_operation_result(
                 workflow_id="benchmark-run/benchmark-run-1",
                 task_count=10,
                 created_at="2026-07-25T00:00:00Z",
-                platform_url="https://platform.osmosis.ai/acme/benchmarks/benchmark-run-1",
+                platform_url="https://platform.example.test/acme/benchmarks/benchmark-run-1",
             )
 
     monkeypatch.setattr(
@@ -153,7 +153,7 @@ def test_submit_sends_benchmark_config_and_returns_operation_result(
     assert result.resource["benchmark_name"] == "DeepSWE"
     assert result.resource["workflow_id"] == "benchmark-run/benchmark-run-1"
     assert result.resource["platform_url"] == (
-        "https://platform.osmosis.ai/acme/benchmarks/benchmark-run-1"
+        "https://platform.example.test/acme/benchmarks/benchmark-run-1"
     )
     assert "url" not in result.resource
     assert result.resource["config"]["agents"][0]["harness_api_key_secret"] == (

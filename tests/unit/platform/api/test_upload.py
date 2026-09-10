@@ -59,10 +59,10 @@ class TestRequireHttps:
     """Tests for _require_https and _is_loopback_url."""
 
     def test_https_url_passes(self) -> None:
-        _require_https("https://s3.amazonaws.com/bucket/key")
+        _require_https("https://storage.example.test/bucket/key")
 
     def test_http_non_loopback_raises(self) -> None:
-        url = "http://s3.amazonaws.com/bucket/key?X-Amz-Signature=secret"
+        url = "http://storage.example.test/bucket/key?X-Amz-Signature=secret"
         with pytest.raises(RuntimeError, match="must use HTTPS") as raised:
             _require_https(url)
         assert url not in str(raised.value)
@@ -86,7 +86,7 @@ class TestRequireHttps:
             ("http://localhost:4566/x", True),
             ("http://127.0.0.1:4566/x", True),
             ("http://[::1]:4566/x", True),
-            ("http://s3.amazonaws.com/x", False),
+            ("http://storage.example.test/x", False),
             ("http://192.168.1.1:4566/x", False),
         ],
     )

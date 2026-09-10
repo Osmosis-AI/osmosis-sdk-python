@@ -41,7 +41,7 @@ def test_is_insecure_platform_url_distinguishes_loopback() -> None:
     assert is_insecure_platform_url("http://example.invalid") is True
     assert is_insecure_platform_url("http://127.0.0.1:8000") is False
     assert is_insecure_platform_url("http://localhost:8000") is False
-    assert is_insecure_platform_url("https://platform.osmosis.ai") is False
+    assert is_insecure_platform_url("https://platform.example.test") is False
 
 
 def test_get_platform_url_is_silent_for_insecure_url(
@@ -61,7 +61,7 @@ def test_parent_dotenv_platform_is_loaded_implicitly(
 ) -> None:
     tmp_path = _platform_env
     (tmp_path / ".env").write_text(
-        "OSMOSIS_PLATFORM_URL=https://platform-staging.osmosis.ai\n",
+        "OSMOSIS_PLATFORM_URL=https://platform-staging.example.test\n",
         encoding="utf-8",
     )
     nested = tmp_path / "rollouts" / "demo"
@@ -75,7 +75,7 @@ def test_parent_dotenv_platform_is_loaded_implicitly(
     assert captured.out == ""
     error = json.loads(captured.err)["error"]
     assert error["code"] == "INTERACTIVE_REQUIRED"
-    assert get_platform_url() == "https://platform-staging.osmosis.ai"
+    assert get_platform_url() == "https://platform-staging.example.test"
     assert os.environ.get("OSMOSIS_TOKEN") is None
 
 
@@ -105,7 +105,7 @@ def test_implicit_env_file_defers_unbound_token_rejection_to_platform_validation
 ) -> None:
     monkeypatch.setenv("OSMOSIS_TOKEN", "ambient-production-token")
     (_platform_env / ".env").write_text(
-        "OSMOSIS_PLATFORM_URL=https://platform-staging.osmosis.ai\n",
+        "OSMOSIS_PLATFORM_URL=https://platform-staging.example.test\n",
         encoding="utf-8",
     )
 
@@ -114,14 +114,16 @@ def test_implicit_env_file_defers_unbound_token_rejection_to_platform_validation
     error = json.loads(capsys.readouterr().err)["error"]
     assert rc == 1
     assert error["code"] == "ENV_TOKEN_PLATFORM_REQUIRED"
-    assert os.environ["OSMOSIS_PLATFORM_URL"] == ("https://platform-staging.osmosis.ai")
+    assert os.environ["OSMOSIS_PLATFORM_URL"] == (
+        "https://platform-staging.example.test"
+    )
 
 
 @pytest.mark.parametrize(
     ("ambient_name", "ambient_value"),
     [
-        ("OSMOSIS_PLATFORM_URL", "https://platform.osmosis.ai"),
-        ("OSMOSIS_TOKEN_PLATFORM_URL", "https://platform.osmosis.ai"),
+        ("OSMOSIS_PLATFORM_URL", "https://platform.example.test"),
+        ("OSMOSIS_TOKEN_PLATFORM_URL", "https://platform.example.test"),
     ],
 )
 def test_dotenv_token_can_load_with_a_nonoverlapping_ambient_profile_value(
@@ -147,7 +149,7 @@ def test_uv_preloaded_url_only_env_does_not_conflict_with_an_ambient_token(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    platform_url = "https://platform-staging.osmosis.ai"
+    platform_url = "https://platform-staging.example.test"
     monkeypatch.setenv("OSMOSIS_PLATFORM_URL", platform_url)
     monkeypatch.setenv("OSMOSIS_TOKEN", "ambient-production-token")
     (_platform_env / ".env").write_text(
@@ -175,13 +177,13 @@ def test_empty_ambient_auth_values_do_not_conflict_with_dotenv(
     monkeypatch.setenv(name, "")
     env_file = _platform_env / "staging.env"
     env_file.write_text(
-        "OSMOSIS_PLATFORM_URL=https://platform-staging.osmosis.ai\n",
+        "OSMOSIS_PLATFORM_URL=https://platform-staging.example.test\n",
         encoding="utf-8",
     )
 
     cli._load_env_file(env_file)
 
-    assert get_platform_url() == "https://platform-staging.osmosis.ai"
+    assert get_platform_url() == "https://platform-staging.example.test"
 
 
 def test_implicit_env_file_accepts_profile_already_loaded_by_uv(
@@ -190,9 +192,9 @@ def test_implicit_env_file_accepts_profile_already_loaded_by_uv(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     profile = {
-        "OSMOSIS_PLATFORM_URL": "https://platform-staging.osmosis.ai",
+        "OSMOSIS_PLATFORM_URL": "https://platform-staging.example.test",
         "OSMOSIS_TOKEN": "staging-token",
-        "OSMOSIS_TOKEN_PLATFORM_URL": "https://platform-staging.osmosis.ai",
+        "OSMOSIS_TOKEN_PLATFORM_URL": "https://platform-staging.example.test",
     }
     for name, value in profile.items():
         monkeypatch.setenv(name, value)
@@ -216,17 +218,17 @@ def test_implicit_env_file_accepts_equivalent_uv_loaded_profile_urls(
 ) -> None:
     monkeypatch.setenv(
         "OSMOSIS_PLATFORM_URL",
-        "https://platform-staging.osmosis.ai/",
+        "https://platform-staging.example.test/",
     )
     monkeypatch.setenv("OSMOSIS_TOKEN", "staging-token")
     monkeypatch.setenv(
         "OSMOSIS_TOKEN_PLATFORM_URL",
-        "https://platform-staging.osmosis.ai/",
+        "https://platform-staging.example.test/",
     )
     (_platform_env / ".env").write_text(
-        "OSMOSIS_PLATFORM_URL=https://platform-staging.osmosis.ai\n"
+        "OSMOSIS_PLATFORM_URL=https://platform-staging.example.test\n"
         "OSMOSIS_TOKEN=staging-token\n"
-        "OSMOSIS_TOKEN_PLATFORM_URL=https://platform-staging.osmosis.ai\n",
+        "OSMOSIS_TOKEN_PLATFORM_URL=https://platform-staging.example.test\n",
         encoding="utf-8",
     )
 
@@ -268,9 +270,9 @@ def test_env_file_auth_profile_cannot_merge_with_ambient_token(
     monkeypatch.setenv("OSMOSIS_TOKEN", "ambient-production-token")
     env_file = _platform_env / "staging.env"
     env_file.write_text(
-        "OSMOSIS_PLATFORM_URL=https://platform-staging.osmosis.ai\n"
+        "OSMOSIS_PLATFORM_URL=https://platform-staging.example.test\n"
         "OSMOSIS_TOKEN=staging-token\n"
-        "OSMOSIS_TOKEN_PLATFORM_URL=https://platform-staging.osmosis.ai\n",
+        "OSMOSIS_TOKEN_PLATFORM_URL=https://platform-staging.example.test\n",
         encoding="utf-8",
     )
 
@@ -397,7 +399,7 @@ def test_platform_option_overrides_env_file(
 ) -> None:
     env_file = _platform_env / "staging.env"
     env_file.write_text(
-        "OSMOSIS_PLATFORM_URL=https://platform-staging.osmosis.ai\n",
+        "OSMOSIS_PLATFORM_URL=https://platform-staging.example.test\n",
         encoding="utf-8",
     )
 
@@ -427,7 +429,7 @@ def test_platform_option_overrides_url_only_env_with_ambient_token(
     monkeypatch.setenv("OSMOSIS_TOKEN", "ambient-production-token")
     env_file = _platform_env / "staging.env"
     env_file.write_text(
-        "OSMOSIS_PLATFORM_URL=https://platform-staging.osmosis.ai\n",
+        "OSMOSIS_PLATFORM_URL=https://platform-staging.example.test\n",
         encoding="utf-8",
     )
 
