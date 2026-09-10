@@ -24,7 +24,7 @@ from osmosis_ai.platform.auth.credentials import (
 )
 
 DEFAULT_PLATFORM = normalize_platform_url(DEFAULT_PLATFORM_URL)
-STAGING_PLATFORM = "https://platform-staging.osmosis.ai"
+STAGING_PLATFORM = "https://platform-staging.example.test"
 LOCAL_PLATFORM = "http://localhost:3000"
 
 

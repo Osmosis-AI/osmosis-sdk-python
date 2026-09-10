@@ -192,7 +192,7 @@ def test_dataset_info_json_envelope(monkeypatch, capsys) -> None:
 
 def test_dataset_info_places_platform_url_after_table(monkeypatch) -> None:
     _stub_git_context(monkeypatch)
-    expected_url = "https://platform.osmosis.ai/ws/datasets/ds_1"
+    expected_url = "https://platform.example.test/ws/datasets/ds_1"
 
     class FakeClient:
         def get_dataset(self, name, *, git_identity, credentials=None):

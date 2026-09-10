@@ -150,12 +150,12 @@ class TestVerifyAndGetUserInfo:
         ("platform_url", "expected_url"),
         [
             (
-                "https://platform.osmosis.ai/",
-                "https://platform.osmosis.ai/api/cli/verify",
+                "https://platform.example.test/",
+                "https://platform.example.test/api/cli/verify",
             ),
             (
-                "https://staging.osmosis.ai/",
-                "https://staging.osmosis.ai/api/cli/verify",
+                "https://staging.example.test/",
+                "https://staging.example.test/api/cli/verify",
             ),
         ],
     )
@@ -186,7 +186,7 @@ class TestVerifyAndGetUserInfo:
     ) -> None:
         monkeypatch.setenv("OSMOSIS_TOKEN", "test-token")
         monkeypatch.setenv(
-            "OSMOSIS_PLATFORM_URL", "https://platform-staging.osmosis.ai"
+            "OSMOSIS_PLATFORM_URL", "https://platform-staging.example.test"
         )
         monkeypatch.delenv("OSMOSIS_TOKEN_PLATFORM_URL", raising=False)
 
@@ -390,7 +390,7 @@ class TestCliVersionHeader:
             {
                 "device_code": "dev_abc",
                 "user_code": "USER-CODE",
-                "verification_uri": "https://platform.osmosis.ai/device",
+                "verification_uri": "https://platform.example.test/device",
                 "expires_in": 600,
                 "interval": 5,
             }

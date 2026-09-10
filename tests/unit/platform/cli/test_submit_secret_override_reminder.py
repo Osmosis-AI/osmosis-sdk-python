@@ -82,7 +82,7 @@ def test_enrich_missing_secret_error_adds_hint() -> None:
         404,
         details={
             "error": "Secret(s) not found: OPENAI_API_KEY, WANDB_API_KEY",
-            "platform_url": "https://platform.osmosis.ai/my-workspace/secrets",
+            "platform_url": "https://platform.example.test/my-workspace/secrets",
         },
     )
     enriched = shared_submit._enrich_missing_secret_error(exc)
@@ -92,7 +92,7 @@ def test_enrich_missing_secret_error_adds_hint() -> None:
     assert "osmosis secret set WANDB_API_KEY" in msg
     assert "Secrets default to personal scope" in msg
     assert "--scope workspace" in msg
-    assert "https://platform.osmosis.ai/my-workspace/secrets" in msg
+    assert "https://platform.example.test/my-workspace/secrets" in msg
 
 
 def test_enrich_missing_secret_error_returns_none_for_other_errors() -> None:

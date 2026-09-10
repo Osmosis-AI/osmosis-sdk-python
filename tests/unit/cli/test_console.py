@@ -193,7 +193,7 @@ def test_print_soft_wrap_preserves_url_without_rich_line_breaks() -> None:
     output = StringIO()
     console = Console(file=output, force_terminal=True, no_color=True, width=92)
     url = (
-        "https://platform.osmosis.ai/osmosis-shared/training/"
+        "https://platform.example.test/osmosis-shared/training/"
         "328be61c-ef39-45e1-9b33-1e3c7c482e97"
     )
 
@@ -207,7 +207,7 @@ def test_format_url_emits_terminal_hyperlink(monkeypatch) -> None:
     monkeypatch.setenv("TERM", "xterm-256color")
     output = StringIO()
     console = Console(file=output, force_terminal=True, width=120)
-    url = "https://platform.osmosis.ai/osmosis-shared/training/run-1"
+    url = "https://platform.example.test/osmosis-shared/training/run-1"
 
     console.print("View: ", console.format_url(url), sep="")
 
@@ -221,7 +221,7 @@ def test_format_url_handles_brackets_in_url(monkeypatch) -> None:
     monkeypatch.setenv("TERM", "xterm-256color")
     output = StringIO()
     console = Console(file=output, force_terminal=True, width=120)
-    url = "https://platform.osmosis.ai/osmosis-shared/training/run-1?filter[]=ok"
+    url = "https://platform.example.test/osmosis-shared/training/run-1?filter[]=ok"
 
     console.print("View: ", console.format_url(url), sep="")
 
@@ -236,7 +236,7 @@ def test_print_error_preserves_url_without_rich_line_breaks(monkeypatch) -> None
     monkeypatch.setattr(sys, "stderr", error_output)
     console = Console(file=StringIO(), force_terminal=True, no_color=True, width=92)
     url = (
-        "https://platform.osmosis.ai/osmosis-shared/settings/billing/"
+        "https://platform.example.test/osmosis-shared/settings/billing/"
         "328be61c-ef39-45e1-9b33-1e3c7c482e97"
     )
 
@@ -275,7 +275,7 @@ def test_print_warning_preserves_url_with_soft_wrap(monkeypatch) -> None:
     monkeypatch.setattr(sys, "stderr", warning_output)
     console = Console(file=StringIO(), force_terminal=True, no_color=True, width=92)
     url = (
-        "https://platform.osmosis.ai/osmosis-shared/settings/billing/"
+        "https://platform.example.test/osmosis-shared/settings/billing/"
         "328be61c-ef39-45e1-9b33-1e3c7c482e97"
     )
 
@@ -330,7 +330,7 @@ def test_table_url_emits_terminal_hyperlink(monkeypatch) -> None:
     monkeypatch.setenv("TERM", "xterm-256color")
     output = StringIO()
     console = Console(file=output, force_terminal=True, width=120)
-    url = "https://platform.osmosis.ai/osmosis-shared/datasets/dataset-1"
+    url = "https://platform.example.test/osmosis-shared/datasets/dataset-1"
 
     console.table([("URL", console.format_url(url))], title="Dataset")
 
@@ -344,7 +344,7 @@ def test_format_url_uses_label_for_visible_text(monkeypatch) -> None:
     monkeypatch.setenv("TERM", "xterm-256color")
     output = StringIO()
     console = Console(file=output, force_terminal=True, width=120)
-    url = "https://platform.osmosis.ai/osmosis-shared/datasets/dataset-1"
+    url = "https://platform.example.test/osmosis-shared/datasets/dataset-1"
 
     console.print("Open ", console.format_url(url, label="Dataset"), sep="")
 
@@ -504,7 +504,7 @@ def test_print_url_preserves_url_without_rich_line_breaks() -> None:
     output = StringIO()
     console = Console(file=output, force_terminal=True, no_color=True, width=92)
     url = (
-        "https://platform.osmosis.ai/osmosis-shared/training/"
+        "https://platform.example.test/osmosis-shared/training/"
         "328be61c-ef39-45e1-9b33-1e3c7c482e97?filter[]=ok"
     )
 

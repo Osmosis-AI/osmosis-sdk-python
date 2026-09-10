@@ -167,7 +167,7 @@ def test_submit_benchmark_run_posts_config_sections(mock_request: MagicMock) -> 
         "workflow_id": "benchmark-run/benchmark-run-1",
         "task_count": 12,
         "created_at": "2026-07-25T00:00:00Z",
-        "platform_url": "https://platform.osmosis.ai/acme/benchmarks/benchmark-run-1",
+        "platform_url": "https://platform.example.test/acme/benchmarks/benchmark-run-1",
     }
     agent: dict[str, Any] = {
         "harness": "codex",
@@ -194,7 +194,7 @@ def test_submit_benchmark_run_posts_config_sections(mock_request: MagicMock) -> 
     assert result.workflow_id == "benchmark-run/benchmark-run-1"
     assert result.task_count == 12
     assert result.platform_url == (
-        "https://platform.osmosis.ai/acme/benchmarks/benchmark-run-1"
+        "https://platform.example.test/acme/benchmarks/benchmark-run-1"
     )
     assert mock_request.call_args.args[0] == "/api/cli/benchmark-runs"
     assert mock_request.call_args.kwargs == {
