@@ -2,6 +2,28 @@
 
 This file records changes to `osmosis-ai`. For earlier versions, see [GitHub Releases](https://github.com/Osmosis-AI/osmosis-sdk-python/releases).
 
+## 0.3.3rc2 - 2026-09-09
+
+### Breaking Changes
+
+- `RolloutClient.run_rollout_async()` now returns an awaitable `RolloutHandle` instead of `asyncio.Task`; keep awaiting it for the terminal result and use its `done()`, `cancel()`, and milestone methods instead of Task-only APIs ([#354](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/354), [#355](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/355)).
+- Custom backends that report intermediate progress must now publish it by awaiting the active `RolloutContext.set_status()` method; result polling no longer reads progress from `ExecutionBackend.rollout_status()` ([#355](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/355)).
+
+### Added
+
+- `RolloutHandle` exposes `status`, `latest_result`, `wait_for_running()`, `wait_for_grading()`, and `wait_for_completion()`; milestone waits also finish when the phase has already passed or the rollout terminates ([#354](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/354), [#355](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/355)).
+- `osmosis eval upload` and `osmosis eval run --upload` now include the combined `logs.txt` so local eval logs appear in the platform's run Logs tab ([#353](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/353)).
+
+### Changed
+
+- Result long polling now returns on status changes, including grading milestones from Local and Harbor backends, without waiting for the full polling timeout ([#355](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/355)).
+
+### Fixed
+
+- Local eval now redacts known ambient provider and platform credentials of at least eight characters from logs and repeats redaction before upload hashing ([#353](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/353)).
+
+[Full changelog](https://github.com/Osmosis-AI/osmosis-sdk-python/compare/v0.3.3rc1...v0.3.3rc2)
+
 ## 0.3.3rc1 - 2026-09-07
 
 ### Breaking Changes
