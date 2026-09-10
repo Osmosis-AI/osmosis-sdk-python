@@ -68,11 +68,11 @@ def _lora_model_detail(
         deployment_status=deployment_status,
         created_at="2026-06-01T00:00:00Z",
         hf_upload_status="uploaded",
-        hf_url="https://huggingface.co/acme/qwen3-run1-step-100",
+        hf_url="https://model-host.example.test/acme/qwen3-run1-step-100",
         uploaded_by=uploaded_by,
         has_deployment_info=has_deployment_info,
         inference_model=f"Qwen/Qwen3-8B:{name}",
-        platform_url="https://platform.osmosis.ai/acme/models/lora_1",
+        platform_url="https://platform.example.test/acme/models/lora_1",
     )
 
 
@@ -738,12 +738,15 @@ class TestInfo:
         assert lora_model["model_name"] == "qwen3-run1-step-100"
         assert lora_model["base_model"] == "Qwen/Qwen3-8B"
         assert lora_model["hf_upload_status"] == "uploaded"
-        assert lora_model["hf_url"] == "https://huggingface.co/acme/qwen3-run1-step-100"
+        assert (
+            lora_model["hf_url"]
+            == "https://model-host.example.test/acme/qwen3-run1-step-100"
+        )
         assert lora_model["uploaded_by"] == "Ada Lovelace"
         assert lora_model["deployment_status"] is None
         assert (
             result.data["platform_url"]
-            == "https://platform.osmosis.ai/acme/models/lora_1"
+            == "https://platform.example.test/acme/models/lora_1"
         )
         assert_git_context(result.data)
         labels = [field.label for field in result.fields]
@@ -760,7 +763,7 @@ class TestInfo:
             [
                 "Hugging Face:",
                 "Upload Status: Uploaded",
-                "URL: https://huggingface.co/acme/qwen3-run1-step-100",
+                "URL: https://model-host.example.test/acme/qwen3-run1-step-100",
                 "Uploaded By: Ada Lovelace",
             ],
             [
@@ -860,7 +863,7 @@ class TestInfo:
         )
         assert (
             "Set $OSMOSIS_API_KEY to an Osmosis API key — "
-            "create one at https://platform.osmosis.ai/acme/api-keys"
+            "create one at https://platform.example.test/acme/api-keys"
             in result.display_hints
         )
         assert "" in result.display_hints

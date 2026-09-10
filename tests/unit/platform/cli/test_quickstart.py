@@ -40,7 +40,7 @@ from tests.unit.platform.cli.conftest import strip_ansi
 _REAL_OUTPUT_STATUS = OutputContext.status
 _REAL_RUN_GIT_CLONE = quickstart_module._run_git_clone
 
-PLATFORM_URL = "https://platform.osmosis.ai"
+PLATFORM_URL = "https://platform.example.test"
 FULL_NAME = "acme/acme-workspace"
 BILLING_PAUSE = "Press Enter to continue..."
 WORKSPACE = WorkspaceSummary(

@@ -1076,10 +1076,13 @@ class TestTaskRefs:
 
         task_id = parse_task_ref(
             "tasks/t1",
-            {"git_url": "https://github.com/org/tasks.git", "git_commit_id": "abc123"},
+            {
+                "git_url": "https://repo.example.test/org/tasks.git",
+                "git_commit_id": "abc123",
+            },
         )
         assert task_id == GitTaskId(
-            git_url="https://github.com/org/tasks.git",
+            git_url="https://repo.example.test/org/tasks.git",
             git_commit_id="abc123",
             path=Path("tasks/t1"),
         )

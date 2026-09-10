@@ -384,7 +384,7 @@ class TestInfo:
             model_name="gpt-2",
             dataset_name="train.jsonl",
             rollout_name="math-rollout",
-            platform_url="https://platform.osmosis.ai/ws/training/abcdef1234567890abcdef1234567890",
+            platform_url="https://platform.example.test/ws/training/abcdef1234567890abcdef1234567890",
             current_step=31,
             total_steps=25,
             reward=0.75,
@@ -650,7 +650,7 @@ class TestStatus:
             status="finished",
             model_name="gpt-2",
             created_at="2026-01-01T00:00:00Z",
-            platform_url="https://platform.osmosis.ai/ws/training/abcdef1234567890abcdef1234567890",
+            platform_url="https://platform.example.test/ws/training/abcdef1234567890abcdef1234567890",
         )
         checkpoint = LoraCheckpointInfo(
             id="ckpt_abcdef123456",
@@ -1051,7 +1051,7 @@ class TestSubmit:
         name="my-training-run",
         status="pending",
         created_at="2026-04-10T12:00:00Z",
-        platform_url="https://platform.osmosis.ai/ws/training/550e8400-e29b-41d4-a716-446655440000",
+        platform_url="https://platform.example.test/ws/training/550e8400-e29b-41d4-a716-446655440000",
     )
 
     @staticmethod
@@ -1958,7 +1958,7 @@ class TestMetrics:
             name="run-1",
             status="completed",
             model_name="gpt-2",
-            platform_url="https://platform.osmosis.ai/ws/training/abcdef1234567890abcdef1234567890",
+            platform_url="https://platform.example.test/ws/training/abcdef1234567890abcdef1234567890",
         )
         metrics = TrainingRunMetrics(
             status="completed",

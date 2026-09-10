@@ -136,7 +136,7 @@ def _fake_client_class(submitted: list[bool]) -> type:
                 name="eval-run",
                 status="pending",
                 created_at="2026-05-27T00:00:00Z",
-                platform_url="https://platform.osmosis.ai/evals/eval-1",
+                platform_url="https://platform.example.test/evals/eval-1",
             )
 
     return FakeClient

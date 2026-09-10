@@ -173,7 +173,7 @@ def test_eval_submit_passes_new_schema_to_evaluation_run_api(
                 name="eval-run",
                 status="pending",
                 created_at="2026-05-27T00:00:00Z",
-                platform_url="https://platform.osmosis.ai/evals/eval-1",
+                platform_url="https://platform.example.test/evals/eval-1",
             )
 
     monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)

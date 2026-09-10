@@ -32,7 +32,7 @@ def _make_run_detail(**overrides) -> TrainingRunDetail:
         started_at="2026-03-28T10:00:00Z",
         completed_at="2026-03-28T11:05:30Z",
         examples_processed_count=5000,
-        platform_url="https://platform.osmosis.ai/acme/rollouts/training/550e8400-e29b-41d4-a716-446655440000",
+        platform_url="https://platform.example.test/acme/rollouts/training/550e8400-e29b-41d4-a716-446655440000",
     )
     defaults.update(overrides)
     return TrainingRunDetail(**defaults)

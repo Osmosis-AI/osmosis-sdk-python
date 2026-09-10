@@ -25,7 +25,7 @@ from osmosis_ai.platform.api.models import (
 GIT_IDENTITY = "acme/rollouts"
 REPO_URL = "https://github.com/acme/rollouts.git"
 PROJECT_ROOT = "/repo"
-SECRETS_URL = "https://platform.osmosis.ai/acme/secrets"
+SECRETS_URL = "https://platform.example.test/acme/secrets"
 
 # A unique sentinel used as the secret value so we can assert it never leaks
 # into any output stream.

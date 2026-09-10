@@ -320,7 +320,7 @@ class TestEnvironmentSecrets:
             "total_count": 1,
             "has_more": False,
             "next_offset": None,
-            "platform_url": "https://platform.osmosis.ai/acme/secrets",
+            "platform_url": "https://platform.example.test/acme/secrets",
         }
 
         result = OsmosisClient().list_environment_secrets(
@@ -338,7 +338,7 @@ class TestEnvironmentSecrets:
         assert len(result.environment_secrets) == 1
         assert result.environment_secrets[0].name == "OPENAI_API_KEY"
         assert not hasattr(result.environment_secrets[0], "value")
-        assert result.platform_url == "https://platform.osmosis.ai/acme/secrets"
+        assert result.platform_url == "https://platform.example.test/acme/secrets"
 
     @patch("osmosis_ai.platform.api.client.platform_request")
     def test_set_environment_secret_posts_value_once_and_returns_metadata(
@@ -353,7 +353,7 @@ class TestEnvironmentSecrets:
             "updated_at": "2026-05-01T00:00:01Z",
             "creator_name": "Ada",
             "scope": "workspace",
-            "platform_url": "https://platform.osmosis.ai/acme/secrets",
+            "platform_url": "https://platform.example.test/acme/secrets",
         }
 
         result = OsmosisClient().set_environment_secret(
@@ -374,7 +374,7 @@ class TestEnvironmentSecrets:
         assert mock_request.call_args.kwargs["credentials"] is credentials
         assert mock_request.call_args.kwargs["git_identity"] == "git_123"
         assert result.name == "OPENAI_API_KEY"
-        assert result.platform_url == "https://platform.osmosis.ai/acme/secrets"
+        assert result.platform_url == "https://platform.example.test/acme/secrets"
         assert not hasattr(result, "value")
 
 
@@ -1287,7 +1287,7 @@ class TestDevRolloutServer:
                 {
                     "id": "r1",
                     "name": "multiply",
-                    "url": "https://r1.example.dev",
+                    "url": "https://r1.example.test",
                     "status": "running",
                     "expires_at": None,
                     "started_at": None,

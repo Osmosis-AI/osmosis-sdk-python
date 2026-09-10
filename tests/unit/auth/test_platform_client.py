@@ -78,7 +78,7 @@ def _make_stream_response(
 
 
 def _make_http_error(
-    code: int, body: str = "", url: str = "https://platform.osmosis.ai/api/test"
+    code: int, body: str = "", url: str = "https://platform.example.test/api/test"
 ) -> HTTPError:
     """Create an HTTPError with readable body."""
     fp = BytesIO(body.encode("utf-8")) if body else BytesIO(b"")
@@ -193,8 +193,11 @@ class TestPlatformRequest:
     @pytest.mark.parametrize(
         ("platform_url", "expected_url"),
         [
-            ("https://platform.osmosis.ai/", "https://platform.osmosis.ai/api/test"),
-            ("https://staging.osmosis.ai/", "https://staging.osmosis.ai/api/test"),
+            (
+                "https://platform.example.test/",
+                "https://platform.example.test/api/test",
+            ),
+            ("https://staging.example.test/", "https://staging.example.test/api/test"),
         ],
     )
     @patch("osmosis_ai.platform.auth.platform_client.urlopen")
@@ -221,7 +224,7 @@ class TestPlatformRequest:
     ) -> None:
         monkeypatch.setenv("OSMOSIS_TOKEN", "env-token")
         monkeypatch.setenv(
-            "OSMOSIS_PLATFORM_URL", "https://platform-staging.osmosis.ai"
+            "OSMOSIS_PLATFORM_URL", "https://platform-staging.example.test"
         )
         monkeypatch.delenv("OSMOSIS_TOKEN_PLATFORM_URL", raising=False)
         credentials = _make_credentials(access_token="env-token")
@@ -1186,7 +1189,7 @@ class TestPlatformRequest:
 
         body = b'{"status":"unsupported","message":"osmosis >= 1.0.0 required. Run: osmosis upgrade","latest":"1.0.0"}'
         mock_urlopen.side_effect = HTTPError(
-            "https://platform.osmosis.ai/api/cli/verify",
+            "https://platform.example.test/api/cli/verify",
             426,
             "Upgrade Required",
             {},
@@ -1223,7 +1226,7 @@ class TestRevokeCLIToken:
     ) -> None:
         monkeypatch.setenv("OSMOSIS_TOKEN", "env-token")
         monkeypatch.setenv(
-            "OSMOSIS_PLATFORM_URL", "https://platform-staging.osmosis.ai"
+            "OSMOSIS_PLATFORM_URL", "https://platform-staging.example.test"
         )
         monkeypatch.delenv("OSMOSIS_TOKEN_PLATFORM_URL", raising=False)
         credentials = _make_credentials(access_token="env-token")
@@ -1329,7 +1332,7 @@ class TestPlatformStream:
     ) -> None:
         monkeypatch.setenv("OSMOSIS_TOKEN", "env-token")
         monkeypatch.setenv(
-            "OSMOSIS_PLATFORM_URL", "https://platform-staging.osmosis.ai"
+            "OSMOSIS_PLATFORM_URL", "https://platform-staging.example.test"
         )
         monkeypatch.delenv("OSMOSIS_TOKEN_PLATFORM_URL", raising=False)
         credentials = _make_credentials(access_token="env-token")

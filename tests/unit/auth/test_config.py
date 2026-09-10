@@ -15,10 +15,10 @@ from osmosis_ai.platform.auth.config import (
 @pytest.mark.parametrize(
     ("raw_url", "expected"),
     [
-        ("https://platform.osmosis.ai/", "https://platform.osmosis.ai"),
-        ("https://platform.osmosis.ai///", "https://platform.osmosis.ai"),
-        (" https://platform.osmosis.ai/ ", "https://platform.osmosis.ai"),
-        ("https://staging.osmosis.ai/", "https://staging.osmosis.ai"),
+        ("https://platform.example.test/", "https://platform.example.test"),
+        ("https://platform.example.test///", "https://platform.example.test"),
+        (" https://platform.example.test/ ", "https://platform.example.test"),
+        ("https://staging.example.test/", "https://staging.example.test"),
     ],
 )
 def test_normalize_platform_url_strips_trailing_slashes(
@@ -34,8 +34,8 @@ def test_normalize_platform_url_strips_trailing_slashes(
         ("localhost:3000", "http://localhost:3000"),
         ("127.0.0.1:8000", "http://127.0.0.1:8000"),
         ("[::1]:3000", "http://[::1]:3000"),
-        ("platform.osmosis.ai", "https://platform.osmosis.ai"),
-        ("staging.osmosis.ai:8443", "https://staging.osmosis.ai:8443"),
+        ("platform.example.test", "https://platform.example.test"),
+        ("staging.example.test:8443", "https://staging.example.test:8443"),
         # "://" in the query must not be mistaken for a scheme.
         ("localhost:3000/cb?next=https://x", "http://localhost:3000/cb"),
     ],
@@ -51,9 +51,9 @@ def test_normalize_platform_url_adds_scheme_when_missing(
 def test_get_platform_url_normalizes_env_trailing_slash(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("OSMOSIS_PLATFORM_URL", "https://platform.osmosis.ai/")
+    monkeypatch.setenv("OSMOSIS_PLATFORM_URL", "https://platform.example.test/")
 
-    assert get_platform_url() == "https://platform.osmosis.ai"
+    assert get_platform_url() == "https://platform.example.test"
 
 
 @pytest.mark.parametrize(
@@ -84,7 +84,7 @@ def test_env_token_requires_binding_for_non_production_platform(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("OSMOSIS_TOKEN", "staging-token")
-    monkeypatch.setenv("OSMOSIS_PLATFORM_URL", "https://platform-staging.osmosis.ai")
+    monkeypatch.setenv("OSMOSIS_PLATFORM_URL", "https://platform-staging.example.test")
     monkeypatch.delenv("OSMOSIS_TOKEN_PLATFORM_URL", raising=False)
 
     with pytest.raises(CLIError) as exc_info:
@@ -97,7 +97,7 @@ def test_env_token_rejects_mismatched_platform_binding(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("OSMOSIS_TOKEN", "staging-token")
-    monkeypatch.setenv("OSMOSIS_PLATFORM_URL", "https://platform-staging.osmosis.ai")
+    monkeypatch.setenv("OSMOSIS_PLATFORM_URL", "https://platform-staging.example.test")
     monkeypatch.setenv("OSMOSIS_TOKEN_PLATFORM_URL", "https://platform.osmosis.ai")
 
     with pytest.raises(CLIError) as exc_info:

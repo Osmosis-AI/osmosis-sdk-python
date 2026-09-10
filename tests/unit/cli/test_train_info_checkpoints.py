@@ -67,7 +67,7 @@ def _make_finished_run() -> TrainingRunDetail:
         status="finished",
         model_name="Qwen/Qwen3",
         created_at="2026-04-01T00:00:00Z",
-        platform_url="https://platform.osmosis.ai/ws/training/run_1",
+        platform_url="https://platform.example.test/ws/training/run_1",
     )
 
 
@@ -78,7 +78,7 @@ def _make_pending_run(status: str) -> TrainingRunDetail:
         status=status,
         model_name="Qwen/Qwen3",
         created_at="2026-04-01T00:00:00Z",
-        platform_url="https://platform.osmosis.ai/ws/training/run_1",
+        platform_url="https://platform.example.test/ws/training/run_1",
     )
 
 
@@ -89,7 +89,7 @@ def _make_stopped_run() -> TrainingRunDetail:
         status="stopped",
         model_name="Qwen/Qwen3",
         created_at="2026-04-01T00:00:00Z",
-        platform_url="https://platform.osmosis.ai/ws/training/run_1",
+        platform_url="https://platform.example.test/ws/training/run_1",
     )
 
 
@@ -140,7 +140,7 @@ class TestStatusCheckpoints:
         assert all(field.label != "Deploy" for field in result.fields)
         assert result.sections
         assert result.sections[0].rich.expand is False
-        expected_url = "https://platform.osmosis.ai/ws/training/run_1"
+        expected_url = "https://platform.example.test/ws/training/run_1"
         assert result.display_hints == [
             f"View: {expected_url}",
             "Deploy with: osmosis model deploy <lora-model-name>",
@@ -221,7 +221,7 @@ class TestStatusCheckpoints:
             "qwen3-run1-step-100"
         )
         assert result.display_hints == [
-            "View: https://platform.osmosis.ai/ws/training/run_1",
+            "View: https://platform.example.test/ws/training/run_1",
             "Deploy with: osmosis model deploy <lora-model-name>",
         ]
 
@@ -266,7 +266,7 @@ class TestStatusCheckpoints:
             status="finished",
             model_name="Qwen/Qwen3",
             created_at="2026-04-01T00:00:00Z",
-            platform_url="https://platform.osmosis.ai/ws/training/run_1",
+            platform_url="https://platform.example.test/ws/training/run_1",
             is_internal_user=True,
         )
 
@@ -342,5 +342,5 @@ class TestStatusCheckpoints:
             field.label not in {"Checkpoint", "Deploy"} for field in result.fields
         )
         assert result.sections == []
-        expected_url = "https://platform.osmosis.ai/ws/training/run_1"
+        expected_url = "https://platform.example.test/ws/training/run_1"
         assert result.display_hints == [f"View: {expected_url}"]

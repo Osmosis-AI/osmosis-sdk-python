@@ -14,8 +14,8 @@ from osmosis_ai.platform.cli.workspace_directories import (
     remember_workspace_directory,
 )
 
-PLATFORM = "https://platform.osmosis.ai"
-OTHER_PLATFORM = "https://staging.osmosis.ai"
+PLATFORM = "https://platform.example.test"
+OTHER_PLATFORM = "https://staging.example.test"
 
 
 @pytest.fixture(autouse=True)

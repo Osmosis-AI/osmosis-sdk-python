@@ -22,13 +22,13 @@ def _make_device_code_response(include_complete_uri: bool = True) -> bytes:
     data = {
         "device_code": "device_abc123",
         "user_code": "ABCD-1234",
-        "verification_uri": "https://platform.osmosis.ai/device",
+        "verification_uri": "https://platform.example.test/device",
         "expires_in": 600,
         "interval": 5,
     }
     if include_complete_uri:
         data["verification_uri_complete"] = (
-            "https://platform.osmosis.ai/device?code=ABCD-1234"
+            "https://platform.example.test/device?code=ABCD-1234"
         )
     return json.dumps(data).encode()
 
@@ -62,7 +62,7 @@ class TestRequestDeviceCode:
         assert result.user_code == "ABCD-1234"
         assert (
             result.verification_uri_complete
-            == "https://platform.osmosis.ai/device?code=ABCD-1234"
+            == "https://platform.example.test/device?code=ABCD-1234"
         )
 
     def test_missing_complete_uri_defaults_to_none(self) -> None:
@@ -227,7 +227,7 @@ class TestDeviceLogin:
             result, creds = device_login(timeout=10.0)
 
         mock_open.assert_called_once_with(
-            "https://platform.osmosis.ai/device?code=ABCD-1234"
+            "https://platform.example.test/device?code=ABCD-1234"
         )
         assert result.user.email == "u@test.com"
         assert creds.access_token == "jwt-user-token"
@@ -259,4 +259,4 @@ class TestDeviceLogin:
             mock_stdin.isatty.return_value = True
             device_login(timeout=10.0)
 
-        mock_open.assert_called_once_with("https://platform.osmosis.ai/device")
+        mock_open.assert_called_once_with("https://platform.example.test/device")

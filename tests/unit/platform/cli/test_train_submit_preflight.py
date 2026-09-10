@@ -135,7 +135,7 @@ def _fake_client_class(submitted: list[bool]) -> type:
                 name="train-run",
                 status="pending",
                 created_at="2026-05-27T00:00:00Z",
-                platform_url="https://platform.osmosis.ai/training/train-1",
+                platform_url="https://platform.example.test/training/train-1",
             )
 
     return FakeClient
