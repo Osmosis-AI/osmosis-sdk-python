@@ -6,7 +6,6 @@ Shared by both Harbor backends, so neither depends on the other.
 from __future__ import annotations
 
 import logging
-import os
 import platform
 from pathlib import Path
 
@@ -23,32 +22,10 @@ from harbor.trial.network_policy import resolve_agent_phase_policy
 
 logger: logging.Logger = logging.getLogger(__name__)
 
-SKYPILOT_CONTEXT_ENV = "HARBOR_SKYPILOT_CONTEXT"
-
 
 def uses_local_docker_runtime(environment_config: HarborEnvironmentConfig) -> bool:
     """Return whether Harbor will run the trial on the host Docker runtime."""
     return environment_config.type == EnvironmentType.DOCKER
-
-
-def apply_managed_skypilot_placement(
-    environment_config: HarborEnvironmentConfig,
-) -> HarborEnvironmentConfig:
-    """Resolve the SkyPilot cluster context from the run environment.
-
-    Harbor reads its registry from ``HARBOR_SKYPILOT_REGISTRY`` but accepts the
-    cluster context only as a constructor argument. Bridging the two here lets a
-    rollout select ``EnvironmentType.SKYPILOT`` without naming a cluster. An
-    explicit ``context_name`` takes precedence.
-    """
-    if environment_config.type != EnvironmentType.SKYPILOT:
-        return environment_config
-    if environment_config.kwargs.get("context_name"):
-        return environment_config
-    context_name = os.environ.get(SKYPILOT_CONTEXT_ENV)
-    if context_name:
-        environment_config.kwargs["context_name"] = context_name
-    return environment_config
 
 
 def is_loopback_url(url: str) -> bool:

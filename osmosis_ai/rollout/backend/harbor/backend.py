@@ -68,7 +68,6 @@ from osmosis_ai.rollout.backend.harbor.diagnostics import (
 )
 from osmosis_ai.rollout.backend.harbor.environment import (
     apply_chat_endpoint_egress,
-    apply_managed_skypilot_placement,
     is_loopback_url,
     load_task_network_config,
     rewrite_url_for_docker,
@@ -219,14 +218,11 @@ class HarborBackend(ExecutionBackend):
             bundle=bundle,
             native=self.native is not None,
         )
-        # The placement helper mutates in place; keep the caller's object
-        # untouched.
+        # Keep the caller's object untouched when applying provider defaults.
         self.environment_config: HarborEnvironmentConfig = (
-            apply_managed_skypilot_placement(
-                environment_config.model_copy(deep=True)
-                if environment_config is not None
-                else HarborEnvironmentConfig()
-            )
+            environment_config.model_copy(deep=True)
+            if environment_config is not None
+            else HarborEnvironmentConfig()
         )
         if (
             self.environment_config.type == EnvironmentType.DAYTONA
