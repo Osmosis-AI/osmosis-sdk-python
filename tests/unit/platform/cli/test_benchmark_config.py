@@ -440,12 +440,7 @@ judge_api_key_secret = 42
 
 @pytest.mark.parametrize(
     "secret_name",
-    [
-        "DAYTONA_API_KEY",
-        "DAYTONA_API_URL",
-        "SKYPILOT_SERVICE_ACCOUNT_TOKEN",
-        "SKYPILOT_API_SERVER_ENDPOINT",
-    ],
+    ["DAYTONA_API_KEY", "DAYTONA_API_URL"],
 )
 @pytest.mark.parametrize("model_type", ["provider", "endpoint"])
 def test_load_benchmark_submit_config_rejects_reserved_model_secret_names(

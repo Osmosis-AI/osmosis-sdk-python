@@ -31,14 +31,14 @@ pip install "osmosis-ai[server]"            # + generic FastAPI rollout server
 pip install "osmosis-ai[eval]"              # + local evaluation runner and dataset support
 pip install "osmosis-ai[strands]"           # + Strands integration
 pip install "osmosis-ai[openai-agents]"     # + OpenAI Agents integration
-pip install "osmosis-ai[harbor]"            # + Harbor backend (uses an externally provided SkyPilot runtime)
+pip install "osmosis-ai[harbor]"            # + Harbor backend with Daytona support
 pip install "osmosis-ai[rubric]"            # + LLM-as-judge rubric evaluation
 pip install "osmosis-ai[parquet]"           # + Parquet dataset support
 pip install "osmosis-ai[full]"              # every optional feature
 # or with uv:  uv add osmosis-ai
 ```
 
-There is one distribution, `osmosis-ai`. The `harbor` extra installs Harbor with its Daytona environment dependencies. It does not install Harbor's `skypilot` extra because the rollout runtime provides SkyPilot. See [Installation](https://docs.osmosis.ai/cli/installation) for product setup and [CONTRIBUTING.md](CONTRIBUTING.md) for development setup.
+There is one distribution, `osmosis-ai`. The `harbor` extra installs Harbor with its Daytona environment dependencies. See [Installation](https://docs.osmosis.ai/cli/installation) for product setup and [CONTRIBUTING.md](CONTRIBUTING.md) for development setup.
 
 ## Documentation
 

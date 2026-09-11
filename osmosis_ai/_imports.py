@@ -23,7 +23,6 @@ EXTRA_MODULES: Final[Mapping[str, frozenset[str]]] = {
         {
             "aiohttp",
             "click",
-            "dockerfile_parse",
             "harbor",
             "litellm",
             "orjson",

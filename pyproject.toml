@@ -93,15 +93,9 @@ openai-agents = [
 
 # Harbor execution backend. Keep Harbor on the reviewed 0.20-0.22 release
 # lines so rollout behavior cannot cross a compatibility boundary without an
-# SDK release. SkyPilot is supplied by the rollout runtime;
-# never install Harbor's [skypilot] extra because its skypilot-nightly package
-# claims the same `sky` namespace as that runtime.
+# SDK release.
 harbor = [
     "harbor[daytona]>=0.20.0,<0.23",
-    # Harbor's SkyPilot environment parses Dockerfile WORKDIR itself, but the
-    # parser is declared only by Harbor's cloud-provider extras, including the
-    # conflicting [skypilot]. Supply that narrow dependency directly.
-    "dockerfile-parse>=2.0.1,<3.0.0",
     # osmosis_ai.packaging builds the bundle wheel that Harbor installs in the
     # task container: toml rewrites the rollout project's pyproject.toml and
     # platformdirs locates the bundle cache, and uv performs the isolated wheel

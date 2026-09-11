@@ -123,7 +123,6 @@ def test_framework_neutral_core_imports_without_optional_dependencies() -> None:
         blocked = {
             "agents",
             "aiohttp",
-            "dockerfile_parse",
             "fastapi",
             "harbor",
             "litellm",
