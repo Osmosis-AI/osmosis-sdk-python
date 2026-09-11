@@ -2,6 +2,23 @@
 
 This file records changes to `osmosis-ai`. For earlier versions, see [GitHub Releases](https://github.com/Osmosis-AI/osmosis-sdk-python/releases).
 
+## 0.3.3rc3 - 2026-09-11
+
+### Breaking Changes
+
+- Managed SkyPilot placement is removed: rollouts using `EnvironmentType.SKYPILOT` must move to `EnvironmentConfig(type=EnvironmentType.DAYTONA)` with Daytona credentials, `HARBOR_SKYPILOT_CONTEXT` is no longer read, and `SKYPILOT_SERVICE_ACCOUNT_TOKEN` / `SKYPILOT_API_SERVER_ENDPOINT` are no longer reserved benchmark model-secret names ([#362](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/362)).
+- The `harbor` extra no longer installs `dockerfile-parse`; Docker remains the default Harbor environment and explicit Daytona settings are unchanged ([#362](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/362)).
+
+### Changed
+
+- Built-in Daytona environments with `delete=True` now default to auto-stop after 60 minutes of Daytona-observed inactivity and immediate deletion, so a crashed rollout server no longer leaves sandboxes running; raise `environment_config.kwargs["auto_stop_interval_mins"]` for long trials or set it to `0` to disable ([#361](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/361)).
+
+### Fixed
+
+- `osmosis train info` now lists checkpoints for running training runs instead of only terminal ones ([#360](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/360)).
+
+[Full changelog](https://github.com/Osmosis-AI/osmosis-sdk-python/compare/v0.3.3rc2...v0.3.3rc3)
+
 ## 0.3.3rc2 - 2026-09-09
 
 ### Breaking Changes
