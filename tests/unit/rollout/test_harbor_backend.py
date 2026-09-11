@@ -95,6 +95,7 @@ class TestPublicSurface:
         )
 
         assert backend.health()["backend"] == "harbor"
+        assert backend.health()["chat_endpoint"]["environment"] == "docker"
 
     @pytest.mark.parametrize(
         ("environment_type", "host_system", "requires_public_url"),
@@ -103,7 +104,7 @@ class TestPublicSurface:
             ("docker", "Linux", True),
             ("singularity", "Linux", False),
             ("daytona", "Darwin", True),
-            ("skypilot", "Linux", True),
+            ("daytona", "Linux", True),
         ],
     )
     def test_health_reports_chat_endpoint_reachability(
@@ -1314,13 +1315,12 @@ class TestConfigValidation:
             ),
             ("daytona", None, False, {}, {}),
             ("docker", None, True, {}, {}),
-            ("skypilot", None, True, {}, {}),
+            ("modal", None, True, {}, {}),
         ],
     )
     def test_orphan_backstop_reaches_trial_config(
         self,
         template_task,
-        monkeypatch,
         environment_type,
         import_path,
         delete,
@@ -1329,7 +1329,6 @@ class TestConfigValidation:
     ):
         from harbor.models.trial.config import EnvironmentConfig
 
-        monkeypatch.delenv("HARBOR_SKYPILOT_CONTEXT", raising=False)
         caller_config = EnvironmentConfig(
             type=environment_type,
             import_path=import_path,

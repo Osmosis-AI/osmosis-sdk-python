@@ -25,14 +25,7 @@ _HARNESS_API_KEY_ENV = {
 # model key as MSWEA_API_KEY for provider/endpoint models. Hosted models get no
 # injected model key, so they may set that env var explicitly.
 _MINI_SWE_AGENT_KEY_ENV = "MSWEA_API_KEY"
-_RESERVED_MODEL_API_KEY_SECRET_NAMES = frozenset(
-    {
-        "DAYTONA_API_KEY",
-        "DAYTONA_API_URL",
-        "SKYPILOT_SERVICE_ACCOUNT_TOKEN",
-        "SKYPILOT_API_SERVER_ENDPOINT",
-    }
-)
+_RESERVED_MODEL_API_KEY_SECRET_NAMES = frozenset({"DAYTONA_API_KEY", "DAYTONA_API_URL"})
 
 
 class _StrictSection(BaseModel):

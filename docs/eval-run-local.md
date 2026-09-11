@@ -16,7 +16,7 @@ Running a local eval also requires [uv](https://docs.astral.sh/uv/): it is what 
 
 `eval run` runs from a local Osmosis Git workspace. A platform dataset requires `osmosis auth login`; `--dataset-file <path>` without `--upload` does not load platform credentials or select a platform workspace. Adding `--upload` requires login because the completed results are imported into the platform. All LLM traffic is served by an in-process LiteLLM bridge on your machine — the same design as the hosted eval service — so `experiment.model_path` is a LiteLLM model id (`openai/gpt-5-mini`, `anthropic/claude-sonnet-4-6`, …) and provider credentials resolve exactly as LiteLLM resolves them anywhere: from the process environment (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, provider `*_API_BASE` overrides, …) or from `--secrets-file`. Local OpenAI-compatible endpoints (a laptop vLLM or Ollama) work through the corresponding LiteLLM provider id and its environment variables.
 
-The rollout entrypoint may build `LocalBackend`, `HarborBackend` with `EnvironmentType.DOCKER` (the host Docker runtime), or a Harbor cloud environment (Daytona, SkyPilot, …). A current Harbor backend reports its resolved placement through `/health`; when the sandbox cannot reach host loopback, `eval run` automatically starts a Cloudflare quick tunnel unless you supplied `--advertise-url`. macOS Docker and `LocalBackend` stay direct. See [Cloud sandboxes](#cloud-sandboxes-tunnels).
+The rollout entrypoint may build `LocalBackend`, `HarborBackend` with `EnvironmentType.DOCKER` (the host Docker runtime), or a Harbor cloud environment such as Daytona. A current Harbor backend reports its resolved placement through `/health`; when the sandbox cannot reach host loopback, `eval run` automatically starts a Cloudflare quick tunnel unless you supplied `--advertise-url`. macOS Docker and `LocalBackend` stay direct. See [Cloud sandboxes](#cloud-sandboxes-tunnels).
 
 ## The rollout environment
 
@@ -189,7 +189,7 @@ The two places Harbor takes run-specific allowlist entries resolve into independ
 
 ## Cloud sandboxes (tunnels)
 
-A Harbor rollout whose `environment_config` selects a cloud environment (Daytona, SkyPilot, …) runs its sandbox off your machine, and that sandbox has no route to the bridge's loopback URL. Exactly one flow crosses that boundary — the sandbox's OpenAI-compatible chat traffic — so exposing local eval to cloud sandboxes means exposing exactly one HTTP surface: the bridge's per-rollout chat endpoint. Result polling stays between the supervisor and the rollout server on the host; provider keys also stay local. The sandbox receives only the tunnel URL and the per-run bridge bearer.
+A Harbor rollout whose `environment_config` selects a cloud environment such as Daytona runs its sandbox off your machine, and that sandbox has no route to the bridge's loopback URL. Exactly one flow crosses that boundary — the sandbox's OpenAI-compatible chat traffic — so exposing local eval to cloud sandboxes means exposing exactly one HTTP surface: the bridge's per-rollout chat endpoint. Result polling stays between the supervisor and the rollout server on the host; provider keys also stay local. The sandbox receives only the tunnel URL and the per-run bridge bearer.
 
 ```bash
 osmosis eval run configs/eval/my-daytona-rollout.toml

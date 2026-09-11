@@ -58,7 +58,6 @@ EXTRA_REQUIREMENTS: dict[str, set[str]] = {
     "harbor": {
         "aiohttp",
         "click",
-        "dockerfile-parse",
         "harbor",
         "litellm",
         "orjson",
@@ -302,6 +301,8 @@ def _smoke_harbor() -> None:
         "osmosis_ai.rollout.backend.harbor",
         ("HarborBackend", "TaskMode"),
     )
+    importlib.import_module("daytona")
+    importlib.import_module("harbor.environments.daytona")
     # The bundle builder is what installs a rollout project inside the task
     # container, so the harbor extra must carry its TOML writer.
     packaging = importlib.import_module("osmosis_ai.packaging")
@@ -361,14 +362,13 @@ SCENARIO_PRESENT: dict[str, set[str]] = {
     "server": {"fastapi", "uvicorn"},
     "strands": {"litellm", "strands-agents"},
     "openai-agents": {"litellm", "openai-agents"},
-    "harbor": {"daytona", "dockerfile-parse", "harbor", "platformdirs", "toml", "uv"},
+    "harbor": {"daytona", "harbor", "platformdirs", "toml", "uv"},
     "rubric": {"litellm", "orjson"},
     "parquet": {"pyarrow"},
     "eval": {"fastapi", "litellm", "pyarrow", "uv", "uvicorn"},
     "full": {
         "daytona",
         "fastapi",
-        "dockerfile-parse",
         "harbor",
         "litellm",
         "openai-agents",
@@ -388,7 +388,6 @@ SCENARIO_PRESENT: dict[str, set[str]] = {
 SCENARIO_ABSENT: dict[str, set[str]] = {
     "bare": {
         "daytona",
-        "dockerfile-parse",
         "fastapi",
         "harbor",
         "litellm",
@@ -404,7 +403,6 @@ SCENARIO_ABSENT: dict[str, set[str]] = {
     },
     "server": {
         "daytona",
-        "dockerfile-parse",
         "harbor",
         "litellm",
         "openai-agents",
@@ -418,7 +416,6 @@ SCENARIO_ABSENT: dict[str, set[str]] = {
     },
     "strands": {
         "daytona",
-        "dockerfile-parse",
         "harbor",
         "openai-agents",
         "platformdirs",
@@ -428,7 +425,6 @@ SCENARIO_ABSENT: dict[str, set[str]] = {
     },
     "openai-agents": {
         "daytona",
-        "dockerfile-parse",
         "harbor",
         "platformdirs",
         "pyarrow",
@@ -439,7 +435,6 @@ SCENARIO_ABSENT: dict[str, set[str]] = {
     "harbor": {"openai-agents", "pyarrow", "strands-agents"},
     "rubric": {
         "daytona",
-        "dockerfile-parse",
         "fastapi",
         "harbor",
         "openai-agents",
@@ -452,7 +447,6 @@ SCENARIO_ABSENT: dict[str, set[str]] = {
     },
     "parquet": {
         "daytona",
-        "dockerfile-parse",
         "fastapi",
         "harbor",
         "litellm",
@@ -469,7 +463,6 @@ SCENARIO_ABSENT: dict[str, set[str]] = {
     # unselected here (same as every other litellm-carrying scenario).
     "eval": {
         "daytona",
-        "dockerfile-parse",
         "harbor",
         "openai-agents",
         "orjson",
@@ -480,10 +473,6 @@ SCENARIO_ABSENT: dict[str, set[str]] = {
     "full": set(),
 }
 
-# SkyPilot is supplied by the remote rollout environment. The wheel must never
-# pull either conflicting SkyPilot distribution.
-PROHIBITED_SANDBOX_DISTRIBUTIONS = {"skypilot", "skypilot-nightly"}
-
 
 def _assert_clean_import_state() -> None:
     """Ensure importing rollout core did not initialize optional/CLI modules."""
@@ -491,7 +480,6 @@ def _assert_clean_import_state() -> None:
         "agents",
         "aiohttp",
         "click",
-        "dockerfile_parse",
         "dotenv",
         "fastapi",
         "harbor",
@@ -638,9 +626,7 @@ def main() -> None:
 
     installed = _installed_distributions()
     present = SCENARIO_PRESENT.get(args.scenario, set())
-    absent = (
-        SCENARIO_ABSENT.get(args.scenario, set()) | PROHIBITED_SANDBOX_DISTRIBUTIONS
-    )
+    absent = SCENARIO_ABSENT.get(args.scenario, set())
     _assert_distributions(
         installed,
         present={"osmosis-ai", *present},
