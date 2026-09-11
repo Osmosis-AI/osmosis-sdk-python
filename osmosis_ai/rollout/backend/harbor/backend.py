@@ -29,6 +29,7 @@ from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from pathlib import Path
 from typing import Any
 
+from harbor.models.environment_type import EnvironmentType
 from harbor.models.trajectories import Trajectory
 from harbor.models.trial.config import (
     AgentConfig as HarborAgentConfig,
@@ -227,6 +228,14 @@ class HarborBackend(ExecutionBackend):
                 else HarborEnvironmentConfig()
             )
         )
+        if (
+            self.environment_config.type == EnvironmentType.DAYTONA
+            and self.environment_config.import_path is None
+            and self.environment_config.delete
+        ):
+            # Provider-side cleanup survives a crashed rollout server.
+            self.environment_config.kwargs.setdefault("auto_stop_interval_mins", 60)
+            self.environment_config.kwargs.setdefault("auto_delete_interval_mins", 0)
         if patch_dockerfile_with_sdk and self.bundle is None:
             raise ValueError("patch_dockerfile_with_sdk requires a bundle")
         if patch_dockerfile_with_sdk is None:
