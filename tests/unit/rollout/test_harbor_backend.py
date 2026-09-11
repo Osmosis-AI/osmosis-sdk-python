@@ -1282,39 +1282,59 @@ class TestConfigValidation:
         assert "poison" not in backend.environment_config.kwargs
 
     @pytest.mark.parametrize(
-        "environment_type,delete,overrides,expected",
+        "environment_type,import_path,delete,overrides,expected",
         [
             (
                 "daytona",
+                None,
                 True,
                 {},
                 {"auto_stop_interval_mins": 60, "auto_delete_interval_mins": 0},
             ),
             (
                 "daytona",
+                None,
                 True,
                 {"auto_stop_interval_mins": 0},
                 {"auto_stop_interval_mins": 0, "auto_delete_interval_mins": 0},
             ),
             (
                 "daytona",
+                None,
                 True,
                 {"auto_stop_interval_mins": 720, "auto_delete_interval_mins": 1440},
                 {"auto_stop_interval_mins": 720, "auto_delete_interval_mins": 1440},
             ),
-            ("daytona", False, {}, {}),
-            ("docker", True, {}, {}),
-            ("skypilot", True, {}, {}),
+            (
+                "daytona",
+                "custom.environments:Sandbox",
+                True,
+                {"custom_flag": True},
+                {"custom_flag": True},
+            ),
+            ("daytona", None, False, {}, {}),
+            ("docker", None, True, {}, {}),
+            ("skypilot", None, True, {}, {}),
         ],
     )
     def test_orphan_backstop_reaches_trial_config(
-        self, template_task, monkeypatch, environment_type, delete, overrides, expected
+        self,
+        template_task,
+        monkeypatch,
+        environment_type,
+        import_path,
+        delete,
+        overrides,
+        expected,
     ):
         from harbor.models.trial.config import EnvironmentConfig
 
         monkeypatch.delenv("HARBOR_SKYPILOT_CONTEXT", raising=False)
         caller_config = EnvironmentConfig(
-            type=environment_type, delete=delete, kwargs=overrides
+            type=environment_type,
+            import_path=import_path,
+            delete=delete,
+            kwargs=overrides,
         )
         backend = self.backend_for(
             template_task, agent="oracle", environment_config=caller_config

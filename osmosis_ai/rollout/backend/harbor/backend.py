@@ -230,10 +230,10 @@ class HarborBackend(ExecutionBackend):
         )
         if (
             self.environment_config.type == EnvironmentType.DAYTONA
+            and self.environment_config.import_path is None
             and self.environment_config.delete
         ):
-            # Provider-side cleanup survives a crashed rollout server. In-sandbox
-            # work can look idle to Daytona; long trials must override this limit.
+            # Provider-side cleanup survives a crashed rollout server.
             self.environment_config.kwargs.setdefault("auto_stop_interval_mins", 60)
             self.environment_config.kwargs.setdefault("auto_delete_interval_mins", 0)
         if patch_dockerfile_with_sdk and self.bundle is None:
