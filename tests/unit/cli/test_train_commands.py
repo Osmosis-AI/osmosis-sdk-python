@@ -797,6 +797,12 @@ class TestStatus:
                 assert git_identity == GIT_IDENTITY
                 return detail
 
+            def list_training_run_checkpoints(
+                self, run_id, *, git_identity, credentials=None
+            ):
+                assert git_identity == GIT_IDENTITY
+                return type("CheckpointPage", (), {"checkpoints": []})()
+
             get_training_run_metrics = _raise_metrics_unavailable
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
@@ -1968,6 +1974,12 @@ class TestMetrics:
             def get_training_run(self, run_id, *, git_identity, credentials=None):
                 assert git_identity == GIT_IDENTITY
                 return detail
+
+            def list_training_run_checkpoints(
+                self, run_id, *, git_identity, credentials=None
+            ):
+                assert git_identity == GIT_IDENTITY
+                return type("CheckpointPage", (), {"checkpoints": []})()
 
             def get_training_run_metrics(
                 self, run_id, *, git_identity, credentials=None
