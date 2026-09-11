@@ -1281,6 +1281,72 @@ class TestConfigValidation:
         assert backend.environment_config is not caller_config
         assert "poison" not in backend.environment_config.kwargs
 
+    @pytest.mark.parametrize(
+        "environment_type,import_path,delete,overrides,expected",
+        [
+            (
+                "daytona",
+                None,
+                True,
+                {},
+                {"auto_stop_interval_mins": 60, "auto_delete_interval_mins": 0},
+            ),
+            (
+                "daytona",
+                None,
+                True,
+                {"auto_stop_interval_mins": 0},
+                {"auto_stop_interval_mins": 0, "auto_delete_interval_mins": 0},
+            ),
+            (
+                "daytona",
+                None,
+                True,
+                {"auto_stop_interval_mins": 720, "auto_delete_interval_mins": 1440},
+                {"auto_stop_interval_mins": 720, "auto_delete_interval_mins": 1440},
+            ),
+            (
+                "daytona",
+                "custom.environments:Sandbox",
+                True,
+                {"custom_flag": True},
+                {"custom_flag": True},
+            ),
+            ("daytona", None, False, {}, {}),
+            ("docker", None, True, {}, {}),
+            ("skypilot", None, True, {}, {}),
+        ],
+    )
+    def test_orphan_backstop_reaches_trial_config(
+        self,
+        template_task,
+        monkeypatch,
+        environment_type,
+        import_path,
+        delete,
+        overrides,
+        expected,
+    ):
+        from harbor.models.trial.config import EnvironmentConfig
+
+        monkeypatch.delenv("HARBOR_SKYPILOT_CONTEXT", raising=False)
+        caller_config = EnvironmentConfig(
+            type=environment_type,
+            import_path=import_path,
+            delete=delete,
+            kwargs=overrides,
+        )
+        backend = self.backend_for(
+            template_task, agent="oracle", environment_config=caller_config
+        )
+        trial = backend.build_trial_config(
+            template_task, request_for(), ContainerInput(rollout_id="r1")
+        )
+
+        assert trial.environment.kwargs == expected
+        assert trial.environment.delete is delete
+        assert caller_config.kwargs == overrides
+
     def test_missing_harbor_model_falls_back_to_default(self, template_task):
         backend = self.backend_for(template_task, agent="terminus-2")
         base = {"rollout_id": "r1", "chat_completions_url": "http://t/v1"}
