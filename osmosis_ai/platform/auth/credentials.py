@@ -518,6 +518,9 @@ class Credentials:
     user: UserInfo
     token_id: str | None = None
     keyring_account: str | None = field(default=None, repr=False, compare=False)
+    # Backend the entry was loaded from; ``None`` for credentials not read
+    # from the metadata file (environment token, fresh login result).
+    token_store: str | None = field(default=None, repr=False, compare=False)
 
     def to_dict(self) -> dict[str, Any]:
         result: dict[str, Any] = {
@@ -548,6 +551,7 @@ class Credentials:
             user=UserInfo.from_dict(data["user"]),
             token_id=data.get("token_id"),
             keyring_account=data.get("keyring_account"),
+            token_store=data.get("token_store", TOKEN_STORE_FILE),
         )
 
     @classmethod
@@ -589,7 +593,9 @@ def _cleanup_replaced_credentials(
         )
     except CLIError:
         cleaned = False
-    if not cleaned:
+    # A file-backed login has no keyring entry of its own; on a host without a
+    # keyring the save already warned, so do not report the cleanup twice.
+    if not cleaned and old_credentials.token_store != TOKEN_STORE_FILE:
         _warn(
             "The new login is active, but an older local keyring entry could "
             "not be removed.",
