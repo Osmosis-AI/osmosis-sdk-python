@@ -120,6 +120,31 @@ def validate_env_token_platform(token: str | None = None) -> None:
         )
 
 
+TOKEN_STORE_PREFERENCE_ENV = "OSMOSIS_TOKEN_STORE"
+TOKEN_STORE_PREFERENCE_AUTO = "auto"
+TOKEN_STORE_PREFERENCES = (TOKEN_STORE_PREFERENCE_AUTO, "keyring", "file")
+
+
+def get_token_store_preference() -> str:
+    """Resolve which backend persists new logins.
+
+    ``auto`` prefers the system keyring and falls back to the owner-only
+    credentials file on hosts where no keyring can be reached; ``keyring`` and
+    ``file`` pin one backend.
+    """
+    raw = (os.environ.get(TOKEN_STORE_PREFERENCE_ENV) or "").strip().lower()
+    if not raw:
+        return TOKEN_STORE_PREFERENCE_AUTO
+    if raw not in TOKEN_STORE_PREFERENCES:
+        raise CLIError(
+            f"Invalid {TOKEN_STORE_PREFERENCE_ENV}={raw!r}. Use one of: "
+            f"{', '.join(TOKEN_STORE_PREFERENCES)}.",
+            code="VALIDATION",
+            details={"token_store": raw},
+        )
+    return raw
+
+
 # Configuration directory and credentials file
 CONFIG_DIR = Path.home() / ".config" / "osmosis"
 CREDENTIALS_FILE = CONFIG_DIR / "credentials.json"

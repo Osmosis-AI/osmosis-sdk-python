@@ -316,9 +316,41 @@ def save_device_credentials_or_revoke(
         raise
 
 
+def _load_replaceable_credentials() -> Any | None:
+    """Load the persistent login that the new one replaces, or ``None``.
+
+    An unreadable keyring is fatal only when ``OSMOSIS_TOKEN_STORE`` pins it.
+    Otherwise the login continues, ``save_credentials`` falls back to the
+    credentials file, and the previous token that cannot be read stays
+    unrevoked.
+    """
+    from osmosis_ai.platform.auth import load_credentials
+    from osmosis_ai.platform.auth.config import get_token_store_preference
+    from osmosis_ai.platform.auth.credentials import TOKEN_STORE_KEYRING
+
+    try:
+        return load_credentials(include_env=False)
+    except CLIError as exc:
+        if exc.code in _RECOVERABLE_CREDENTIAL_METADATA_CODES:
+            return None
+        if (
+            exc.code == "KEYRING_UNAVAILABLE"
+            and get_token_store_preference() != TOKEN_STORE_KEYRING
+        ):
+            from osmosis_ai.cli.console import console
+
+            console.print_warning(
+                "The previous login could not be read from the system keyring, "
+                "so it was not revoked.",
+                code="TOKEN_REVOKE_FAILED",
+            )
+            return None
+        raise
+
+
 def _login_with_token(*, token: str) -> OperationResult:
     """Verify and persist an explicit token, returning structured output."""
-    from osmosis_ai.platform.auth import load_credentials, verify_token
+    from osmosis_ai.platform.auth import verify_token
     from osmosis_ai.platform.auth.credentials import (
         Credentials,
         ensure_keyring_available,
@@ -327,12 +359,7 @@ def _login_with_token(*, token: str) -> OperationResult:
 
     output = get_output_context()
     ensure_keyring_available()
-    try:
-        old_credentials = load_credentials(include_env=False)
-    except CLIError as exc:
-        if exc.code not in _RECOVERABLE_CREDENTIAL_METADATA_CODES:
-            raise
-        old_credentials = None
+    old_credentials = _load_replaceable_credentials()
 
     with output.status("Verifying token..."):
         verified = verify_token(token)
@@ -350,17 +377,12 @@ def _login_with_token(*, token: str) -> OperationResult:
 
 def _login_with_device_flow() -> OperationResult:
     """Interactive device-code login. Caller must have already gated on interactivity."""
-    from osmosis_ai.platform.auth import device_login, load_credentials
+    from osmosis_ai.platform.auth import device_login
     from osmosis_ai.platform.auth.credentials import ensure_keyring_available
 
     output = get_output_context()
     ensure_keyring_available()
-    try:
-        old_credentials = load_credentials(include_env=False)
-    except CLIError as exc:
-        if exc.code not in _RECOVERABLE_CREDENTIAL_METADATA_CODES:
-            raise
-        old_credentials = None
+    old_credentials = _load_replaceable_credentials()
     result, creds = device_login()
 
     return _finish_login(

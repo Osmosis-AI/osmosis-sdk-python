@@ -4,10 +4,11 @@ Supports three token sources with descending priority:
 
     1. ``OSMOSIS_TOKEN`` environment variable  (CI / headless)
     2. System keyring  (macOS Keychain, GNOME Keyring, …)
-    3. Legacy platform-scoped plain-text JSON files
+    3. Platform-scoped JSON file with owner-only permissions
 
-New credentials are saved only to the system keyring. Existing file-backed
-credentials remain readable so upgrading does not force a new login.
+New credentials prefer the system keyring. Hosts without a reachable keyring
+(headless containers, remote shells, sandboxes) fall back to the credentials
+file so login still completes; ``OSMOSIS_TOKEN_STORE`` pins either backend.
 """
 
 from __future__ import annotations
@@ -30,7 +31,9 @@ from .config import (
     CREDENTIALS_FILE,
     CREDENTIALS_VERSION,
     DEFAULT_PLATFORM_URL,
+    TOKEN_STORE_PREFERENCE_ENV,
     get_platform_url,
+    get_token_store_preference,
     normalize_platform_url,
     validate_env_token_platform,
 )
@@ -412,7 +415,13 @@ def _keyring_set(account: str, token: str) -> bool:
 
 
 def ensure_keyring_available() -> None:
-    """Fail before device login when no system keyring backend is available."""
+    """Fail before device login when no credential store can hold the token.
+
+    Only a pinned ``OSMOSIS_TOKEN_STORE=keyring`` makes a missing keyring fatal;
+    otherwise ``save_credentials`` falls back to the credentials file.
+    """
+    if get_token_store_preference() != TOKEN_STORE_KEYRING:
+        return
     try:
         if isinstance(keyring.get_keyring(), FailKeyring):
             raise CLIError(
@@ -509,6 +518,9 @@ class Credentials:
     user: UserInfo
     token_id: str | None = None
     keyring_account: str | None = field(default=None, repr=False, compare=False)
+    # Backend the entry was loaded from; ``None`` for credentials not read
+    # from the metadata file (environment token, fresh login result).
+    token_store: str | None = field(default=None, repr=False, compare=False)
 
     def to_dict(self) -> dict[str, Any]:
         result: dict[str, Any] = {
@@ -539,6 +551,7 @@ class Credentials:
             user=UserInfo.from_dict(data["user"]),
             token_id=data.get("token_id"),
             keyring_account=data.get("keyring_account"),
+            token_store=data.get("token_store", TOKEN_STORE_FILE),
         )
 
     @classmethod
@@ -580,7 +593,9 @@ def _cleanup_replaced_credentials(
         )
     except CLIError:
         cleaned = False
-    if not cleaned:
+    # A file-backed login has no keyring entry of its own; on a host without a
+    # keyring the save already warned, so do not report the cleanup twice.
+    if not cleaned and old_credentials.token_store != TOKEN_STORE_FILE:
         _warn(
             "The new login is active, but an older local keyring entry could "
             "not be removed.",
@@ -604,12 +619,15 @@ def save_credentials(
 
     The token is written to the platform-scoped system-keyring account before
     metadata or legacy entries are changed, so a failed save leaves the
-    previous login usable.
+    previous login usable. When no keyring can be reached, the token is written
+    to the owner-only credentials file instead unless ``OSMOSIS_TOKEN_STORE``
+    pins the keyring.
 
     Returns:
-        The storage backend used: ``"keyring"``.
+        The storage backend used: ``"keyring"`` or ``"file"``.
     """
     platform_url = get_platform_url()
+    preference = get_token_store_preference()
     old_metadata = _read_metadata(recover_invalid=recover_invalid_metadata)
     registry = _registry_from_metadata(old_metadata)
     old_key = _platform_entry_key(registry, platform_url)
@@ -620,23 +638,45 @@ def save_credentials(
 
     keyring_account = _keyring_account_for_credentials(credentials, platform_url)
     old_keyring_accounts = set(_keyring_accounts_for_entry(old_entry, platform_url))
-    if not _keyring_set(keyring_account, credentials.access_token):
-        raise CLIError(
-            "No system keyring is available. Set OSMOSIS_TOKEN for CI/CD or "
-            "other non-interactive environments.",
-            code="KEYRING_UNAVAILABLE",
-        )
+    stored_in_keyring = False
+    keyring_unreachable = False
+    if preference != TOKEN_STORE_FILE:
+        try:
+            stored_in_keyring = _keyring_set(keyring_account, credentials.access_token)
+        except CLIError:
+            if preference == TOKEN_STORE_KEYRING:
+                raise
+            stored_in_keyring = False
+        keyring_unreachable = not stored_in_keyring
+        if not stored_in_keyring and preference == TOKEN_STORE_KEYRING:
+            raise CLIError(
+                "No system keyring is available. Set OSMOSIS_TOKEN for CI/CD, or "
+                f"set {TOKEN_STORE_PREFERENCE_ENV}=file to store the token in "
+                f"{CREDENTIALS_FILE} with owner-only permissions.",
+                code="KEYRING_UNAVAILABLE",
+            )
 
-    data.pop("access_token", None)
-    data["token_store"] = TOKEN_STORE_KEYRING
-    data["keyring_account"] = keyring_account
+    if stored_in_keyring:
+        data.pop("access_token", None)
+        data["token_store"] = TOKEN_STORE_KEYRING
+        data["keyring_account"] = keyring_account
+    else:
+        data["token_store"] = TOKEN_STORE_FILE
+        data.pop("keyring_account", None)
+        if keyring_unreachable:
+            _warn(
+                "No usable system keyring was found, so the access token was "
+                f"saved to {CREDENTIALS_FILE} with owner-only permissions. "
+                f"Set {TOKEN_STORE_PREFERENCE_ENV}=keyring to require the keyring.",
+                code="KEYRING_UNAVAILABLE",
+            )
     if old_key is not None and old_key != platform_url:
         del registry["platforms"][old_key]
     registry["platforms"][platform_url] = data
     try:
         atomic_write_json(CREDENTIALS_FILE, registry)
     except Exception:
-        if keyring_account not in old_keyring_accounts:
+        if stored_in_keyring and keyring_account not in old_keyring_accounts:
             try:
                 cleaned = _keyring_delete(keyring_account)
             except CLIError:
@@ -650,24 +690,31 @@ def save_credentials(
         raise
     if cleanup_replaced:
         try:
-            cleaned = _cleanup_replaced_keyring_entries(
-                old_entry,
-                platform_url,
-                keyring_account,
-            )
+            if stored_in_keyring:
+                cleaned = _cleanup_replaced_keyring_entries(
+                    old_entry,
+                    platform_url,
+                    keyring_account,
+                )
+            else:
+                cleaned = _cleanup_platform_keyring_entries(
+                    old_entry,
+                    platform_url,
+                    tolerate_unavailable=True,
+                )
         except CLIError:
             cleaned = False
-        if not cleaned:
+        if not cleaned and not keyring_unreachable:
             _warn(
                 "Credentials were saved, but an older local keyring entry "
                 "could not be removed.",
                 code="KEYRING_CLEANUP_FAILED",
             )
-    return TOKEN_STORE_KEYRING
+    return TOKEN_STORE_KEYRING if stored_in_keyring else TOKEN_STORE_FILE
 
 
 def load_credentials(*, include_env: bool = True) -> Credentials | None:
-    """Load credentials with priority: env var → keyring → legacy file.
+    """Load credentials with priority: env var → keyring → credentials file.
 
     Args:
         include_env: When ``False``, skip ``OSMOSIS_TOKEN`` and load only

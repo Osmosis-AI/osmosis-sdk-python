@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -403,10 +404,13 @@ def test_device_login_save_failure_warns_when_revoke_fails(
     ]
 
 
-def test_device_login_stops_before_minting_without_keyring(monkeypatch) -> None:
+def test_device_login_stops_before_minting_without_a_pinned_keyring(
+    monkeypatch,
+) -> None:
     from keyring.backends.fail import Keyring as FailKeyring
 
     monkeypatch.delenv("OSMOSIS_TOKEN", raising=False)
+    monkeypatch.setenv("OSMOSIS_TOKEN_STORE", "keyring")
     monkeypatch.setattr("keyring.get_keyring", lambda: FailKeyring())
     monkeypatch.setattr(
         "osmosis_ai.platform.auth.device_login",
@@ -419,9 +423,12 @@ def test_device_login_stops_before_minting_without_keyring(monkeypatch) -> None:
     assert exc_info.value.code == "KEYRING_UNAVAILABLE"
 
 
-def test_token_login_stops_before_verifying_without_keyring(monkeypatch) -> None:
+def test_token_login_stops_before_verifying_without_a_pinned_keyring(
+    monkeypatch,
+) -> None:
     from keyring.backends.fail import Keyring as FailKeyring
 
+    monkeypatch.setenv("OSMOSIS_TOKEN_STORE", "keyring")
     monkeypatch.setattr("keyring.get_keyring", lambda: FailKeyring())
     monkeypatch.setattr(
         "osmosis_ai.platform.auth.verify_token",
@@ -432,6 +439,144 @@ def test_token_login_stops_before_verifying_without_keyring(monkeypatch) -> None
         auth_module._login_with_token(token="token")
 
     assert exc_info.value.code == "KEYRING_UNAVAILABLE"
+
+
+def test_device_login_proceeds_without_a_keyring_by_default(
+    tmp_path, monkeypatch
+) -> None:
+    """Headless hosts fall back to the credentials file instead of aborting."""
+    from keyring.backends.fail import Keyring as FailKeyring
+
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.credentials.CREDENTIALS_FILE",
+        tmp_path / "creds.json",
+    )
+    monkeypatch.delenv("OSMOSIS_TOKEN", raising=False)
+    monkeypatch.delenv("OSMOSIS_TOKEN_STORE", raising=False)
+    monkeypatch.setattr("keyring.get_keyring", lambda: FailKeyring())
+
+    credentials = _make_credentials()
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.device_login",
+        lambda: (_make_login_result(), credentials),
+    )
+    saved: list[Credentials] = []
+
+    def fake_save(creds: Credentials, **kwargs) -> str:
+        saved.append(creds)
+        return "file"
+
+    monkeypatch.setattr(auth_module, "save_device_credentials_or_revoke", fake_save)
+
+    result = auth_module.login()
+
+    assert saved == [credentials]
+    assert result.exit_code == 0
+
+
+def _write_old_login(creds_file, monkeypatch, *, token_store: str) -> None:
+    """Persist a previous login for the default platform in *creds_file*."""
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.credentials.CREDENTIALS_FILE", creds_file
+    )
+    monkeypatch.delenv("OSMOSIS_TOKEN", raising=False)
+    monkeypatch.delenv("OSMOSIS_PLATFORM_URL", raising=False)
+    monkeypatch.delenv("OSMOSIS_TOKEN_PLATFORM_URL", raising=False)
+    entry = _make_credentials(access_token="old-token", token_id="tok_old").to_dict()
+    entry["token_store"] = token_store
+    if token_store == "keyring":
+        entry.pop("access_token")
+    creds_file.write_text(json.dumps(entry))
+
+
+def _record_warnings(monkeypatch) -> list[str | None]:
+    codes: list[str | None] = []
+    monkeypatch.setattr(
+        "osmosis_ai.cli.console.console.print_warning",
+        lambda message, *, code=None, **kwargs: codes.append(code),
+    )
+    return codes
+
+
+def test_device_login_replaces_an_unreadable_keyring_login_by_default(
+    tmp_path, monkeypatch
+) -> None:
+    """A host whose keyring went away (e.g. over SSH) can still log in again."""
+    from keyring.backends.fail import Keyring as FailKeyring
+
+    _write_old_login(tmp_path / "creds.json", monkeypatch, token_store="keyring")
+    monkeypatch.delenv("OSMOSIS_TOKEN_STORE", raising=False)
+    monkeypatch.setattr("keyring.get_keyring", lambda: FailKeyring())
+    credentials = _make_credentials(access_token="new-token", token_id="tok_new")
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.device_login",
+        lambda: (_make_login_result(), credentials),
+    )
+    saved: list[Credentials] = []
+
+    def fake_save(creds: Credentials, **kwargs) -> str:
+        saved.append(creds)
+        return "file"
+
+    monkeypatch.setattr(auth_module, "save_device_credentials_or_revoke", fake_save)
+    warnings = _record_warnings(monkeypatch)
+
+    result = auth_module.login()
+
+    assert result.exit_code == 0
+    assert saved == [credentials]
+    # The old token cannot be read, so the user is told it was not revoked.
+    assert warnings == ["TOKEN_REVOKE_FAILED"]
+
+
+def test_pinned_keyring_login_fails_when_the_old_token_cannot_be_read(
+    tmp_path, monkeypatch
+) -> None:
+    _write_old_login(tmp_path / "creds.json", monkeypatch, token_store="keyring")
+    monkeypatch.setenv("OSMOSIS_TOKEN_STORE", "keyring")
+
+    def locked(account: str) -> str | None:
+        raise CLIError("keyring locked", code="KEYRING_UNAVAILABLE")
+
+    monkeypatch.setattr("osmosis_ai.platform.auth.credentials._keyring_get", locked)
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.device_login",
+        lambda: pytest.fail("no token may be minted when the keyring is pinned"),
+    )
+
+    with pytest.raises(CLIError) as exc_info:
+        auth_module.login()
+
+    assert exc_info.value.code == "KEYRING_UNAVAILABLE"
+
+
+def test_second_headless_login_warns_once(tmp_path, monkeypatch) -> None:
+    """Replacing a file-backed login without a keyring reports only the fallback."""
+    from keyring.backends.fail import Keyring as FailKeyring
+
+    creds_file = tmp_path / "creds.json"
+    _write_old_login(creds_file, monkeypatch, token_store="file")
+    monkeypatch.delenv("OSMOSIS_TOKEN_STORE", raising=False)
+    monkeypatch.setattr("keyring.get_keyring", lambda: FailKeyring())
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.device_login",
+        lambda: (
+            _make_login_result(),
+            _make_credentials(access_token="new-token", token_id="tok_new"),
+        ),
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.platform_client.revoke_cli_token",
+        lambda *args, **kwargs: True,
+    )
+    warnings = _record_warnings(monkeypatch)
+
+    result = auth_module.login()
+
+    assert result.exit_code == 0
+    assert warnings == ["KEYRING_UNAVAILABLE"]
+    platforms = json.loads(creds_file.read_text())["platforms"]
+    assert [entry["access_token"] for entry in platforms.values()] == ["new-token"]
 
 
 def test_device_login_loads_persistent_credentials_without_env(monkeypatch) -> None:
