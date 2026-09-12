@@ -403,10 +403,13 @@ def test_device_login_save_failure_warns_when_revoke_fails(
     ]
 
 
-def test_device_login_stops_before_minting_without_keyring(monkeypatch) -> None:
+def test_device_login_stops_before_minting_without_a_pinned_keyring(
+    monkeypatch,
+) -> None:
     from keyring.backends.fail import Keyring as FailKeyring
 
     monkeypatch.delenv("OSMOSIS_TOKEN", raising=False)
+    monkeypatch.setenv("OSMOSIS_TOKEN_STORE", "keyring")
     monkeypatch.setattr("keyring.get_keyring", lambda: FailKeyring())
     monkeypatch.setattr(
         "osmosis_ai.platform.auth.device_login",
@@ -419,9 +422,12 @@ def test_device_login_stops_before_minting_without_keyring(monkeypatch) -> None:
     assert exc_info.value.code == "KEYRING_UNAVAILABLE"
 
 
-def test_token_login_stops_before_verifying_without_keyring(monkeypatch) -> None:
+def test_token_login_stops_before_verifying_without_a_pinned_keyring(
+    monkeypatch,
+) -> None:
     from keyring.backends.fail import Keyring as FailKeyring
 
+    monkeypatch.setenv("OSMOSIS_TOKEN_STORE", "keyring")
     monkeypatch.setattr("keyring.get_keyring", lambda: FailKeyring())
     monkeypatch.setattr(
         "osmosis_ai.platform.auth.verify_token",
@@ -432,6 +438,33 @@ def test_token_login_stops_before_verifying_without_keyring(monkeypatch) -> None
         auth_module._login_with_token(token="token")
 
     assert exc_info.value.code == "KEYRING_UNAVAILABLE"
+
+
+def test_device_login_proceeds_without_a_keyring_by_default(monkeypatch) -> None:
+    """Headless hosts fall back to the credentials file instead of aborting."""
+    from keyring.backends.fail import Keyring as FailKeyring
+
+    monkeypatch.delenv("OSMOSIS_TOKEN", raising=False)
+    monkeypatch.delenv("OSMOSIS_TOKEN_STORE", raising=False)
+    monkeypatch.setattr("keyring.get_keyring", lambda: FailKeyring())
+
+    credentials = _make_credentials()
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.device_login",
+        lambda: (_make_login_result(), credentials),
+    )
+    saved: list[Credentials] = []
+
+    def fake_save(creds: Credentials, **kwargs) -> str:
+        saved.append(creds)
+        return "file"
+
+    monkeypatch.setattr(auth_module, "save_device_credentials_or_revoke", fake_save)
+
+    result = auth_module.login()
+
+    assert saved == [credentials]
+    assert result.exit_code == 0
 
 
 def test_device_login_loads_persistent_credentials_without_env(monkeypatch) -> None:
