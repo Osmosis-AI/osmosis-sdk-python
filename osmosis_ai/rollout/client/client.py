@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import math
 from collections.abc import Generator
 from typing import Any
@@ -22,6 +23,7 @@ _RETRY_AFTER_FLOOR_SEC = 0.05
 _MAX_RETRY_AFTER_SEC = 60.0
 _CANCEL_REQUEST_TIMEOUT_SEC = 5.0
 _RESULT_READ_GRACE_SEC = 10.0
+_RESULT_RETRY_DELAYS_SEC = (0.1, 0.5)
 _FINISHED_STATUSES = frozenset(
     {RolloutStatus.SUCCESS, RolloutStatus.FAILURE, RolloutStatus.CANCELLED}
 )
@@ -31,6 +33,8 @@ _STATUS_ORDER = {
     RolloutStatus.GRADING: 2,
     RolloutStatus.SUCCESS: 3,
 }
+
+logger: logging.Logger = logging.getLogger(__name__)
 
 
 class RolloutAdmissionTimeoutError(TimeoutError):
@@ -294,12 +298,27 @@ class RolloutClient:
         self, admission: RolloutInitResponse
     ) -> RolloutResultResponse:
         timeout = admission.result_wait_timeout_sec + _RESULT_READ_GRACE_SEC
-        response = await self.http_client.get(
-            f"{self.url}/rollout/{admission.rollout_id}/result",
-            headers={POLLING_LEASE_HEADER: admission.polling_lease_token},
-            timeout=timeout,
-        )
-        return _result(response, admission.rollout_id)
+        delays = iter(_RESULT_RETRY_DELAYS_SEC)
+        while True:
+            try:
+                response = await self.http_client.get(
+                    f"{self.url}/rollout/{admission.rollout_id}/result",
+                    headers={POLLING_LEASE_HEADER: admission.polling_lease_token},
+                    timeout=timeout,
+                )
+            except (httpx.RemoteProtocolError, httpx.NetworkError) as exc:
+                delay = next(delays, None)
+                if delay is None:
+                    raise
+                logger.warning(
+                    "Retrying result read for rollout %s after %s in %.1fs",
+                    admission.rollout_id,
+                    type(exc).__name__,
+                    delay,
+                )
+                await asyncio.sleep(delay)
+            else:
+                return _result(response, admission.rollout_id)
 
     async def cancel_rollout(self, rollout_id: str) -> CancelRolloutsResponse:
         request = CancelRolloutsRequest(ids=[rollout_id])
