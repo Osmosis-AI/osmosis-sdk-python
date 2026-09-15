@@ -34,7 +34,7 @@ _STATUS_ORDER = {
     RolloutStatus.SUCCESS: 3,
 }
 
-_logger: logging.Logger = logging.getLogger(__name__)
+logger: logging.Logger = logging.getLogger(__name__)
 
 
 class RolloutAdmissionTimeoutError(TimeoutError):
@@ -298,7 +298,7 @@ class RolloutClient:
         self, admission: RolloutInitResponse
     ) -> RolloutResultResponse:
         timeout = admission.result_wait_timeout_sec + _RESULT_READ_GRACE_SEC
-        retries = 0
+        delays = iter(_RESULT_RETRY_DELAYS_SEC)
         while True:
             try:
                 response = await self.http_client.get(
@@ -306,21 +306,19 @@ class RolloutClient:
                     headers={POLLING_LEASE_HEADER: admission.polling_lease_token},
                     timeout=timeout,
                 )
-                break
             except (httpx.RemoteProtocolError, httpx.NetworkError) as exc:
-                if retries == len(_RESULT_RETRY_DELAYS_SEC):
+                delay = next(delays, None)
+                if delay is None:
                     raise
-                delay = _RESULT_RETRY_DELAYS_SEC[retries]
-                retries += 1
-                _logger.warning(
-                    "Retrying result read for rollout %s after %s (%d/%d)",
+                logger.warning(
+                    "Retrying result read for rollout %s after %s in %.1fs",
                     admission.rollout_id,
                     type(exc).__name__,
-                    retries,
-                    len(_RESULT_RETRY_DELAYS_SEC),
+                    delay,
                 )
                 await asyncio.sleep(delay)
-        return _result(response, admission.rollout_id)
+            else:
+                return _result(response, admission.rollout_id)
 
     async def cancel_rollout(self, rollout_id: str) -> CancelRolloutsResponse:
         request = CancelRolloutsRequest(ids=[rollout_id])
