@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 from typing import Any
+from unittest.mock import AsyncMock, call
 
 import httpx
 import pytest
@@ -59,6 +60,261 @@ def client(handler: Any, **kwargs: Any) -> RolloutClient:
 
 async def completed(rollout_client: RolloutClient):
     return await rollout_client.run_rollout(**request())
+
+
+@pytest.fixture
+def retry_sleep(monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
+    sleep = AsyncMock()
+    monkeypatch.setattr("osmosis_ai.rollout.client.client.asyncio.sleep", sleep)
+    return sleep
+
+
+@pytest.mark.parametrize(
+    "failure", [httpx.RemoteProtocolError, httpx.ReadError, httpx.ConnectError]
+)
+@pytest.mark.parametrize("disconnects", [1, 2])
+async def test_result_disconnects_reuse_admission_and_lease(
+    failure: type[httpx.TransportError], disconnects: int, retry_sleep: AsyncMock
+) -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(http_request: httpx.Request) -> httpx.Response:
+        requests.append(http_request)
+        if http_request.method == "POST":
+            return httpx.Response(202, json=admission())
+        if len(requests) <= disconnects + 1:
+            raise failure("lost result response", request=http_request)
+        return httpx.Response(200, json={"rollout_id": ROLLOUT_ID, "status": "success"})
+
+    rollout_client = client(handler)
+    try:
+        rollout = await rollout_client.run_rollout_async(**request())
+        running, grading, result = await asyncio.gather(
+            rollout.wait_for_running(),
+            rollout.wait_for_grading(),
+            rollout.wait_for_completion(),
+        )
+        assert running is grading is result.status is RolloutStatus.SUCCESS
+    finally:
+        await rollout_client.http_client.aclose()
+
+    assert [r.method for r in requests] == ["POST"] + ["GET"] * (disconnects + 1)
+    assert all(r.url.path == f"/rollout/{ROLLOUT_ID}/result" for r in requests[1:])
+    assert all(r.headers[POLLING_LEASE_HEADER] == "test-lease" for r in requests[1:])
+    assert all(r.extensions["timeout"]["read"] == 40.0 for r in requests[1:])
+    assert retry_sleep.await_args_list == [call(0.1), call(0.5)][:disconnects]
+
+
+async def test_exhausted_result_retries_wake_all_lifecycle_waiters(
+    retry_sleep: AsyncMock,
+) -> None:
+    release_failure = asyncio.Event()
+    failures: list[httpx.RemoteProtocolError] = []
+
+    async def handler(http_request: httpx.Request) -> httpx.Response:
+        if http_request.method == "POST":
+            return httpx.Response(202, json=admission())
+        await release_failure.wait()
+        failure = httpx.RemoteProtocolError(
+            "lost result response", request=http_request
+        )
+        failures.append(failure)
+        raise failure
+
+    rollout_client = client(handler)
+    try:
+        rollout = await rollout_client.run_rollout_async(**request())
+        waiters = asyncio.gather(
+            rollout.wait_for_running(),
+            rollout.wait_for_grading(),
+            rollout.wait_for_completion(),
+            return_exceptions=True,
+        )
+        asyncio.get_running_loop().call_soon(release_failure.set)
+        async with asyncio.timeout(1.0):
+            errors = await waiters
+        assert len(failures) == 3
+        assert all(error is failures[-1] for error in errors)
+        assert rollout.done() and rollout.polling_finished
+        assert rollout.status is RolloutStatus.QUEUED
+    finally:
+        await rollout_client.http_client.aclose()
+    assert retry_sleep.await_args_list == [call(0.1), call(0.5)]
+
+
+async def test_interrupted_result_body_is_closed_before_retry(
+    retry_sleep: AsyncMock,
+) -> None:
+    class InterruptedBody(httpx.AsyncByteStream):
+        closed = False
+
+        async def __aiter__(self):
+            yield b'{"status":'
+            raise httpx.ReadError("connection lost during body")
+
+        async def aclose(self) -> None:
+            self.closed = True
+
+    body = InterruptedBody()
+    polls = 0
+
+    def handler(http_request: httpx.Request) -> httpx.Response:
+        nonlocal polls
+        if http_request.method == "POST":
+            return httpx.Response(202, json=admission())
+        polls += 1
+        if polls == 1:
+            return httpx.Response(200, stream=body)
+        assert body.closed
+        return httpx.Response(200, json={"rollout_id": ROLLOUT_ID, "status": "success"})
+
+    rollout_client = client(handler)
+    try:
+        assert (await completed(rollout_client)).status is RolloutStatus.SUCCESS
+    finally:
+        await rollout_client.http_client.aclose()
+    assert polls == 2
+    retry_sleep.assert_awaited_once_with(0.1)
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        httpx.ConnectTimeout,
+        httpx.ReadTimeout,
+        httpx.WriteTimeout,
+        httpx.PoolTimeout,
+        asyncio.CancelledError,
+    ],
+)
+async def test_result_timeouts_and_cancellation_are_not_retried(
+    failure: type[BaseException], retry_sleep: AsyncMock
+) -> None:
+    polls = 0
+    error = failure("stopped")
+
+    def handler(http_request: httpx.Request) -> httpx.Response:
+        nonlocal polls
+        if http_request.method == "POST":
+            return httpx.Response(202, json=admission())
+        polls += 1
+        raise error
+
+    rollout_client = client(handler)
+    try:
+        with pytest.raises(failure) as raised:
+            await completed(rollout_client)
+        assert raised.value is error
+    finally:
+        await rollout_client.http_client.aclose()
+    assert polls == 1
+    retry_sleep.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        *(httpx.Response(status) for status in (401, 404, 410, 429, 500)),
+        httpx.Response(200, content=b"invalid json"),
+        httpx.Response(200, json={"rollout_id": ROLLOUT_ID, "status": "not-a-status"}),
+        httpx.Response(200, json={"rollout_id": "another-run", "status": "success"}),
+    ],
+)
+async def test_result_http_and_protocol_errors_are_not_retried(
+    response: httpx.Response, retry_sleep: AsyncMock
+) -> None:
+    polls = 0
+
+    def handler(http_request: httpx.Request) -> httpx.Response:
+        nonlocal polls
+        if http_request.method == "POST":
+            return httpx.Response(202, json=admission())
+        polls += 1
+        assert polls == 1
+        return response
+
+    rollout_client = client(handler)
+    try:
+        with pytest.raises(RolloutProtocolError) as raised:
+            await completed(rollout_client)
+        assert raised.value.status_code == response.status_code
+    finally:
+        await rollout_client.http_client.aclose()
+    assert polls == 1
+    retry_sleep.assert_not_awaited()
+
+
+@pytest.mark.parametrize("cancel", [False, True])
+async def test_admission_and_cancellation_disconnects_are_not_retried(
+    cancel: bool, retry_sleep: AsyncMock
+) -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(http_request: httpx.Request) -> httpx.Response:
+        requests.append(http_request)
+        raise httpx.RemoteProtocolError("lost response", request=http_request)
+
+    rollout_client = client(handler)
+    try:
+        with pytest.raises(httpx.RemoteProtocolError):
+            if cancel:
+                await rollout_client.cancel_rollout(ROLLOUT_ID)
+            else:
+                await completed(rollout_client)
+    finally:
+        await rollout_client.http_client.aclose()
+    assert len(requests) == 1
+    assert requests[0].method == "POST"
+    assert requests[0].url.path == ("/rollout/cancel" if cancel else "/rollout")
+    retry_sleep.assert_not_awaited()
+
+
+@pytest.mark.parametrize("deadline", [False, True])
+async def test_result_backoff_obeys_caller_cancellation_and_deadline(
+    deadline: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sleeping = asyncio.Event()
+    interrupted = asyncio.Event()
+    polls = 0
+
+    async def sleep(delay: float) -> None:
+        assert delay == 0.1
+        sleeping.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            interrupted.set()
+
+    monkeypatch.setattr("osmosis_ai.rollout.client.client.asyncio.sleep", sleep)
+
+    def handler(http_request: httpx.Request) -> httpx.Response:
+        nonlocal polls
+        if http_request.method == "POST":
+            return httpx.Response(202, json=admission())
+        polls += 1
+        raise httpx.ReadError("lost result response", request=http_request)
+
+    rollout_client = client(handler)
+    rollout = await rollout_client.run_rollout_async(**request())
+    try:
+        async with asyncio.timeout(1.0):
+            await sleeping.wait()
+            if deadline:
+                with pytest.raises(TimeoutError):
+                    async with asyncio.timeout(0):
+                        await rollout
+            else:
+                rollout.cancel()
+                with pytest.raises(asyncio.CancelledError):
+                    await rollout
+        assert interrupted.is_set()
+        assert rollout.done() and rollout.polling_finished
+        assert polls == 1
+    finally:
+        if not rollout.done():
+            rollout.cancel()
+        await asyncio.gather(rollout.result_task, return_exceptions=True)
+        await rollout_client.http_client.aclose()
 
 
 async def test_cancel_bounds_waits_outside_http_timeouts(monkeypatch) -> None:
