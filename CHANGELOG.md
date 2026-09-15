@@ -2,6 +2,14 @@
 
 This file records changes to `osmosis-ai`. For earlier versions, see [GitHub Releases](https://github.com/Osmosis-AI/osmosis-sdk-python/releases).
 
+## 0.3.4rc1 - 2026-09-15
+
+### Fixed
+
+- `RolloutClient` now retries transient result-polling disconnects up to twice; remove custom result-GET retry wrappers to avoid nested retries ([#366](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/366)).
+
+[Full changelog](https://github.com/Osmosis-AI/osmosis-sdk-python/compare/v0.3.3...v0.3.4rc1)
+
 ## 0.3.3 - 2026-09-14
 
 ### Breaking Changes
