@@ -34,6 +34,7 @@ from .models import (
     PaginatedRollouts,
     PaginatedTrainingRuns,
     QuickstartStatus,
+    RetryEvalRunResult,
     RunDownloadFile,
     RunDownloadManifest,
     RunDownloadURLBatch,
@@ -664,10 +665,15 @@ class OsmosisClient:
         schema_versions: dict[str, Any],
         provenance: dict[str, Any],
         files: Sequence[dict[str, Any]],
+        reimport: bool = False,
         credentials: Credentials | None = None,
         git_identity: str,
     ) -> EvalRunImportResult:
-        """Start or resume the server-authoritative import for a local eval."""
+        """Start or resume the server-authoritative import for a local eval.
+
+        ``reimport`` replaces the results this local run already imported
+        instead of conflicting, for a run re-run with ``--retry-failed``.
+        """
         result = platform_request(
             "/api/cli/eval-runs/imports",
             method="POST",
@@ -679,6 +685,7 @@ class OsmosisClient:
                 "schema_versions": schema_versions,
                 "provenance": provenance,
                 "files": list(files),
+                "reimport": reimport,
             },
             credentials=credentials,
             git_identity=git_identity,
@@ -1027,6 +1034,23 @@ class OsmosisClient:
             credentials=credentials,
             git_identity=git_identity,
         )
+
+    def retry_eval_run(
+        self,
+        eval_run_id: str,
+        *,
+        credentials: Credentials | None = None,
+        git_identity: str | None,
+    ) -> RetryEvalRunResult:
+        """Re-run a terminal evaluation run's failed and skipped samples."""
+        result = platform_request(
+            f"/api/cli/eval-runs/{_safe_path(eval_run_id)}/retry",
+            method="POST",
+            data={},
+            credentials=credentials,
+            git_identity=git_identity,
+        )
+        return RetryEvalRunResult.from_dict(result)
 
     def stop_eval_run(
         self,

@@ -507,6 +507,29 @@ class SubmitRunResult:
 
 
 @dataclass
+class RetryEvalRunResult:
+    """Result of re-running an evaluation run's failed and skipped samples."""
+
+    id: str
+    name: str
+    status: str
+    workflow_id: str
+    retryable_samples: int
+    platform_url: str | None = None
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> RetryEvalRunResult:
+        return cls(
+            id=data["id"],
+            name=data["name"],
+            status=data["status"],
+            workflow_id=data["workflow_id"],
+            retryable_samples=int(data.get("retryable_samples") or 0),
+            platform_url=data.get("platform_url"),
+        )
+
+
+@dataclass
 class BenchmarkTaskSet:
     """A named task set exposed by a benchmark."""
 

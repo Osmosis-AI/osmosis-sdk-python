@@ -636,8 +636,11 @@ def test_upload_flag_uploads_after_finalize_and_surfaces_platform_url(
         after_finalize(summary)
         return summary
 
-    def upload_plan(_plan: Any, *, context: Any) -> SimpleNamespace:
+    def upload_plan(
+        _plan: Any, *, context: Any, replace: bool = False
+    ) -> SimpleNamespace:
         events.append("upload")
+        assert replace is False
         return SimpleNamespace(
             session_id="session-1",
             eval_run_id="eval-1",

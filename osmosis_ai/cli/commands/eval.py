@@ -16,8 +16,8 @@ from osmosis_ai.cli.output import CommandResult
 
 app: typer.Typer = typer.Typer(
     help=(
-        "Manage evaluation runs (submit, run, upload, list, info, download, stop) and"
-        " LLM-as-judge rubric scoring."
+        "Manage evaluation runs (submit, run, upload, list, info, download, "
+        "retry, stop) and LLM-as-judge rubric scoring."
     ),
     no_args_is_help=True,
 )
@@ -249,11 +249,30 @@ def eval_upload(
         metavar="EVAL_NAME_OR_DIRECTORY",
         help="Completed local evaluation name or run directory.",
     ),
+    replace: bool = typer.Option(
+        False,
+        "--replace",
+        help=(
+            "Replace the results this run already imported, for a run re-run "
+            "with --retry-failed."
+        ),
+    ),
 ) -> CommandResult:
     """Upload a completed local evaluation run to the platform."""
     from osmosis_ai.platform.cli.eval_upload import upload as _upload
 
-    return _upload(run_dir)
+    return _upload(run_dir, replace=replace)
+
+
+@app.command("retry")
+def eval_retry(
+    name: str = typer.Argument(..., help="Evaluation run name or ID."),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt."),
+) -> CommandResult:
+    """Re-run an evaluation run's failed and skipped samples."""
+    from osmosis_ai.platform.cli.eval import retry as _retry
+
+    return _retry(name, yes=yes)
 
 
 @app.command("list")

@@ -492,11 +492,16 @@ def run(
             summary.run_dir,
             workspace_directory=workspace_directory,
             display_root=display_root,
+            replace=retry_failed,
         )
         run_path = display_path(summary.run_dir, base=display_root)
         try:
             imported = upload_plan(
-                prepare_eval_upload_plan(summary.run_dir), context=platform_context
+                prepare_eval_upload_plan(summary.run_dir),
+                context=platform_context,
+                # A retry attempt is the same local run again, so its upload
+                # replaces whatever the earlier attempt already imported.
+                replace=retry_failed,
             )
         except KeyboardInterrupt as exc:
             raise CLIError(
@@ -567,6 +572,7 @@ def run(
         dataset_source=dataset.source,
         imported=imported,
         upload_requested=upload,
+        retried=retry_failed,
         rerun_flags=rerun_flags,
     )
 
@@ -710,7 +716,11 @@ def _print_failures(summary: Any, *, display_root: Path) -> None:
 
 
 def _upload_command(
-    run_dir: Path, *, workspace_directory: Path, display_root: Path
+    run_dir: Path,
+    *,
+    workspace_directory: Path,
+    display_root: Path,
+    replace: bool = False,
 ) -> str:
     resolved = run_dir.resolve()
     default_run_dir = workspace_directory.joinpath(
@@ -726,7 +736,7 @@ def _upload_command(
         # away therefore needs an absolute spelling to preserve path intent.
         if not parsed.is_absolute() and len(parsed.parts) == 1:
             argument = str(resolved)
-    return f"osmosis eval upload {quote(argument)}"
+    return f"osmosis eval upload {quote(argument)}{' --replace' if replace else ''}"
 
 
 def _result(
@@ -739,6 +749,7 @@ def _result(
     dataset_source: str,
     imported: Any | None = None,
     upload_requested: bool = False,
+    retried: bool = False,
     rerun_flags: str = "",
 ) -> OperationResult:
     resource: dict[str, Any] = {
@@ -820,6 +831,7 @@ def _result(
                 summary.run_dir,
                 workspace_directory=workspace_directory,
                 display_root=display_root,
+                replace=retried,
             )
         )
     run_path = display_path(summary.run_dir, base=display_root)

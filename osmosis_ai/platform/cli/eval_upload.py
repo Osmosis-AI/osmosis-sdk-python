@@ -118,8 +118,13 @@ def upload_plan(
     *,
     context: GitWorkspaceDirectoryContext,
     client: OsmosisClient | None = None,
+    replace: bool = False,
 ) -> EvalRunImportResult:
-    """Upload a validated plan. The caller must hold the run's ``RunLock``."""
+    """Upload a validated plan. The caller must hold the run's ``RunLock``.
+
+    ``replace`` opts into overwriting results this run already imported, which
+    is what a ``--retry-failed`` attempt of an uploaded run needs.
+    """
     client = client or OsmosisClient()
     files = _file_map(plan)
     with get_output_context().status("Starting local evaluation upload..."):
@@ -130,6 +135,7 @@ def upload_plan(
             schema_versions=plan.schema_versions,
             provenance=plan.provenance,
             files=plan.file_requests(),
+            reimport=replace,
             credentials=context.credentials,
             git_identity=context.git_identity,
         )
@@ -230,7 +236,7 @@ def _resolve_run_dir(requested: Path, *, workspace_directory: Path) -> Path:
     return Path(os.path.abspath(workspace_directory / ".osmosis" / "evals" / run_name))
 
 
-def upload(run_dir: Path) -> OperationResult:
+def upload(run_dir: Path, *, replace: bool = False) -> OperationResult:
     """Upload one completed local evaluation by run name or directory."""
     context = require_git_workspace_directory_context()
     candidate = _resolve_run_dir(
@@ -240,7 +246,7 @@ def upload(run_dir: Path) -> OperationResult:
     try:
         with RunLock(lock_path):
             plan = prepare_eval_upload_plan(candidate)
-            imported = upload_plan(plan, context=context)
+            imported = upload_plan(plan, context=context, replace=replace)
     except LocalEvalUploadError as exc:
         raise CLIError(str(exc)) from exc
     except (OSError, RuntimeError, ValueError) as exc:

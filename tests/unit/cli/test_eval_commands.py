@@ -20,6 +20,7 @@ from osmosis_ai.platform.api.models import (
     LogEntry,
     LogsPage,
     PaginatedEvaluationRuns,
+    RetryEvalRunResult,
 )
 from osmosis_ai.platform.auth import PlatformAPIError
 
@@ -532,3 +533,62 @@ class TestFormatPassAtK:
     def test_no_values_returns_none(self) -> None:
         results = {"reward_stats": {"pass_at_k": {"1": "bad"}}}
         assert platform_eval_module._format_pass_at_k(results) is None
+
+
+class TestRetryEvalRun:
+    def test_retry_reports_the_sample_count_and_links_the_run(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        captured: dict[str, object] = {}
+
+        def _retry(self, eval_run_id, *, credentials=None, git_identity=None):
+            captured["eval_run_id"] = eval_run_id
+            captured["git_identity"] = git_identity
+            return RetryEvalRunResult(
+                id="11111111-1111-4111-8111-111111111111",
+                name="brave-otter",
+                status="pending",
+                workflow_id="cloud-eval/11111111-1111-4111-8111-111111111111",
+                retryable_samples=4,
+                platform_url="https://platform.osmosis.ai/acme/eval/1",
+            )
+
+        monkeypatch.setattr(api_client_module.OsmosisClient, "retry_eval_run", _retry)
+
+        result = eval_module.eval_retry(name="brave-otter", yes=True)
+
+        assert captured == {
+            "eval_run_id": "brave-otter",
+            "git_identity": GIT_IDENTITY,
+        }
+        assert result.operation == "eval.retry"
+        assert result.status == "success"
+        assert result.resource["retryable_samples"] == 4
+        assert result.message == (
+            "Retrying 4 failed and skipped samples in brave-otter"
+        )
+        assert "View: https://platform.osmosis.ai/acme/eval/1" in (
+            result.display_next_steps
+        )
+
+    def test_retry_singularizes_a_lone_sample(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(
+            api_client_module.OsmosisClient,
+            "retry_eval_run",
+            lambda self, eval_run_id, *, credentials=None, git_identity=None: (
+                RetryEvalRunResult(
+                    id="1",
+                    name="brave-otter",
+                    status="pending",
+                    workflow_id="cloud-eval/1",
+                    retryable_samples=1,
+                )
+            ),
+        )
+
+        result = eval_module.eval_retry(name="brave-otter", yes=True)
+
+        assert result.message == "Retrying 1 failed and skipped sample in brave-otter"
+        assert result.resource["platform_url"] is None

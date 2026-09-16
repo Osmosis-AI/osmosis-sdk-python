@@ -1,4 +1,5 @@
-"""Handler for `osmosis eval` remote subcommands (submit/list/info/download/stop)."""
+"""Handler for `osmosis eval` remote subcommands
+(submit/list/info/download/retry/stop)."""
 
 from __future__ import annotations
 
@@ -701,6 +702,50 @@ def download(
                 "or the platform may not support run downloads yet."
             ) from exc
         raise
+
+
+def retry(name: str, *, yes: bool) -> OperationResult:
+    """Re-run an evaluation run's failed and skipped samples."""
+    from osmosis_ai.cli.prompts import require_confirmation
+
+    context = require_platform_workspace_context()
+    client = OsmosisClient()
+    require_confirmation(
+        f'Retry evaluation run "{name}"?',
+        yes=yes,
+        default=False,
+        summary=[("Name", name)],
+    )
+    with get_output_context().status("Retrying evaluation run..."):
+        result = client.retry_eval_run(
+            name,
+            credentials=context.credentials,
+            git_identity=context.git_identity,
+        )
+
+    resource: dict[str, Any] = {
+        "id": result.id,
+        "name": result.name,
+        "status": result.status,
+        "workflow_id": result.workflow_id,
+        "retryable_samples": result.retryable_samples,
+        "platform_url": result.platform_url,
+        **workspace_result_context(context),
+    }
+    next_steps = [f"Follow progress: osmosis eval logs {result.name} --follow"]
+    if result.platform_url:
+        next_steps.append(f"View: {result.platform_url}")
+    return OperationResult(
+        operation="eval.retry",
+        status="success",
+        resource=resource,
+        message=(
+            f"Retrying {result.retryable_samples} failed and skipped "
+            f"{'sample' if result.retryable_samples == 1 else 'samples'} in "
+            f"{result.name}"
+        ),
+        display_next_steps=next_steps,
+    )
 
 
 def stop(name: str, *, yes: bool) -> OperationResult:

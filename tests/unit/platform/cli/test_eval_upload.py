@@ -382,3 +382,43 @@ def test_incomplete_finalized_response_is_rejected(tmp_path: Path) -> None:
     context = SimpleNamespace(credentials=None, git_identity="acme/repo")
     with pytest.raises(RuntimeError, match="incomplete files"):
         upload_plan(plan, context=context, client=FakeClient())  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("replace", [False, True])
+def test_replace_is_forwarded_to_the_import_start(
+    tmp_path: Path, replace: bool
+) -> None:
+    files = (
+        _local_file(tmp_path, "index.jsonl", b"{}\n"),
+        _local_file(tmp_path, "progress.json", b'{"total_runs":1}\n'),
+    )
+    plan = EvalUploadPlan(
+        run_dir=tmp_path,
+        local_run_id="a" * 32,
+        manifest_digest="b" * 64,
+        run={"name": "run-1"},
+        schema_versions={"state_schema": 1},
+        provenance={},
+        files=files,
+    )
+    seen: dict[str, Any] = {}
+
+    class FakeClient:
+        def start_eval_run_import(self, **kwargs: Any) -> EvalRunImportResult:
+            seen["reimport"] = kwargs["reimport"]
+            return _result(files, finalized=True)
+
+        def finalize_eval_run_import(
+            self, _session_id: str, **_kwargs: Any
+        ) -> EvalRunImportResult:
+            return _result(files, finalized=True)
+
+    context = SimpleNamespace(credentials=None, git_identity="acme/repo")
+    upload_plan(
+        plan,
+        context=context,  # type: ignore[arg-type]
+        client=FakeClient(),  # type: ignore[arg-type]
+        replace=replace,
+    )
+
+    assert seen["reimport"] is replace
