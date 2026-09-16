@@ -541,9 +541,12 @@ class TestRetryEvalRun:
     ) -> None:
         captured: dict[str, object] = {}
 
-        def _retry(self, eval_run_id, *, credentials=None, git_identity=None):
+        def _retry(
+            self, eval_run_id, *, secrets=None, credentials=None, git_identity=None
+        ):
             captured["eval_run_id"] = eval_run_id
             captured["git_identity"] = git_identity
+            captured["secrets"] = secrets
             return RetryEvalRunResult(
                 id="11111111-1111-4111-8111-111111111111",
                 name="brave-otter",
@@ -560,6 +563,7 @@ class TestRetryEvalRun:
         assert captured == {
             "eval_run_id": "brave-otter",
             "git_identity": GIT_IDENTITY,
+            "secrets": None,
         }
         assert result.operation == "eval.retry"
         assert result.status == "success"
@@ -570,6 +574,8 @@ class TestRetryEvalRun:
         assert "View: https://platform.osmosis.ai/acme/eval/1" in (
             result.display_next_steps
         )
+        # `eval logs` has no --follow flag; a hint must not invent one.
+        assert not any("--follow" in step for step in result.display_next_steps)
 
     def test_retry_singularizes_a_lone_sample(
         self, monkeypatch: pytest.MonkeyPatch
@@ -577,7 +583,7 @@ class TestRetryEvalRun:
         monkeypatch.setattr(
             api_client_module.OsmosisClient,
             "retry_eval_run",
-            lambda self, eval_run_id, *, credentials=None, git_identity=None: (
+            lambda self, eval_run_id, *, secrets=None, credentials=None, git_identity=None: (
                 RetryEvalRunResult(
                     id="1",
                     name="brave-otter",
@@ -592,3 +598,64 @@ class TestRetryEvalRun:
 
         assert result.message == "Retrying 1 failed and skipped sample in brave-otter"
         assert result.resource["platform_url"] is None
+
+
+class TestRetryEvalRunSecrets:
+    def test_retry_resupplies_only_the_names_the_platform_asked_for(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        calls: list[dict[str, str] | None] = []
+
+        def _retry(
+            self, eval_run_id, *, secrets=None, credentials=None, git_identity=None
+        ):
+            calls.append(secrets)
+            if secrets is None:
+                raise PlatformAPIError(
+                    "This run supplied these secret(s) itself",
+                    status_code=400,
+                    details={"run_secret_names": ["OPENAI_API_KEY"]},
+                )
+            return RetryEvalRunResult(
+                id="1",
+                name="brave-otter",
+                status="pending",
+                workflow_id="cloud-eval/1",
+                retryable_samples=2,
+            )
+
+        monkeypatch.setattr(api_client_module.OsmosisClient, "retry_eval_run", _retry)
+        monkeypatch.setattr(
+            platform_eval_module,
+            "require_platform_workspace_context",
+            lambda: SimpleNamespace(
+                workspace_directory="/repo",
+                git_identity=GIT_IDENTITY,
+                repo_url=REPO_URL,
+                credentials=FAKE_CREDENTIALS,
+            ),
+        )
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-from-env")
+
+        result = eval_module.eval_retry(name="brave-otter", yes=True, secrets_file=None)
+
+        assert calls == [None, {"OPENAI_API_KEY": "sk-from-env"}]
+        assert result.status == "success"
+
+    def test_an_unrelated_failure_is_not_retried_as_a_secret_prompt(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        attempts = 0
+
+        def _retry(
+            self, eval_run_id, *, secrets=None, credentials=None, git_identity=None
+        ):
+            nonlocal attempts
+            attempts += 1
+            raise PlatformAPIError("Evaluation run not found", status_code=404)
+
+        monkeypatch.setattr(api_client_module.OsmosisClient, "retry_eval_run", _retry)
+
+        with pytest.raises(PlatformAPIError):
+            eval_module.eval_retry(name="brave-otter", yes=True, secrets_file=None)
+        assert attempts == 1

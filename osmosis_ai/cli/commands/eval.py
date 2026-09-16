@@ -268,11 +268,19 @@ def eval_upload(
 def eval_retry(
     name: str = typer.Argument(..., help="Evaluation run name or ID."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt."),
+    secrets_file: str = typer.Option(
+        None,
+        "--secrets-file",
+        help=(
+            "Dotenv file supplying values the original run provided itself; "
+            "- reads stdin. Values are never saved."
+        ),
+    ),
 ) -> CommandResult:
     """Re-run an evaluation run's failed and skipped samples."""
     from osmosis_ai.platform.cli.eval import retry as _retry
 
-    return _retry(name, yes=yes)
+    return _retry(name, yes=yes, secrets_file=secrets_file)
 
 
 @app.command("list")

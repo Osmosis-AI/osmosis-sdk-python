@@ -704,9 +704,10 @@ def download(
         raise
 
 
-def retry(name: str, *, yes: bool) -> OperationResult:
+def retry(name: str, *, yes: bool, secrets_file: str | None = None) -> OperationResult:
     """Re-run an evaluation run's failed and skipped samples."""
     from osmosis_ai.cli.prompts import require_confirmation
+    from osmosis_ai.platform.cli.secret_resolution import resolve_run_secrets
 
     context = require_platform_workspace_context()
     client = OsmosisClient()
@@ -716,11 +717,30 @@ def retry(name: str, *, yes: bool) -> OperationResult:
         default=False,
         summary=[("Name", name)],
     )
-    with get_output_context().status("Retrying evaluation run..."):
-        result = client.retry_eval_run(
-            name,
-            credentials=context.credentials,
-            git_identity=context.git_identity,
+
+    def _retry(secrets: dict[str, str] | None):
+        with get_output_context().status("Retrying evaluation run..."):
+            return client.retry_eval_run(
+                name,
+                secrets=secrets,
+                credentials=context.credentials,
+                git_identity=context.git_identity,
+            )
+
+    try:
+        result = _retry(None)
+    except PlatformAPIError as exc:
+        # The run supplied these itself and their values are never stored, so
+        # the platform can only name them; collect them and go again.
+        needed = (exc.details or {}).get("run_secret_names")
+        if not isinstance(needed, list) or not needed:
+            raise
+        result = _retry(
+            resolve_run_secrets(
+                names=[str(item) for item in needed],
+                secrets_file=secrets_file,
+                stored_names=set(),
+            )
         )
 
     resource: dict[str, Any] = {
@@ -732,7 +752,7 @@ def retry(name: str, *, yes: bool) -> OperationResult:
         "platform_url": result.platform_url,
         **workspace_result_context(context),
     }
-    next_steps = [f"Follow progress: osmosis eval logs {result.name} --follow"]
+    next_steps = [f"Check progress: osmosis eval info {result.name}"]
     if result.platform_url:
         next_steps.append(f"View: {result.platform_url}")
     return OperationResult(

@@ -1039,14 +1039,19 @@ class OsmosisClient:
         self,
         eval_run_id: str,
         *,
+        secrets: dict[str, str] | None = None,
         credentials: Credentials | None = None,
         git_identity: str | None,
     ) -> RetryEvalRunResult:
-        """Re-run a terminal evaluation run's failed and skipped samples."""
+        """Re-run a terminal evaluation run's failed and skipped samples.
+
+        ``secrets`` re-supplies values the original run provided itself; they
+        are never stored, so the platform cannot replay them on its own.
+        """
         result = platform_request(
             f"/api/cli/eval-runs/{_safe_path(eval_run_id)}/retry",
             method="POST",
-            data={},
+            data={"secrets": secrets} if secrets else {},
             credentials=credentials,
             git_identity=git_identity,
         )
