@@ -707,6 +707,7 @@ def download(
 def retry(name: str, *, yes: bool, secrets_file: str | None = None) -> OperationResult:
     """Re-run an evaluation run's failed and skipped samples."""
     from osmosis_ai.cli.prompts import require_confirmation
+    from osmosis_ai.platform.cli.secret_redact import redact_provided_secrets
     from osmosis_ai.platform.cli.secret_resolution import resolve_run_secrets
 
     context = require_platform_workspace_context()
@@ -720,12 +721,18 @@ def retry(name: str, *, yes: bool, secrets_file: str | None = None) -> Operation
 
     def _retry(secrets: dict[str, str] | None):
         with get_output_context().status("Retrying evaluation run..."):
-            return client.retry_eval_run(
-                name,
-                secrets=secrets,
-                credentials=context.credentials,
-                git_identity=context.git_identity,
-            )
+            try:
+                return client.retry_eval_run(
+                    name,
+                    secrets=secrets,
+                    credentials=context.credentials,
+                    git_identity=context.git_identity,
+                )
+            except PlatformAPIError as exc:
+                # A re-supplied value can be echoed back in a validation error.
+                if secrets:
+                    raise redact_provided_secrets(exc, secrets.values()) from None
+                raise
 
     try:
         result = _retry(None)

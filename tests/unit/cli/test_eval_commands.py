@@ -659,3 +659,25 @@ class TestRetryEvalRunSecrets:
         with pytest.raises(PlatformAPIError):
             eval_module.eval_retry(name="brave-otter", yes=True, secrets_file=None)
         assert attempts == 1
+
+    def test_a_resupplied_value_is_redacted_from_a_platform_error(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def _retry(
+            self, eval_run_id, *, secrets=None, credentials=None, git_identity=None
+        ):
+            if secrets is None:
+                raise PlatformAPIError(
+                    "needs secrets",
+                    status_code=400,
+                    details={"run_secret_names": ["OPENAI_API_KEY"]},
+                )
+            raise PlatformAPIError("Rejected value sk-supersecret", status_code=400)
+
+        monkeypatch.setattr(api_client_module.OsmosisClient, "retry_eval_run", _retry)
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-supersecret")
+
+        with pytest.raises(PlatformAPIError) as excinfo:
+            eval_module.eval_retry(name="brave-otter", yes=True, secrets_file=None)
+
+        assert "sk-supersecret" not in str(excinfo.value)

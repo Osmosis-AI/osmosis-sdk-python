@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from osmosis_ai.cli.console import console
-from osmosis_ai.cli.errors import CLIError
+from osmosis_ai.cli.errors import CLIError, CLIErrorCode
 from osmosis_ai.cli.output import OperationResult, get_output_context
 from osmosis_ai.eval.local.runner import LOGS_FILENAME, scrub_logs_file
 from osmosis_ai.eval.local.state import (
@@ -24,6 +24,7 @@ from osmosis_ai.eval.local.upload import (
 )
 from osmosis_ai.platform.api.client import OsmosisClient
 from osmosis_ai.platform.api.models import EvalRunImportResult
+from osmosis_ai.platform.auth.platform_client import PlatformAPIError
 from osmosis_ai.platform.cli.utils import require_git_workspace_directory_context
 from osmosis_ai.platform.cli.workspace_directory_context import git_result_context
 
@@ -249,6 +250,14 @@ def upload(run_dir: Path, *, replace: bool = False) -> OperationResult:
             imported = upload_plan(plan, context=context, replace=replace)
     except LocalEvalUploadError as exc:
         raise CLIError(str(exc)) from exc
+    except PlatformAPIError as exc:
+        if exc.status_code == 409 and not replace:
+            raise CLIError(
+                f"{exc} Re-run it with --retry-failed, then republish with: "
+                f"osmosis eval upload {console.escape(str(run_dir))} --replace",
+                code=CLIErrorCode.VALIDATION,
+            ) from None
+        raise
     except (OSError, RuntimeError, ValueError) as exc:
         raise CLIError(f"Local evaluation upload failed: {exc}") from exc
     return _result(plan, imported, context=context)

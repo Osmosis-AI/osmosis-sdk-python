@@ -672,6 +672,51 @@ def test_upload_flag_uploads_after_finalize_and_surfaces_platform_url(
     assert events[:2] == ["close", "upload"]
 
 
+def test_retry_failed_upload_replaces_the_runs_published_results(
+    workspace: Path,
+    captured_runner: type[_CapturedRunner],
+    console_capture: StringIO,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A retry is the same local run again, so its upload replaces what the
+    earlier attempt published rather than conflicting with it."""
+    import osmosis_ai.platform.cli.eval_upload as eval_upload_module
+
+    captured_replace: list[bool] = []
+    original_run = _CapturedRunner.run
+
+    async def run_with_callback(self: Any, *, after_finalize: Any) -> Any:
+        summary = await original_run(self)
+        after_finalize(summary)
+        return summary
+
+    def upload_plan(
+        _plan: Any, *, context: Any, replace: bool = False
+    ) -> SimpleNamespace:
+        captured_replace.append(replace)
+        return SimpleNamespace(
+            session_id="session-1",
+            eval_run_id="eval-1",
+            eval_run_name="uploaded-run",
+            status="finalized",
+            expected_files=2,
+            uploaded_files=2,
+            platform_url="https://platform.example/evals/eval-1",
+        )
+
+    monkeypatch.setattr(_CapturedRunner, "run", run_with_callback)
+    monkeypatch.setattr(
+        eval_upload_module,
+        "prepare_eval_upload_plan",
+        lambda run_dir: SimpleNamespace(run_dir=run_dir),
+    )
+    monkeypatch.setattr(eval_upload_module, "upload_plan", upload_plan)
+
+    _run(workspace, upload=True, retry_failed=True)
+
+    assert captured_replace == [True]
+
+
 def test_upload_failure_says_local_results_are_complete_and_gives_retry_command(
     workspace: Path,
     captured_runner: type[_CapturedRunner],
