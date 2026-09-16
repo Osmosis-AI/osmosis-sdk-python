@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from contextlib import redirect_stderr
 from io import StringIO
 from types import SimpleNamespace
 
@@ -15,6 +16,7 @@ import osmosis_ai.platform.cli.utils as utils_module
 from osmosis_ai.cli.console import Console
 from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.cli.output import DetailResult, ListResult
+from osmosis_ai.cli.output.error import classify_error, emit_structured_error_to_stderr
 from osmosis_ai.platform.api.models import (
     EvaluationRun,
     EvaluationRunDetail,
@@ -673,7 +675,13 @@ class TestRetryEvalRunSecrets:
                     status_code=400,
                     details={"run_secret_names": ["OPENAI_API_KEY"]},
                 )
-            raise PlatformAPIError("Rejected value sk-supersecret", status_code=400)
+            raise PlatformAPIError(
+                "Rejected value sk-supersecret",
+                status_code=400,
+                error_code="bad_sk-supersecret",
+                field="field_sk-supersecret",
+                details={"nested": {"message": "contains sk-supersecret"}},
+            )
 
         monkeypatch.setattr(api_client_module.OsmosisClient, "retry_eval_run", _retry)
         monkeypatch.setenv("OPENAI_API_KEY", "sk-supersecret")
@@ -681,7 +689,17 @@ class TestRetryEvalRunSecrets:
         with pytest.raises(PlatformAPIError) as excinfo:
             eval_module.eval_retry(name="brave-otter", yes=True, secrets_file=None)
 
-        assert "sk-supersecret" not in str(excinfo.value)
+        redacted = excinfo.value
+        assert "sk-supersecret" not in str(redacted)
+        assert "sk-supersecret" not in (redacted.error_code or "")
+        assert "sk-supersecret" not in (redacted.field or "")
+        assert "sk-supersecret" not in str(redacted.details)
+        buf = StringIO()
+        with redirect_stderr(buf):
+            emit_structured_error_to_stderr(
+                classify_error(redacted), command="eval retry"
+            )
+        assert "sk-supersecret" not in buf.getvalue()
 
     def test_a_local_run_gets_the_exact_command_instead_of_a_refusal(
         self, monkeypatch: pytest.MonkeyPatch
@@ -710,7 +728,34 @@ class TestRetryEvalRunSecrets:
             "--retry-failed --upload" in str(excinfo.value)
         )
 
-    def test_a_local_run_without_a_recorded_config_falls_back_to_a_placeholder(
+    def test_a_local_run_command_shell_quotes_paths_with_spaces(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def _retry(
+            self, eval_run_id, *, secrets=None, credentials=None, git_identity=None
+        ):
+            raise PlatformAPIError(
+                "Local evaluation runs are retried from the CLI, not the platform",
+                status_code=409,
+                details={
+                    "local_run": {
+                        "eval_run_name": "brave otter",
+                        "config_path": "configs/eval/my rollout.toml",
+                    }
+                },
+            )
+
+        monkeypatch.setattr(api_client_module.OsmosisClient, "retry_eval_run", _retry)
+
+        with pytest.raises(CLIError) as excinfo:
+            eval_module.eval_retry(name="brave otter", yes=True, secrets_file=None)
+
+        assert (
+            "osmosis eval run 'configs/eval/my rollout.toml' --name 'brave otter' "
+            "--retry-failed --upload" in str(excinfo.value)
+        )
+
+    def test_a_local_run_without_a_recorded_config_asks_for_the_original_path(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setattr(
@@ -735,4 +780,7 @@ class TestRetryEvalRunSecrets:
         with pytest.raises(CLIError) as excinfo:
             eval_module.eval_retry(name="brave-otter", yes=True, secrets_file=None)
 
-        assert "<config>.toml --name brave-otter" in str(excinfo.value)
+        message = str(excinfo.value)
+        assert "no recorded config path" in message
+        assert "<config>.toml" not in message
+        assert "--name brave-otter --retry-failed --upload" in message

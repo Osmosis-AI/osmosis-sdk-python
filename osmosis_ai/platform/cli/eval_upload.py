@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from shlex import quote
 from typing import TYPE_CHECKING, Any
 
 from osmosis_ai.cli.console import console
-from osmosis_ai.cli.errors import CLIError, CLIErrorCode
+from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.cli.output import OperationResult, get_output_context
+from osmosis_ai.cli.output.error import classify_error
 from osmosis_ai.eval.local.runner import LOGS_FILENAME, scrub_logs_file
 from osmosis_ai.eval.local.state import (
     LOCKS_DIRNAME,
@@ -252,10 +254,13 @@ def upload(run_dir: Path, *, replace: bool = False) -> OperationResult:
         raise CLIError(str(exc)) from exc
     except PlatformAPIError as exc:
         if exc.status_code == 409 and not replace:
+            classified = classify_error(exc)
+            command = f"osmosis eval upload {quote(str(run_dir))} --replace"
             raise CLIError(
                 f"{exc} Re-run it with --retry-failed, then republish with: "
-                f"osmosis eval upload {console.escape(str(run_dir))} --replace",
-                code=CLIErrorCode.VALIDATION,
+                f"{console.escape(command)}",
+                code=classified.code,
+                details=classified.details,
             ) from None
         raise
     except (OSError, RuntimeError, ValueError) as exc:

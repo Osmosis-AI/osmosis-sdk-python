@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import math
 from pathlib import Path
+from shlex import quote
 from typing import TYPE_CHECKING, Any
 
 from osmosis_ai.cli.console import console
@@ -742,13 +743,25 @@ def retry(name: str, *, yes: bool, secrets_file: str | None = None) -> Operation
         # command instead of the bare refusal.
         local_run = details.get("local_run")
         if isinstance(local_run, dict):
-            config = local_run.get("config_path") or "<config>.toml"
+            config = local_run.get("config_path")
             run_name = local_run.get("eval_run_name") or name
+            quoted_name = quote(str(run_name))
+            if isinstance(config, str) and config:
+                command = (
+                    f"osmosis eval run {quote(config)} --name {quoted_name} "
+                    "--retry-failed --upload"
+                )
+                raise CLIError(
+                    "Local evaluation runs are retried on the machine that "
+                    "produced them. Retry it with:\n"
+                    f"  {console.escape(command)}",
+                    code=CLIErrorCode.VALIDATION,
+                ) from None
             raise CLIError(
                 "Local evaluation runs are retried on the machine that "
-                "produced them. Retry it with:\n"
-                f"  osmosis eval run {console.escape(str(config))} "
-                f"--name {console.escape(str(run_name))} "
+                "produced them. This run has no recorded config path; pass "
+                "the original config:\n"
+                f"  osmosis eval run <config> --name {console.escape(quoted_name)} "
                 "--retry-failed --upload",
                 code=CLIErrorCode.VALIDATION,
             ) from None
