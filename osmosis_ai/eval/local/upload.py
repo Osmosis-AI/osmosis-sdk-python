@@ -32,6 +32,7 @@ _PROVENANCE_KEYS = (
     "git_dirty",
     "config_branch",
     "config_commit_sha",
+    "config_path",
 )
 _HASH_CHUNK_SIZE = 1024 * 1024
 _MAX_UPLOAD_PATH_LENGTH = 1024

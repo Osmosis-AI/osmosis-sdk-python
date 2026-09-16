@@ -13,6 +13,7 @@ import osmosis_ai.platform.api.client as api_client_module
 import osmosis_ai.platform.cli.eval as platform_eval_module
 import osmosis_ai.platform.cli.utils as utils_module
 from osmosis_ai.cli.console import Console
+from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.cli.output import DetailResult, ListResult
 from osmosis_ai.platform.api.models import (
     EvaluationRun,
@@ -681,3 +682,57 @@ class TestRetryEvalRunSecrets:
             eval_module.eval_retry(name="brave-otter", yes=True, secrets_file=None)
 
         assert "sk-supersecret" not in str(excinfo.value)
+
+    def test_a_local_run_gets_the_exact_command_instead_of_a_refusal(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def _retry(
+            self, eval_run_id, *, secrets=None, credentials=None, git_identity=None
+        ):
+            raise PlatformAPIError(
+                "Local evaluation runs are retried from the CLI, not the platform",
+                status_code=409,
+                details={
+                    "local_run": {
+                        "eval_run_name": "brave-otter",
+                        "config_path": "configs/eval/my-rollout.toml",
+                    }
+                },
+            )
+
+        monkeypatch.setattr(api_client_module.OsmosisClient, "retry_eval_run", _retry)
+
+        with pytest.raises(CLIError) as excinfo:
+            eval_module.eval_retry(name="brave-otter", yes=True, secrets_file=None)
+
+        assert (
+            "osmosis eval run configs/eval/my-rollout.toml --name brave-otter "
+            "--retry-failed --upload" in str(excinfo.value)
+        )
+
+    def test_a_local_run_without_a_recorded_config_falls_back_to_a_placeholder(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(
+            api_client_module.OsmosisClient,
+            "retry_eval_run",
+            lambda self, eval_run_id, *, secrets=None, credentials=None, git_identity=None: (
+                (_ for _ in ()).throw(
+                    PlatformAPIError(
+                        "Local evaluation runs are retried from the CLI",
+                        status_code=409,
+                        details={
+                            "local_run": {
+                                "eval_run_name": "brave-otter",
+                                "config_path": None,
+                            }
+                        },
+                    )
+                )
+            ),
+        )
+
+        with pytest.raises(CLIError) as excinfo:
+            eval_module.eval_retry(name="brave-otter", yes=True, secrets_file=None)
+
+        assert "<config>.toml --name brave-otter" in str(excinfo.value)

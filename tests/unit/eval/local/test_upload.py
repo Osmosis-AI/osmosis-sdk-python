@@ -79,6 +79,7 @@ def _run_dir(tmp_path: Path, *, trajectory: bool = True) -> Path:
                 "git_dirty": True,
                 "config_branch": "feature/eval",
                 "config_commit_sha": "f" * 40,
+                "config_path": "configs/eval/echo.toml",
                 "advanced": {"do_not_upload": True},
                 "env": {"TOKEN": "secret"},
             },
@@ -161,6 +162,9 @@ def test_build_plan_selects_only_canonical_upload_files(tmp_path: Path) -> None:
         "git_dirty": True,
         "config_branch": "feature/eval",
         "config_commit_sha": "f" * 40,
+        # Carried so the platform can show the exact retry command; `advanced`
+        # and `env` above stay out of the upload.
+        "config_path": "configs/eval/echo.toml",
     }
     assert [file.path for file in plan.files] == [
         "index.jsonl",

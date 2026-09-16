@@ -1212,3 +1212,32 @@ async def test_declining_the_dispatch_confirmation_exits_before_any_rollout(
     with pytest.raises(typer.Exit) as raised:
         await _confirm_dispatch()
     assert raised.value.exit_code == 0
+
+
+def test_provenance_records_the_config_path_relative_to_the_workspace(
+    workspace: Path,
+) -> None:
+    spec = SimpleNamespace(branch=None, commit_sha=None)
+
+    provenance = eval_run_module._provenance(
+        workspace,
+        spec,
+        config_path=workspace / "configs" / "eval" / "echo.toml",
+    )
+
+    assert provenance["config_path"] == "configs/eval/echo.toml"
+
+
+def test_provenance_omits_a_config_that_lives_outside_the_workspace(
+    workspace: Path, tmp_path: Path
+) -> None:
+    """An absolute path outside the workspace has no portable spelling, so it is
+    dropped rather than uploaded as something a reader cannot act on."""
+    spec = SimpleNamespace(branch=None, commit_sha=None)
+    outside = tmp_path / "elsewhere" / "eval.toml"
+    outside.parent.mkdir(parents=True, exist_ok=True)
+    outside.write_text("", encoding="utf-8")
+
+    provenance = eval_run_module._provenance(workspace, spec, config_path=outside)
+
+    assert "config_path" not in provenance

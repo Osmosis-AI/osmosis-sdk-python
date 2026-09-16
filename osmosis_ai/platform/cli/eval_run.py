@@ -463,7 +463,12 @@ def run(
         rollout_dir=rollout_dir,
         output_root=output_root,
         hooks=hooks,
-        provenance=_provenance(workspace_directory, spec, advanced=advanced),
+        provenance=_provenance(
+            workspace_directory,
+            spec,
+            advanced=advanced,
+            config_path=resolved_config_path,
+        ),
         display_root=display_root,
     )
 
@@ -577,8 +582,28 @@ def run(
     )
 
 
+def _workspace_relative_config_path(
+    config_path: Path, workspace_directory: Path
+) -> str | None:
+    """The config's path inside the workspace, for reproducing the run command.
+
+    Provenance, not manifest inputs: a moved config must not refuse a resume.
+    A config outside the workspace has no portable spelling, so it is omitted
+    rather than recording an absolute path that means nothing to a reader.
+    """
+    try:
+        relative = config_path.resolve().relative_to(workspace_directory.resolve())
+    except ValueError:
+        return None
+    return relative.as_posix()
+
+
 def _provenance(
-    workspace_directory: Path, spec: Any, *, advanced: dict[str, Any] | None = None
+    workspace_directory: Path,
+    spec: Any,
+    *,
+    advanced: dict[str, Any] | None = None,
+    config_path: Path | None = None,
 ) -> dict[str, Any]:
     """Record what actually executed. Never mutates the workspace (§5)."""
     from osmosis_ai.platform.cli.workspace_repo import summarize_local_git_state
@@ -587,6 +612,11 @@ def _provenance(
     provenance: dict[str, Any] = {
         "config_branch": spec.branch,
         "config_commit_sha": spec.commit_sha,
+        "config_path": (
+            _workspace_relative_config_path(config_path, workspace_directory)
+            if config_path is not None
+            else None
+        ),
         "advanced": dict(advanced) if advanced else None,
     }
     if state is not None:

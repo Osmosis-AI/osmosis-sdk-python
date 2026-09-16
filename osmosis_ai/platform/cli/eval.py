@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from osmosis_ai.cli.console import console
-from osmosis_ai.cli.errors import CLIError
+from osmosis_ai.cli.errors import CLIError, CLIErrorCode
 from osmosis_ai.cli.output import (
     DetailResult,
     DetailSection,
@@ -737,9 +737,24 @@ def retry(name: str, *, yes: bool, secrets_file: str | None = None) -> Operation
     try:
         result = _retry(None)
     except PlatformAPIError as exc:
+        details = exc.details or {}
+        # A local run executes on the machine that produced it, so hand back the
+        # command instead of the bare refusal.
+        local_run = details.get("local_run")
+        if isinstance(local_run, dict):
+            config = local_run.get("config_path") or "<config>.toml"
+            run_name = local_run.get("eval_run_name") or name
+            raise CLIError(
+                "Local evaluation runs are retried on the machine that "
+                "produced them. Retry it with:\n"
+                f"  osmosis eval run {console.escape(str(config))} "
+                f"--name {console.escape(str(run_name))} "
+                "--retry-failed --upload",
+                code=CLIErrorCode.VALIDATION,
+            ) from None
         # The run supplied these itself and their values are never stored, so
         # the platform can only name them; collect them and go again.
-        needed = (exc.details or {}).get("run_secret_names")
+        needed = details.get("run_secret_names")
         if not isinstance(needed, list) or not needed:
             raise
         result = _retry(
