@@ -227,17 +227,33 @@ def test_login_json_preserves_http_error_classification(
     assert envelope["error"]["details"]["status_code"] == status
 
 
-def test_login_json_conflict_retains_response_and_platform_code(
-    monkeypatch, capsys
+@pytest.mark.parametrize(
+    ("status", "body", "expected_code", "expected_message"),
+    [
+        (
+            409,
+            {
+                "error": "deployment_conflict",
+                "message": "A deployment is in progress. Please try again shortly.",
+            },
+            "CONFLICT",
+            "A deployment is in progress. Please try again shortly.",
+        ),
+        (
+            401,
+            {"code": "TOKEN_EXPIRED", "message": "Token expired on 2026-09-01."},
+            "AUTH_REQUIRED",
+            "Token has expired.",
+        ),
+    ],
+)
+def test_login_json_http_error_retains_response_and_platform_code(
+    monkeypatch, capsys, status, body, expected_code, expected_message
 ) -> None:
-    body = {
-        "error": "deployment_conflict",
-        "message": "A deployment is in progress. Please try again shortly.",
-    }
     error = HTTPError(
         url="http://test",
-        code=409,
-        msg="Conflict",
+        code=status,
+        msg="Error",
         hdrs=None,
         fp=BytesIO(json.dumps(body).encode()),
     )
@@ -254,12 +270,12 @@ def test_login_json_conflict_retains_response_and_platform_code(
 
     envelope = json.loads(capsys.readouterr().err)
     assert exit_code == 1
-    assert envelope["error"]["code"] == "CONFLICT"
-    assert body["message"] in envelope["error"]["message"]
+    assert envelope["error"]["code"] == expected_code
+    assert expected_message in envelope["error"]["message"]
     assert envelope["error"]["details"] == {
         **body,
-        "platform_code": "deployment_conflict",
-        "status_code": 409,
+        "platform_code": body.get("code") or body["error"],
+        "status_code": status,
     }
 
 

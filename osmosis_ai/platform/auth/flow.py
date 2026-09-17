@@ -110,18 +110,23 @@ class DeviceCodeResponse:
 # ---------------------------------------------------------------------------
 
 
-def _parse_expires_at(raw: str | None) -> datetime:
+def _parse_expires_at(raw: Any) -> datetime:
     """Parse an ISO 8601 expires_at string into a timezone-aware datetime.
 
     Falls back to 90 days from now if the value is missing.
 
     Raises:
-        LoginError: If the timestamp is naive (no timezone) or already expired.
+        LoginError: If the value is not a parseable ISO 8601 string, is naive
+            (no timezone), or is already expired.
     """
     if not raw:
         return datetime.now(UTC) + timedelta(days=90)
-
-    expires_at = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    if not isinstance(raw, str):
+        raise LoginError("Invalid response from platform")
+    try:
+        expires_at = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError as e:
+        raise LoginError("Invalid response from platform") from e
     if expires_at.tzinfo is None:
         raise LoginError(
             "Invalid expires_at from platform: expected timezone-aware ISO8601 timestamp"
@@ -147,6 +152,25 @@ def _read_json_object(response: Any) -> dict[str, Any]:
     if not isinstance(data, dict):
         raise LoginError("Invalid response from platform")
     return data
+
+
+def _parse_user(data: dict[str, Any]) -> UserInfo:
+    """Build the caller identity from a login response.
+
+    Raises:
+        LoginError: If ``user`` is not an object or lacks an id or email.
+    """
+    user_data = data.get("user", {})
+    if not isinstance(user_data, dict):
+        raise LoginError("Invalid response from platform")
+    user = UserInfo(
+        id=user_data.get("id", ""),
+        email=user_data.get("email", ""),
+        name=user_data.get("name"),
+    )
+    if not user.id or not user.email:
+        raise LoginError("Server returned incomplete user information")
+    return user
 
 
 # User-friendly messages keyed by HTTP status code.
@@ -251,17 +275,7 @@ def verify_token(token: str, *, git_identity: str | None = None) -> VerifyResult
             data = _read_json_object(response)
 
             token_id = data.get("token_id")
-
-            user_data = data.get("user", {})
-            user_info = UserInfo(
-                id=user_data.get("id", ""),
-                email=user_data.get("email", ""),
-                name=user_data.get("name"),
-            )
-
-            if not user_info.id or not user_info.email:
-                raise LoginError("Server returned incomplete user information")
-
+            user_info = _parse_user(data)
             expires_at = _parse_expires_at(data.get("expires_at"))
 
             workspace_data = data.get("workspace")
@@ -287,13 +301,18 @@ def verify_token(token: str, *, git_identity: str | None = None) -> VerifyResult
                     _CLI_TOKEN_ERROR_MESSAGES[error_code],
                     code=error_code,
                     status_code=e.code,
+                    details=error_body or None,
                 ) from e
-            raise LoginError(_HTTP_ERROR_MESSAGES[e.code], status_code=e.code) from e
+            raise LoginError(
+                _HTTP_ERROR_MESSAGES[e.code],
+                status_code=e.code,
+                details=error_body or None,
+            ) from e
         raise _login_error_from_http(e, "Verification failed") from e
     except (URLError, TimeoutError) as e:
         raise LoginError(connection_error_message(e)) from e
     except (ValueError, TypeError) as e:
-        # JSON decoding, a non-UTF-8 body, or a malformed expires_at.
+        # JSON decoding or a non-UTF-8 body.
         raise LoginError("Invalid response from platform") from e
 
 
@@ -383,10 +402,14 @@ def poll_device_token(
                     "Device code expired. Please try again.",
                     code=code,
                     status_code=e.code,
+                    details=error_data or None,
                 ) from e
             elif error_code == "access_denied":
                 raise LoginError(
-                    "Authorization was denied.", code=code, status_code=e.code
+                    "Authorization was denied.",
+                    code=code,
+                    status_code=e.code,
+                    details=error_data or None,
                 ) from e
             else:
                 raise LoginError(
@@ -461,16 +484,7 @@ def device_login(timeout: float = 900.0) -> tuple[LoginResult, Credentials]:
     if not token:
         raise LoginError("Server response missing token")
 
-    user_data = token_response.get("user", {})
-    user = UserInfo(
-        id=user_data.get("id", ""),
-        email=user_data.get("email", ""),
-        name=user_data.get("name"),
-    )
-
-    if not user.id or not user.email:
-        raise LoginError("Server returned incomplete user information")
-
+    user = _parse_user(token_response)
     expires_at = _parse_expires_at(token_response.get("expires_at"))
     token_id = token_response.get("token_id")
 

@@ -637,10 +637,20 @@ def test_login_rejects_non_object_response(stage: str, payload: bytes) -> None:
             _call_login_stage(stage)
 
 
-def test_verify_token_malformed_expires_at_is_login_error() -> None:
-    payload = json.dumps(
-        {"user": {"id": "u1", "email": "a@b.c"}, "expires_at": "2026-13-45T99:00:00Z"}
-    ).encode()
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"user": {"id": "u1", "email": "a@b.c"}, "expires_at": "2026-13-45T99:00:00Z"},
+        {"user": {"id": "u1", "email": "a@b.c"}, "expires_at": 1234},
+        {"user": "not-an-object", "expires_at": "2099-01-01T00:00:00Z"},
+        {"user": ["u1"], "expires_at": "2099-01-01T00:00:00Z"},
+    ],
+    ids=["bad_iso", "non_string_expires_at", "string_user", "list_user"],
+)
+def test_verify_token_malformed_fields_are_login_errors(
+    payload: dict[str, Any],
+) -> None:
+    payload = json.dumps(payload).encode()
     with patch(
         "osmosis_ai.platform.auth.flow.urlopen", return_value=_login_response(payload)
     ):

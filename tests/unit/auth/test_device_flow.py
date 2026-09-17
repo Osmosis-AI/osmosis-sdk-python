@@ -345,3 +345,40 @@ def test_poll_terminal_errors_carry_status_and_code(
             poll_device_token("device_abc", interval=1, timeout=10)
     assert caught.value.status_code == 400
     assert caught.value.code == error_code
+    assert caught.value.details == {"error": error_code}
+
+
+def _mock_response(body: bytes) -> MagicMock:
+    response = MagicMock()
+    response.read.return_value = body
+    response.__enter__ = MagicMock(return_value=response)
+    response.__exit__ = MagicMock(return_value=False)
+    return response
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"expires_at": "2026-13-45T99:00:00Z"},
+        {"expires_at": 1234},
+        {"user": "not-an-object"},
+    ],
+    ids=["bad_iso", "non_string_expires_at", "string_user"],
+)
+def test_device_login_malformed_token_response_is_login_error(
+    overrides: dict[str, object],
+) -> None:
+    with (
+        patch(
+            "osmosis_ai.platform.auth.flow.urlopen",
+            side_effect=[
+                _mock_response(_make_device_code_response()),
+                _mock_response(_make_token_response(**overrides)),
+            ],
+        ),
+        patch("osmosis_ai.platform.auth.flow.time.sleep"),
+        patch("sys.stdin") as mock_stdin,
+    ):
+        mock_stdin.isatty.return_value = False
+        with pytest.raises(LoginError, match="Invalid response from platform"):
+            device_login(timeout=10.0)

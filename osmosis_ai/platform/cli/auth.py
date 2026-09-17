@@ -113,7 +113,12 @@ def _verify_env_token(env_token: str, *, git_identity: str | None = None) -> Any
         if message is None and exc.status_code == 401:
             message = MSG_ENV_TOKEN_INVALID
         if message is not None:
-            raise LoginError(message, code=code, status_code=exc.status_code) from exc
+            raise LoginError(
+                message,
+                code=code,
+                status_code=exc.status_code,
+                details=exc.details,
+            ) from exc
         raise
 
 
