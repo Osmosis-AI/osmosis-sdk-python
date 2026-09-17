@@ -79,6 +79,10 @@ Command path prefers Click's `command_path` when the context is already inside a
 
 Not-logged-in failures use `AUTH_REQUIRED`. `SubscriptionRequiredError` maps to `SUBSCRIPTION_REQUIRED` or `BILLING_REQUIRED` from the platform `error_code`; a generic HTTP 403 stays `PLATFORM_ERROR`. The error object has `code`, `message`, and `details` only — `request_id` is omitted because the platform client does not expose one.
 
+Platform API and login errors prefer a non-empty string `message` over the legacy `error` field, falling back to a non-empty string `error` when no usable explanation is supplied. Non-string and whitespace-only fields are skipped when choosing that explanation. Authentication and repository-scope guidance, validation issue details, and device-login polling decisions remain unchanged. Login HTTP errors use the same status classification as API errors (including `VALIDATION`, `CONFLICT`, and `RATE_LIMITED`), and retain the status in JSON details. Connection and response-read timeouts during login surface a timeout message with retry guidance instead of an internal-error message.
+
+HTTP 409 responses with `error: "deployment_conflict"` remain `CONFLICT` errors. The platform client surfaces a non-empty server `message`; missing or invalid messages and the legacy browser-only reload prompt receive CLI guidance to retry shortly and contact support if the conflict persists. The JSON error details retain the original response, HTTP status, and platform code. Requests are not automatically retried.
+
 JSON success and error envelopes are encoded with `allow_nan=False`. Non-finite metric values are sanitized to `null` in train/eval metrics exports (including the file written by `train info --output`); any remaining non-finite float fails the command rather than emitting invalid JSON.
 
 Unknown exceptions become `INTERNAL` with a generic message. Set `OSMOSIS_DEBUG=1` to append the original exception and traceback to stderr (the JSON envelope is unchanged).

@@ -193,8 +193,17 @@ def test_invalid_token_does_not_mutate_existing_session(monkeypatch, capsys) -> 
     assert json.loads(captured.err)["error"]["code"] == "AUTH_REQUIRED"
 
 
-def test_login_json_with_platform_verify_error_is_platform_error(
-    monkeypatch, capsys
+@pytest.mark.parametrize(
+    ("status", "code"),
+    [
+        (400, "VALIDATION"),
+        (409, "CONFLICT"),
+        (429, "RATE_LIMITED"),
+        (500, "PLATFORM_ERROR"),
+    ],
+)
+def test_login_json_preserves_http_error_classification(
+    monkeypatch, capsys, status, code
 ) -> None:
     monkeypatch.delenv("OSMOSIS_TOKEN", raising=False)
     monkeypatch.setattr(
@@ -203,7 +212,7 @@ def test_login_json_with_platform_verify_error_is_platform_error(
     monkeypatch.setattr(
         "osmosis_ai.platform.auth.verify_token",
         lambda token, git_identity=None: (_ for _ in ()).throw(
-            LoginError("Platform error", status_code=500)
+            LoginError("Platform error", status_code=status)
         ),
     )
 
@@ -211,8 +220,8 @@ def test_login_json_with_platform_verify_error_is_platform_error(
 
     envelope = json.loads(capsys.readouterr().err)
     assert exit_code == 1
-    assert envelope["error"]["code"] == "PLATFORM_ERROR"
-    assert envelope["error"]["details"]["status_code"] == 500
+    assert envelope["error"]["code"] == code
+    assert envelope["error"]["details"]["status_code"] == status
 
 
 def test_login_json_with_426_preserves_upgrade_details(monkeypatch, capsys) -> None:

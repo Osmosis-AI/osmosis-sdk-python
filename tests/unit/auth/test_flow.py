@@ -19,6 +19,7 @@ from osmosis_ai.platform.auth.flow import (
     LoginError,
     VerifyResult,
     _get_device_name,
+    poll_device_token,
     request_device_code,
     verify_token,
 )
@@ -527,3 +528,25 @@ class TestVerifyTokenVersionSignals:
         mock_console.print_warning.assert_called_once_with(
             upgrade_msg, code="UPGRADE_AVAILABLE"
         )
+
+
+@pytest.mark.parametrize("stage", ["verify", "authorize", "poll"])
+@pytest.mark.parametrize("during_read", [False, True])
+def test_login_timeout_has_actionable_message(stage: str, during_read: bool) -> None:
+    response = MagicMock()
+    response.headers = {}
+    response.__enter__.return_value = response
+    response.read.side_effect = TimeoutError()
+    with patch("osmosis_ai.platform.auth.flow.urlopen") as request:
+        if during_read:
+            request.return_value = response
+        else:
+            request.side_effect = TimeoutError()
+        with pytest.raises(LoginError, match=r"timed out.*try again"):
+            if stage == "verify":
+                verify_token("test-token")
+            elif stage == "authorize":
+                request_device_code()
+            else:
+                poll_device_token("test-device", interval=1, timeout=10)
+    request.assert_called_once()

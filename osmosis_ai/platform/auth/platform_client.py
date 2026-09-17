@@ -421,6 +421,15 @@ def revoke_cli_token(
         return False
 
 
+def _response_error_message(body: dict[str, Any]) -> str | None:
+    """Prefer a human-readable message over a legacy error string or code."""
+    for key in ("message", "error"):
+        value = body.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
 def _raise_for_http_error(
     e: HTTPError,
     *,
@@ -473,9 +482,9 @@ def _raise_for_http_error(
                         error_code = error_body["code"]
                     if isinstance(error_body.get("field"), str):
                         field = error_body["field"]
-            # Prefer structured error/message field over raw body
-            error_msg = error_body.get("error") or error_body.get("message")
-            if error_msg and isinstance(error_msg, str):
+            # Prefer a usable explanation over an error code or raw response body.
+            error_msg = _response_error_message(error_body)
+            if error_msg:
                 issues_detail = _format_response_issues(error_body)
                 platform_message = f"{error_msg}{issues_detail or ''}"
             elif text:
@@ -484,6 +493,23 @@ def _raise_for_http_error(
                 detail = f" Response: {text}"
     except Exception:
         pass
+
+    if e.code == 409 and error_body.get("error") == "deployment_conflict":
+        error_code = error_code or "deployment_conflict"
+        message = error_body.get("message")
+        # Older edge routers return browser reload guidance for CLI requests too.
+        if (
+            isinstance(message, str)
+            and message.strip()
+            and message.strip() != "We\u2019ve updated the app. Reload to continue."
+        ):
+            platform_message = message.strip()
+        else:
+            platform_message = (
+                "The platform is temporarily blocking this request during a deployment "
+                "or release transition. Please try again shortly. "
+                "If this persists, contact Osmosis support."
+            )
 
     if error_code in _REPO_SCOPE_ERROR_MESSAGES:
         raise PlatformAPIError(
@@ -498,9 +524,8 @@ def _raise_for_http_error(
         "SUBSCRIPTION_REQUIRED",
         "BILLING_REQUIRED",
     }:
-        error_msg = error_body.get("error") or error_body.get("message")
         raise SubscriptionRequiredError(
-            error_msg if isinstance(error_msg, str) else None,
+            platform_message,
             error_code=error_code,
             field=field,
             details=error_body or None,
@@ -511,7 +536,7 @@ def _raise_for_http_error(
         error_msg = error_body.get("error", "")
         if isinstance(error_msg, str) and "subscription" in error_msg.lower():
             raise SubscriptionRequiredError(
-                error_msg,
+                platform_message or error_msg,
                 error_code=error_code,
                 field=field,
                 details=error_body or None,

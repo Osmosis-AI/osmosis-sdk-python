@@ -146,6 +146,8 @@ def _verify_with_optional_workspace(verify: Any, *, git_identity: str | None) ->
 
 
 def _cli_error_from_login_error(exc: Any) -> CLIError:
+    from osmosis_ai.cli.output.error import _classify_platform_status
+
     status_code = getattr(exc, "status_code", None)
     platform_code = getattr(exc, "code", None)
     if _is_auth_login_error(exc):
@@ -167,7 +169,9 @@ def _cli_error_from_login_error(exc: Any) -> CLIError:
         details["status_code"] = status_code
     if isinstance(platform_code, str):
         details["platform_code"] = platform_code
-    return CLIError(str(exc), code="PLATFORM_ERROR", details=details)
+    return CLIError(
+        str(exc), code=_classify_platform_status(status_code), details=details
+    )
 
 
 def _finish_login(

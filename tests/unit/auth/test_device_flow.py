@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime, timedelta
+from io import BytesIO
 from unittest.mock import MagicMock, patch
 from urllib.error import HTTPError, URLError
 
@@ -260,3 +261,36 @@ class TestDeviceLogin:
             device_login(timeout=10.0)
 
         mock_open.assert_called_once_with("https://platform.example.test/device")
+
+
+@pytest.mark.parametrize("polling", [False, True])
+@pytest.mark.parametrize(
+    "error_value", ["workspace_unavailable", {"code": "workspace_unavailable"}]
+)
+@pytest.mark.parametrize("status", [400, 409])
+def test_device_login_errors_surface_server_explanation(
+    polling: bool,
+    error_value: object,
+    status: int,
+) -> None:
+    body = {
+        "error": error_value,
+        "message": "Ask your workspace administrator to restore access.",
+    }
+    error = HTTPError(
+        url="http://test",
+        code=status,
+        msg="Bad Request",
+        hdrs=None,
+        fp=BytesIO(json.dumps(body).encode()),
+    )
+    with patch("osmosis_ai.platform.auth.flow.urlopen", side_effect=error) as request:
+        with pytest.raises(
+            LoginError, match="Ask your workspace administrator to restore access"
+        ) as caught:
+            if polling:
+                poll_device_token("device_abc", interval=1, timeout=10)
+            else:
+                request_device_code()
+    request.assert_called_once()
+    assert caught.value.status_code == status

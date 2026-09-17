@@ -24,6 +24,7 @@ from osmosis_ai.cli.console import console
 from .config import get_platform_url
 from .credentials import Credentials, UserInfo
 from .platform_client import (
+    _response_error_message,
     cli_request_headers,
     surface_response_version_signal,
     upgrade_required_message,
@@ -149,9 +150,7 @@ def _read_error_body(e: HTTPError) -> dict[str, Any]:
 
 def _read_error_detail(e: HTTPError) -> str:
     """Extract error message from an HTTPError JSON response body."""
-    body = _read_error_body(e)
-    detail = body.get("error", "") or body.get("message", "")
-    return detail if isinstance(detail, str) else ""
+    return _response_error_message(_read_error_body(e)) or ""
 
 
 # User-friendly messages keyed by HTTP status code.
@@ -286,6 +285,10 @@ def verify_token(token: str, *, git_identity: str | None = None) -> VerifyResult
         raise _login_error_from_http(e, "Verification failed") from e
     except URLError as e:
         raise LoginError(f"Could not connect to platform: {e.reason}") from e
+    except TimeoutError as e:
+        raise LoginError(
+            "Connection to the platform timed out. Check your connection and try again."
+        ) from e
     except json.JSONDecodeError as e:
         raise LoginError("Invalid response from platform") from e
 
@@ -327,6 +330,10 @@ def request_device_code(device_name: str | None = None) -> DeviceCodeResponse:
         raise _login_error_from_http(e, "Failed to request device code") from e
     except URLError as e:
         raise LoginError(f"Could not connect to platform: {e.reason}") from e
+    except TimeoutError as e:
+        raise LoginError(
+            "Connection to the platform timed out. Check your connection and try again."
+        ) from e
     except (json.JSONDecodeError, KeyError) as e:
         raise LoginError("Invalid response from platform") from e
 
@@ -357,7 +364,9 @@ def poll_device_token(
                 raise _login_error_from_http(e, "Polling failed") from e
             error_data = _read_error_body(e)
             if not error_data:
-                raise LoginError(f"Polling failed: HTTP {e.code}") from e
+                raise LoginError(
+                    f"Polling failed: HTTP {e.code}", status_code=e.code
+                ) from e
             error_code = error_data.get("error", "")
 
             if error_code == "authorization_pending":
@@ -377,10 +386,15 @@ def poll_device_token(
                 raise LoginError("Authorization was denied.") from e
             else:
                 raise LoginError(
-                    f"Polling failed: {error_code or f'HTTP {e.code}'}"
+                    f"Polling failed: {_response_error_message(error_data) or f'HTTP {e.code}'}",
+                    status_code=e.code,
                 ) from e
         except URLError as e:
             raise LoginError(f"Could not connect to platform: {e.reason}") from e
+        except TimeoutError as e:
+            raise LoginError(
+                "Connection to the platform timed out. Check your connection and try again."
+            ) from e
         except (json.JSONDecodeError, KeyError) as e:
             raise LoginError("Invalid response from platform") from e
 
