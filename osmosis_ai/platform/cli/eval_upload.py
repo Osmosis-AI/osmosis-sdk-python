@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from shlex import quote
 from typing import TYPE_CHECKING, Any
 
 from osmosis_ai.cli.console import console
 from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.cli.output import OperationResult, get_output_context
+from osmosis_ai.cli.output.error import classify_error
 from osmosis_ai.eval.local.runner import LOGS_FILENAME, scrub_logs_file
 from osmosis_ai.eval.local.state import (
     LOCKS_DIRNAME,
@@ -24,6 +26,7 @@ from osmosis_ai.eval.local.upload import (
 )
 from osmosis_ai.platform.api.client import OsmosisClient
 from osmosis_ai.platform.api.models import EvalRunImportResult
+from osmosis_ai.platform.auth.platform_client import PlatformAPIError
 from osmosis_ai.platform.cli.utils import require_git_workspace_directory_context
 from osmosis_ai.platform.cli.workspace_directory_context import git_result_context
 
@@ -107,10 +110,12 @@ def _upload_one(
     )
 
 
-def prepare_eval_upload_plan(run_dir: Path) -> EvalUploadPlan:
+def prepare_eval_upload_plan(
+    run_dir: Path, *, config_path: str | None = None
+) -> EvalUploadPlan:
     """Scrub ambient env secrets from logs.txt, then build the import plan."""
     scrub_logs_file(run_dir / LOGS_FILENAME, env=os.environ)
-    return build_eval_upload_plan(run_dir)
+    return build_eval_upload_plan(run_dir, config_path=config_path)
 
 
 def upload_plan(
@@ -118,8 +123,13 @@ def upload_plan(
     *,
     context: GitWorkspaceDirectoryContext,
     client: OsmosisClient | None = None,
+    replace: bool = False,
 ) -> EvalRunImportResult:
-    """Upload a validated plan. The caller must hold the run's ``RunLock``."""
+    """Upload a validated plan. The caller must hold the run's ``RunLock``.
+
+    ``replace`` opts into overwriting results this run already imported, which
+    is what a ``--retry-failed`` attempt of an uploaded run needs.
+    """
     client = client or OsmosisClient()
     files = _file_map(plan)
     with get_output_context().status("Starting local evaluation upload..."):
@@ -130,6 +140,7 @@ def upload_plan(
             schema_versions=plan.schema_versions,
             provenance=plan.provenance,
             files=plan.file_requests(),
+            reimport=replace,
             credentials=context.credentials,
             git_identity=context.git_identity,
         )
@@ -230,7 +241,7 @@ def _resolve_run_dir(requested: Path, *, workspace_directory: Path) -> Path:
     return Path(os.path.abspath(workspace_directory / ".osmosis" / "evals" / run_name))
 
 
-def upload(run_dir: Path) -> OperationResult:
+def upload(run_dir: Path, *, replace: bool = False) -> OperationResult:
     """Upload one completed local evaluation by run name or directory."""
     context = require_git_workspace_directory_context()
     candidate = _resolve_run_dir(
@@ -240,9 +251,20 @@ def upload(run_dir: Path) -> OperationResult:
     try:
         with RunLock(lock_path):
             plan = prepare_eval_upload_plan(candidate)
-            imported = upload_plan(plan, context=context)
+            imported = upload_plan(plan, context=context, replace=replace)
     except LocalEvalUploadError as exc:
         raise CLIError(str(exc)) from exc
+    except PlatformAPIError as exc:
+        if exc.status_code == 409 and not replace:
+            classified = classify_error(exc)
+            command = f"osmosis eval upload {quote(str(run_dir))} --replace"
+            raise CLIError(
+                f"{exc} Re-run it with --retry-failed, then republish with: "
+                f"{console.escape(command)}",
+                code=classified.code,
+                details=classified.details,
+            ) from None
+        raise
     except (OSError, RuntimeError, ValueError) as exc:
         raise CLIError(f"Local evaluation upload failed: {exc}") from exc
     return _result(plan, imported, context=context)

@@ -90,12 +90,13 @@ The result is an `OperationResult` whose next-steps point at `osmosis eval info 
 
 ### Companion commands
 
-The list, info, logs, and stop commands accept root `--workspace <name>` and otherwise use the current Git workspace directory ([../osmosis_ai/platform/cli/eval.py](../osmosis_ai/platform/cli/eval.py)). Download remains local-workspace scoped because it writes into a workspace-relative run layout:
+The list, info, logs, retry, and stop commands accept root `--workspace <name>` and otherwise use the current Git workspace directory ([../osmosis_ai/platform/cli/eval.py](../osmosis_ai/platform/cli/eval.py)). Download remains local-workspace scoped because it writes into a workspace-relative run layout:
 
 - `osmosis eval list [--all] [--limit N]` — list runs for the workspace.
 - `osmosis eval info <name|id> [-o root]` — run detail, results, and metrics (writes `<root>/metrics.json` in rich mode; default `.osmosis/evals/<name>/metrics.json`).
 - `osmosis eval logs <name|id> [--cursor …]` — recent run logs, oldest first.
 - `osmosis eval download <name|id> [--type metrics,trajectories|artifacts|logs|all] [--rows 3,7,10-20] [-o root] [--overwrite] [--yes]` — download run outputs into the fixed run-scoped layout. The default is `metrics,trajectories`; `--type` replaces that selection. Matching local sizes resume for free, and transfers over 100 MiB require confirmation unless `--yes` is supplied.
+- `osmosis eval retry <name|id> [--yes] [--secrets-file PATH]` — re-run a terminal hosted run's failed and skipped samples under the same run id; graded samples are carried forward. A locally imported run is retried on the machine that produced it: the CLI prints `osmosis eval run <config> --name <name> --retry-failed --upload` instead of executing the retry. If the original run supplied secret values itself, the CLI resolves the names the platform asks for from `--secrets-file`, the environment, or an interactive prompt.
 - `osmosis eval stop <name|id> [--yes]` — stop a run.
 
 See [docs.osmosis.ai/cli/config-files](https://docs.osmosis.ai/cli/config-files) for the full config field reference.

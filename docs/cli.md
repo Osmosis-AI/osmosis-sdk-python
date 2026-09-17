@@ -12,7 +12,7 @@ The console script is `osmosis_ai.cli.main:main` (aliases: `osmosis`, `osmosis-a
 
 ## Workspace scope
 
-Workspace-scoped platform commands normally derive `X-Osmosis-Git` from the current Osmosis workspace directory. A root `--workspace <name>` selection instead sends only `X-Osmosis-Workspace` and skips local Git and scaffold discovery; the selection is per invocation and is not persisted. This applies to benchmark catalog/run commands and submit, dataset/model/secret commands, and train/eval list, info, logs, and stop. Structured output records `workspace.name` for an explicit selection and does not fabricate `git` or `workspace_directory` fields.
+Workspace-scoped platform commands normally derive `X-Osmosis-Git` from the current Osmosis workspace directory. A root `--workspace <name>` selection instead sends only `X-Osmosis-Workspace` and skips local Git and scaffold discovery; the selection is per invocation and is not persisted. This applies to benchmark catalog/run commands and submit, dataset/model/secret commands, and train/eval list, info, logs, retry, and stop. Structured output records `workspace.name` for an explicit selection and does not fabricate `git` or `workspace_directory` fields.
 
 Train and eval submit remain source-backed. With `--workspace`, their config argument must be absolute; the CLI locates the containing Osmosis Git workspace, checks the selected workspace's connected repository against that Git identity, and submits with only `X-Osmosis-Workspace`. The local Git identity is retained in structured output because it is real source context, not inferred platform state. Without `--workspace`, their existing current-directory behavior is unchanged.
 
