@@ -317,6 +317,9 @@ def test_device_login_deployment_conflict_gets_cli_guidance(polling: bool) -> No
                 request_device_code()
     assert "Reload" not in str(caught.value)
     assert caught.value.status_code == 409
+    # The legacy ``error`` field is the only place the platform code lives here.
+    assert caught.value.code == "deployment_conflict"
+    assert caught.value.details == body
 
 
 @pytest.mark.parametrize(

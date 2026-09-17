@@ -435,6 +435,19 @@ def _is_deployment_conflict(body: dict[str, Any]) -> bool:
     return "deployment_conflict" in (body.get("error"), body.get("code"))
 
 
+def platform_error_code(body: dict[str, Any]) -> str | None:
+    """Machine-readable platform code carried by an error body.
+
+    ``code`` is authoritative. The legacy ``error`` field is free text, so it
+    is only promoted when it names a deployment conflict; the API client and
+    the login handshake share this rule so ``details.platform_code`` matches.
+    """
+    code = body.get("code")
+    if isinstance(code, str) and code:
+        return code
+    return "deployment_conflict" if _is_deployment_conflict(body) else None
+
+
 def _response_error_message(body: dict[str, Any]) -> str | None:
     """Prefer a human-readable message over a legacy error string or code.
 
@@ -509,7 +522,6 @@ def _raise_for_http_error(
     # Best-effort capture of structured error message from response body
     detail = ""
     error_body: dict[str, Any] = {}
-    error_code: str | None = None
     field: str | None = None
     platform_message: str | None = None
     try:
@@ -521,8 +533,6 @@ def _raise_for_http_error(
                 # Only treat as error_body if it's actually a dict
                 if isinstance(parsed, dict):
                     error_body = parsed
-                    if isinstance(error_body.get("code"), str):
-                        error_code = error_body["code"]
                     if isinstance(error_body.get("field"), str):
                         field = error_body["field"]
             # Prefer a usable explanation over an error code or raw response body.
@@ -536,10 +546,7 @@ def _raise_for_http_error(
                 detail = f" Response: {text}"
     except Exception:
         pass
-
-    if _is_deployment_conflict(error_body):
-        # The message itself comes from _response_error_message above.
-        error_code = error_code or "deployment_conflict"
+    error_code = platform_error_code(error_body)
 
     if error_code in _REPO_SCOPE_ERROR_MESSAGES:
         raise PlatformAPIError(

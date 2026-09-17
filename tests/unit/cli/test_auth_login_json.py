@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime, timedelta
-from io import StringIO
+from io import BytesIO, StringIO
+from unittest.mock import MagicMock
+from urllib.error import HTTPError
 
 import pytest
 
@@ -223,6 +225,42 @@ def test_login_json_preserves_http_error_classification(
     assert exit_code == 1
     assert envelope["error"]["code"] == code
     assert envelope["error"]["details"]["status_code"] == status
+
+
+def test_login_json_conflict_retains_response_and_platform_code(
+    monkeypatch, capsys
+) -> None:
+    body = {
+        "error": "deployment_conflict",
+        "message": "A deployment is in progress. Please try again shortly.",
+    }
+    error = HTTPError(
+        url="http://test",
+        code=409,
+        msg="Conflict",
+        hdrs=None,
+        fp=BytesIO(json.dumps(body).encode()),
+    )
+    monkeypatch.delenv("OSMOSIS_TOKEN", raising=False)
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.load_credentials", lambda **kwargs: None
+    )
+    # Only the transport is patched so the real verify path builds the error.
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.flow.urlopen", MagicMock(side_effect=error)
+    )
+
+    exit_code = cli.main(["--json", "auth", "login", "--token", "secret"])
+
+    envelope = json.loads(capsys.readouterr().err)
+    assert exit_code == 1
+    assert envelope["error"]["code"] == "CONFLICT"
+    assert body["message"] in envelope["error"]["message"]
+    assert envelope["error"]["details"] == {
+        **body,
+        "platform_code": "deployment_conflict",
+        "status_code": 409,
+    }
 
 
 def test_login_json_auth_required_keeps_status_in_details(monkeypatch, capsys) -> None:

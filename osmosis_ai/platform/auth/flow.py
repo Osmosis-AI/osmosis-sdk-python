@@ -29,6 +29,7 @@ from .platform_client import (
     cli_request_headers,
     connection_error_message,
     is_timeout,
+    platform_error_code,
     surface_response_version_signal,
     upgrade_required_message,
 )
@@ -195,7 +196,6 @@ def _login_error_from_http(
     body = _read_error_body(e)
     detail = _response_error_message(body) or ""
     friendly = _HTTP_ERROR_MESSAGES.get(e.code)
-    code = body.get("code")
     # A bare error code (the legacy ``error`` field) only means something next
     # to the status-specific text; a server-supplied explanation stands alone.
     error_field = body.get("error")
@@ -207,10 +207,13 @@ def _login_error_from_http(
         message = f"{fallback_prefix}: {detail} (HTTP {e.code})"
     else:
         message = f"{fallback_prefix}: HTTP {e.code}"
+    # Carry the parsed body so the CLI envelope retains the original response
+    # alongside ``platform_code``, exactly as a regular API error does.
     return LoginError(
         message,
-        code=code if isinstance(code, str) else None,
+        code=platform_error_code(body),
         status_code=e.code,
+        details=body or None,
     )
 
 
@@ -390,6 +393,7 @@ def poll_device_token(
                     f"Polling failed: {_response_error_message(error_data) or f'HTTP {e.code}'}",
                     code=code,
                     status_code=e.code,
+                    details=error_data or None,
                 ) from e
         except (URLError, TimeoutError) as e:
             if is_timeout(e):

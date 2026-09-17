@@ -149,22 +149,19 @@ def _verify_with_optional_workspace(verify: Any, *, git_identity: str | None) ->
 def _cli_error_from_login_error(exc: Any) -> CLIError:
     status_code = getattr(exc, "status_code", None)
     platform_code = getattr(exc, "code", None)
-    if status_code == 426:
-        details: dict[str, Any] = {"status_code": 426}
-        # Mirror the structured signal (status/message) a 426 carries on a
-        # regular API call so the UPGRADE_REQUIRED envelope looks the same
-        # whether it came from the login handshake or any other command.
-        signal = getattr(exc, "details", None)
-        if isinstance(signal, dict):
-            for key, value in signal.items():
-                details.setdefault(key, value)
-        return CLIError(str(exc), code="UPGRADE_REQUIRED", details=details)
-
+    # Same layering as ``_platform_error_details`` for API errors: platform
+    # code, then the parsed response body (a 426 carries its version signal
+    # there), then the HTTP status. The UPGRADE_REQUIRED envelope leaves out
+    # the platform code, which only restates the CLI code.
     details: dict[str, Any] = {}
+    if isinstance(platform_code, str) and status_code != 426:
+        details["platform_code"] = platform_code
+    body = getattr(exc, "details", None)
+    if isinstance(body, dict):
+        for key, value in body.items():
+            details.setdefault(key, value)
     if isinstance(status_code, int):
         details["status_code"] = status_code
-    if isinstance(platform_code, str):
-        details["platform_code"] = platform_code
     if _is_auth_login_error(exc):
         return CLIError(str(exc), code="AUTH_REQUIRED", details=details)
     code = _classify_platform_status(status_code)
