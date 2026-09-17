@@ -157,6 +157,10 @@ This is deliberate. The common loop — "some rows failed, edit the agent, re-ru
 
 `--retry-failed` re-runs failed and skipped items *without* a code change, which is the case where mixing versions cannot happen. Each attempt gets a fresh rollout id; the superseded attempt's directory stays for diagnosis but never appears in the index.
 
+The run's provenance records the workspace-relative config path, so the platform can show the exact `--retry-failed` command on the run's detail page and `osmosis eval retry` can print it instead of refusing. Configs must live under the workspace's `configs/eval/` directory; other paths are rejected. `eval run --upload` sends the config it actually ran, which supersedes the manifest's when a resume follows a rename; a standalone `eval upload` has no invocation to read and sends the manifest's. The manifest itself is never rewritten, because its bytes are the `manifest_digest` that identifies the import.
+
+Publishing a retried run needs `--replace`, which `eval run --retry-failed --upload` passes for you; `eval upload <run-name> --replace` is the standalone form. Without it the platform refuses, because a run whose local id it already imported would otherwise be overwritten silently. The manifest digest still has to match, which is what proves both attempts evaluated the same resolved inputs. The platform run keeps its id and URL.
+
 Throughput knobs (`--max-in-flight`, `evaluation.batch_size`) are excluded from the lock, so you can change concurrency and still resume.
 
 ## Uploading completed results

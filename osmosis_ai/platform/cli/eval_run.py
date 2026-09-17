@@ -463,7 +463,12 @@ def run(
         rollout_dir=rollout_dir,
         output_root=output_root,
         hooks=hooks,
-        provenance=_provenance(workspace_directory, spec, advanced=advanced),
+        provenance=_provenance(
+            workspace_directory,
+            spec,
+            advanced=advanced,
+            config_path=resolved_config_path,
+        ),
         display_root=display_root,
     )
 
@@ -492,11 +497,23 @@ def run(
             summary.run_dir,
             workspace_directory=workspace_directory,
             display_root=display_root,
+            replace=retry_failed,
         )
         run_path = display_path(summary.run_dir, base=display_root)
         try:
             imported = upload_plan(
-                prepare_eval_upload_plan(summary.run_dir), context=platform_context
+                prepare_eval_upload_plan(
+                    summary.run_dir,
+                    # A resume can run a config that moved since the run was
+                    # created; the manifest still holds the original path.
+                    config_path=_workspace_relative_config_path(
+                        resolved_config_path, workspace_directory
+                    ),
+                ),
+                context=platform_context,
+                # A retry attempt is the same local run again, so its upload
+                # replaces whatever the earlier attempt already imported.
+                replace=retry_failed,
             )
         except KeyboardInterrupt as exc:
             raise CLIError(
@@ -567,12 +584,33 @@ def run(
         dataset_source=dataset.source,
         imported=imported,
         upload_requested=upload,
+        retried=retry_failed,
         rerun_flags=rerun_flags,
     )
 
 
+def _workspace_relative_config_path(
+    config_path: Path, workspace_directory: Path
+) -> str | None:
+    """The config's path inside the workspace, for reproducing the run command.
+
+    Provenance, not manifest inputs: a moved config must not refuse a resume.
+    A config outside the workspace has no portable spelling, so it is omitted
+    rather than recording an absolute path that means nothing to a reader.
+    """
+    try:
+        relative = config_path.resolve().relative_to(workspace_directory.resolve())
+    except ValueError:
+        return None
+    return relative.as_posix()
+
+
 def _provenance(
-    workspace_directory: Path, spec: Any, *, advanced: dict[str, Any] | None = None
+    workspace_directory: Path,
+    spec: Any,
+    *,
+    advanced: dict[str, Any] | None = None,
+    config_path: Path | None = None,
 ) -> dict[str, Any]:
     """Record what actually executed. Never mutates the workspace (§5)."""
     from osmosis_ai.platform.cli.workspace_repo import summarize_local_git_state
@@ -581,6 +619,11 @@ def _provenance(
     provenance: dict[str, Any] = {
         "config_branch": spec.branch,
         "config_commit_sha": spec.commit_sha,
+        "config_path": (
+            _workspace_relative_config_path(config_path, workspace_directory)
+            if config_path is not None
+            else None
+        ),
         "advanced": dict(advanced) if advanced else None,
     }
     if state is not None:
@@ -710,7 +753,11 @@ def _print_failures(summary: Any, *, display_root: Path) -> None:
 
 
 def _upload_command(
-    run_dir: Path, *, workspace_directory: Path, display_root: Path
+    run_dir: Path,
+    *,
+    workspace_directory: Path,
+    display_root: Path,
+    replace: bool = False,
 ) -> str:
     resolved = run_dir.resolve()
     default_run_dir = workspace_directory.joinpath(
@@ -726,7 +773,7 @@ def _upload_command(
         # away therefore needs an absolute spelling to preserve path intent.
         if not parsed.is_absolute() and len(parsed.parts) == 1:
             argument = str(resolved)
-    return f"osmosis eval upload {quote(argument)}"
+    return f"osmosis eval upload {quote(argument)}{' --replace' if replace else ''}"
 
 
 def _result(
@@ -739,6 +786,7 @@ def _result(
     dataset_source: str,
     imported: Any | None = None,
     upload_requested: bool = False,
+    retried: bool = False,
     rerun_flags: str = "",
 ) -> OperationResult:
     resource: dict[str, Any] = {
@@ -820,6 +868,7 @@ def _result(
                 summary.run_dir,
                 workspace_directory=workspace_directory,
                 display_root=display_root,
+                replace=retried,
             )
         )
     run_path = display_path(summary.run_dir, base=display_root)

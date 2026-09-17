@@ -636,8 +636,11 @@ def test_upload_flag_uploads_after_finalize_and_surfaces_platform_url(
         after_finalize(summary)
         return summary
 
-    def upload_plan(_plan: Any, *, context: Any) -> SimpleNamespace:
+    def upload_plan(
+        _plan: Any, *, context: Any, replace: bool = False
+    ) -> SimpleNamespace:
         events.append("upload")
+        assert replace is False
         return SimpleNamespace(
             session_id="session-1",
             eval_run_id="eval-1",
@@ -653,7 +656,7 @@ def test_upload_flag_uploads_after_finalize_and_surfaces_platform_url(
     monkeypatch.setattr(
         eval_upload_module,
         "prepare_eval_upload_plan",
-        lambda run_dir: SimpleNamespace(run_dir=run_dir),
+        lambda run_dir, **_kwargs: SimpleNamespace(run_dir=run_dir),
     )
     monkeypatch.setattr(
         eval_upload_module,
@@ -667,6 +670,51 @@ def test_upload_flag_uploads_after_finalize_and_surfaces_platform_url(
     assert result.resource["platform_url"] == "https://platform.example/evals/eval-1"
     assert result.display_next_steps == ["View: https://platform.example/evals/eval-1"]
     assert events[:2] == ["close", "upload"]
+
+
+def test_retry_failed_upload_replaces_the_runs_published_results(
+    workspace: Path,
+    captured_runner: type[_CapturedRunner],
+    console_capture: StringIO,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A retry is the same local run again, so its upload replaces what the
+    earlier attempt published rather than conflicting with it."""
+    import osmosis_ai.platform.cli.eval_upload as eval_upload_module
+
+    captured_replace: list[bool] = []
+    original_run = _CapturedRunner.run
+
+    async def run_with_callback(self: Any, *, after_finalize: Any) -> Any:
+        summary = await original_run(self)
+        after_finalize(summary)
+        return summary
+
+    def upload_plan(
+        _plan: Any, *, context: Any, replace: bool = False
+    ) -> SimpleNamespace:
+        captured_replace.append(replace)
+        return SimpleNamespace(
+            session_id="session-1",
+            eval_run_id="eval-1",
+            eval_run_name="uploaded-run",
+            status="finalized",
+            expected_files=2,
+            uploaded_files=2,
+            platform_url="https://platform.example/evals/eval-1",
+        )
+
+    monkeypatch.setattr(_CapturedRunner, "run", run_with_callback)
+    monkeypatch.setattr(
+        eval_upload_module,
+        "prepare_eval_upload_plan",
+        lambda run_dir, **_kwargs: SimpleNamespace(run_dir=run_dir),
+    )
+    monkeypatch.setattr(eval_upload_module, "upload_plan", upload_plan)
+
+    _run(workspace, upload=True, retry_failed=True)
+
+    assert captured_replace == [True]
 
 
 def test_upload_failure_says_local_results_are_complete_and_gives_retry_command(
@@ -688,7 +736,7 @@ def test_upload_failure_says_local_results_are_complete_and_gives_retry_command(
     monkeypatch.setattr(
         eval_upload_module,
         "prepare_eval_upload_plan",
-        lambda run_dir: SimpleNamespace(run_dir=run_dir),
+        lambda run_dir, **_kwargs: SimpleNamespace(run_dir=run_dir),
     )
     monkeypatch.setattr(
         eval_upload_module,
@@ -726,7 +774,7 @@ def test_upload_plan_error_reports_local_problem_without_retry_guidance(
     monkeypatch.setattr(
         eval_upload_module,
         "prepare_eval_upload_plan",
-        lambda _run_dir: (_ for _ in ()).throw(
+        lambda _run_dir, **_kwargs: (_ for _ in ()).throw(
             local_upload_module.LocalEvalUploadError("index.jsonl is invalid")
         ),
     )
@@ -761,7 +809,7 @@ def test_unexpected_upload_error_keeps_internal_classification(
     monkeypatch.setattr(
         eval_upload_module,
         "prepare_eval_upload_plan",
-        lambda run_dir: SimpleNamespace(run_dir=run_dir),
+        lambda run_dir, **_kwargs: SimpleNamespace(run_dir=run_dir),
     )
     monkeypatch.setattr(
         eval_upload_module,
@@ -799,7 +847,7 @@ def test_upload_platform_error_keeps_auth_code_and_retry_context(
     monkeypatch.setattr(
         eval_upload_module,
         "prepare_eval_upload_plan",
-        lambda run_dir: SimpleNamespace(run_dir=run_dir),
+        lambda run_dir, **_kwargs: SimpleNamespace(run_dir=run_dir),
     )
     monkeypatch.setattr(
         eval_upload_module,
@@ -1164,3 +1212,32 @@ async def test_declining_the_dispatch_confirmation_exits_before_any_rollout(
     with pytest.raises(typer.Exit) as raised:
         await _confirm_dispatch()
     assert raised.value.exit_code == 0
+
+
+def test_provenance_records_the_config_path_relative_to_the_workspace(
+    workspace: Path,
+) -> None:
+    spec = SimpleNamespace(branch=None, commit_sha=None)
+
+    provenance = eval_run_module._provenance(
+        workspace,
+        spec,
+        config_path=workspace / "configs" / "eval" / "echo.toml",
+    )
+
+    assert provenance["config_path"] == "configs/eval/echo.toml"
+
+
+def test_provenance_omits_a_config_that_lives_outside_the_workspace(
+    workspace: Path, tmp_path: Path
+) -> None:
+    """An absolute path outside the workspace has no portable spelling, so it is
+    dropped rather than uploaded as something a reader cannot act on."""
+    spec = SimpleNamespace(branch=None, commit_sha=None)
+    outside = tmp_path / "elsewhere" / "eval.toml"
+    outside.parent.mkdir(parents=True, exist_ok=True)
+    outside.write_text("", encoding="utf-8")
+
+    provenance = eval_run_module._provenance(workspace, spec, config_path=outside)
+
+    assert "config_path" not in provenance

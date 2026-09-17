@@ -382,3 +382,100 @@ def test_incomplete_finalized_response_is_rejected(tmp_path: Path) -> None:
     context = SimpleNamespace(credentials=None, git_identity="acme/repo")
     with pytest.raises(RuntimeError, match="incomplete files"):
         upload_plan(plan, context=context, client=FakeClient())  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("replace", [False, True])
+def test_replace_is_forwarded_to_the_import_start(
+    tmp_path: Path, replace: bool
+) -> None:
+    files = (
+        _local_file(tmp_path, "index.jsonl", b"{}\n"),
+        _local_file(tmp_path, "progress.json", b'{"total_runs":1}\n'),
+    )
+    plan = EvalUploadPlan(
+        run_dir=tmp_path,
+        local_run_id="a" * 32,
+        manifest_digest="b" * 64,
+        run={"name": "run-1"},
+        schema_versions={"state_schema": 1},
+        provenance={},
+        files=files,
+    )
+    seen: dict[str, Any] = {}
+
+    class FakeClient:
+        def start_eval_run_import(self, **kwargs: Any) -> EvalRunImportResult:
+            seen["reimport"] = kwargs["reimport"]
+            return _result(files, finalized=True)
+
+        def finalize_eval_run_import(
+            self, _session_id: str, **_kwargs: Any
+        ) -> EvalRunImportResult:
+            return _result(files, finalized=True)
+
+    context = SimpleNamespace(credentials=None, git_identity="acme/repo")
+    upload_plan(
+        plan,
+        context=context,  # type: ignore[arg-type]
+        client=FakeClient(),  # type: ignore[arg-type]
+        replace=replace,
+    )
+
+    assert seen["reimport"] is replace
+
+
+def test_conflict_without_replace_keeps_platform_details_and_quotes_the_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from osmosis_ai.cli.errors import CLIError
+    from osmosis_ai.platform.auth.platform_client import PlatformAPIError
+    from osmosis_ai.platform.cli.eval_upload import upload as upload_run
+
+    class DummyLock:
+        def __init__(self, *_args: Any, **_kwargs: Any) -> None:
+            pass
+
+        def __enter__(self) -> DummyLock:
+            return self
+
+        def __exit__(self, *_args: Any) -> bool:
+            return False
+
+    monkeypatch.setattr(
+        "osmosis_ai.platform.cli.eval_upload.RunLock",
+        DummyLock,
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.platform.cli.eval_upload.require_git_workspace_directory_context",
+        lambda: SimpleNamespace(
+            workspace_directory=tmp_path,
+            credentials=None,
+            git_identity="acme/repo",
+        ),
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.platform.cli.eval_upload.prepare_eval_upload_plan",
+        lambda _run_dir: SimpleNamespace(),
+    )
+
+    def _upload_plan(*_args: Any, **_kwargs: Any) -> None:
+        raise PlatformAPIError(
+            "already imported",
+            status_code=409,
+            error_code="EVAL_IMPORT_EXISTS",
+            details={"local_run_id": "abc"},
+        )
+
+    monkeypatch.setattr(
+        "osmosis_ai.platform.cli.eval_upload.upload_plan",
+        _upload_plan,
+    )
+
+    with pytest.raises(CLIError) as excinfo:
+        upload_run(Path("my run"), replace=False)
+
+    err = excinfo.value
+    assert err.code == "CONFLICT"
+    assert err.details["platform_code"] == "EVAL_IMPORT_EXISTS"
+    assert err.details["local_run_id"] == "abc"
+    assert "osmosis eval upload 'my run' --replace" in str(err)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from contextlib import redirect_stderr
 from io import StringIO
 from types import SimpleNamespace
 
@@ -13,13 +14,16 @@ import osmosis_ai.platform.api.client as api_client_module
 import osmosis_ai.platform.cli.eval as platform_eval_module
 import osmosis_ai.platform.cli.utils as utils_module
 from osmosis_ai.cli.console import Console
+from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.cli.output import DetailResult, ListResult
+from osmosis_ai.cli.output.error import classify_error, emit_structured_error_to_stderr
 from osmosis_ai.platform.api.models import (
     EvaluationRun,
     EvaluationRunDetail,
     LogEntry,
     LogsPage,
     PaginatedEvaluationRuns,
+    RetryEvalRunResult,
 )
 from osmosis_ai.platform.auth import PlatformAPIError
 
@@ -532,3 +536,251 @@ class TestFormatPassAtK:
     def test_no_values_returns_none(self) -> None:
         results = {"reward_stats": {"pass_at_k": {"1": "bad"}}}
         assert platform_eval_module._format_pass_at_k(results) is None
+
+
+class TestRetryEvalRun:
+    def test_retry_reports_the_sample_count_and_links_the_run(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        captured: dict[str, object] = {}
+
+        def _retry(
+            self, eval_run_id, *, secrets=None, credentials=None, git_identity=None
+        ):
+            captured["eval_run_id"] = eval_run_id
+            captured["git_identity"] = git_identity
+            captured["secrets"] = secrets
+            return RetryEvalRunResult(
+                id="11111111-1111-4111-8111-111111111111",
+                name="brave-otter",
+                status="pending",
+                workflow_id="cloud-eval/11111111-1111-4111-8111-111111111111",
+                retryable_samples=4,
+                platform_url="https://platform.osmosis.ai/acme/eval/1",
+            )
+
+        monkeypatch.setattr(api_client_module.OsmosisClient, "retry_eval_run", _retry)
+
+        result = eval_module.eval_retry(name="brave-otter", yes=True)
+
+        assert captured == {
+            "eval_run_id": "brave-otter",
+            "git_identity": GIT_IDENTITY,
+            "secrets": None,
+        }
+        assert result.operation == "eval.retry"
+        assert result.status == "success"
+        assert result.resource["retryable_samples"] == 4
+        assert result.message == (
+            "Retrying 4 failed and skipped samples in brave-otter"
+        )
+        assert "View: https://platform.osmosis.ai/acme/eval/1" in (
+            result.display_next_steps
+        )
+        # `eval logs` has no --follow flag; a hint must not invent one.
+        assert not any("--follow" in step for step in result.display_next_steps)
+
+    def test_retry_singularizes_a_lone_sample(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(
+            api_client_module.OsmosisClient,
+            "retry_eval_run",
+            lambda self, eval_run_id, *, secrets=None, credentials=None, git_identity=None: (
+                RetryEvalRunResult(
+                    id="1",
+                    name="brave-otter",
+                    status="pending",
+                    workflow_id="cloud-eval/1",
+                    retryable_samples=1,
+                )
+            ),
+        )
+
+        result = eval_module.eval_retry(name="brave-otter", yes=True)
+
+        assert result.message == "Retrying 1 failed and skipped sample in brave-otter"
+        assert result.resource["platform_url"] is None
+
+
+class TestRetryEvalRunSecrets:
+    def test_retry_resupplies_only_the_names_the_platform_asked_for(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        calls: list[dict[str, str] | None] = []
+
+        def _retry(
+            self, eval_run_id, *, secrets=None, credentials=None, git_identity=None
+        ):
+            calls.append(secrets)
+            if secrets is None:
+                raise PlatformAPIError(
+                    "This run supplied these secret(s) itself",
+                    status_code=400,
+                    details={"run_secret_names": ["OPENAI_API_KEY"]},
+                )
+            return RetryEvalRunResult(
+                id="1",
+                name="brave-otter",
+                status="pending",
+                workflow_id="cloud-eval/1",
+                retryable_samples=2,
+            )
+
+        monkeypatch.setattr(api_client_module.OsmosisClient, "retry_eval_run", _retry)
+        monkeypatch.setattr(
+            platform_eval_module,
+            "require_platform_workspace_context",
+            lambda: SimpleNamespace(
+                workspace_directory="/repo",
+                git_identity=GIT_IDENTITY,
+                repo_url=REPO_URL,
+                credentials=FAKE_CREDENTIALS,
+            ),
+        )
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-from-env")
+
+        result = eval_module.eval_retry(name="brave-otter", yes=True, secrets_file=None)
+
+        assert calls == [None, {"OPENAI_API_KEY": "sk-from-env"}]
+        assert result.status == "success"
+
+    def test_an_unrelated_failure_is_not_retried_as_a_secret_prompt(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        attempts = 0
+
+        def _retry(
+            self, eval_run_id, *, secrets=None, credentials=None, git_identity=None
+        ):
+            nonlocal attempts
+            attempts += 1
+            raise PlatformAPIError("Evaluation run not found", status_code=404)
+
+        monkeypatch.setattr(api_client_module.OsmosisClient, "retry_eval_run", _retry)
+
+        with pytest.raises(PlatformAPIError):
+            eval_module.eval_retry(name="brave-otter", yes=True, secrets_file=None)
+        assert attempts == 1
+
+    def test_a_resupplied_value_is_redacted_from_a_platform_error(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def _retry(
+            self, eval_run_id, *, secrets=None, credentials=None, git_identity=None
+        ):
+            if secrets is None:
+                raise PlatformAPIError(
+                    "needs secrets",
+                    status_code=400,
+                    details={"run_secret_names": ["OPENAI_API_KEY"]},
+                )
+            raise PlatformAPIError(
+                "Rejected value sk-supersecret",
+                status_code=400,
+                error_code="bad_sk-supersecret",
+                field="field_sk-supersecret",
+                details={"nested": {"message": "contains sk-supersecret"}},
+            )
+
+        monkeypatch.setattr(api_client_module.OsmosisClient, "retry_eval_run", _retry)
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-supersecret")
+
+        with pytest.raises(PlatformAPIError) as excinfo:
+            eval_module.eval_retry(name="brave-otter", yes=True, secrets_file=None)
+
+        redacted = excinfo.value
+        assert "sk-supersecret" not in str(redacted)
+        assert "sk-supersecret" not in (redacted.error_code or "")
+        assert "sk-supersecret" not in (redacted.field or "")
+        assert "sk-supersecret" not in str(redacted.details)
+        buf = StringIO()
+        with redirect_stderr(buf):
+            emit_structured_error_to_stderr(
+                classify_error(redacted), command="eval retry"
+            )
+        assert "sk-supersecret" not in buf.getvalue()
+
+    def test_a_local_run_gets_the_exact_command_instead_of_a_refusal(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def _retry(
+            self, eval_run_id, *, secrets=None, credentials=None, git_identity=None
+        ):
+            raise PlatformAPIError(
+                "Local evaluation runs are retried from the CLI, not the platform",
+                status_code=409,
+                details={
+                    "local_run": {
+                        "eval_run_name": "brave-otter",
+                        "config_path": "configs/eval/my-rollout.toml",
+                    }
+                },
+            )
+
+        monkeypatch.setattr(api_client_module.OsmosisClient, "retry_eval_run", _retry)
+
+        with pytest.raises(CLIError) as excinfo:
+            eval_module.eval_retry(name="brave-otter", yes=True, secrets_file=None)
+
+        assert (
+            "osmosis eval run configs/eval/my-rollout.toml --name brave-otter "
+            "--retry-failed --upload" in str(excinfo.value)
+        )
+
+    def test_a_local_run_command_shell_quotes_paths_with_spaces(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def _retry(
+            self, eval_run_id, *, secrets=None, credentials=None, git_identity=None
+        ):
+            raise PlatformAPIError(
+                "Local evaluation runs are retried from the CLI, not the platform",
+                status_code=409,
+                details={
+                    "local_run": {
+                        "eval_run_name": "brave otter",
+                        "config_path": "configs/eval/my rollout.toml",
+                    }
+                },
+            )
+
+        monkeypatch.setattr(api_client_module.OsmosisClient, "retry_eval_run", _retry)
+
+        with pytest.raises(CLIError) as excinfo:
+            eval_module.eval_retry(name="brave otter", yes=True, secrets_file=None)
+
+        assert (
+            "osmosis eval run 'configs/eval/my rollout.toml' --name 'brave otter' "
+            "--retry-failed --upload" in str(excinfo.value)
+        )
+
+    def test_a_local_run_without_a_recorded_config_asks_for_the_original_path(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(
+            api_client_module.OsmosisClient,
+            "retry_eval_run",
+            lambda self, eval_run_id, *, secrets=None, credentials=None, git_identity=None: (
+                (_ for _ in ()).throw(
+                    PlatformAPIError(
+                        "Local evaluation runs are retried from the CLI",
+                        status_code=409,
+                        details={
+                            "local_run": {
+                                "eval_run_name": "brave-otter",
+                                "config_path": None,
+                            }
+                        },
+                    )
+                )
+            ),
+        )
+
+        with pytest.raises(CLIError) as excinfo:
+            eval_module.eval_retry(name="brave-otter", yes=True, secrets_file=None)
+
+        message = str(excinfo.value)
+        assert "no recorded config path" in message
+        assert "<config>.toml" not in message
+        assert "--name brave-otter --retry-failed --upload" in message

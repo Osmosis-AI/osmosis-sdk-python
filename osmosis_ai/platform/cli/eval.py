@@ -1,13 +1,15 @@
-"""Handler for `osmosis eval` remote subcommands (submit/list/info/download/stop)."""
+"""Handler for `osmosis eval` remote subcommands
+(submit/list/info/download/retry/stop)."""
 
 from __future__ import annotations
 
 import math
 from pathlib import Path
+from shlex import quote
 from typing import TYPE_CHECKING, Any
 
 from osmosis_ai.cli.console import console
-from osmosis_ai.cli.errors import CLIError
+from osmosis_ai.cli.errors import CLIError, CLIErrorCode
 from osmosis_ai.cli.output import (
     DetailResult,
     DetailSection,
@@ -701,6 +703,104 @@ def download(
                 "or the platform may not support run downloads yet."
             ) from exc
         raise
+
+
+def retry(name: str, *, yes: bool, secrets_file: str | None = None) -> OperationResult:
+    """Re-run an evaluation run's failed and skipped samples."""
+    from osmosis_ai.cli.prompts import require_confirmation
+    from osmosis_ai.platform.cli.secret_redact import redact_provided_secrets
+    from osmosis_ai.platform.cli.secret_resolution import resolve_run_secrets
+
+    context = require_platform_workspace_context()
+    client = OsmosisClient()
+    require_confirmation(
+        f'Retry evaluation run "{name}"?',
+        yes=yes,
+        default=False,
+        summary=[("Name", name)],
+    )
+
+    def _retry(secrets: dict[str, str] | None):
+        with get_output_context().status("Retrying evaluation run..."):
+            try:
+                return client.retry_eval_run(
+                    name,
+                    secrets=secrets,
+                    credentials=context.credentials,
+                    git_identity=context.git_identity,
+                )
+            except PlatformAPIError as exc:
+                # A re-supplied value can be echoed back in a validation error.
+                if secrets:
+                    raise redact_provided_secrets(exc, secrets.values()) from None
+                raise
+
+    try:
+        result = _retry(None)
+    except PlatformAPIError as exc:
+        details = exc.details or {}
+        # A local run executes on the machine that produced it, so hand back the
+        # command instead of the bare refusal.
+        local_run = details.get("local_run")
+        if isinstance(local_run, dict):
+            config = local_run.get("config_path")
+            run_name = local_run.get("eval_run_name") or name
+            quoted_name = quote(str(run_name))
+            if isinstance(config, str) and config:
+                command = (
+                    f"osmosis eval run {quote(config)} --name {quoted_name} "
+                    "--retry-failed --upload"
+                )
+                raise CLIError(
+                    "Local evaluation runs are retried on the machine that "
+                    "produced them. Retry it with:\n"
+                    f"  {console.escape(command)}",
+                    code=CLIErrorCode.VALIDATION,
+                ) from None
+            raise CLIError(
+                "Local evaluation runs are retried on the machine that "
+                "produced them. This run has no recorded config path; pass "
+                "the original config:\n"
+                f"  osmosis eval run <config> --name {console.escape(quoted_name)} "
+                "--retry-failed --upload",
+                code=CLIErrorCode.VALIDATION,
+            ) from None
+        # The run supplied these itself and their values are never stored, so
+        # the platform can only name them; collect them and go again.
+        needed = details.get("run_secret_names")
+        if not isinstance(needed, list) or not needed:
+            raise
+        result = _retry(
+            resolve_run_secrets(
+                names=[str(item) for item in needed],
+                secrets_file=secrets_file,
+                stored_names=set(),
+            )
+        )
+
+    resource: dict[str, Any] = {
+        "id": result.id,
+        "name": result.name,
+        "status": result.status,
+        "workflow_id": result.workflow_id,
+        "retryable_samples": result.retryable_samples,
+        "platform_url": result.platform_url,
+        **workspace_result_context(context),
+    }
+    next_steps = [f"Check progress: osmosis eval info {result.name}"]
+    if result.platform_url:
+        next_steps.append(f"View: {result.platform_url}")
+    return OperationResult(
+        operation="eval.retry",
+        status="success",
+        resource=resource,
+        message=(
+            f"Retrying {result.retryable_samples} failed and skipped "
+            f"{'sample' if result.retryable_samples == 1 else 'samples'} in "
+            f"{result.name}"
+        ),
+        display_next_steps=next_steps,
+    )
 
 
 def stop(name: str, *, yes: bool) -> OperationResult:
