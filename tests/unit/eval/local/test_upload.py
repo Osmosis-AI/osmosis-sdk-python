@@ -516,3 +516,20 @@ def test_rollout_trials_root_symlink_is_rejected(tmp_path: Path) -> None:
         LocalEvalUploadError, match="rollout_trials must be a regular, non-symlink"
     ):
         build_eval_upload_plan(run_dir)
+
+
+def test_the_current_invocations_config_path_supersedes_the_manifests(
+    tmp_path: Path,
+) -> None:
+    """A resume can run a config that moved after the run was created. The
+    manifest keeps the original path because its bytes are the manifest_digest
+    that identifies the import; the upload carries the path that actually ran."""
+    run_dir = _run_dir(tmp_path)
+
+    stale = build_eval_upload_plan(run_dir)
+    assert stale.provenance["config_path"] == "configs/eval/echo.toml"
+
+    current = build_eval_upload_plan(run_dir, config_path="configs/eval/renamed.toml")
+    assert current.provenance["config_path"] == "configs/eval/renamed.toml"
+    # Same manifest bytes, so a retry's re-upload still resolves to this run.
+    assert current.manifest_digest == stale.manifest_digest

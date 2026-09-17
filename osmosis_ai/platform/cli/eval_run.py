@@ -502,7 +502,14 @@ def run(
         run_path = display_path(summary.run_dir, base=display_root)
         try:
             imported = upload_plan(
-                prepare_eval_upload_plan(summary.run_dir),
+                prepare_eval_upload_plan(
+                    summary.run_dir,
+                    # A resume can run a config that moved since the run was
+                    # created; the manifest still holds the original path.
+                    config_path=_workspace_relative_config_path(
+                        resolved_config_path, workspace_directory
+                    ),
+                ),
                 context=platform_context,
                 # A retry attempt is the same local run again, so its upload
                 # replaces whatever the earlier attempt already imported.

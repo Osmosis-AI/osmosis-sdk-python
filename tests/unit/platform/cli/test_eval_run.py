@@ -656,7 +656,7 @@ def test_upload_flag_uploads_after_finalize_and_surfaces_platform_url(
     monkeypatch.setattr(
         eval_upload_module,
         "prepare_eval_upload_plan",
-        lambda run_dir: SimpleNamespace(run_dir=run_dir),
+        lambda run_dir, **_kwargs: SimpleNamespace(run_dir=run_dir),
     )
     monkeypatch.setattr(
         eval_upload_module,
@@ -708,7 +708,7 @@ def test_retry_failed_upload_replaces_the_runs_published_results(
     monkeypatch.setattr(
         eval_upload_module,
         "prepare_eval_upload_plan",
-        lambda run_dir: SimpleNamespace(run_dir=run_dir),
+        lambda run_dir, **_kwargs: SimpleNamespace(run_dir=run_dir),
     )
     monkeypatch.setattr(eval_upload_module, "upload_plan", upload_plan)
 
@@ -736,7 +736,7 @@ def test_upload_failure_says_local_results_are_complete_and_gives_retry_command(
     monkeypatch.setattr(
         eval_upload_module,
         "prepare_eval_upload_plan",
-        lambda run_dir: SimpleNamespace(run_dir=run_dir),
+        lambda run_dir, **_kwargs: SimpleNamespace(run_dir=run_dir),
     )
     monkeypatch.setattr(
         eval_upload_module,
@@ -774,7 +774,7 @@ def test_upload_plan_error_reports_local_problem_without_retry_guidance(
     monkeypatch.setattr(
         eval_upload_module,
         "prepare_eval_upload_plan",
-        lambda _run_dir: (_ for _ in ()).throw(
+        lambda _run_dir, **_kwargs: (_ for _ in ()).throw(
             local_upload_module.LocalEvalUploadError("index.jsonl is invalid")
         ),
     )
@@ -809,7 +809,7 @@ def test_unexpected_upload_error_keeps_internal_classification(
     monkeypatch.setattr(
         eval_upload_module,
         "prepare_eval_upload_plan",
-        lambda run_dir: SimpleNamespace(run_dir=run_dir),
+        lambda run_dir, **_kwargs: SimpleNamespace(run_dir=run_dir),
     )
     monkeypatch.setattr(
         eval_upload_module,
@@ -847,7 +847,7 @@ def test_upload_platform_error_keeps_auth_code_and_retry_context(
     monkeypatch.setattr(
         eval_upload_module,
         "prepare_eval_upload_plan",
-        lambda run_dir: SimpleNamespace(run_dir=run_dir),
+        lambda run_dir, **_kwargs: SimpleNamespace(run_dir=run_dir),
     )
     monkeypatch.setattr(
         eval_upload_module,

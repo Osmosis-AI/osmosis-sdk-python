@@ -110,10 +110,12 @@ def _upload_one(
     )
 
 
-def prepare_eval_upload_plan(run_dir: Path) -> EvalUploadPlan:
+def prepare_eval_upload_plan(
+    run_dir: Path, *, config_path: str | None = None
+) -> EvalUploadPlan:
     """Scrub ambient env secrets from logs.txt, then build the import plan."""
     scrub_logs_file(run_dir / LOGS_FILENAME, env=os.environ)
-    return build_eval_upload_plan(run_dir)
+    return build_eval_upload_plan(run_dir, config_path=config_path)
 
 
 def upload_plan(

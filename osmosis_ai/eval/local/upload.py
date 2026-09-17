@@ -409,8 +409,17 @@ def _artifact_paths(run_dir: Path, rollout_id: str) -> list[tuple[str, Path]]:
     return selected
 
 
-def build_eval_upload_plan(run_dir: Path) -> EvalUploadPlan:
-    """Validate *run_dir* and return its exact, sorted platform import plan."""
+def build_eval_upload_plan(
+    run_dir: Path, *, config_path: str | None = None
+) -> EvalUploadPlan:
+    """Validate *run_dir* and return its exact, sorted platform import plan.
+
+    ``config_path`` is the workspace-relative config this invocation actually
+    ran, and supersedes the manifest's. The manifest records the path the run
+    was *created* with and is never rewritten -- its bytes are the
+    ``manifest_digest`` that identifies the import, so refreshing it in place
+    would make a retry's re-upload look like a different run.
+    """
     run_dir = run_dir.expanduser()
     if run_dir.is_symlink() or not run_dir.is_dir():
         raise LocalEvalUploadError(
@@ -578,6 +587,8 @@ def build_eval_upload_plan(run_dir: Path) -> EvalUploadPlan:
                 f"manifest.json provenance.{key} must be a non-empty string"
             )
         provenance[key] = value
+    if config_path:
+        provenance["config_path"] = config_path
     rollout_config: dict[str, Any] = {
         "name": rollout_name,
         "source_digest": rollout_source_digest,
