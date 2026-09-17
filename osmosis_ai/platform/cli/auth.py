@@ -6,7 +6,7 @@ import os
 from dataclasses import replace
 from typing import Any
 
-from osmosis_ai.cli.errors import CLIError
+from osmosis_ai.cli.errors import CLIError, CLIErrorCode
 from osmosis_ai.cli.output import (
     DetailField,
     DetailResult,
@@ -14,6 +14,7 @@ from osmosis_ai.cli.output import (
     OutputFormat,
     get_output_context,
 )
+from osmosis_ai.cli.output.error import _classify_platform_status
 
 _AUTH_LOGIN_ERROR_CODES = {
     "AUTH_HEADER_MISSING",
@@ -146,13 +147,8 @@ def _verify_with_optional_workspace(verify: Any, *, git_identity: str | None) ->
 
 
 def _cli_error_from_login_error(exc: Any) -> CLIError:
-    from osmosis_ai.cli.output.error import _classify_platform_status
-
     status_code = getattr(exc, "status_code", None)
     platform_code = getattr(exc, "code", None)
-    if _is_auth_login_error(exc):
-        return CLIError(str(exc), code="AUTH_REQUIRED")
-
     if status_code == 426:
         details: dict[str, Any] = {"status_code": 426}
         # Mirror the structured signal (status/message) a 426 carries on a
@@ -169,9 +165,14 @@ def _cli_error_from_login_error(exc: Any) -> CLIError:
         details["status_code"] = status_code
     if isinstance(platform_code, str):
         details["platform_code"] = platform_code
-    return CLIError(
-        str(exc), code=_classify_platform_status(status_code), details=details
-    )
+    if _is_auth_login_error(exc):
+        return CLIError(str(exc), code="AUTH_REQUIRED", details=details)
+    code = _classify_platform_status(status_code)
+    if code is CLIErrorCode.NOT_FOUND:
+        # A login endpoint that does not exist means the platform URL is wrong
+        # or stale, not that a resource is missing.
+        code = CLIErrorCode.PLATFORM_ERROR
+    return CLIError(str(exc), code=code, details=details)
 
 
 def _finish_login(

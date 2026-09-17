@@ -199,6 +199,7 @@ def test_invalid_token_does_not_mutate_existing_session(monkeypatch, capsys) -> 
         (400, "VALIDATION"),
         (409, "CONFLICT"),
         (429, "RATE_LIMITED"),
+        (404, "PLATFORM_ERROR"),
         (500, "PLATFORM_ERROR"),
     ],
 )
@@ -222,6 +223,29 @@ def test_login_json_preserves_http_error_classification(
     assert exit_code == 1
     assert envelope["error"]["code"] == code
     assert envelope["error"]["details"]["status_code"] == status
+
+
+def test_login_json_auth_required_keeps_status_in_details(monkeypatch, capsys) -> None:
+    monkeypatch.delenv("OSMOSIS_TOKEN", raising=False)
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.load_credentials", lambda **kwargs: None
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.verify_token",
+        lambda token, git_identity=None: (_ for _ in ()).throw(
+            LoginError("Token is invalid.", code="TOKEN_INVALID", status_code=401)
+        ),
+    )
+
+    exit_code = cli.main(["--json", "auth", "login", "--token", "secret"])
+
+    envelope = json.loads(capsys.readouterr().err)
+    assert exit_code == 1
+    assert envelope["error"]["code"] == "AUTH_REQUIRED"
+    assert envelope["error"]["details"] == {
+        "status_code": 401,
+        "platform_code": "TOKEN_INVALID",
+    }
 
 
 def test_login_json_with_426_preserves_upgrade_details(monkeypatch, capsys) -> None:

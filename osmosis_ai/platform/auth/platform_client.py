@@ -14,6 +14,7 @@ from osmosis_ai.cli.console import console
 from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.consts import PACKAGE_VERSION
 from osmosis_ai.platform.constants import (
+    MSG_CONNECTION_TIMED_OUT,
     MSG_ENV_TOKEN_EXPIRED,
     MSG_ENV_TOKEN_INVALID,
     MSG_ENV_TOKEN_REVOKED,
@@ -421,13 +422,55 @@ def revoke_cli_token(
         return False
 
 
+# Shown for a ``deployment_conflict`` when the server sends no usable message,
+# or only the edge router's browser copy ("Reload to continue").
+DEPLOYMENT_CONFLICT_MESSAGE = (
+    "The platform is temporarily blocking this request during a deployment "
+    "or release transition. Please try again shortly. "
+    "If this persists, contact Osmosis support."
+)
+
+
+def _is_deployment_conflict(body: dict[str, Any]) -> bool:
+    return "deployment_conflict" in (body.get("error"), body.get("code"))
+
+
 def _response_error_message(body: dict[str, Any]) -> str | None:
-    """Prefer a human-readable message over a legacy error string or code."""
-    for key in ("message", "error"):
-        value = body.get(key)
+    """Prefer a human-readable message over a legacy error string or code.
+
+    A ``deployment_conflict`` body gets CLI retry guidance unless the server
+    message is usable and not written for a browser: the reload prompt means
+    nothing in a terminal and its exact wording is not stable, so any mention
+    of reloading is treated as browser copy.
+    """
+    message = None
+    for value in (body.get("message"), body.get("error")):
         if isinstance(value, str) and value.strip():
-            return value.strip()
-    return None
+            message = value.strip()
+            break
+    if _is_deployment_conflict(body) and (
+        message is None
+        or message == "deployment_conflict"
+        or "reload" in message.lower()
+    ):
+        return DEPLOYMENT_CONFLICT_MESSAGE
+    return message
+
+
+def is_timeout(e: BaseException) -> bool:
+    """True for a bare ``TimeoutError`` and for one urllib wrapped in ``URLError``.
+
+    urllib wraps a connect-phase timeout as ``URLError(TimeoutError)``; a
+    timeout while awaiting or reading the response surfaces bare.
+    """
+    return isinstance(getattr(e, "reason", e), TimeoutError)
+
+
+def connection_error_message(e: URLError | TimeoutError) -> str:
+    """User-facing text for a request that never produced a response."""
+    if is_timeout(e):
+        return MSG_CONNECTION_TIMED_OUT
+    return f"Could not connect to platform: {getattr(e, 'reason', e)}"
 
 
 def _raise_for_http_error(
@@ -494,22 +537,9 @@ def _raise_for_http_error(
     except Exception:
         pass
 
-    if e.code == 409 and error_body.get("error") == "deployment_conflict":
+    if _is_deployment_conflict(error_body):
+        # The message itself comes from _response_error_message above.
         error_code = error_code or "deployment_conflict"
-        message = error_body.get("message")
-        # Older edge routers return browser reload guidance for CLI requests too.
-        if (
-            isinstance(message, str)
-            and message.strip()
-            and message.strip() != "We\u2019ve updated the app. Reload to continue."
-        ):
-            platform_message = message.strip()
-        else:
-            platform_message = (
-                "The platform is temporarily blocking this request during a deployment "
-                "or release transition. Please try again shortly. "
-                "If this persists, contact Osmosis support."
-            )
 
     if error_code in _REPO_SCOPE_ERROR_MESSAGES:
         raise PlatformAPIError(
@@ -536,7 +566,7 @@ def _raise_for_http_error(
         error_msg = error_body.get("error", "")
         if isinstance(error_msg, str) and "subscription" in error_msg.lower():
             raise SubscriptionRequiredError(
-                platform_message or error_msg,
+                platform_message,
                 error_code=error_code,
                 field=field,
                 details=error_body or None,
@@ -651,11 +681,8 @@ def platform_request(
             using_env_token=using_env_token,
             git_identity=git_identity,
         )
-    except URLError as e:
-        raise PlatformAPIError(f"Connection error: {e.reason}") from e
-    except TimeoutError as e:
-        # A socket timeout mid-read is a bare TimeoutError, not a URLError.
-        raise PlatformAPIError("Connection error: timed out") from e
+    except (URLError, TimeoutError) as e:
+        raise PlatformAPIError(connection_error_message(e)) from e
     except (json.JSONDecodeError, UnicodeDecodeError) as e:
         raise PlatformAPIError("Invalid JSON response from platform") from e
     if not isinstance(parsed, dict):
@@ -732,8 +759,5 @@ def platform_stream(
             using_env_token=using_env_token,
             git_identity=git_identity,
         )
-    except URLError as e:
-        raise PlatformAPIError(f"Connection error: {e.reason}") from e
-    except TimeoutError as e:
-        # A socket timeout during setup or iteration is bare, not a URLError.
-        raise PlatformAPIError("Connection error: timed out") from e
+    except (URLError, TimeoutError) as e:
+        raise PlatformAPIError(connection_error_message(e)) from e

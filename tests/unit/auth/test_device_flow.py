@@ -294,3 +294,51 @@ def test_device_login_errors_surface_server_explanation(
                 request_device_code()
     request.assert_called_once()
     assert caught.value.status_code == status
+
+
+@pytest.mark.parametrize("polling", [False, True])
+def test_device_login_deployment_conflict_gets_cli_guidance(polling: bool) -> None:
+    body = {
+        "error": "deployment_conflict",
+        "message": "We\u2019ve updated the app. Reload to continue.",
+    }
+    error = HTTPError(
+        url="http://test",
+        code=409,
+        msg="Conflict",
+        hdrs=None,
+        fp=BytesIO(json.dumps(body).encode()),
+    )
+    with patch("osmosis_ai.platform.auth.flow.urlopen", side_effect=error):
+        with pytest.raises(LoginError, match="try again shortly") as caught:
+            if polling:
+                poll_device_token("device_abc", interval=1, timeout=10)
+            else:
+                request_device_code()
+    assert "Reload" not in str(caught.value)
+    assert caught.value.status_code == 409
+
+
+@pytest.mark.parametrize(
+    ("error_code", "message"),
+    [
+        ("expired_token", "Device code expired"),
+        ("access_denied", "Authorization was denied"),
+        ("invalid_grant", "Polling failed"),
+    ],
+)
+def test_poll_terminal_errors_carry_status_and_code(
+    error_code: str, message: str
+) -> None:
+    error = HTTPError(
+        url="http://test",
+        code=400,
+        msg="Bad Request",
+        hdrs=None,
+        fp=BytesIO(json.dumps({"error": error_code}).encode()),
+    )
+    with patch("osmosis_ai.platform.auth.flow.urlopen", side_effect=error):
+        with pytest.raises(LoginError, match=message) as caught:
+            poll_device_token("device_abc", interval=1, timeout=10)
+    assert caught.value.status_code == 400
+    assert caught.value.code == error_code

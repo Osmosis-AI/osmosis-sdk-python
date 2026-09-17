@@ -24,8 +24,11 @@ from osmosis_ai.cli.console import console
 from .config import get_platform_url
 from .credentials import Credentials, UserInfo
 from .platform_client import (
+    _read_error_body,
     _response_error_message,
     cli_request_headers,
+    connection_error_message,
+    is_timeout,
     surface_response_version_signal,
     upgrade_required_message,
 )
@@ -137,26 +140,19 @@ def _get_device_name() -> str:
         return "Unknown"
 
 
-def _read_error_body(e: HTTPError) -> dict[str, Any]:
-    """Extract a JSON error body from an HTTPError."""
-    try:
-        body = json.loads(e.read().decode())
-        if isinstance(body, dict):
-            return body
-    except Exception:
-        pass
-    return {}
-
-
-def _read_error_detail(e: HTTPError) -> str:
-    """Extract error message from an HTTPError JSON response body."""
-    return _response_error_message(_read_error_body(e)) or ""
+def _read_json_object(response: Any) -> dict[str, Any]:
+    """Parse a successful response body, rejecting anything but a JSON object."""
+    data = json.loads(response.read().decode())
+    if not isinstance(data, dict):
+        raise LoginError("Invalid response from platform")
+    return data
 
 
 # User-friendly messages keyed by HTTP status code.
 _HTTP_ERROR_MESSAGES: dict[int, str] = {
     401: "Authentication failed.",
     403: "Access denied by the platform.",
+    404: "The platform did not recognize this endpoint. Check the platform URL.",
     429: "Too many requests. Please wait a few minutes and try again.",
     500: "Osmosis platform encountered an internal error. Please try again later.",
     502: "Osmosis platform is temporarily unavailable. Please try again later.",
@@ -196,18 +192,26 @@ def _login_error_from_http(
             details=version_signal,
         )
 
-    detail = _read_error_detail(e)
+    body = _read_error_body(e)
+    detail = _response_error_message(body) or ""
     friendly = _HTTP_ERROR_MESSAGES.get(e.code)
+    code = body.get("code")
+    # A bare error code (the legacy ``error`` field) only means something next
+    # to the status-specific text; a server-supplied explanation stands alone.
+    error_field = body.get("error")
+    bare_code = isinstance(error_field, str) and detail == error_field.strip()
 
-    if detail and friendly:
-        return LoginError(f"{friendly} ({detail})", status_code=e.code)
-    if friendly:
-        return LoginError(friendly, status_code=e.code)
-    if detail:
-        return LoginError(
-            f"{fallback_prefix}: {detail} (HTTP {e.code})", status_code=e.code
-        )
-    return LoginError(f"{fallback_prefix}: HTTP {e.code}", status_code=e.code)
+    if friendly and (not detail or bare_code):
+        message = f"{friendly} ({detail})" if detail else friendly
+    elif detail:
+        message = f"{fallback_prefix}: {detail} (HTTP {e.code})"
+    else:
+        message = f"{fallback_prefix}: HTTP {e.code}"
+    return LoginError(
+        message,
+        code=code if isinstance(code, str) else None,
+        status_code=e.code,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -241,7 +245,7 @@ def verify_token(token: str, *, git_identity: str | None = None) -> VerifyResult
     try:
         with urlopen(request, timeout=30) as response:
             surface_response_version_signal(response)
-            data = json.loads(response.read().decode())
+            data = _read_json_object(response)
 
             token_id = data.get("token_id")
 
@@ -283,13 +287,10 @@ def verify_token(token: str, *, git_identity: str | None = None) -> VerifyResult
                 ) from e
             raise LoginError(_HTTP_ERROR_MESSAGES[e.code], status_code=e.code) from e
         raise _login_error_from_http(e, "Verification failed") from e
-    except URLError as e:
-        raise LoginError(f"Could not connect to platform: {e.reason}") from e
-    except TimeoutError as e:
-        raise LoginError(
-            "Connection to the platform timed out. Check your connection and try again."
-        ) from e
-    except json.JSONDecodeError as e:
+    except (URLError, TimeoutError) as e:
+        raise LoginError(connection_error_message(e)) from e
+    except (ValueError, TypeError) as e:
+        # JSON decoding, a non-UTF-8 body, or a malformed expires_at.
         raise LoginError("Invalid response from platform") from e
 
 
@@ -317,7 +318,7 @@ def request_device_code(device_name: str | None = None) -> DeviceCodeResponse:
     try:
         with urlopen(request, timeout=30) as response:
             surface_response_version_signal(response)
-            data = json.loads(response.read().decode())
+            data = _read_json_object(response)
             return DeviceCodeResponse(
                 device_code=data["device_code"],
                 user_code=data["user_code"],
@@ -328,13 +329,9 @@ def request_device_code(device_name: str | None = None) -> DeviceCodeResponse:
             )
     except HTTPError as e:
         raise _login_error_from_http(e, "Failed to request device code") from e
-    except URLError as e:
-        raise LoginError(f"Could not connect to platform: {e.reason}") from e
-    except TimeoutError as e:
-        raise LoginError(
-            "Connection to the platform timed out. Check your connection and try again."
-        ) from e
-    except (json.JSONDecodeError, KeyError) as e:
+    except (URLError, TimeoutError) as e:
+        raise LoginError(connection_error_message(e)) from e
+    except (ValueError, TypeError, KeyError) as e:
         raise LoginError("Invalid response from platform") from e
 
 
@@ -357,17 +354,15 @@ def poll_device_token(
         try:
             with urlopen(request, timeout=30) as response:
                 surface_response_version_signal(response)
-                data = json.loads(response.read().decode())
-                return data
+                return _read_json_object(response)
         except HTTPError as e:
             if e.code in (426, 429, 500, 502, 503, 504):
                 raise _login_error_from_http(e, "Polling failed") from e
             error_data = _read_error_body(e)
-            if not error_data:
-                raise LoginError(
-                    f"Polling failed: HTTP {e.code}", status_code=e.code
-                ) from e
             error_code = error_data.get("error", "")
+            # RFC 8628 puts the machine-readable code in ``error``; carry it so
+            # the CLI envelope keeps it under details.platform_code.
+            code = error_code if isinstance(error_code, str) and error_code else None
 
             if error_code == "authorization_pending":
                 if on_poll:
@@ -381,21 +376,28 @@ def poll_device_token(
                 time.sleep(current_interval)
                 continue
             elif error_code == "expired_token":
-                raise LoginError("Device code expired. Please try again.") from e
+                raise LoginError(
+                    "Device code expired. Please try again.",
+                    code=code,
+                    status_code=e.code,
+                ) from e
             elif error_code == "access_denied":
-                raise LoginError("Authorization was denied.") from e
+                raise LoginError(
+                    "Authorization was denied.", code=code, status_code=e.code
+                ) from e
             else:
                 raise LoginError(
                     f"Polling failed: {_response_error_message(error_data) or f'HTTP {e.code}'}",
+                    code=code,
                     status_code=e.code,
                 ) from e
-        except URLError as e:
-            raise LoginError(f"Could not connect to platform: {e.reason}") from e
-        except TimeoutError as e:
-            raise LoginError(
-                "Connection to the platform timed out. Check your connection and try again."
-            ) from e
-        except (json.JSONDecodeError, KeyError) as e:
+        except (URLError, TimeoutError) as e:
+            if is_timeout(e):
+                # One stalled poll is not fatal; the deadline bounds the loop.
+                time.sleep(current_interval)
+                continue
+            raise LoginError(connection_error_message(e)) from e
+        except (ValueError, TypeError, KeyError) as e:
             raise LoginError("Invalid response from platform") from e
 
     raise LoginError("Device authorization timed out. Please try again.")
