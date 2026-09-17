@@ -564,6 +564,23 @@ def test_login_timeout_has_actionable_message(stage: str, failure: str) -> None:
     request.assert_called_once()
 
 
+def test_poll_device_token_never_waits_past_deadline() -> None:
+    # monotonic(): deadline calc, loop check, sleep clamp, loop check, sleep clamp, loop check.
+    clock = [0.0, 0.0, 8.0, 8.0, 10.5, 10.5]
+    with (
+        patch(
+            "osmosis_ai.platform.auth.flow.urlopen", side_effect=TimeoutError()
+        ) as request,
+        patch("osmosis_ai.platform.auth.flow.time.sleep") as sleep,
+        patch("osmosis_ai.platform.auth.flow.time.monotonic", side_effect=clock),
+    ):
+        with pytest.raises(LoginError, match="Device authorization timed out"):
+            poll_device_token("test-device", interval=5, timeout=10)
+    # The request timeout shrinks to the time left; the pause never overshoots it.
+    assert [call.kwargs["timeout"] for call in request.call_args_list] == [10.0, 2.0]
+    assert [call.args[0] for call in sleep.call_args_list] == [2.0, 0.0]
+
+
 def test_poll_device_token_retries_after_timeout() -> None:
     success = _login_response(json.dumps({"token": "tok"}).encode())
     with (

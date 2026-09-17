@@ -357,6 +357,11 @@ def request_device_code(device_name: str | None = None) -> DeviceCodeResponse:
         raise LoginError("Invalid response from platform") from e
 
 
+def _bounded_sleep(seconds: float, deadline: float) -> None:
+    """Sleep for ``seconds`` but never past ``deadline`` (a ``time.monotonic`` value)."""
+    time.sleep(max(0.0, min(seconds, deadline - time.monotonic())))
+
+
 def poll_device_token(
     device_code: str,
     interval: int,
@@ -370,11 +375,13 @@ def poll_device_token(
     deadline = time.monotonic() + timeout
     current_interval = interval
 
-    while time.monotonic() < deadline:
+    # Neither a poll in flight nor the pause after one may outlive the deadline,
+    # so the command ends close to the advertised code expiry.
+    while (remaining := deadline - time.monotonic()) > 0:
         request = Request(url, data=body, headers=req_headers, method="POST")
 
         try:
-            with urlopen(request, timeout=30) as response:
+            with urlopen(request, timeout=min(30.0, remaining)) as response:
                 surface_response_version_signal(response)
                 return _read_json_object(response)
         except HTTPError as e:
@@ -389,13 +396,13 @@ def poll_device_token(
             if error_code == "authorization_pending":
                 if on_poll:
                     on_poll()
-                time.sleep(current_interval)
+                _bounded_sleep(current_interval, deadline)
                 continue
             elif error_code == "slow_down":
                 current_interval = min(current_interval + 5, 30)
                 if on_poll:
                     on_poll()
-                time.sleep(current_interval)
+                _bounded_sleep(current_interval, deadline)
                 continue
             elif error_code == "expired_token":
                 raise LoginError(
@@ -421,7 +428,7 @@ def poll_device_token(
         except (URLError, TimeoutError) as e:
             if is_timeout(e):
                 # One stalled poll is not fatal; the deadline bounds the loop.
-                time.sleep(current_interval)
+                _bounded_sleep(current_interval, deadline)
                 continue
             raise LoginError(connection_error_message(e)) from e
         except (ValueError, TypeError, KeyError) as e:
