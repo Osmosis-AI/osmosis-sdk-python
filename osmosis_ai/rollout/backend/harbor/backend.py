@@ -982,9 +982,8 @@ class HarborBackend(ExecutionBackend):
                 sample=sample,
                 extra_fields=self.event_diagnostics(event),
             )
-        # Only harbor's ExceptionInfo reaches us here, and it preserves the
-        # class name but not the numeric HTTP status, so classification keys
-        # off the exception type.
+        # Harbor drops structured HTTP status codes. Only unambiguous provider
+        # exception names can be promoted to a run-wide infrastructure failure.
         err = event.result.exception_info if event.result else None
         category = categorize_error_type(err.exception_type if err else None)
         return ExecutionResult(
