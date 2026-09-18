@@ -95,6 +95,22 @@ def test_enrich_missing_secret_error_adds_hint() -> None:
     assert "https://platform.example.test/my-workspace/secrets" in msg
 
 
+def test_enrich_missing_secret_error_reads_legacy_error_field() -> None:
+    from osmosis_ai.platform.auth.platform_client import PlatformAPIError
+
+    exc = PlatformAPIError(
+        "One or more secrets could not be resolved.",
+        404,
+        details={
+            "error": "Secret(s) not found: OPENAI_API_KEY",
+            "message": "One or more secrets could not be resolved.",
+        },
+    )
+    enriched = shared_submit._enrich_missing_secret_error(exc)
+    assert enriched is not None
+    assert "osmosis secret set OPENAI_API_KEY" in str(enriched)
+
+
 def test_enrich_missing_secret_error_returns_none_for_other_errors() -> None:
     from osmosis_ai.platform.auth.platform_client import PlatformAPIError
 

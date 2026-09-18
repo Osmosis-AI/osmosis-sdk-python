@@ -19,6 +19,7 @@ from osmosis_ai.platform.auth.flow import (
     LoginError,
     VerifyResult,
     _get_device_name,
+    poll_device_token,
     request_device_code,
     verify_token,
 )
@@ -527,3 +528,148 @@ class TestVerifyTokenVersionSignals:
         mock_console.print_warning.assert_called_once_with(
             upgrade_msg, code="UPGRADE_AVAILABLE"
         )
+
+
+def _login_response(payload: bytes) -> MagicMock:
+    response = MagicMock()
+    response.headers = {}
+    response.__enter__.return_value = response
+    response.read.return_value = payload
+    return response
+
+
+def _call_login_stage(stage: str) -> Any:
+    if stage == "verify":
+        return verify_token("test-token")
+    if stage == "authorize":
+        return request_device_code()
+    return poll_device_token("test-device", interval=1, timeout=10)
+
+
+@pytest.mark.parametrize("stage", ["verify", "authorize"])
+@pytest.mark.parametrize("failure", ["connect", "headers", "read"])
+def test_login_timeout_has_actionable_message(stage: str, failure: str) -> None:
+    response = _login_response(b"")
+    response.read.side_effect = TimeoutError()
+    with patch("osmosis_ai.platform.auth.flow.urlopen") as request:
+        if failure == "read":
+            request.return_value = response
+        elif failure == "headers":
+            request.side_effect = TimeoutError()
+        else:
+            # urllib wraps a connect-phase timeout in URLError.
+            request.side_effect = URLError(TimeoutError("timed out"))
+        with pytest.raises(LoginError, match=r"timed out.*try again"):
+            _call_login_stage(stage)
+    request.assert_called_once()
+
+
+def test_poll_device_token_never_waits_past_deadline() -> None:
+    # monotonic(): deadline calc, loop check, sleep clamp, loop check, sleep clamp, loop check.
+    clock = [0.0, 0.0, 8.0, 8.0, 10.5, 10.5]
+    with (
+        patch(
+            "osmosis_ai.platform.auth.flow.urlopen", side_effect=TimeoutError()
+        ) as request,
+        patch("osmosis_ai.platform.auth.flow.time.sleep") as sleep,
+        patch("osmosis_ai.platform.auth.flow.time.monotonic", side_effect=clock),
+    ):
+        with pytest.raises(LoginError, match="Device authorization timed out"):
+            poll_device_token("test-device", interval=5, timeout=10)
+    # The request timeout shrinks to the time left; the pause never overshoots it.
+    assert [call.kwargs["timeout"] for call in request.call_args_list] == [10.0, 2.0]
+    assert [call.args[0] for call in sleep.call_args_list] == [2.0, 0.0]
+
+
+def test_poll_device_token_retries_after_timeout() -> None:
+    success = _login_response(json.dumps({"token": "tok"}).encode())
+    with (
+        patch(
+            "osmosis_ai.platform.auth.flow.urlopen",
+            side_effect=[URLError(TimeoutError("timed out")), TimeoutError(), success],
+        ) as request,
+        patch("osmosis_ai.platform.auth.flow.time.sleep") as sleep,
+    ):
+        result = poll_device_token("test-device", interval=1, timeout=10)
+    assert result == {"token": "tok"}
+    assert request.call_count == 3
+    assert sleep.call_count == 2
+
+
+@pytest.mark.parametrize(
+    ("body", "expected"),
+    [
+        (
+            {
+                "error": "rate_limited",
+                "message": "Too many requests. Please wait a few minutes and try again.",
+            },
+            "Verification failed: Too many requests. Please wait a few minutes "
+            "and try again. (HTTP 429)",
+        ),
+        (
+            {"error": "rate_limited"},
+            "Too many requests. Please wait a few minutes and try again. (rate_limited)",
+        ),
+        ({}, "Too many requests. Please wait a few minutes and try again."),
+    ],
+)
+def test_login_http_error_shows_server_message_once(
+    body: dict[str, Any], expected: str
+) -> None:
+    error = HTTPError(
+        url="http://test",
+        code=429,
+        msg="Too Many Requests",
+        hdrs=None,
+        fp=BytesIO(json.dumps(body).encode()),
+    )
+    with patch("osmosis_ai.platform.auth.flow.urlopen", side_effect=error):
+        with pytest.raises(LoginError) as caught:
+            verify_token("test-token")
+    assert str(caught.value) == expected
+    assert caught.value.status_code == 429
+
+
+def test_login_error_body_tolerates_non_utf8_bytes() -> None:
+    error = HTTPError(
+        url="http://test",
+        code=409,
+        msg="Conflict",
+        hdrs=None,
+        fp=BytesIO(b'{"error":"workspace_unavailable","message":"Caf\xe9 is closed"}'),
+    )
+    with patch("osmosis_ai.platform.auth.flow.urlopen", side_effect=error):
+        with pytest.raises(LoginError, match="is closed"):
+            request_device_code()
+
+
+@pytest.mark.parametrize("stage", ["verify", "authorize", "poll"])
+@pytest.mark.parametrize("payload", [b"null", b"[1, 2]", b'"oops"'])
+def test_login_rejects_non_object_response(stage: str, payload: bytes) -> None:
+    with patch(
+        "osmosis_ai.platform.auth.flow.urlopen", return_value=_login_response(payload)
+    ):
+        with pytest.raises(LoginError, match="Invalid response from platform"):
+            _call_login_stage(stage)
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"user": {"id": "u1", "email": "a@b.c"}, "expires_at": "2026-13-45T99:00:00Z"},
+        {"user": {"id": "u1", "email": "a@b.c"}, "expires_at": 1234},
+        {"user": "not-an-object", "expires_at": "2099-01-01T00:00:00Z"},
+        {"user": ["u1"], "expires_at": "2099-01-01T00:00:00Z"},
+    ],
+    ids=["bad_iso", "non_string_expires_at", "string_user", "list_user"],
+)
+def test_verify_token_malformed_fields_are_login_errors(
+    payload: dict[str, Any],
+) -> None:
+    payload = json.dumps(payload).encode()
+    with patch(
+        "osmosis_ai.platform.auth.flow.urlopen", return_value=_login_response(payload)
+    ):
+        with pytest.raises(LoginError, match="Invalid response from platform"):
+            verify_token("test-token")
