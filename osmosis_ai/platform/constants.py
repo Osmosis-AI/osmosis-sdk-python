@@ -31,6 +31,9 @@ MSG_ENV_TOKEN_REVOKED = (
     "to use saved credentials or interactive login."
 )
 MSG_NOT_LOGGED_IN = "Not logged in. Run 'osmosis auth login' first."
+MSG_CONNECTION_TIMED_OUT = (
+    "Connection to the platform timed out. Check your connection and try again."
+)
 
 # ── Inference endpoint ───────────────────────────────────────────
 

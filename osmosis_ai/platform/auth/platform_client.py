@@ -14,6 +14,7 @@ from osmosis_ai.cli.console import console
 from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.consts import PACKAGE_VERSION
 from osmosis_ai.platform.constants import (
+    MSG_CONNECTION_TIMED_OUT,
     MSG_ENV_TOKEN_EXPIRED,
     MSG_ENV_TOKEN_INVALID,
     MSG_ENV_TOKEN_REVOKED,
@@ -421,6 +422,70 @@ def revoke_cli_token(
         return False
 
 
+# Shown for a ``deployment_conflict`` when the server sends no usable message,
+# or only the edge router's browser copy ("Reload to continue").
+DEPLOYMENT_CONFLICT_MESSAGE = (
+    "The platform is temporarily blocking this request during a deployment "
+    "or release transition. Please try again shortly. "
+    "If this persists, contact Osmosis support."
+)
+
+
+def _is_deployment_conflict(body: dict[str, Any]) -> bool:
+    return "deployment_conflict" in (body.get("error"), body.get("code"))
+
+
+def platform_error_code(body: dict[str, Any]) -> str | None:
+    """Machine-readable platform code carried by an error body.
+
+    ``code`` is authoritative. The legacy ``error`` field is free text, so it
+    is only promoted when it names a deployment conflict; the API client and
+    the login handshake share this rule so ``details.platform_code`` matches.
+    """
+    code = body.get("code")
+    if isinstance(code, str) and code:
+        return code
+    return "deployment_conflict" if _is_deployment_conflict(body) else None
+
+
+def _response_error_message(body: dict[str, Any]) -> str | None:
+    """Prefer a human-readable message over a legacy error string or code.
+
+    A ``deployment_conflict`` body gets CLI retry guidance unless the server
+    message is usable and not written for a browser: the reload prompt means
+    nothing in a terminal and its exact wording is not stable, so any mention
+    of reloading is treated as browser copy.
+    """
+    message = None
+    for value in (body.get("message"), body.get("error")):
+        if isinstance(value, str) and value.strip():
+            message = value.strip()
+            break
+    if _is_deployment_conflict(body) and (
+        message is None
+        or message == "deployment_conflict"
+        or "reload" in message.lower()
+    ):
+        return DEPLOYMENT_CONFLICT_MESSAGE
+    return message
+
+
+def is_timeout(e: BaseException) -> bool:
+    """True for a bare ``TimeoutError`` and for one urllib wrapped in ``URLError``.
+
+    urllib wraps a connect-phase timeout as ``URLError(TimeoutError)``; a
+    timeout while awaiting or reading the response surfaces bare.
+    """
+    return isinstance(getattr(e, "reason", e), TimeoutError)
+
+
+def connection_error_message(e: URLError | TimeoutError) -> str:
+    """User-facing text for a request that never produced a response."""
+    if is_timeout(e):
+        return MSG_CONNECTION_TIMED_OUT
+    return f"Could not connect to platform: {getattr(e, 'reason', e)}"
+
+
 def _raise_for_http_error(
     e: HTTPError,
     *,
@@ -457,7 +522,6 @@ def _raise_for_http_error(
     # Best-effort capture of structured error message from response body
     detail = ""
     error_body: dict[str, Any] = {}
-    error_code: str | None = None
     field: str | None = None
     platform_message: str | None = None
     try:
@@ -469,13 +533,11 @@ def _raise_for_http_error(
                 # Only treat as error_body if it's actually a dict
                 if isinstance(parsed, dict):
                     error_body = parsed
-                    if isinstance(error_body.get("code"), str):
-                        error_code = error_body["code"]
                     if isinstance(error_body.get("field"), str):
                         field = error_body["field"]
-            # Prefer structured error/message field over raw body
-            error_msg = error_body.get("error") or error_body.get("message")
-            if error_msg and isinstance(error_msg, str):
+            # Prefer a usable explanation over an error code or raw response body.
+            error_msg = _response_error_message(error_body)
+            if error_msg:
                 issues_detail = _format_response_issues(error_body)
                 platform_message = f"{error_msg}{issues_detail or ''}"
             elif text:
@@ -484,6 +546,7 @@ def _raise_for_http_error(
                 detail = f" Response: {text}"
     except Exception:
         pass
+    error_code = platform_error_code(error_body)
 
     if error_code in _REPO_SCOPE_ERROR_MESSAGES:
         raise PlatformAPIError(
@@ -498,9 +561,8 @@ def _raise_for_http_error(
         "SUBSCRIPTION_REQUIRED",
         "BILLING_REQUIRED",
     }:
-        error_msg = error_body.get("error") or error_body.get("message")
         raise SubscriptionRequiredError(
-            error_msg if isinstance(error_msg, str) else None,
+            platform_message,
             error_code=error_code,
             field=field,
             details=error_body or None,
@@ -511,7 +573,7 @@ def _raise_for_http_error(
         error_msg = error_body.get("error", "")
         if isinstance(error_msg, str) and "subscription" in error_msg.lower():
             raise SubscriptionRequiredError(
-                error_msg,
+                platform_message,
                 error_code=error_code,
                 field=field,
                 details=error_body or None,
@@ -626,11 +688,8 @@ def platform_request(
             using_env_token=using_env_token,
             git_identity=git_identity,
         )
-    except URLError as e:
-        raise PlatformAPIError(f"Connection error: {e.reason}") from e
-    except TimeoutError as e:
-        # A socket timeout mid-read is a bare TimeoutError, not a URLError.
-        raise PlatformAPIError("Connection error: timed out") from e
+    except (URLError, TimeoutError) as e:
+        raise PlatformAPIError(connection_error_message(e)) from e
     except (json.JSONDecodeError, UnicodeDecodeError) as e:
         raise PlatformAPIError("Invalid JSON response from platform") from e
     if not isinstance(parsed, dict):
@@ -707,8 +766,5 @@ def platform_stream(
             using_env_token=using_env_token,
             git_identity=git_identity,
         )
-    except URLError as e:
-        raise PlatformAPIError(f"Connection error: {e.reason}") from e
-    except TimeoutError as e:
-        # A socket timeout during setup or iteration is bare, not a URLError.
-        raise PlatformAPIError("Connection error: timed out") from e
+    except (URLError, TimeoutError) as e:
+        raise PlatformAPIError(connection_error_message(e)) from e

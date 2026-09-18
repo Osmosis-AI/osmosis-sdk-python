@@ -186,7 +186,11 @@ def _enrich_missing_secret_error(
     """
     if exc.status_code != 404:
         return None
-    match = _MISSING_SECRET_RE.search(str(exc))
+    # The names live in the legacy ``error`` field; when the body also carries
+    # a generic ``message`` that becomes str(exc), so search both.
+    error_field = (exc.details or {}).get("error")
+    haystack = f"{exc}\n{error_field}" if isinstance(error_field, str) else str(exc)
+    match = _MISSING_SECRET_RE.search(haystack)
     if not match:
         return None
 
