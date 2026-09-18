@@ -1217,9 +1217,25 @@ class TestGetEvalRunMetrics:
 class TestDevRolloutServer:
     """Tests for OsmosisClient dev rollout server methods."""
 
+    @pytest.mark.parametrize("provider", ["daytona", "opensandbox"])
+    @patch("osmosis_ai.platform.api.client.platform_request")
+    def test_provision_sends_explicit_sandbox_environment(self, mock_request, provider):
+        from osmosis_ai.platform.constants import DevServerSandboxEnvironment
+
+        OsmosisClient().provision_dev_rollout_server(
+            rollout_name="r",
+            commit_sha="sha",
+            repository_path="rollouts/r",
+            entrypoint="main.py",
+            ttl_hours=1,
+            git_identity="git_test",
+            sandbox_environment=DevServerSandboxEnvironment(provider),
+        )
+        assert mock_request.call_args.kwargs["data"]["sandbox_environment"] == provider
+
     @patch("osmosis_ai.platform.api.client.platform_request")
     def test_provision_posts_correct_payload(self, mock_request: MagicMock) -> None:
-        mock_request.return_value = {"server_id": "srv-1", "status": "provisioning"}
+        mock_request.return_value = {"id": "srv-1", "status": "provisioning"}
         credentials = object()
 
         result = OsmosisClient().provision_dev_rollout_server(
@@ -1232,7 +1248,7 @@ class TestDevRolloutServer:
             git_identity="git_test",
         )
 
-        assert result == {"server_id": "srv-1", "status": "provisioning"}
+        assert result == {"id": "srv-1", "status": "provisioning"}
         assert mock_request.call_args[0][0] == "/api/cli/dev-rollout-server"
         assert mock_request.call_args.kwargs["method"] == "POST"
         assert mock_request.call_args.kwargs["data"] == {
@@ -1247,7 +1263,7 @@ class TestDevRolloutServer:
 
     @patch("osmosis_ai.platform.api.client.platform_request")
     def test_provision_accepts_none_ttl_hours(self, mock_request: MagicMock) -> None:
-        mock_request.return_value = {"server_id": "srv-2", "status": "provisioning"}
+        mock_request.return_value = {"id": "srv-2", "status": "provisioning"}
 
         OsmosisClient().provision_dev_rollout_server(
             rollout_name="r",
@@ -1264,7 +1280,7 @@ class TestDevRolloutServer:
     def test_teardown_sends_delete_and_encodes_id(
         self, mock_request: MagicMock
     ) -> None:
-        mock_request.return_value = {"server_id": "a/b", "status": "terminating"}
+        mock_request.return_value = {"id": "a/b", "status": "terminating"}
         credentials = object()
 
         result = OsmosisClient().teardown_dev_rollout_server(
@@ -1273,7 +1289,7 @@ class TestDevRolloutServer:
             git_identity="git_test",
         )
 
-        assert result == {"server_id": "a/b", "status": "terminating"}
+        assert result == {"id": "a/b", "status": "terminating"}
         assert mock_request.call_args[0][0] == "/api/cli/dev-rollout-server/a%2Fb"
         assert mock_request.call_args.kwargs["method"] == "DELETE"
         assert mock_request.call_args.kwargs["data"] == {}
@@ -1411,3 +1427,20 @@ class TestStreamDevRolloutServerLogs:
         assert mock_stream.call_args[0][0].startswith(
             "/api/cli/dev-rollout-server/a%2Fb/logs/stream?"
         )
+
+
+@pytest.mark.parametrize("backend", ["ecs", "gke"])
+@patch("osmosis_ai.platform.api.client.platform_request")
+def test_provision_dev_server_sends_backend(mock_request, backend):
+    from osmosis_ai.platform.constants import DevServerBackend
+
+    OsmosisClient().provision_dev_rollout_server(
+        rollout_name="test",
+        commit_sha="abc",
+        repository_path=".",
+        entrypoint="main.py",
+        ttl_hours=1,
+        git_identity="git_test",
+        backend=DevServerBackend(backend),
+    )
+    assert mock_request.call_args.kwargs["data"]["backend"] == backend
