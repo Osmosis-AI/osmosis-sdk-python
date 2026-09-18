@@ -871,6 +871,42 @@ class TestGraderOutcome:
         assert outcome.err_category == RolloutErrorCategory.AGENT_ERROR
         assert "Command failed" in outcome.err_message
 
+    async def test_opensandbox_error_is_http_error(self, template_task, tmp_path):
+        """An upstream sandbox provider failure is infra, not an agent error.
+
+        The cloud-eval controller fast-aborts on 2 consecutive http_error
+        trials; harbor's ExceptionInfo preserves only the class name, so the
+        classification must key off the name.
+        """
+        backend = self.backend_for(template_task, tmp_path)
+        event = self.event_with(
+            exception_info=self.exception_at(0, exception_type="SandboxApiException"),
+            verifier=self.verifier_span(),
+        )
+
+        outcome = backend.grader_outcome(event, "r1", PendingTrial())
+        workflow = backend.workflow_outcome(event, "r1", PendingTrial())
+
+        assert outcome.err_category == RolloutErrorCategory.HTTP_ERROR
+        assert workflow.err_category == RolloutErrorCategory.HTTP_ERROR
+        assert workflow.extra_fields["harbor_exception_type"] == "SandboxApiException"
+
+    async def test_grading_phase_sandbox_error_is_http_error(
+        self, template_task, tmp_path
+    ):
+        """A sandbox provider error after the agent phase stays http_error."""
+        backend = self.backend_for(template_task, tmp_path)
+        event = self.event_with(
+            exception_info=self.exception_at(
+                120, exception_type="SandboxInternalException"
+            ),
+            verifier=self.verifier_span(start_offset_sec=30, duration_sec=30),
+        )
+
+        outcome = backend.grader_outcome(event, "r1", PendingTrial())
+
+        assert outcome.err_category == RolloutErrorCategory.HTTP_ERROR
+
 
 class TestTaskResolution:
     def backend_for(self, template_task):
@@ -2087,6 +2123,31 @@ class TestFailureCategorization:
         )
         assert (
             categorize_exception(RuntimeError("x")) == RolloutErrorCategory.AGENT_ERROR
+        )
+
+    def test_categorize_error_type_matches_sandbox_providers_by_name(self):
+        """Provider SDKs are optional imports, so names are the only handle."""
+        from osmosis_ai.rollout.utils.errors import (
+            SANDBOX_ERROR_TYPES,
+            categorize_error_type,
+        )
+
+        for name in SANDBOX_ERROR_TYPES:
+            assert categorize_error_type(name) == RolloutErrorCategory.HTTP_ERROR
+        assert categorize_error_type(None) == RolloutErrorCategory.AGENT_ERROR
+        assert (
+            categorize_error_type("NonZeroAgentExitCodeError")
+            == RolloutErrorCategory.AGENT_ERROR
+        )
+
+    def test_categorize_exception_flags_sandbox_errors_by_class_name(self):
+        """A live sandbox SDK exception (optional import) classifies by name."""
+        from osmosis_ai.rollout.utils.errors import categorize_exception
+
+        SandboxApiException = type("SandboxApiException", (Exception,), {})
+        assert (
+            categorize_exception(SandboxApiException("402"))
+            == RolloutErrorCategory.HTTP_ERROR
         )
 
     def test_failure_phase_blames_agent_for_pre_verifier_exception(self):

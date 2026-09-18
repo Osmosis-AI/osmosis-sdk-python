@@ -103,7 +103,7 @@ from osmosis_ai.rollout.types import (
     RolloutSample,
     RolloutStatus,
 )
-from osmosis_ai.rollout.utils.errors import categorize_exception
+from osmosis_ai.rollout.utils.errors import categorize_error_type, categorize_exception
 from osmosis_ai.rollout.utils.file_artifacts import default_artifact_root
 from osmosis_ai.rollout.utils.imports import ensure_import_path, resolve_object
 from osmosis_ai.rollout.utils.rewards import validate_sample_has_reward
@@ -982,13 +982,16 @@ class HarborBackend(ExecutionBackend):
                 sample=sample,
                 extra_fields=self.event_diagnostics(event),
             )
+        # Only harbor's ExceptionInfo reaches us here, and it preserves the
+        # class name but not the numeric HTTP status, so classification keys
+        # off the exception type.
+        err = event.result.exception_info if event.result else None
+        category = categorize_error_type(err.exception_type if err else None)
         return ExecutionResult(
             status=RolloutStatus.FAILURE,
             err_message=err_message,
-            err_category=RolloutErrorCategory.AGENT_ERROR,
-            extra_fields=self.event_diagnostics(
-                event, RolloutErrorCategory.AGENT_ERROR
-            ),
+            err_category=category,
+            extra_fields=self.event_diagnostics(event, category),
         )
 
     def grader_outcome(
@@ -1001,14 +1004,13 @@ class HarborBackend(ExecutionBackend):
         # under a secondary validation error.
         if (agent_err := agent_phase_failure(event.result)) is not None:
             log_trial_exception(rollout_id, agent_err, phase="during the agent run")
+            category = categorize_error_type(agent_err.exception_type)
             return ExecutionResult(
                 status=RolloutStatus.FAILURE,
                 sample=sample,
                 err_message=agent_err.exception_message,
-                err_category=RolloutErrorCategory.AGENT_ERROR,
-                extra_fields=self.event_diagnostics(
-                    event, RolloutErrorCategory.AGENT_ERROR
-                ),
+                err_category=category,
+                extra_fields=self.event_diagnostics(event, category),
             )
 
         if event.result and event.result.verifier_result:
@@ -1047,14 +1049,13 @@ class HarborBackend(ExecutionBackend):
 
         if err:
             log_trial_exception(rollout_id, err, phase="during grading")
+            category = categorize_error_type(err.exception_type)
             return ExecutionResult(
                 status=RolloutStatus.FAILURE,
                 sample=sample,
                 err_message=err.exception_message,
-                err_category=RolloutErrorCategory.AGENT_ERROR,
-                extra_fields=self.event_diagnostics(
-                    event, RolloutErrorCategory.AGENT_ERROR
-                ),
+                err_category=category,
+                extra_fields=self.event_diagnostics(event, category),
             )
         # A task without tests/ and without a grader has no reward source.
         return ExecutionResult(
@@ -1106,15 +1107,16 @@ class HarborBackend(ExecutionBackend):
                         log_trial_exception(
                             rollout_id, err, phase="before the agent completed"
                         )
+                    category = categorize_error_type(
+                        err.exception_type if err else None
+                    )
                     workflow_result = ExecutionResult(
                         status=RolloutStatus.FAILURE,
                         err_message=err.exception_message
                         if err
                         else "Trial ended before agent completed",
-                        err_category=RolloutErrorCategory.AGENT_ERROR,
-                        extra_fields=self.event_diagnostics(
-                            event, RolloutErrorCategory.AGENT_ERROR
-                        ),
+                        err_category=category,
+                        extra_fields=self.event_diagnostics(event, category),
                     )
                 else:
                     workflow_result = self.workflow_outcome(event, rollout_id, pending)
