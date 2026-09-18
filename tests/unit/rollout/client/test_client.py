@@ -70,7 +70,14 @@ def retry_sleep(monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
 
 
 @pytest.mark.parametrize(
-    "failure", [httpx.RemoteProtocolError, httpx.ReadError, httpx.ConnectError]
+    "failure",
+    [
+        httpx.RemoteProtocolError,
+        httpx.ReadError,
+        httpx.ConnectError,
+        httpx.ReadTimeout,
+        httpx.ConnectTimeout,
+    ],
 )
 @pytest.mark.parametrize("disconnects", [1, 2])
 async def test_result_disconnects_reuse_admission_and_lease(
@@ -105,21 +112,102 @@ async def test_result_disconnects_reuse_admission_and_lease(
     assert retry_sleep.await_args_list == [call(0.1), call(0.5)][:disconnects]
 
 
+async def test_stalled_result_response_retries_without_resubmission(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("osmosis_ai.rollout.client.client._RESULT_READ_GRACE_SEC", 0.1)
+    requests: list[tuple[str, str, dict[str, str]]] = []
+    stalled = asyncio.Event()
+    released = asyncio.Event()
+
+    async def serve(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        try:
+            raw = (await reader.readuntil(b"\r\n\r\n")).decode()
+            first, *lines = raw.strip().split("\r\n")
+            method, path, _ = first.split()
+            headers = dict(line.lower().split(": ", 1) for line in lines)
+            await reader.readexactly(int(headers.get("content-length", "0")))
+            requests.append((method, path, headers))
+            if method == "POST":
+                result = {**admission(), "result_wait_timeout_sec": 0.01}
+                status = "202 Accepted"
+            elif not stalled.is_set():
+                # The first accepted result read loses its response on the wire.
+                stalled.set()
+                await released.wait()
+                return
+            else:
+                result = {"rollout_id": ROLLOUT_ID, "status": "success"}
+                status = "200 OK"
+            body = json.dumps(result).encode()
+            writer.write(
+                f"HTTP/1.1 {status}\r\nContent-Type: application/json\r\n"
+                f"Content-Length: {len(body)}\r\nConnection: close\r\n\r\n".encode()
+                + body
+            )
+            await writer.drain()
+        finally:
+            writer.close()
+            await writer.wait_closed()
+
+    server = await asyncio.start_server(serve, "127.0.0.1", 0)
+    port = server.sockets[0].getsockname()[1]
+    async with server:
+        try:
+            async with httpx.AsyncClient(trust_env=False) as http_client:
+                rollout_client = RolloutClient(
+                    url=f"http://127.0.0.1:{port}", http_client=http_client
+                )
+                async with asyncio.timeout(2.0):
+                    result = await completed(rollout_client)
+                assert result.status is RolloutStatus.SUCCESS
+        finally:
+            released.set()
+    assert [method for method, _, _ in requests] == ["POST", "GET", "GET"]
+    assert all(path == f"/rollout/{ROLLOUT_ID}/result" for _, path, _ in requests[1:])
+    assert all(
+        headers[POLLING_LEASE_HEADER.lower()] == "test-lease"
+        for _, _, headers in requests[1:]
+    )
+
+
+async def test_caller_deadline_interrupts_result_retry_backoff() -> None:
+    polls = 0
+
+    def handler(http_request: httpx.Request) -> httpx.Response:
+        nonlocal polls
+        if http_request.method == "POST":
+            return httpx.Response(202, json=admission())
+        polls += 1
+        raise httpx.ReadTimeout("lost result response", request=http_request)
+
+    rollout_client = client(handler)
+    try:
+        with pytest.raises(TimeoutError):
+            async with asyncio.timeout(0.02):
+                await completed(rollout_client)
+    finally:
+        await rollout_client.http_client.aclose()
+    assert polls == 1
+
+
+@pytest.mark.parametrize(
+    "failure", [httpx.RemoteProtocolError, httpx.ReadTimeout, httpx.ConnectTimeout]
+)
 async def test_exhausted_result_retries_wake_all_lifecycle_waiters(
+    failure: type[httpx.TransportError],
     retry_sleep: AsyncMock,
 ) -> None:
     release_failure = asyncio.Event()
-    failures: list[httpx.RemoteProtocolError] = []
+    failures: list[httpx.TransportError] = []
 
     async def handler(http_request: httpx.Request) -> httpx.Response:
         if http_request.method == "POST":
             return httpx.Response(202, json=admission())
         await release_failure.wait()
-        failure = httpx.RemoteProtocolError(
-            "lost result response", request=http_request
-        )
-        failures.append(failure)
-        raise failure
+        error = failure("lost result response", request=http_request)
+        failures.append(error)
+        raise error
 
     rollout_client = client(handler)
     try:
@@ -145,14 +233,12 @@ async def test_exhausted_result_retries_wake_all_lifecycle_waiters(
 @pytest.mark.parametrize(
     "failure",
     [
-        httpx.ConnectTimeout,
-        httpx.ReadTimeout,
         httpx.WriteTimeout,
         httpx.PoolTimeout,
         asyncio.CancelledError,
     ],
 )
-async def test_result_timeouts_and_cancellation_are_not_retried(
+async def test_result_pool_write_timeouts_and_cancellation_are_not_retried(
     failure: type[BaseException], retry_sleep: AsyncMock
 ) -> None:
     polls = 0
@@ -210,18 +296,21 @@ async def test_result_http_and_protocol_errors_are_not_retried(
 
 
 @pytest.mark.parametrize("cancel", [False, True])
+@pytest.mark.parametrize(
+    "failure", [httpx.RemoteProtocolError, httpx.ReadTimeout, httpx.ConnectTimeout]
+)
 async def test_admission_and_cancellation_disconnects_are_not_retried(
-    cancel: bool, retry_sleep: AsyncMock
+    cancel: bool, failure: type[httpx.TransportError], retry_sleep: AsyncMock
 ) -> None:
     requests: list[httpx.Request] = []
 
     def handler(http_request: httpx.Request) -> httpx.Response:
         requests.append(http_request)
-        raise httpx.RemoteProtocolError("lost response", request=http_request)
+        raise failure("lost response", request=http_request)
 
     rollout_client = client(handler)
     try:
-        with pytest.raises(httpx.RemoteProtocolError):
+        with pytest.raises(failure):
             if cancel:
                 await rollout_client.cancel_rollout(ROLLOUT_ID)
             else:
