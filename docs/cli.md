@@ -2,9 +2,6 @@
 
 > The user-facing command + flag reference lives at [docs.osmosis.ai/cli/command-reference](https://docs.osmosis.ai/cli/command-reference). This page explains how the CLI is wired so you can add or change commands correctly.
 
-The internal managed rollout workflow is documented in [dev servers](dev-servers.md),
-including per-server sandbox selection and provider requirements.
-
 ## Entry point and registration
 
 The console script is `osmosis_ai.cli.main:main` (aliases: `osmosis`, `osmosis-ai`, `osmosis_ai`). [../osmosis_ai/cli/main.py](../osmosis_ai/cli/main.py):
