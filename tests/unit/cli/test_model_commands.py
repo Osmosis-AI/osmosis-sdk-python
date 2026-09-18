@@ -13,7 +13,7 @@ import pytest
 import osmosis_ai.platform.cli.model as platform_model_module
 import osmosis_ai.platform.cli.utils as utils_module
 from osmosis_ai.cli.console import Console
-from osmosis_ai.cli.errors import CLIError
+from osmosis_ai.cli.errors import CLIError, CLIErrorCode
 from osmosis_ai.cli.output import (
     DetailResult,
     ListResult,
@@ -23,6 +23,7 @@ from osmosis_ai.cli.output import (
     override_output_context,
 )
 from osmosis_ai.platform.api.models import (
+    BaseModelDetail,
     BaseModelInfo,
     LoraModelDetail,
     LoraModelInfo,
@@ -30,6 +31,7 @@ from osmosis_ai.platform.api.models import (
     PaginatedBaseModels,
     PaginatedLoraModels,
 )
+from osmosis_ai.platform.auth.platform_client import PlatformAPIError
 from osmosis_ai.platform.constants import DEFAULT_PAGE_SIZE
 
 AUTH_CREDENTIALS = object()
@@ -891,10 +893,10 @@ class TestInfo:
             format=OutputFormat.rich, interactive=True
         ) as output:
             monkeypatch.setattr(output, "status", record_spinner)
-            result = platform_model_module.info("[red]bad[/red]")
+            result = platform_model_module.info("[red]bad[grn]")
 
-        assert captured["lora_model_name"] == "[red]bad[/red]"
-        assert captured["message"] == 'Fetching LoRA model "\\[red]bad\\[/red]"...'
+        assert captured["lora_model_name"] == "[red]bad[grn]"
+        assert captured["message"] == 'Fetching LoRA model "\\[red]bad\\[grn]"...'
         assert isinstance(result, DetailResult)
 
     def test_info_shows_id_for_internal_user(
@@ -1047,3 +1049,93 @@ class TestUndeploy:
         assert captured["lora_model_name"] == "[red]bad[/red]"
         assert captured["message"] == 'Undeploying LoRA model "\\[red]bad\\[/red]"...'
         assert isinstance(result, OperationResult)
+
+
+def _base_model_detail(*, priced: bool = True) -> BaseModelDetail:
+    return BaseModelDetail(
+        id="model_1",
+        model_name="Qwen3.6-35B-A3B",
+        base_model="Qwen/Qwen3.6-35B-A3B",
+        creator_name="Osmosis",
+        created_at="2026-09-10T20:00:00Z",
+        namespace="Qwen",
+        parameters=35951822704,
+        context_window=262144,
+        hf_url="https://huggingface.co/Qwen/Qwen3.6-35B-A3B",
+        inference_input_usd_per_million_tokens=0.1 if priced else None,
+        inference_output_usd_per_million_tokens=0.4 if priced else None,
+        platform_url="https://platform.example.test/acme/models",
+        has_inference_pricing=priced,
+    )
+
+
+@pytest.mark.usefixtures("mock_git_context")
+class TestInfoBaseModel:
+    def test_path_argument_skips_lora_lookup(
+        self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
+    ) -> None:
+        calls: list[str] = []
+
+        class FakeClient:
+            def get_lora_model(self, name, *, git_identity, credentials=None):
+                calls.append("lora")
+                raise AssertionError("path arguments must not hit the LoRA route")
+
+            def get_base_model(self, name, *, git_identity, credentials=None):
+                calls.append("base")
+                return _base_model_detail()
+
+        monkeypatch.setattr(platform_model_module, "OsmosisClient", FakeClient)
+        result = platform_model_module.info("Qwen/Qwen3.6-35B-A3B")
+
+        assert calls == ["base"]
+        assert result.title == "Base Model Info"
+        base_model = result.data["base_model"]
+        assert base_model["base_model"] == "Qwen/Qwen3.6-35B-A3B"
+        assert base_model["context_window"] == 262144
+        labels = [field.label for field in result.fields]
+        assert "Context Window" in labels
+        section_titles = [section.plain_lines[0] for section in result.sections]
+        assert "Inference Pricing:" in section_titles
+        assert "Hugging Face:" in section_titles
+
+    def test_name_falls_back_to_base_after_lora_404(
+        self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
+    ) -> None:
+        class FakeClient:
+            def get_lora_model(self, name, *, git_identity, credentials=None):
+                raise PlatformAPIError("LoRA model not found", status_code=404)
+
+            def get_base_model(self, name, *, git_identity, credentials=None):
+                return _base_model_detail(priced=False)
+
+        monkeypatch.setattr(platform_model_module, "OsmosisClient", FakeClient)
+        result = platform_model_module.info("Qwen3.6-35B-A3B")
+
+        assert result.title == "Base Model Info"
+        section_titles = [section.plain_lines[0] for section in result.sections]
+        assert "Inference Pricing:" not in section_titles
+
+    def test_both_404_raise_model_not_found(
+        self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
+    ) -> None:
+        class FakeClient:
+            def get_lora_model(self, name, *, git_identity, credentials=None):
+                raise PlatformAPIError("LoRA model not found", status_code=404)
+
+            def get_base_model(self, name, *, git_identity, credentials=None):
+                raise PlatformAPIError("Base model not found", status_code=404)
+
+        monkeypatch.setattr(platform_model_module, "OsmosisClient", FakeClient)
+        with pytest.raises(CLIError, match="Model not found: nope") as excinfo:
+            platform_model_module.info("nope")
+        assert excinfo.value.code == CLIErrorCode.NOT_FOUND
+
+    def test_compact_promotes_unit_when_rounding_crosses_threshold(self) -> None:
+        assert platform_model_module._compact(999_999_999) == "1B"
+        assert platform_model_module._compact(35_951_822_704) == "36B"
+        assert platform_model_module._compact(999) == "1k"
+        assert platform_model_module._compact(949) == "949"
+        assert platform_model_module._compact_tokens(1_048_575) == "1M"
+        assert platform_model_module._compact_tokens(262_144) == "256K"
+        assert platform_model_module._compact_tokens(40_960) == "40K"

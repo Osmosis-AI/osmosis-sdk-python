@@ -4,7 +4,7 @@ Models cover both base (foundation) models and LoRA models produced by
 training runs. The ``cli/commands/model.py`` shell delegates here:
 
     osmosis model list                      -> list_models()
-    osmosis model info     <lora-model>     -> info()
+    osmosis model info     <model>          -> info(), GET /api/cli/models/[modelName] or /api/cli/models/base/[modelName]
     osmosis model deploy   <lora-model>     -> deploy()
     osmosis model undeploy <lora-model>     -> undeploy()
 """
@@ -15,7 +15,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from osmosis_ai.cli.console import console
-from osmosis_ai.cli.errors import CLIError
+from osmosis_ai.cli.errors import CLIError, CLIErrorCode
 from osmosis_ai.cli.output import (
     DetailResult,
     DetailSection,
@@ -26,12 +26,19 @@ from osmosis_ai.cli.output import (
     SectionedListResult,
     detail_fields,
     get_output_context,
+    serialize_base_model_detail,
     serialize_lora_model,
     serialize_model,
 )
 from osmosis_ai.cli.output.display import format_local_date, format_local_datetime
 from osmosis_ai.platform.api.client import OsmosisClient
-from osmosis_ai.platform.api.models import BaseModelInfo, LoraModelInfo
+from osmosis_ai.platform.api.models import (
+    BaseModelDetail,
+    BaseModelInfo,
+    LoraModelDetail,
+    LoraModelInfo,
+)
+from osmosis_ai.platform.auth.platform_client import PlatformAPIError
 from osmosis_ai.platform.cli.utils import (
     format_deployment_status,
     format_reward,
@@ -246,19 +253,7 @@ def list_models(
     )
 
 
-def info(lora_model_name: str) -> DetailResult:
-    """Show details for a single LoRA model."""
-    context = require_platform_workspace_context()
-    client = OsmosisClient()
-    output = get_output_context()
-
-    with output.status(f'Fetching LoRA model "{console.escape(lora_model_name)}"...'):
-        model = client.get_lora_model(
-            lora_model_name,
-            credentials=context.credentials,
-            git_identity=context.git_identity,
-        )
-
+def _lora_model_info(model: LoraModelDetail, context: Any) -> DetailResult:
     # Rows mirror the platform's model detail sidebar (fields and order);
     # Hugging Face and Deployment render as their own sections, like the
     # page's cards.
@@ -371,6 +366,133 @@ def info(lora_model_name: str) -> DetailResult:
         sections=sections,
         display_hints=display_hints,
     )
+
+
+def _compact(value: int) -> str:
+    # Pick the unit from the rounded value so 999,999,999 reads 1B, not 1000M.
+    for threshold, suffix in ((1_000_000_000, "B"), (1_000_000, "M"), (1_000, "k")):
+        scaled = round(value / threshold, 1)
+        if scaled >= 1:
+            text = f"{scaled:.1f}".rstrip("0").rstrip(".")
+            return f"{text}{suffix}"
+    return str(value)
+
+
+def _compact_tokens(value: int) -> str:
+    # Base-1024 so 262144 reads 256K, matching vendor model cards and the web dialog.
+    for threshold, suffix in ((1024 * 1024, "M"), (1024, "K")):
+        scaled = round(value / threshold, 1)
+        if scaled >= 1:
+            text = f"{scaled:.1f}".rstrip("0").rstrip(".")
+            return f"{text}{suffix}"
+    return str(value)
+
+
+def _format_parameters(value: int | None) -> str:
+    if value is None:
+        return "–"
+    return f"{_compact(value)} ({value:,})"
+
+
+def _format_context_window(value: int | None) -> str:
+    if value is None:
+        return "–"
+    return f"{_compact_tokens(value)} tokens ({value:,})"
+
+
+def _usd_per_million(value: float | None) -> str:
+    return "–" if value is None else f"${value:,.2f} / 1M tokens"
+
+
+def _base_model_info(model: BaseModelDetail, context: Any) -> DetailResult:
+    rows: list[tuple[str, str]] = [("Name", model.model_name)]
+    if model.is_internal_user:
+        rows.append(("ID", model.id))
+    rows.extend(
+        [
+            ("Path", model.base_model or "–"),
+            ("Namespace", model.namespace or "–"),
+            ("Parameters", _format_parameters(model.parameters)),
+            ("Context Window", _format_context_window(model.context_window)),
+            ("Created", format_local_datetime(model.created_at)),
+            ("Created By", model.creator_name or "–"),
+        ]
+    )
+
+    sections: list[DetailSection] = []
+    if model.has_inference_pricing:
+        pricing = kv_section(
+            "Inference Pricing",
+            [
+                (
+                    "Input",
+                    _usd_per_million(model.inference_input_usd_per_million_tokens),
+                ),
+                (
+                    "Output",
+                    _usd_per_million(model.inference_output_usd_per_million_tokens),
+                ),
+            ],
+        )
+        if pricing is not None:
+            sections.append(pricing)
+    if model.hf_url:
+        hf = kv_section("Hugging Face", [("URL", model.hf_url)])
+        if hf is not None:
+            sections.append(hf)
+
+    display_hints: list[str] = []
+    if model.platform_url:
+        display_hints.append(f"View: {model.platform_url}")
+
+    return DetailResult(
+        title="Base Model Info",
+        data={
+            "base_model": serialize_base_model_detail(model),
+            "platform_url": model.platform_url,
+            **workspace_result_context(context),
+        },
+        fields=detail_fields(rows),
+        sections=sections,
+        display_hints=display_hints,
+    )
+
+
+def info(model_name: str) -> DetailResult:
+    """Show details for a LoRA model or a base model."""
+    context = require_platform_workspace_context()
+    client = OsmosisClient()
+    output = get_output_context()
+
+    # A Hugging Face path always has a slash; LoRA model names never do.
+    if "/" not in model_name:
+        with output.status(f'Fetching LoRA model "{console.escape(model_name)}"...'):
+            try:
+                lora_model = client.get_lora_model(
+                    model_name,
+                    credentials=context.credentials,
+                    git_identity=context.git_identity,
+                )
+            except PlatformAPIError as exc:
+                if exc.status_code != 404:
+                    raise
+            else:
+                return _lora_model_info(lora_model, context)
+
+    with output.status(f'Fetching base model "{console.escape(model_name)}"...'):
+        try:
+            base_model = client.get_base_model(
+                model_name,
+                credentials=context.credentials,
+                git_identity=context.git_identity,
+            )
+        except PlatformAPIError as exc:
+            if exc.status_code == 404:
+                raise CLIError(
+                    f"Model not found: {model_name}", code=CLIErrorCode.NOT_FOUND
+                ) from exc
+            raise
+    return _base_model_info(base_model, context)
 
 
 def deploy(lora_model_name: str) -> OperationResult:
