@@ -871,6 +871,61 @@ class TestGraderOutcome:
         assert outcome.err_category == RolloutErrorCategory.AGENT_ERROR
         assert "Command failed" in outcome.err_message
 
+    @pytest.mark.parametrize(
+        "exception_type, category",
+        [
+            ("SandboxConnectionException", RolloutErrorCategory.HTTP_ERROR),
+            ("SandboxRateLimitException", RolloutErrorCategory.HTTP_ERROR),
+            ("SandboxApiException", RolloutErrorCategory.AGENT_ERROR),
+            ("SandboxInternalException", RolloutErrorCategory.AGENT_ERROR),
+        ],
+    )
+    @pytest.mark.parametrize("offset_sec", [0, 120])
+    async def test_sandbox_failure_classification_in_agent_and_grader(
+        self, template_task, tmp_path, exception_type, category, offset_sec
+    ):
+        """A task-level API error must not become a run-wide provider outage."""
+        backend = self.backend_for(template_task, tmp_path)
+        event = self.event_with(
+            exception_info=self.exception_at(offset_sec, exception_type=exception_type),
+            verifier=self.verifier_span(),
+        )
+
+        outcome = backend.grader_outcome(event, "r1", PendingTrial())
+        workflow = backend.workflow_outcome(event, "r1", PendingTrial())
+
+        assert outcome.err_category == category
+        assert workflow.err_category == category
+        assert outcome.extra_fields["category"] == category.value
+        assert workflow.extra_fields["category"] == category.value
+        assert workflow.extra_fields["harbor_exception_type"] == exception_type
+
+    @pytest.mark.parametrize(
+        "exception_type, category",
+        [
+            ("SandboxConnectionException", RolloutErrorCategory.HTTP_ERROR),
+            ("SandboxApiException", RolloutErrorCategory.AGENT_ERROR),
+        ],
+    )
+    async def test_trial_end_before_agent_completion_preserves_classification(
+        self, template_task, tmp_path, exception_type, category
+    ):
+        """Provisioning failures use the same conservative fallback as grading."""
+        backend = self.backend_for(template_task, tmp_path)
+        event = self.event_with(
+            exception_info=self.exception_at(0, exception_type=exception_type),
+        )
+        event.config = SimpleNamespace(trial_name="trial-r1")
+        pending = PendingTrial()
+        backend.pending["r1"] = pending
+
+        await backend.on_trial_end(event)
+        outcome = pending.done.result()
+
+        assert outcome.workflow.err_category == category
+        assert outcome.grader.err_category == category
+        assert outcome.result.err_category == category
+
 
 class TestTaskResolution:
     def backend_for(self, template_task):

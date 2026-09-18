@@ -104,6 +104,32 @@ class TestCategorizeException:
 
 
 class TestLocalBackend:
+    @pytest.mark.parametrize(
+        "exception_type, status_code, category",
+        [
+            ("SandboxApiException", 400, RolloutErrorCategory.AGENT_ERROR),
+            ("SandboxApiException", 404, RolloutErrorCategory.AGENT_ERROR),
+            ("SandboxApiException", 503, RolloutErrorCategory.HTTP_ERROR),
+            ("SandboxConnectionException", None, RolloutErrorCategory.HTTP_ERROR),
+        ],
+    )
+    async def test_workflow_sandbox_errors_preserve_task_vs_provider_boundary(
+        self, tmp_path, exception_type, status_code, category
+    ):
+        error_cls = type(exception_type, (Exception,), {"status_code": status_code})
+
+        class SandboxWorkflow(AgentWorkflow):
+            async def run(self, ctx):
+                raise error_cls("sandbox operation failed")
+
+        backend = LocalBackend(workflow=SandboxWorkflow)
+        backend.artifact_root = tmp_path
+
+        outcome = await backend.execute(ExecutionRequest(id="sandbox-error", prompt=[]))
+
+        assert outcome.result.status is RolloutStatus.FAILURE
+        assert outcome.result.err_category is category
+
     def _make_backend(self, *, grader=None, grader_config=None):
         return LocalBackend(
             workflow=StubWorkflow,
