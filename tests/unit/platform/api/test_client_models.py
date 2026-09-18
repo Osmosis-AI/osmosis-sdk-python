@@ -1,7 +1,7 @@
 """Tests for OsmosisClient model + checkpoint methods.
 
 Covers the model-centric API:
-    list_base_models / list_lora_models / get_lora_model /
+    list_base_models / list_lora_models / get_lora_model / get_base_model /
     deploy_lora_model / undeploy_lora_model / list_training_run_checkpoints
 """
 
@@ -253,3 +253,48 @@ class TestListTrainingRunCheckpoints:
         assert args[0] == "/api/cli/training-runs/qwen3-run1/checkpoints"
         assert kwargs["git_identity"] == GIT_IDENTITY
         assert "workspace_id" not in kwargs
+
+
+class TestGetBaseModel:
+    @patch("osmosis_ai.platform.api.client.platform_request")
+    def test_get_by_path(self, mock_req: MagicMock) -> None:
+        mock_req.return_value = {
+            "id": "model_1",
+            "model_name": "Qwen3.6-35B-A3B",
+            "base_model": "Qwen/Qwen3.6-35B-A3B",
+            "namespace": "Qwen",
+            "parameters": 35951822704,
+            "context_window": 262144,
+            "hf_url": "https://huggingface.co/Qwen/Qwen3.6-35B-A3B",
+            "inference_input_usd_per_million_tokens": 0.1,
+            "inference_output_usd_per_million_tokens": 0.4,
+            "creator_name": "Osmosis",
+            "created_at": "2026-09-10T20:00:00Z",
+            "updated_at": "2026-09-10T20:00:00Z",
+            "platform_url": "https://platform.example.test/acme/models",
+            "is_internal_user": False,
+        }
+        client = OsmosisClient()
+        result = client.get_base_model(
+            "Qwen/Qwen3.6-35B-A3B", git_identity=GIT_IDENTITY
+        )
+        assert result.model_name == "Qwen3.6-35B-A3B"
+        assert result.parameters == 35951822704
+        assert result.context_window == 262144
+        assert result.inference_input_usd_per_million_tokens == 0.1
+        assert result.has_inference_pricing is True
+        assert result.inference_output_usd_per_million_tokens == 0.4
+        assert result.namespace == "Qwen"
+        assert result.hf_url == "https://huggingface.co/Qwen/Qwen3.6-35B-A3B"
+        args, kwargs = mock_req.call_args
+        assert args[0] == "/api/cli/models/base/Qwen%2FQwen3.6-35B-A3B"
+        assert kwargs["git_identity"] == GIT_IDENTITY
+        assert "workspace_id" not in kwargs
+
+    @patch("osmosis_ai.platform.api.client.platform_request")
+    def test_get_unpriced(self, mock_req: MagicMock) -> None:
+        mock_req.return_value = {"id": "model_1", "model_name": "Qwen3-4B"}
+        client = OsmosisClient()
+        result = client.get_base_model("Qwen3-4B", git_identity=GIT_IDENTITY)
+        assert result.has_inference_pricing is False
+        assert result.context_window is None

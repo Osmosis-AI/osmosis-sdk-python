@@ -38,6 +38,7 @@ from .result import (
 
 if TYPE_CHECKING:
     from .serializers import (
+        serialize_base_model_detail,
         serialize_benchmark_run,
         serialize_checkpoint,
         serialize_dataset,
@@ -53,6 +54,7 @@ if TYPE_CHECKING:
 _SERIALIZER_EXPORTS: dict[str, tuple[str, str]] = {
     name: ("osmosis_ai.cli.output.serializers", name)
     for name in (
+        "serialize_base_model_detail",
         "serialize_benchmark_run",
         "serialize_checkpoint",
         "serialize_dataset",
@@ -103,6 +105,7 @@ __all__ = [
     "render",
     "render_command_result",
     "resolve_format_selectors",
+    "serialize_base_model_detail",
     "serialize_benchmark_run",
     "serialize_checkpoint",
     "serialize_dataset",

@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from osmosis_ai.platform.api.models import (
+    BaseModelDetail,
     BaseModelInfo,
     BenchmarkRun,
     DatasetFile,
@@ -134,6 +135,25 @@ def serialize_model(model: BaseModelInfo) -> dict[str, Any]:
         "created_at": model.created_at,
         "updated_at": model.updated_at,
     }
+
+
+def serialize_base_model_detail(model: BaseModelDetail) -> dict[str, Any]:
+    """Serialize base model details for the public JSON contract."""
+    data: dict[str, Any] = {
+        **serialize_model(model),
+        "namespace": model.namespace,
+        "parameters": model.parameters,
+        "context_window": model.context_window,
+        "hf_url": model.hf_url,
+    }
+    if model.has_inference_pricing:
+        data["inference_input_usd_per_million_tokens"] = (
+            model.inference_input_usd_per_million_tokens
+        )
+        data["inference_output_usd_per_million_tokens"] = (
+            model.inference_output_usd_per_million_tokens
+        )
+    return data
 
 
 def serialize_rollout(rollout: RolloutInfo) -> dict[str, Any]:

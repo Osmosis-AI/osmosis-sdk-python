@@ -10,6 +10,7 @@ from osmosis_ai.platform.auth.platform_client import platform_request, platform_
 from osmosis_ai.platform.constants import DEFAULT_PAGE_SIZE, DevServerSandboxEnvironment
 
 from .models import (
+    BaseModelDetail,
     BenchmarkCatalogDetail,
     BenchmarkRunDetail,
     DatasetDownloadInfo,
@@ -490,6 +491,21 @@ class OsmosisClient:
             git_identity=git_identity,
         )
         return LoraModelDetail.from_dict(data)
+
+    def get_base_model(
+        self,
+        name_or_path: str,
+        *,
+        credentials: Credentials | None = None,
+        git_identity: str | None,
+    ) -> BaseModelDetail:
+        """Get details for a single base model by name or Hugging Face path."""
+        data = platform_request(
+            f"/api/cli/models/base/{_safe_path(name_or_path)}",
+            credentials=credentials,
+            git_identity=git_identity,
+        )
+        return BaseModelDetail.from_dict(data)
 
     def deploy_lora_model(
         self,

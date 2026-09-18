@@ -4,7 +4,7 @@ Models cover both base (foundation) models and LoRA models produced by
 training runs:
 
     osmosis model list                      -> GET  /api/cli/models/base + /api/cli/models/lora
-    osmosis model info     <lora-model>     -> GET  /api/cli/models/[modelName]
+    osmosis model info     <model>          -> GET  /api/cli/models/[modelName] or /api/cli/models/base/[modelName]
     osmosis model deploy   <lora-model>     -> POST /api/cli/models/[modelName]/deploy
     osmosis model undeploy <lora-model>     -> POST /api/cli/models/[modelName]/undeploy
 """
@@ -40,14 +40,16 @@ def list_models(
 
 @app.command("info")
 def info(
-    lora_model_name: str = typer.Argument(
-        ..., help="LoRA model name.", metavar="LORA_MODEL"
+    model_name: str = typer.Argument(
+        ...,
+        help="LoRA model name, or a base model name or Hugging Face path.",
+        metavar="MODEL",
     ),
 ) -> CommandResult:
-    """Show details for a single LoRA model."""
+    """Show details for a LoRA model or a base model."""
     from osmosis_ai.platform.cli.model import info as _info
 
-    return _info(lora_model_name)
+    return _info(model_name)
 
 
 @app.command("deploy")

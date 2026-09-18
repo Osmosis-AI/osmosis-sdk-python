@@ -1206,6 +1206,46 @@ class BaseModelInfo:
 
 
 @dataclass
+class BaseModelDetail(BaseModelInfo):
+    """Base model facts for `osmosis model info`: specs, Hugging Face link, prices."""
+
+    namespace: str = ""
+    parameters: int | None = None
+    context_window: int | None = None
+    hf_url: str | None = None
+    inference_input_usd_per_million_tokens: float | None = None
+    inference_output_usd_per_million_tokens: float | None = None
+    platform_url: str | None = None
+    is_internal_user: bool = False
+    # The platform omits both price keys when the model has no published rate.
+    has_inference_pricing: bool = False
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> BaseModelDetail:
+        return cls(
+            id=data["id"],
+            model_name=data.get("model_name", ""),
+            base_model=data.get("base_model"),
+            creator_name=data.get("creator_name"),
+            created_at=data.get("created_at", ""),
+            updated_at=data.get("updated_at", ""),
+            namespace=data.get("namespace", ""),
+            parameters=data.get("parameters"),
+            context_window=data.get("context_window"),
+            hf_url=data.get("hf_url"),
+            inference_input_usd_per_million_tokens=data.get(
+                "inference_input_usd_per_million_tokens"
+            ),
+            inference_output_usd_per_million_tokens=data.get(
+                "inference_output_usd_per_million_tokens"
+            ),
+            platform_url=data.get("platform_url"),
+            is_internal_user=data.get("is_internal_user", False),
+            has_inference_pricing="inference_input_usd_per_million_tokens" in data,
+        )
+
+
+@dataclass
 class PaginatedBaseModels:
     """Paginated list of base models."""
 
