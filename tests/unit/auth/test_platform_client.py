@@ -891,7 +891,7 @@ class TestPlatformRequest:
         mock_urlopen.side_effect = URLError("Name resolution failed")
         creds = _make_credentials()
 
-        with pytest.raises(PlatformAPIError, match="Connection error"):
+        with pytest.raises(PlatformAPIError, match="Could not connect"):
             platform_request("/api/test", credentials=creds, git_identity="git_test")
 
     @patch("osmosis_ai.platform.auth.platform_client.urlopen")
@@ -953,7 +953,7 @@ class TestPlatformRequest:
         mock_urlopen.return_value = mock_resp
         creds = _make_credentials()
 
-        with pytest.raises(PlatformAPIError, match="Connection error"):
+        with pytest.raises(PlatformAPIError, match=r"timed out.*try again"):
             platform_request("/api/test", credentials=creds, git_identity="git_test")
 
     # -------------------------------------------------------------------------
@@ -1421,7 +1421,7 @@ class TestPlatformStream:
         mock_urlopen.side_effect = URLError("boom")
         creds = _make_credentials()
 
-        with pytest.raises(PlatformAPIError, match="Connection error"):
+        with pytest.raises(PlatformAPIError, match="Could not connect"):
             list(
                 platform_stream(
                     "/api/stream",
@@ -1438,7 +1438,7 @@ class TestPlatformStream:
         mock_urlopen.side_effect = TimeoutError("timed out")
         creds = _make_credentials()
 
-        with pytest.raises(PlatformAPIError, match="Connection error"):
+        with pytest.raises(PlatformAPIError, match=r"timed out.*try again"):
             list(
                 platform_stream(
                     "/api/stream",
@@ -1465,7 +1465,7 @@ class TestPlatformStream:
 
         events = platform_stream("/api/stream", credentials=creds, git_identity="git_1")
         assert next(events) == {"message": "ready"}
-        with pytest.raises(PlatformAPIError, match="Connection error: timed out"):
+        with pytest.raises(PlatformAPIError, match=r"timed out.*try again"):
             next(events)
 
     @patch("osmosis_ai.platform.auth.platform_client.surface_version_signal")
@@ -1485,3 +1485,236 @@ class TestPlatformStream:
         list(platform_stream("/api/stream", credentials=creds, git_identity="git_1"))
 
         mock_surface.assert_called_once_with("deprecated", "please upgrade")
+
+
+@pytest.mark.parametrize("streaming", [False, True])
+@pytest.mark.parametrize("key", ["error", "code"])
+@pytest.mark.parametrize(
+    "server_message",
+    [
+        None,
+        "",
+        "   ",
+        42,
+        "deployment_conflict",
+        "We\u2019ve updated the app. Reload to continue.",
+        "We've updated the app. Reload to continue",
+        "Please reload the page to continue.",
+    ],
+)
+def test_deployment_conflict_explains_retry_without_browser_reload(
+    streaming: bool,
+    key: str,
+    server_message: object,
+) -> None:
+    body: dict[str, Any] = {key: "deployment_conflict"}
+    if server_message is not None:
+        body["message"] = server_message
+    with patch(
+        "osmosis_ai.platform.auth.platform_client.urlopen",
+        side_effect=_make_http_error(409, json.dumps(body)),
+    ) as request:
+        with pytest.raises(PlatformAPIError) as caught:
+            if streaming:
+                list(
+                    platform_stream(
+                        "/api/cli/eval-runs",
+                        credentials=_make_credentials(),
+                        git_identity="git_test",
+                    )
+                )
+            else:
+                platform_request(
+                    "/api/cli/eval-runs",
+                    credentials=_make_credentials(),
+                    git_identity="git_test",
+                    method="POST",
+                )
+    assert "deployment" in str(caught.value)
+    assert "try again" in str(caught.value)
+    assert "Reload" not in str(caught.value)
+    assert caught.value.status_code == 409
+    assert caught.value.error_code == "deployment_conflict"
+    assert caught.value.details == body
+    request.assert_called_once()
+
+
+@pytest.mark.parametrize("output_format", ["--plain", "--json"])
+def test_deployment_conflict_preserves_server_guidance_in_cli_output(
+    output_format: str,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from osmosis_ai.cli.main import main
+
+    body = {
+        "error": "deployment_conflict",
+        "message": "A deployment is in progress. Please try again shortly.",
+    }
+
+    def submit(*args: Any, **kwargs: Any) -> None:
+        platform_request(
+            "/api/cli/eval-runs",
+            credentials=_make_credentials(),
+            git_identity="git_test",
+            method="POST",
+        )
+
+    # ``eval submit`` resolves its handler lazily, so patching the platform
+    # layer keeps command registration, argument parsing, and the error
+    # envelope on the real path.
+    monkeypatch.setattr("osmosis_ai.platform.cli.eval.submit", submit)
+    with patch(
+        "osmosis_ai.platform.auth.platform_client.urlopen",
+        side_effect=_make_http_error(409, json.dumps(body)),
+    ) as request:
+        argv = [output_format, "eval", "submit", "configs/eval/demo.toml", "--yes"]
+        assert main(argv) == 1
+    request.assert_called_once()
+    output = capsys.readouterr()
+    assert output.out == ""
+    if output_format == "--json":
+        error = json.loads(output.err)["error"]
+        assert error["code"] == "CONFLICT"
+        assert error["message"] == body["message"]
+        assert error["details"] == {
+            **body,
+            "platform_code": "deployment_conflict",
+            "status_code": 409,
+        }
+    else:
+        assert body["message"] in output.err
+
+
+@pytest.mark.parametrize(
+    ("status", "body"),
+    [
+        (
+            503,
+            {
+                "error": "release_unavailable",
+                "message": "The requested frontend release is not addressable.",
+            },
+        ),
+        (429, {"error": "rate_limited", "message": "Wait 30 seconds before retrying."}),
+        (
+            400,
+            {
+                "error": {"code": "invalid_request"},
+                "message": "Select a dataset first.",
+            },
+        ),
+        (
+            403,
+            {
+                "error": "billing_required",
+                "code": "BILLING_REQUIRED",
+                "message": "Add a payment method to continue.",
+            },
+        ),
+        (
+            403,
+            {
+                "error": "subscription_required",
+                "code": "SUBSCRIPTION_REQUIRED",
+                "message": "Choose a plan to continue.",
+            },
+        ),
+        (
+            403,
+            {"error": "subscription required", "message": "Choose a plan to continue."},
+        ),
+    ],
+)
+@pytest.mark.parametrize("streaming", [False, True])
+def test_http_error_prefers_explanation_and_retains_metadata(
+    status: int,
+    body: dict[str, Any],
+    streaming: bool,
+) -> None:
+    with patch(
+        "osmosis_ai.platform.auth.platform_client.urlopen",
+        side_effect=_make_http_error(status, json.dumps(body)),
+    ):
+        with pytest.raises(PlatformAPIError) as caught:
+            if streaming:
+                list(
+                    platform_stream(
+                        "/api/test",
+                        credentials=_make_credentials(),
+                        require_git_repo=False,
+                    )
+                )
+            else:
+                platform_request(
+                    "/api/test", credentials=_make_credentials(), require_git_repo=False
+                )
+    assert str(caught.value) == body["message"]
+    assert caught.value.status_code == status
+    assert caught.value.error_code == body.get("code")
+    assert caught.value.details == body
+    assert isinstance(caught.value, SubscriptionRequiredError) == (status == 403)
+
+
+@pytest.mark.parametrize("message", [None, "", "  ", 42, {"detail": "invalid"}])
+def test_http_error_falls_back_to_string_error(message: object) -> None:
+    body = {"error": "Dataset not found", "message": message}
+    with patch(
+        "osmosis_ai.platform.auth.platform_client.urlopen",
+        side_effect=_make_http_error(404, json.dumps(body)),
+    ):
+        with pytest.raises(PlatformAPIError, match="Dataset not found"):
+            platform_request(
+                "/api/test", credentials=_make_credentials(), require_git_repo=False
+            )
+
+
+@pytest.mark.parametrize("streaming", [False, True])
+def test_deployment_conflict_keeps_server_message_and_issues(streaming: bool) -> None:
+    body = {
+        "error": "deployment_conflict",
+        "message": "A deployment is in progress. Please try again shortly.",
+        "issues": [{"key": "name", "message": "required"}],
+    }
+    with patch(
+        "osmosis_ai.platform.auth.platform_client.urlopen",
+        side_effect=_make_http_error(409, json.dumps(body)),
+    ):
+        with pytest.raises(PlatformAPIError) as caught:
+            if streaming:
+                list(
+                    platform_stream(
+                        "/api/test",
+                        credentials=_make_credentials(),
+                        require_git_repo=False,
+                    )
+                )
+            else:
+                platform_request(
+                    "/api/test", credentials=_make_credentials(), require_git_repo=False
+                )
+    assert str(caught.value) == f"{body['message']}\n  - name: required"
+    assert caught.value.error_code == "deployment_conflict"
+
+
+@pytest.mark.parametrize("streaming", [False, True])
+def test_connect_timeout_wrapped_in_url_error_gets_retry_guidance(
+    streaming: bool,
+) -> None:
+    with patch(
+        "osmosis_ai.platform.auth.platform_client.urlopen",
+        side_effect=URLError(TimeoutError("timed out")),
+    ):
+        with pytest.raises(PlatformAPIError, match=r"timed out.*try again"):
+            if streaming:
+                list(
+                    platform_stream(
+                        "/api/test",
+                        credentials=_make_credentials(),
+                        require_git_repo=False,
+                    )
+                )
+            else:
+                platform_request(
+                    "/api/test", credentials=_make_credentials(), require_git_repo=False
+                )

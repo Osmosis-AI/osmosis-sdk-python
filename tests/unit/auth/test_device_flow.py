@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime, timedelta
+from io import BytesIO
 from unittest.mock import MagicMock, patch
 from urllib.error import HTTPError, URLError
 
@@ -260,3 +261,124 @@ class TestDeviceLogin:
             device_login(timeout=10.0)
 
         mock_open.assert_called_once_with("https://platform.example.test/device")
+
+
+@pytest.mark.parametrize("polling", [False, True])
+@pytest.mark.parametrize(
+    "error_value", ["workspace_unavailable", {"code": "workspace_unavailable"}]
+)
+@pytest.mark.parametrize("status", [400, 409])
+def test_device_login_errors_surface_server_explanation(
+    polling: bool,
+    error_value: object,
+    status: int,
+) -> None:
+    body = {
+        "error": error_value,
+        "message": "Ask your workspace administrator to restore access.",
+    }
+    error = HTTPError(
+        url="http://test",
+        code=status,
+        msg="Bad Request",
+        hdrs=None,
+        fp=BytesIO(json.dumps(body).encode()),
+    )
+    with patch("osmosis_ai.platform.auth.flow.urlopen", side_effect=error) as request:
+        with pytest.raises(
+            LoginError, match="Ask your workspace administrator to restore access"
+        ) as caught:
+            if polling:
+                poll_device_token("device_abc", interval=1, timeout=10)
+            else:
+                request_device_code()
+    request.assert_called_once()
+    assert caught.value.status_code == status
+
+
+@pytest.mark.parametrize("polling", [False, True])
+def test_device_login_deployment_conflict_gets_cli_guidance(polling: bool) -> None:
+    body = {
+        "error": "deployment_conflict",
+        "message": "We\u2019ve updated the app. Reload to continue.",
+    }
+    error = HTTPError(
+        url="http://test",
+        code=409,
+        msg="Conflict",
+        hdrs=None,
+        fp=BytesIO(json.dumps(body).encode()),
+    )
+    with patch("osmosis_ai.platform.auth.flow.urlopen", side_effect=error):
+        with pytest.raises(LoginError, match="try again shortly") as caught:
+            if polling:
+                poll_device_token("device_abc", interval=1, timeout=10)
+            else:
+                request_device_code()
+    assert "Reload" not in str(caught.value)
+    assert caught.value.status_code == 409
+    # The legacy ``error`` field is the only place the platform code lives here.
+    assert caught.value.code == "deployment_conflict"
+    assert caught.value.details == body
+
+
+@pytest.mark.parametrize(
+    ("error_code", "message"),
+    [
+        ("expired_token", "Device code expired"),
+        ("access_denied", "Authorization was denied"),
+        ("invalid_grant", "Polling failed"),
+    ],
+)
+def test_poll_terminal_errors_carry_status_and_code(
+    error_code: str, message: str
+) -> None:
+    error = HTTPError(
+        url="http://test",
+        code=400,
+        msg="Bad Request",
+        hdrs=None,
+        fp=BytesIO(json.dumps({"error": error_code}).encode()),
+    )
+    with patch("osmosis_ai.platform.auth.flow.urlopen", side_effect=error):
+        with pytest.raises(LoginError, match=message) as caught:
+            poll_device_token("device_abc", interval=1, timeout=10)
+    assert caught.value.status_code == 400
+    assert caught.value.code == error_code
+    assert caught.value.details == {"error": error_code}
+
+
+def _mock_response(body: bytes) -> MagicMock:
+    response = MagicMock()
+    response.read.return_value = body
+    response.__enter__ = MagicMock(return_value=response)
+    response.__exit__ = MagicMock(return_value=False)
+    return response
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"expires_at": "2026-13-45T99:00:00Z"},
+        {"expires_at": 1234},
+        {"user": "not-an-object"},
+    ],
+    ids=["bad_iso", "non_string_expires_at", "string_user"],
+)
+def test_device_login_malformed_token_response_is_login_error(
+    overrides: dict[str, object],
+) -> None:
+    with (
+        patch(
+            "osmosis_ai.platform.auth.flow.urlopen",
+            side_effect=[
+                _mock_response(_make_device_code_response()),
+                _mock_response(_make_token_response(**overrides)),
+            ],
+        ),
+        patch("osmosis_ai.platform.auth.flow.time.sleep"),
+        patch("sys.stdin") as mock_stdin,
+    ):
+        mock_stdin.isatty.return_value = False
+        with pytest.raises(LoginError, match="Invalid response from platform"):
+            device_login(timeout=10.0)

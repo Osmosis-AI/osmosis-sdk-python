@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime, timedelta
-from io import StringIO
+from io import BytesIO, StringIO
+from unittest.mock import MagicMock
+from urllib.error import HTTPError
 
 import pytest
 
@@ -193,8 +195,18 @@ def test_invalid_token_does_not_mutate_existing_session(monkeypatch, capsys) -> 
     assert json.loads(captured.err)["error"]["code"] == "AUTH_REQUIRED"
 
 
-def test_login_json_with_platform_verify_error_is_platform_error(
-    monkeypatch, capsys
+@pytest.mark.parametrize(
+    ("status", "code"),
+    [
+        (400, "VALIDATION"),
+        (409, "CONFLICT"),
+        (429, "RATE_LIMITED"),
+        (404, "PLATFORM_ERROR"),
+        (500, "PLATFORM_ERROR"),
+    ],
+)
+def test_login_json_preserves_http_error_classification(
+    monkeypatch, capsys, status, code
 ) -> None:
     monkeypatch.delenv("OSMOSIS_TOKEN", raising=False)
     monkeypatch.setattr(
@@ -203,7 +215,7 @@ def test_login_json_with_platform_verify_error_is_platform_error(
     monkeypatch.setattr(
         "osmosis_ai.platform.auth.verify_token",
         lambda token, git_identity=None: (_ for _ in ()).throw(
-            LoginError("Platform error", status_code=500)
+            LoginError("Platform error", status_code=status)
         ),
     )
 
@@ -211,8 +223,83 @@ def test_login_json_with_platform_verify_error_is_platform_error(
 
     envelope = json.loads(capsys.readouterr().err)
     assert exit_code == 1
-    assert envelope["error"]["code"] == "PLATFORM_ERROR"
-    assert envelope["error"]["details"]["status_code"] == 500
+    assert envelope["error"]["code"] == code
+    assert envelope["error"]["details"]["status_code"] == status
+
+
+@pytest.mark.parametrize(
+    ("status", "body", "expected_code", "expected_message"),
+    [
+        (
+            409,
+            {
+                "error": "deployment_conflict",
+                "message": "A deployment is in progress. Please try again shortly.",
+            },
+            "CONFLICT",
+            "A deployment is in progress. Please try again shortly.",
+        ),
+        (
+            401,
+            {"code": "TOKEN_EXPIRED", "message": "Token expired on 2026-09-01."},
+            "AUTH_REQUIRED",
+            "Token has expired.",
+        ),
+    ],
+)
+def test_login_json_http_error_retains_response_and_platform_code(
+    monkeypatch, capsys, status, body, expected_code, expected_message
+) -> None:
+    error = HTTPError(
+        url="http://test",
+        code=status,
+        msg="Error",
+        hdrs=None,
+        fp=BytesIO(json.dumps(body).encode()),
+    )
+    monkeypatch.delenv("OSMOSIS_TOKEN", raising=False)
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.load_credentials", lambda **kwargs: None
+    )
+    # Only the transport is patched so the real verify path builds the error.
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.flow.urlopen", MagicMock(side_effect=error)
+    )
+
+    exit_code = cli.main(["--json", "auth", "login", "--token", "secret"])
+
+    envelope = json.loads(capsys.readouterr().err)
+    assert exit_code == 1
+    assert envelope["error"]["code"] == expected_code
+    assert expected_message in envelope["error"]["message"]
+    assert envelope["error"]["details"] == {
+        **body,
+        "platform_code": body.get("code") or body["error"],
+        "status_code": status,
+    }
+
+
+def test_login_json_auth_required_keeps_status_in_details(monkeypatch, capsys) -> None:
+    monkeypatch.delenv("OSMOSIS_TOKEN", raising=False)
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.load_credentials", lambda **kwargs: None
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.verify_token",
+        lambda token, git_identity=None: (_ for _ in ()).throw(
+            LoginError("Token is invalid.", code="TOKEN_INVALID", status_code=401)
+        ),
+    )
+
+    exit_code = cli.main(["--json", "auth", "login", "--token", "secret"])
+
+    envelope = json.loads(capsys.readouterr().err)
+    assert exit_code == 1
+    assert envelope["error"]["code"] == "AUTH_REQUIRED"
+    assert envelope["error"]["details"] == {
+        "status_code": 401,
+        "platform_code": "TOKEN_INVALID",
+    }
 
 
 def test_login_json_with_426_preserves_upgrade_details(monkeypatch, capsys) -> None:
