@@ -7,16 +7,25 @@ from osmosis_ai.rollout.types import RolloutErrorCategory
 # Upstream sandbox/environment provider errors, matched by class name:
 # harbor's ExceptionInfo preserves only the class name (the numeric HTTP
 # status is discarded), and the provider SDKs are optional imports here.
-# Mirrors harbor's own transient sets in environments/opensandbox.py.
+# Mirrors the OpenSandbox SDK's exceptions/sandbox.py (InvalidArgumentException
+# and other input errors are intentionally excluded) plus the SkyPilot
+# Sandbox SDK's SandboxAPIError.
 SANDBOX_ERROR_TYPES = frozenset(
     {
         # OpenSandbox SDK
+        "SandboxException",
         "SandboxApiException",
         "SandboxInternalException",
+        "SandboxConnectionException",
+        "SandboxRateLimitException",
+        "SandboxTimeoutException",
         "SandboxReadyTimeoutException",
         "SandboxUnhealthyException",
         "PoolAcquireFailedException",
         "PoolEmptyException",
+        "PoolNotRunningException",
+        "PoolDestroyedException",
+        "PoolDestroyIncompleteException",
         "PoolStateStoreUnavailableException",
         "PoolStateStoreContentionException",
         # SkyPilot Sandbox SDK (early access) / retired Daytona SDK
