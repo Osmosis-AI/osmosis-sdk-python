@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any
 from urllib.parse import quote, urlencode
 
 from osmosis_ai.platform.auth.platform_client import platform_request, platform_stream
-from osmosis_ai.platform.constants import DEFAULT_PAGE_SIZE
+from osmosis_ai.platform.constants import DEFAULT_PAGE_SIZE, DevServerSandboxEnvironment
 
 from .models import (
     BenchmarkCatalogDetail,
@@ -1085,6 +1085,7 @@ class OsmosisClient:
         ttl_hours: int | None,
         credentials: Credentials | None = None,
         git_identity: str,
+        sandbox_environment: DevServerSandboxEnvironment | None = None,
     ) -> dict[str, Any]:
         return platform_request(
             "/api/cli/dev-rollout-server",
@@ -1095,6 +1096,11 @@ class OsmosisClient:
                 "repository_path": repository_path,
                 "entrypoint": entrypoint,
                 "ttl_hours": ttl_hours,
+                **(
+                    {"sandbox_environment": sandbox_environment.value}
+                    if sandbox_environment is not None
+                    else {}
+                ),
             },
             credentials=credentials,
             git_identity=git_identity,

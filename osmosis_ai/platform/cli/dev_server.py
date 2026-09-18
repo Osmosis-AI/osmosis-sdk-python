@@ -24,9 +24,15 @@ from osmosis_ai.platform.cli.workspace_repo import (
     check_pinned_commit,
     summarize_local_git_state,
 )
+from osmosis_ai.platform.constants import DevServerSandboxEnvironment
 
 
-def up(*, ttl_hours: int | None, yes: bool = False) -> OperationResult:
+def up(
+    *,
+    ttl_hours: int | None,
+    yes: bool = False,
+    sandbox_environment: DevServerSandboxEnvironment | None = None,
+) -> OperationResult:
     cwd = Path.cwd()
     if not (cwd / "main.py").is_file():
         raise CLIError(
@@ -66,7 +72,33 @@ def up(*, ttl_hours: int | None, yes: bool = False) -> OperationResult:
         ttl_hours=ttl_hours,
         credentials=ctx.credentials,
         git_identity=ctx.git_identity,
+        sandbox_environment=sandbox_environment,
     )
+    if (
+        sandbox_environment is not None
+        and result.get("sandbox_environment") != sandbox_environment.value
+    ):
+        server_id = result["id"]
+        try:
+            client.teardown_dev_rollout_server(
+                server_id,
+                credentials=ctx.credentials,
+                git_identity=ctx.git_identity,
+            )
+        except Exception:
+            raise CLIError(
+                "The platform did not confirm the requested sandbox environment "
+                "and teardown could not be requested. Stop the server with "
+                f"'osmosis dev server down {server_id}' before retrying on an "
+                "updated platform.",
+                code="VALIDATION",
+            ) from None
+        raise CLIError(
+            "The platform did not confirm the requested sandbox environment. "
+            f"Teardown requested for server {server_id}. Update the platform "
+            "before retrying and check 'osmosis dev server list' for cleanup.",
+            code="VALIDATION",
+        )
     api_key = result.get("api_key")
     return OperationResult(
         operation="dev.server.up",

@@ -1217,6 +1217,22 @@ class TestGetEvalRunMetrics:
 class TestDevRolloutServer:
     """Tests for OsmosisClient dev rollout server methods."""
 
+    @pytest.mark.parametrize("provider", ["daytona", "opensandbox"])
+    @patch("osmosis_ai.platform.api.client.platform_request")
+    def test_provision_sends_explicit_sandbox_environment(self, mock_request, provider):
+        from osmosis_ai.platform.constants import DevServerSandboxEnvironment
+
+        OsmosisClient().provision_dev_rollout_server(
+            rollout_name="r",
+            commit_sha="sha",
+            repository_path="rollouts/r",
+            entrypoint="main.py",
+            ttl_hours=1,
+            git_identity="git_test",
+            sandbox_environment=DevServerSandboxEnvironment(provider),
+        )
+        assert mock_request.call_args.kwargs["data"]["sandbox_environment"] == provider
+
     @patch("osmosis_ai.platform.api.client.platform_request")
     def test_provision_posts_correct_payload(self, mock_request: MagicMock) -> None:
         mock_request.return_value = {"server_id": "srv-1", "status": "provisioning"}

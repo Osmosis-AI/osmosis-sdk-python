@@ -1,6 +1,13 @@
 """Shared constants for the Osmosis Platform package."""
 
 import os
+from enum import StrEnum
+
+
+class DevServerSandboxEnvironment(StrEnum):
+    DAYTONA = "daytona"
+    OPENSANDBOX = "opensandbox"
+
 
 # ── Pagination ───────────────────────────────────────────────────
 
