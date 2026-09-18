@@ -1235,7 +1235,7 @@ class TestDevRolloutServer:
 
     @patch("osmosis_ai.platform.api.client.platform_request")
     def test_provision_posts_correct_payload(self, mock_request: MagicMock) -> None:
-        mock_request.return_value = {"server_id": "srv-1", "status": "provisioning"}
+        mock_request.return_value = {"id": "srv-1", "status": "provisioning"}
         credentials = object()
 
         result = OsmosisClient().provision_dev_rollout_server(
@@ -1248,7 +1248,7 @@ class TestDevRolloutServer:
             git_identity="git_test",
         )
 
-        assert result == {"server_id": "srv-1", "status": "provisioning"}
+        assert result == {"id": "srv-1", "status": "provisioning"}
         assert mock_request.call_args[0][0] == "/api/cli/dev-rollout-server"
         assert mock_request.call_args.kwargs["method"] == "POST"
         assert mock_request.call_args.kwargs["data"] == {
@@ -1263,7 +1263,7 @@ class TestDevRolloutServer:
 
     @patch("osmosis_ai.platform.api.client.platform_request")
     def test_provision_accepts_none_ttl_hours(self, mock_request: MagicMock) -> None:
-        mock_request.return_value = {"server_id": "srv-2", "status": "provisioning"}
+        mock_request.return_value = {"id": "srv-2", "status": "provisioning"}
 
         OsmosisClient().provision_dev_rollout_server(
             rollout_name="r",
@@ -1280,7 +1280,7 @@ class TestDevRolloutServer:
     def test_teardown_sends_delete_and_encodes_id(
         self, mock_request: MagicMock
     ) -> None:
-        mock_request.return_value = {"server_id": "a/b", "status": "terminating"}
+        mock_request.return_value = {"id": "a/b", "status": "terminating"}
         credentials = object()
 
         result = OsmosisClient().teardown_dev_rollout_server(
@@ -1289,7 +1289,7 @@ class TestDevRolloutServer:
             git_identity="git_test",
         )
 
-        assert result == {"server_id": "a/b", "status": "terminating"}
+        assert result == {"id": "a/b", "status": "terminating"}
         assert mock_request.call_args[0][0] == "/api/cli/dev-rollout-server/a%2Fb"
         assert mock_request.call_args.kwargs["method"] == "DELETE"
         assert mock_request.call_args.kwargs["data"] == {}
