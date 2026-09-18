@@ -9,6 +9,11 @@ class DevServerSandboxEnvironment(StrEnum):
     OPENSANDBOX = "opensandbox"
 
 
+class DevServerBackend(StrEnum):
+    ECS = "ecs"
+    GKE = "gke"
+
+
 # ── Pagination ───────────────────────────────────────────────────
 
 DEFAULT_PAGE_SIZE = 50

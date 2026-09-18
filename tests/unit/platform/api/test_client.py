@@ -1427,3 +1427,20 @@ class TestStreamDevRolloutServerLogs:
         assert mock_stream.call_args[0][0].startswith(
             "/api/cli/dev-rollout-server/a%2Fb/logs/stream?"
         )
+
+
+@pytest.mark.parametrize("backend", ["ecs", "gke"])
+@patch("osmosis_ai.platform.api.client.platform_request")
+def test_provision_dev_server_sends_backend(mock_request, backend):
+    from osmosis_ai.platform.constants import DevServerBackend
+
+    OsmosisClient().provision_dev_rollout_server(
+        rollout_name="test",
+        commit_sha="abc",
+        repository_path=".",
+        entrypoint="main.py",
+        ttl_hours=1,
+        git_identity="git_test",
+        backend=DevServerBackend(backend),
+    )
+    assert mock_request.call_args.kwargs["data"]["backend"] == backend

@@ -14,7 +14,11 @@ from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.cli.output import ListResult, OperationResult
 from osmosis_ai.cli.output.display import format_local_date
 from osmosis_ai.platform.api.models import PaginatedDevRolloutServers
-from osmosis_ai.platform.constants import DEFAULT_PAGE_SIZE, DevServerSandboxEnvironment
+from osmosis_ai.platform.constants import (
+    DEFAULT_PAGE_SIZE,
+    DevServerBackend,
+    DevServerSandboxEnvironment,
+)
 
 GIT_IDENTITY = "acme/rollouts"
 FAKE_CREDENTIALS = object()
@@ -59,8 +63,13 @@ class TestDevServerUp:
     @pytest.mark.parametrize(
         "sandbox_environment", [None, *DevServerSandboxEnvironment]
     )
+    @pytest.mark.parametrize("backend", [None, *DevServerBackend])
     def test_up_happy_path(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, sandbox_environment
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+        sandbox_environment,
+        backend,
     ) -> None:
         rollout_dir = tmp_path / "rollouts" / "multiply"
         rollout_dir.mkdir(parents=True)
@@ -97,24 +106,30 @@ class TestDevServerUp:
                 credentials=None,
                 git_identity,
                 sandbox_environment=None,
+                backend=None,
             ):
                 captured["rollout_name"] = rollout_name
                 captured["commit_sha"] = commit_sha
                 captured["repository_path"] = repository_path
                 captured["ttl_hours"] = ttl_hours
                 captured["sandbox_environment"] = sandbox_environment
+                captured["backend"] = backend
                 assert credentials is FAKE_CREDENTIALS
                 assert git_identity == GIT_IDENTITY
                 return {
                     **FAKE_SERVER,
                     "sandbox_environment": sandbox_environment,
+                    "backend": backend,
                 }
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
         monkeypatch.setattr(dev_server_module, "OsmosisClient", FakeClient)
 
         result = dev_server_module.up(
-            ttl_hours=24, yes=False, sandbox_environment=sandbox_environment
+            ttl_hours=24,
+            yes=False,
+            sandbox_environment=sandbox_environment,
+            backend=backend,
         )
 
         assert isinstance(result, OperationResult)
@@ -125,16 +140,23 @@ class TestDevServerUp:
         assert captured["repository_path"] == "rollouts/multiply"
         assert captured["ttl_hours"] == 24
         assert captured["sandbox_environment"] == sandbox_environment
+        assert captured["backend"] == backend
         assert result.message is not None
         assert "provisioning" in result.message
         assert FAKE_SERVER["url"] in result.message
         assert "osmosis dev server list" in result.message
         assert result.display_next_steps == []
 
+    @pytest.mark.parametrize("selection", ["sandbox_environment", "backend"])
     @pytest.mark.parametrize("confirmed", [None, "daytona"])
     @pytest.mark.parametrize("teardown_fails", [False, True])
     def test_up_rejects_unacknowledged_provider(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, confirmed, teardown_fails
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+        confirmed,
+        teardown_fails,
+        selection,
     ) -> None:
         (tmp_path / "main.py").write_text("# main")
         monkeypatch.chdir(tmp_path)
@@ -160,14 +182,20 @@ class TestDevServerUp:
             )
         client.provision_dev_rollout_server.return_value = {
             **FAKE_SERVER,
-            "sandbox_environment": confirmed,
+            selection: confirmed,
             "api_key": "server-secret",
         }
         monkeypatch.setattr(dev_server_module, "OsmosisClient", lambda: client)
         with pytest.raises(CLIError, match="did not confirm") as caught:
             dev_server_module.up(
                 ttl_hours=24,
-                sandbox_environment=DevServerSandboxEnvironment.OPENSANDBOX,
+                **(
+                    {"backend": DevServerBackend.GKE}
+                    if selection == "backend"
+                    else {
+                        "sandbox_environment": DevServerSandboxEnvironment.OPENSANDBOX
+                    }
+                ),
             )
         client.teardown_dev_rollout_server.assert_called_once_with(
             "r1", credentials=FAKE_CREDENTIALS, git_identity=GIT_IDENTITY
@@ -846,4 +874,32 @@ def test_up_command_rejects_deployment_target(monkeypatch):
     monkeypatch.setattr(dev_server_module, "up", up)
     result = CliRunner().invoke(app, ["up", "--sandbox-environment", "gke"])
     assert result.exit_code == 2
+    up.assert_not_called()
+
+
+@pytest.mark.parametrize("backend", ["ecs", "gke"])
+def test_up_command_forwards_deployment_backend(monkeypatch, backend):
+    from osmosis_ai.cli.commands.dev.server import app
+
+    up = Mock(return_value=OperationResult(operation="dev.server.up", status="success"))
+    monkeypatch.setattr(dev_server_module, "up", up)
+    result = CliRunner().invoke(
+        app,
+        ["up", "--backend", backend, "--sandbox-environment", "opensandbox", "--yes"],
+    )
+    assert result.exit_code == 0, result.output
+    up.assert_called_once_with(
+        ttl_hours=24,
+        yes=True,
+        sandbox_environment=DevServerSandboxEnvironment.OPENSANDBOX,
+        backend=DevServerBackend(backend),
+    )
+
+
+def test_up_command_rejects_unknown_backend(monkeypatch):
+    from osmosis_ai.cli.commands.dev.server import app
+
+    up = Mock()
+    monkeypatch.setattr(dev_server_module, "up", up)
+    assert CliRunner().invoke(app, ["up", "--backend", "docker"]).exit_code == 2
     up.assert_not_called()

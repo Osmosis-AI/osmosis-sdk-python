@@ -6,7 +6,11 @@ import typer
 
 from osmosis_ai.cli.options import all_option, limit_option
 from osmosis_ai.cli.output import CommandResult
-from osmosis_ai.platform.constants import MAX_LOG_PAGE_SIZE, DevServerSandboxEnvironment
+from osmosis_ai.platform.constants import (
+    MAX_LOG_PAGE_SIZE,
+    DevServerBackend,
+    DevServerSandboxEnvironment,
+)
 
 app: typer.Typer = typer.Typer(
     help="Manage a remote rollout server.", no_args_is_help=True
@@ -22,6 +26,11 @@ def up(
         24, "--ttl-hours", min=1, help="Hours before auto-teardown."
     ),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt."),
+    backend: DevServerBackend | None = typer.Option(
+        None,
+        "--backend",
+        help="Deployment backend for the rollout server (ecs or gke). Defaults to the platform setting.",
+    ),
     sandbox_environment: DevServerSandboxEnvironment | None = typer.Option(
         None,
         "--sandbox-environment",
@@ -35,6 +44,7 @@ def up(
         ttl_hours=None if no_ttl else ttl_hours,
         yes=yes,
         sandbox_environment=sandbox_environment,
+        **({"backend": backend} if backend is not None else {}),
     )
 
 

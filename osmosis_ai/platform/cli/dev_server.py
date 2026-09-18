@@ -24,7 +24,7 @@ from osmosis_ai.platform.cli.workspace_repo import (
     check_pinned_commit,
     summarize_local_git_state,
 )
-from osmosis_ai.platform.constants import DevServerSandboxEnvironment
+from osmosis_ai.platform.constants import DevServerBackend, DevServerSandboxEnvironment
 
 
 def up(
@@ -32,6 +32,7 @@ def up(
     ttl_hours: int | None,
     yes: bool = False,
     sandbox_environment: DevServerSandboxEnvironment | None = None,
+    backend: DevServerBackend | None = None,
 ) -> OperationResult:
     cwd = Path.cwd()
     if not (cwd / "main.py").is_file():
@@ -73,11 +74,17 @@ def up(
         credentials=ctx.credentials,
         git_identity=ctx.git_identity,
         sandbox_environment=sandbox_environment,
+        **({"backend": backend} if backend is not None else {}),
     )
-    if (
+    unconfirmed = None
+    if backend is not None and result.get("backend") != backend.value:
+        unconfirmed = "deployment backend"
+    elif (
         sandbox_environment is not None
         and result.get("sandbox_environment") != sandbox_environment.value
     ):
+        unconfirmed = "sandbox environment"
+    if unconfirmed:
         server_id = result["id"]
         try:
             client.teardown_dev_rollout_server(
@@ -87,14 +94,14 @@ def up(
             )
         except Exception:
             raise CLIError(
-                "The platform did not confirm the requested sandbox environment "
+                f"The platform did not confirm the requested {unconfirmed} "
                 "and teardown could not be requested. Stop the server with "
                 f"'osmosis dev server down {server_id}' before retrying on an "
                 "updated platform.",
                 code="VALIDATION",
             ) from None
         raise CLIError(
-            "The platform did not confirm the requested sandbox environment. "
+            f"The platform did not confirm the requested {unconfirmed}. "
             f"Teardown requested for server {server_id}. Update the platform "
             "before retrying and check 'osmosis dev server list' for cleanup.",
             code="VALIDATION",
