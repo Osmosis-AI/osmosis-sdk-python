@@ -2,12 +2,6 @@
 
 This file records changes to `osmosis-ai`. For earlier versions, see [GitHub Releases](https://github.com/Osmosis-AI/osmosis-sdk-python/releases).
 
-## Unreleased
-
-### Added
-
-- `osmosis model info` accepts a base model name or Hugging Face path and prints parameters, context window, Hugging Face URL, and inference prices when published.
-
 ## 0.3.4rc1 - 2026-09-15
 
 ### Fixed

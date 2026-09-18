@@ -283,8 +283,13 @@ class TestGetBaseModel:
         assert result.context_window == 262144
         assert result.inference_input_usd_per_million_tokens == 0.1
         assert result.has_inference_pricing is True
-        args, _ = mock_req.call_args
+        assert result.inference_output_usd_per_million_tokens == 0.4
+        assert result.namespace == "Qwen"
+        assert result.hf_url == "https://huggingface.co/Qwen/Qwen3.6-35B-A3B"
+        args, kwargs = mock_req.call_args
         assert args[0] == "/api/cli/models/base/Qwen%2FQwen3.6-35B-A3B"
+        assert kwargs["git_identity"] == GIT_IDENTITY
+        assert "workspace_id" not in kwargs
 
     @patch("osmosis_ai.platform.api.client.platform_request")
     def test_get_unpriced(self, mock_req: MagicMock) -> None:

@@ -15,7 +15,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from osmosis_ai.cli.console import console
-from osmosis_ai.cli.errors import CLIError
+from osmosis_ai.cli.errors import CLIError, CLIErrorCode
 from osmosis_ai.cli.output import (
     DetailResult,
     DetailSection,
@@ -369,9 +369,10 @@ def _lora_model_info(model: LoraModelDetail, context: Any) -> DetailResult:
 
 
 def _compact(value: int) -> str:
+    # Pick the unit from the rounded value so 999,999,999 reads 1B, not 1000M.
     for threshold, suffix in ((1_000_000_000, "B"), (1_000_000, "M"), (1_000, "k")):
-        if value >= threshold:
-            scaled = value / threshold
+        scaled = round(value / threshold, 1)
+        if scaled >= 1:
             text = f"{scaled:.1f}".rstrip("0").rstrip(".")
             return f"{text}{suffix}"
     return str(value)
@@ -380,8 +381,8 @@ def _compact(value: int) -> str:
 def _compact_tokens(value: int) -> str:
     # Base-1024 so 262144 reads 256K, matching vendor model cards and the web dialog.
     for threshold, suffix in ((1024 * 1024, "M"), (1024, "K")):
-        if value >= threshold:
-            scaled = value / threshold
+        scaled = round(value / threshold, 1)
+        if scaled >= 1:
             text = f"{scaled:.1f}".rstrip("0").rstrip(".")
             return f"{text}{suffix}"
     return str(value)
@@ -487,7 +488,9 @@ def info(model_name: str) -> DetailResult:
             )
         except PlatformAPIError as exc:
             if exc.status_code == 404:
-                raise CLIError(f"Model not found: {model_name}") from exc
+                raise CLIError(
+                    f"Model not found: {model_name}", code=CLIErrorCode.NOT_FOUND
+                ) from exc
             raise
     return _base_model_info(base_model, context)
 

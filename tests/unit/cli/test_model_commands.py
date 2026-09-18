@@ -13,7 +13,7 @@ import pytest
 import osmosis_ai.platform.cli.model as platform_model_module
 import osmosis_ai.platform.cli.utils as utils_module
 from osmosis_ai.cli.console import Console
-from osmosis_ai.cli.errors import CLIError
+from osmosis_ai.cli.errors import CLIError, CLIErrorCode
 from osmosis_ai.cli.output import (
     DetailResult,
     ListResult,
@@ -1127,5 +1127,15 @@ class TestInfoBaseModel:
                 raise PlatformAPIError("Base model not found", status_code=404)
 
         monkeypatch.setattr(platform_model_module, "OsmosisClient", FakeClient)
-        with pytest.raises(CLIError, match="Model not found: nope"):
+        with pytest.raises(CLIError, match="Model not found: nope") as excinfo:
             platform_model_module.info("nope")
+        assert excinfo.value.code == CLIErrorCode.NOT_FOUND
+
+    def test_compact_promotes_unit_when_rounding_crosses_threshold(self) -> None:
+        assert platform_model_module._compact(999_999_999) == "1B"
+        assert platform_model_module._compact(35_951_822_704) == "36B"
+        assert platform_model_module._compact(999) == "1k"
+        assert platform_model_module._compact(949) == "949"
+        assert platform_model_module._compact_tokens(1_048_575) == "1M"
+        assert platform_model_module._compact_tokens(262_144) == "256K"
+        assert platform_model_module._compact_tokens(40_960) == "40K"
