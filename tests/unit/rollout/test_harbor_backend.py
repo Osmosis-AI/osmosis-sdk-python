@@ -649,9 +649,17 @@ class TestNativeAgents:
         command = first._build_register_config_command()
         assert "https://trainer/sessions/first/v1" in command
         assert "@ai-sdk/openai-compatible" in command
+        assert configs[0].model_name == "osmosis-rollout/student"
+        providers = configs[0].kwargs["opencode_config"]["provider"]
+        assert "openai" not in providers
+        assert providers["osmosis-rollout"]["models"]["student"]["limit"] == {
+            "context": 131072
+        }
         assert "131072" in command
         assert "key-first" not in command  # key stays in the agent environment
-        assert first.model_connection.env["OPENAI_API_KEY"] == "key-first"
+        # Trial applies the explicit environment to every sandbox command;
+        # custom providers do not infer OPENAI_API_KEY in model_connection.
+        assert first._extra_env["OPENAI_API_KEY"] == "key-first"
         assert configs[0].kwargs["opencode_config"]["compaction"] == {
             "auto": False,
             "prune": False,

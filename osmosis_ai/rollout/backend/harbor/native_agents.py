@@ -80,9 +80,13 @@ def native_agent_config(
         if not separator or not provider or not model_id:
             raise ValueError("OpenCode model_name must have the form provider/model")
         config = kwargs.setdefault("opencode_config", {})
-        # OpenCode otherwise selects its built-in provider, which may use the
-        # Responses API or ignore the per-rollout chat-completions endpoint.
-        provider_config = config.setdefault("provider", {}).setdefault(provider, {})
+        # Built-in provider IDs have OpenCode-specific loaders. In particular,
+        # "openai" selects sdk.responses even when npm is overridden. A private
+        # provider ID keeps the session on the chat-completions protocol.
+        session_provider = "osmosis-rollout"
+        providers = config.setdefault("provider", {})
+        provider_config = providers.pop(provider, {})
+        providers[session_provider] = provider_config
         provider_config["npm"] = "@ai-sdk/openai-compatible"
         provider_config.setdefault("options", {}).update(
             {"baseURL": url, "apiKey": "{env:OPENAI_API_KEY}"}
@@ -92,7 +96,7 @@ def native_agent_config(
         config.setdefault("compaction", {}).update({"auto": False, "prune": False})
         return HarborAgentConfig(
             name=name,
-            model_name=model_name,
+            model_name=f"{session_provider}/{model_id}",
             env={
                 **binding.env,
                 "OPENAI_API_BASE": url,
