@@ -306,7 +306,11 @@ class RolloutClient:
                     headers={POLLING_LEASE_HEADER: admission.polling_lease_token},
                     timeout=timeout,
                 )
-            except (httpx.RemoteProtocolError, httpx.NetworkError) as exc:
+            except (
+                httpx.RemoteProtocolError,
+                httpx.NetworkError,
+                httpx.ReadTimeout,
+            ) as exc:
                 delay = next(delays, None)
                 if delay is None:
                     raise

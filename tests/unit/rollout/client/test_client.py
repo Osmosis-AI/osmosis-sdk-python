@@ -70,10 +70,11 @@ def retry_sleep(monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
 
 
 @pytest.mark.parametrize(
-    "failure", [httpx.RemoteProtocolError, httpx.ReadError, httpx.ConnectError]
+    "failure",
+    [httpx.RemoteProtocolError, httpx.ReadError, httpx.ConnectError, httpx.ReadTimeout],
 )
 @pytest.mark.parametrize("disconnects", [1, 2])
-async def test_result_disconnects_reuse_admission_and_lease(
+async def test_result_read_failures_reuse_admission_and_lease(
     failure: type[httpx.TransportError], disconnects: int, retry_sleep: AsyncMock
 ) -> None:
     requests: list[httpx.Request] = []
@@ -105,19 +106,19 @@ async def test_result_disconnects_reuse_admission_and_lease(
     assert retry_sleep.await_args_list == [call(0.1), call(0.5)][:disconnects]
 
 
+@pytest.mark.parametrize("failure_type", [httpx.RemoteProtocolError, httpx.ReadTimeout])
 async def test_exhausted_result_retries_wake_all_lifecycle_waiters(
+    failure_type: type[httpx.TransportError],
     retry_sleep: AsyncMock,
 ) -> None:
     release_failure = asyncio.Event()
-    failures: list[httpx.RemoteProtocolError] = []
+    failures: list[httpx.TransportError] = []
 
     async def handler(http_request: httpx.Request) -> httpx.Response:
         if http_request.method == "POST":
             return httpx.Response(202, json=admission())
         await release_failure.wait()
-        failure = httpx.RemoteProtocolError(
-            "lost result response", request=http_request
-        )
+        failure = failure_type("lost result response", request=http_request)
         failures.append(failure)
         raise failure
 
@@ -146,13 +147,12 @@ async def test_exhausted_result_retries_wake_all_lifecycle_waiters(
     "failure",
     [
         httpx.ConnectTimeout,
-        httpx.ReadTimeout,
         httpx.WriteTimeout,
         httpx.PoolTimeout,
         asyncio.CancelledError,
     ],
 )
-async def test_result_timeouts_and_cancellation_are_not_retried(
+async def test_other_result_timeouts_and_cancellation_are_not_retried(
     failure: type[BaseException], retry_sleep: AsyncMock
 ) -> None:
     polls = 0
