@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
@@ -10,7 +11,7 @@ from harbor.models.trial.config import AgentConfig as HarborAgentConfig
 
 @dataclass(frozen=True)
 class NativeAgentBinding:
-    wiring: Literal["env", "kwargs", "none"]
+    wiring: Literal["env", "kwargs", "opencode", "none"]
     trainable: bool = True
     env: dict[str, str] = field(default_factory=dict)
     kwargs: dict[str, Any] = field(default_factory=dict)
@@ -27,6 +28,7 @@ NATIVE_AGENTS: dict[str, NativeAgentBinding] = {
         wiring="env",
         env={"MSWEA_COST_TRACKING": "ignore_errors"},
     ),
+    "opencode": NativeAgentBinding(wiring="opencode"),
     # Runs the task's reference solution with no model traffic; validates
     # datasets and verifiers, never produces training data.
     "oracle": NativeAgentBinding(wiring="none", trainable=False),
@@ -34,14 +36,17 @@ NATIVE_AGENTS: dict[str, NativeAgentBinding] = {
 
 
 def native_prewarm_agent_config(
-    name: str, binding: NativeAgentBinding, model_name: str
+    name: str,
+    binding: NativeAgentBinding,
+    model_name: str,
+    extra_kwargs: dict[str, Any] | None = None,
 ) -> HarborAgentConfig:
     """Setup-only config: installs the agent with no endpoint or credentials."""
     return HarborAgentConfig(
         name=name,
         model_name=model_name,
         env=dict(binding.env),
-        kwargs=dict(binding.kwargs),
+        kwargs=copy.deepcopy({**binding.kwargs, **(extra_kwargs or {})}),
     )
 
 
@@ -65,10 +70,36 @@ def native_agent_config(
     api_key: str,
     extra_kwargs: dict[str, Any] | None = None,
 ) -> HarborAgentConfig:
-    kwargs = {**binding.kwargs, **(extra_kwargs or {})}
+    kwargs = copy.deepcopy({**binding.kwargs, **(extra_kwargs or {})})
     if binding.wiring == "none":
         return HarborAgentConfig(
             name=name, model_name=model_name, env=dict(binding.env), kwargs=kwargs
+        )
+    if binding.wiring == "opencode":
+        provider, separator, model_id = model_name.partition("/")
+        if not separator or not provider or not model_id:
+            raise ValueError("OpenCode model_name must have the form provider/model")
+        config = kwargs.setdefault("opencode_config", {})
+        # OpenCode otherwise selects its built-in provider, which may use the
+        # Responses API or ignore the per-rollout chat-completions endpoint.
+        provider_config = config.setdefault("provider", {}).setdefault(provider, {})
+        provider_config["npm"] = "@ai-sdk/openai-compatible"
+        provider_config.setdefault("options", {}).update(
+            {"baseURL": url, "apiKey": "{env:OPENAI_API_KEY}"}
+        )
+        provider_config.setdefault("models", {}).setdefault(model_id, {})
+        # Compaction rewrites history and breaks the training token trajectory.
+        config.setdefault("compaction", {}).update({"auto": False, "prune": False})
+        return HarborAgentConfig(
+            name=name,
+            model_name=model_name,
+            env={
+                **binding.env,
+                "OPENAI_API_BASE": url,
+                "OPENAI_BASE_URL": url,
+                "OPENAI_API_KEY": api_key,
+            },
+            kwargs=kwargs,
         )
     if binding.wiring == "env":
         # mini-swe-agent reads OPENAI_BASE_URL before OPENAI_API_BASE; set both

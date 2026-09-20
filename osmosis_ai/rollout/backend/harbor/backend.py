@@ -738,7 +738,9 @@ class HarborBackend(ExecutionBackend):
     def prewarm_agent_config(self, task_dir: Path) -> HarborAgentConfig:
         """Install-only trials never run the agent: no endpoint, no credentials."""
         if self.native is not None and isinstance(self.agent, str):
-            return native_prewarm_agent_config(self.agent, self.native, self.model_name)
+            return native_prewarm_agent_config(
+                self.agent, self.native, self.model_name, self.native_agent_kwargs
+            )
         return self.harness_agent_config(task_dir)
 
     def prewarm_trial_config(self, task: HarborTask) -> TrialConfig:

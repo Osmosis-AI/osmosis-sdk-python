@@ -610,6 +610,75 @@ class TestNativeAgents:
         backend = self.backend_for("mini-swe-agent", template_task)
         assert backend.bundle is None
 
+    def test_opencode_uses_session_endpoint_in_native_harbor_agent(
+        self, template_task, tmp_path
+    ):
+        from harbor.agents.factory import AgentFactory
+
+        overrides = {
+            "version": "1.18.27",
+            "opencode_config": {
+                "compaction": {"auto": True},
+                "provider": {
+                    "openai": {
+                        "npm": "@ai-sdk/openai",
+                        "options": {"baseURL": "https://wrong.example/v1"},
+                        "models": {"student": {"limit": {"context": 131072}}},
+                    }
+                },
+            },
+        }
+        backend = self.backend_for(
+            "opencode",
+            template_task,
+            model_name="openai/student",
+            native_agent_kwargs=overrides,
+        )
+        configs = [
+            backend.build_agent_config(
+                template_task,
+                ContainerInput(
+                    rollout_id=name,
+                    chat_completions_url=f"https://trainer/sessions/{name}/v1",
+                    api_key=f"key-{name}",
+                ),
+            )
+            for name in ("first", "second")
+        ]
+        first = AgentFactory.create_agent_from_config(configs[0], tmp_path / "logs")
+        command = first._build_register_config_command()
+        assert "https://trainer/sessions/first/v1" in command
+        assert "@ai-sdk/openai-compatible" in command
+        assert "131072" in command
+        assert "key-first" not in command  # key stays in the agent environment
+        assert first.model_connection.env["OPENAI_API_KEY"] == "key-first"
+        assert configs[0].kwargs["opencode_config"]["compaction"] == {
+            "auto": False,
+            "prune": False,
+        }
+        assert "second" not in command
+        assert overrides["opencode_config"]["compaction"]["auto"] is True
+        assert (
+            overrides["opencode_config"]["provider"]["openai"]["options"]["baseURL"]
+            == "https://wrong.example/v1"
+        )
+
+    @pytest.mark.parametrize("agent", ["opencode", "mini-swe-agent"])
+    def test_prewarm_preserves_native_version_without_rollout_credentials(
+        self, template_task, agent
+    ):
+        backend = self.backend_for(
+            agent,
+            template_task,
+            native_agent_kwargs={"version": "1.2.3", "custom": {"value": 1}},
+        )
+        config = backend.prewarm_agent_config(template_task)
+        assert config.kwargs["version"] == "1.2.3"
+        assert "OPENAI_API_KEY" not in config.env
+        assert "OPENAI_BASE_URL" not in config.env
+        config.kwargs["custom"]["value"] = 2
+        assert backend.native_agent_kwargs["custom"]["value"] == 1
+
     def test_native_agent_kwargs_merge_into_native_config(self, template_task):
         backend = self.backend_for(
             "mini-swe-agent",
