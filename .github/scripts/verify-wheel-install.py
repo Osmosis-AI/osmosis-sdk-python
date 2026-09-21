@@ -38,7 +38,13 @@ BASE_REQUIREMENTS = {
 }
 
 EXTRA_REQUIREMENTS: dict[str, set[str]] = {
-    "server": {"click", "fastapi", "uvicorn"},
+    "server": {
+        "click",
+        "fastapi",
+        "uvicorn",
+        "opentelemetry-sdk",
+        "opentelemetry-exporter-otlp-proto-http",
+    },
     "strands": {
         "aiohttp",
         "click",
