@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 
 from osmosis_ai.cli.errors import CLIError
+from osmosis_ai.consts import PACKAGE_VERSION
 from osmosis_ai.platform.cli import workspace_directory_contract
 from osmosis_ai.platform.cli.workspace_directory_contract import (
     ensure_context_path,
@@ -608,7 +610,7 @@ def test_validate_rollout_backend_skips_and_warns_on_version_skew(
     assert lines[1].startswith("  Reason:")
     assert any("osmosis-ai" in line for line in lines[2:])
     assert lines[-1] == (
-        '  To enable local preflight: pip install "osmosis-ai>=999.0.0"'
+        f'  To enable local preflight: {sys.executable} -m pip install "osmosis-ai>=999.0.0"'
     )
     assert "server validates" not in warnings[0]
 
@@ -657,9 +659,51 @@ def test_validate_rollout_backend_install_hint_dedupes_and_strips_markers(
     lines = warnings[0].splitlines()
     assert len([line for line in lines if line.startswith("    - ")]) == 3
     assert lines[-1] == (
-        "  To enable local preflight: "
-        'pip install "osmosis-ai[server,strands]" "definitely-not-installed-xyz"'
+        f"  To enable local preflight: {sys.executable} -m pip install "
+        '"osmosis-ai[server,strands]" "definitely-not-installed-xyz"'
     )
+
+
+@pytest.mark.parametrize(
+    ("method", "targets", "expected"),
+    [
+        (
+            "pip",
+            ["osmosis-ai[server,strands]", "httpx>=0.27"],
+            '/venv/bin/python -m pip install "osmosis-ai[server,strands]" "httpx>=0.27"',
+        ),
+        (
+            "uv_tool",
+            ["osmosis-ai[server,strands]", "httpx>=0.27"],
+            'uv tool install "osmosis-ai[server,strands]" --with "httpx>=0.27"',
+        ),
+        (
+            "uv_tool",
+            ["httpx>=0.27"],
+            f'uv tool install "osmosis-ai=={PACKAGE_VERSION}" --with "httpx>=0.27"',
+        ),
+        (
+            "pipx",
+            ["osmosis-ai[server,strands]", "httpx>=0.27"],
+            'pipx install --force "osmosis-ai[server,strands]" '
+            '&& pipx inject osmosis-ai "httpx>=0.27"',
+        ),
+        (
+            "pipx",
+            ["httpx>=0.27"],
+            'pipx inject osmosis-ai "httpx>=0.27"',
+        ),
+    ],
+)
+def test_install_command_targets_the_cli_environment(
+    monkeypatch: pytest.MonkeyPatch, method: str, targets: list[str], expected: str
+) -> None:
+    monkeypatch.setattr(sys, "executable", "/venv/bin/python")
+    monkeypatch.setattr(
+        workspace_directory_contract, "detect_install_method", lambda: method
+    )
+
+    assert workspace_directory_contract._install_command(targets) == expected
 
 
 def test_validate_rollout_backend_skips_and_warns_on_undeclared_dependency(

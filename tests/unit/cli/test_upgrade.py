@@ -5,9 +5,9 @@ from __future__ import annotations
 import pytest
 
 from osmosis_ai.cli.upgrade import (
-    _detect_install_method,
     _get_upgrade_commands,
     _is_up_to_date,
+    detect_install_method,
 )
 
 # ── _is_up_to_date ──────────────────────────────────────────────────
@@ -35,26 +35,26 @@ def test_is_up_to_date_unparseable_assumes_upgrade_needed() -> None:
     assert not _is_up_to_date("bad", "1.0.0")
 
 
-# ── _detect_install_method ───────────────────────────────────────────
+# ── detect_install_method ───────────────────────────────────────────
 
 
-def test_detect_install_method_uv(monkeypatch: pytest.MonkeyPatch) -> None:
+def testdetect_install_method_uv(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         "sys.executable", "/home/user/.local/share/uv/tools/osmosis/bin/python"
     )
-    assert _detect_install_method() == "uv_tool"
+    assert detect_install_method() == "uv_tool"
 
 
-def test_detect_install_method_pipx(monkeypatch: pytest.MonkeyPatch) -> None:
+def testdetect_install_method_pipx(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         "sys.executable", "/home/user/.local/pipx/venvs/osmosis/bin/python"
     )
-    assert _detect_install_method() == "pipx"
+    assert detect_install_method() == "pipx"
 
 
-def test_detect_install_method_pip(monkeypatch: pytest.MonkeyPatch) -> None:
+def testdetect_install_method_pip(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("sys.executable", "/usr/bin/python3")
-    assert _detect_install_method() == "pip"
+    assert detect_install_method() == "pip"
 
 
 # ── _get_upgrade_commands ────────────────────────────────────────────

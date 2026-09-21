@@ -6,6 +6,8 @@ workspace, distinct from the remote tenant managed by the platform.
 
 from __future__ import annotations
 
+import shlex
+import sys
 import tomllib
 from dataclasses import dataclass
 from importlib.metadata import PackageNotFoundError
@@ -17,6 +19,8 @@ from packaging.requirements import InvalidRequirement, Requirement
 from packaging.utils import canonicalize_name
 
 from osmosis_ai.cli.errors import CLIError
+from osmosis_ai.cli.upgrade import detect_install_method
+from osmosis_ai.consts import PACKAGE_VERSION, package_name
 from osmosis_ai.templates.catalog import required_workspace_paths
 
 
@@ -198,6 +202,41 @@ def _install_target(requirement: Requirement) -> str:
     return str(unmarked)
 
 
+def _install_command(install_targets: list[str]) -> str:
+    """Shell command that installs ``install_targets`` where the CLI runs.
+
+    Preflight imports into the interpreter running ``osmosis``, so a bare
+    ``pip install`` would miss a pipx or uv tool venv.
+    """
+    method = detect_install_method()
+    quoted = [f'"{target}"' for target in install_targets]
+    if method == "pip":
+        return f"{shlex.quote(sys.executable)} -m pip install {' '.join(quoted)}"
+
+    sdk_targets: list[str] = []
+    other_targets: list[str] = []
+    for target, quoted_target in zip(install_targets, quoted, strict=True):
+        is_sdk = canonicalize_name(Requirement(target).name) == canonicalize_name(
+            package_name
+        )
+        (sdk_targets if is_sdk else other_targets).append(quoted_target)
+    injected = [*sdk_targets[1:], *other_targets]
+
+    if method == "uv_tool":
+        main = sdk_targets[0] if sdk_targets else f'"{package_name}=={PACKAGE_VERSION}"'
+        parts = ["uv", "tool", "install", main]
+        for target in injected:
+            parts.extend(["--with", target])
+        return " ".join(parts)
+
+    commands: list[str] = []
+    if sdk_targets:
+        commands.append(f"pipx install --force {sdk_targets[0]}")
+    if injected:
+        commands.append(f"pipx inject {package_name} {' '.join(injected)}")
+    return " && ".join(commands)
+
+
 def _unsatisfied_rollout_requirements(
     rollout_dir: Path,
 ) -> list[UnsatisfiedRequirement]:
@@ -274,17 +313,14 @@ def validate_rollout_backend(
         unsatisfied = _unsatisfied_rollout_requirements(rollout_dir)
         if unsatisfied:
             problems = "\n".join(f"    - {entry.problem}" for entry in unsatisfied)
-            install_targets = " ".join(
-                f'"{target}"'
-                for target in dict.fromkeys(
-                    entry.install_target for entry in unsatisfied
-                )
+            install_command = _install_command(
+                list(dict.fromkeys(entry.install_target for entry in unsatisfied))
             )
             return [
                 f"Local preflight skipped for rollouts/{rollout}\n"
                 "  Reason: unsatisfied declared dependencies in this Python environment:\n"
                 f"{problems}\n"
-                f"  To enable local preflight: pip install {install_targets}"
+                f"  To enable local preflight: {install_command}"
             ]
 
     # Importing the entrypoint constructs module-level backends and servers;
