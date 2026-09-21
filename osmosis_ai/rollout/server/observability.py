@@ -15,7 +15,7 @@ if TYPE_CHECKING:
     from opentelemetry._logs import Logger
     from opentelemetry.sdk._logs import LoggerProvider
 
-logger = logging.getLogger(__name__)
+logger: logging.Logger = logging.getLogger(__name__)
 METADATA_KEY = "osmosis_observability"
 
 
@@ -30,7 +30,7 @@ class RolloutObservability:
     def __init__(self) -> None:
         self.provider: LoggerProvider | None = None
         self.log: Logger | None = None
-        self.owner = {
+        self.owner: dict[str, str] = {
             "server_id": os.environ.get("OSMOSIS_ROLLOUT_SERVER_ID")
             or os.environ.get("_OSMOSIS_ROLLOUT_INSTANCE_ID")
             or socket.gethostname(),
