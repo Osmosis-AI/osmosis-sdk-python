@@ -6,7 +6,10 @@ workspace, distinct from the remote tenant managed by the platform.
 
 from __future__ import annotations
 
+import shlex
+import sys
 import tomllib
+from dataclasses import dataclass
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import requires as installed_requirements
 from importlib.metadata import version as installed_version
@@ -16,6 +19,8 @@ from packaging.requirements import InvalidRequirement, Requirement
 from packaging.utils import canonicalize_name
 
 from osmosis_ai.cli.errors import CLIError
+from osmosis_ai.cli.upgrade import detect_install_method
+from osmosis_ai.consts import PACKAGE_VERSION, package_name
 from osmosis_ai.templates.catalog import required_workspace_paths
 
 
@@ -184,7 +189,61 @@ def _unsatisfied_requested_extras(requirement: Requirement) -> list[str]:
     return unsatisfied
 
 
-def _unsatisfied_rollout_requirements(rollout_dir: Path) -> list[str]:
+@dataclass(frozen=True)
+class UnsatisfiedRequirement:
+    install_target: str
+    problem: str
+
+
+def _install_target(requirement: Requirement) -> str:
+    # The marker already evaluated true above, so it is noise in the hint.
+    unmarked = Requirement(str(requirement))
+    unmarked.marker = None
+    return str(unmarked)
+
+
+def _install_command(install_targets: list[str]) -> str:
+    """Shell command that installs ``install_targets`` where the CLI runs.
+
+    Preflight imports into the interpreter running ``osmosis``, so a bare
+    ``pip install`` would miss a pipx or uv tool venv.
+    """
+    method = detect_install_method()
+    quoted = [shlex.quote(target) for target in install_targets]
+    if method == "pip":
+        return f"{shlex.quote(sys.executable)} -m pip install {' '.join(quoted)}"
+
+    sdk_targets: list[str] = []
+    other_targets: list[str] = []
+    for target, quoted_target in zip(install_targets, quoted, strict=True):
+        is_sdk = canonicalize_name(Requirement(target).name) == canonicalize_name(
+            package_name
+        )
+        (sdk_targets if is_sdk else other_targets).append(quoted_target)
+    injected = [*sdk_targets[1:], *other_targets]
+
+    if method == "uv_tool":
+        main = (
+            sdk_targets[0]
+            if sdk_targets
+            else shlex.quote(f"{package_name}=={PACKAGE_VERSION}")
+        )
+        parts = ["uv", "tool", "install", main]
+        for target in injected:
+            parts.extend(["--with", target])
+        return " ".join(parts)
+
+    commands: list[str] = []
+    if sdk_targets:
+        commands.append(f"pipx install --force {sdk_targets[0]}")
+    if injected:
+        commands.append(f"pipx inject {package_name} {' '.join(injected)}")
+    return " && ".join(commands)
+
+
+def _unsatisfied_rollout_requirements(
+    rollout_dir: Path,
+) -> list[UnsatisfiedRequirement]:
     """Declared requirements this environment does not satisfy.
 
     Preflight imports the rollout into the workspace-root environment, not the
@@ -204,7 +263,7 @@ def _unsatisfied_rollout_requirements(rollout_dir: Path) -> list[str]:
     if not isinstance(declared, list):
         return []
 
-    unsatisfied: list[str] = []
+    unsatisfied: list[UnsatisfiedRequirement] = []
     for raw in declared:
         if not isinstance(raw, str):
             continue
@@ -214,11 +273,17 @@ def _unsatisfied_rollout_requirements(rollout_dir: Path) -> list[str]:
             continue
         if requirement.marker is not None and not requirement.marker.evaluate():
             continue
+        install_target = _install_target(requirement)
         problem = _requirement_problem(requirement)
-        if problem is not None:
-            unsatisfied.append(problem)
-            continue
-        unsatisfied.extend(_unsatisfied_requested_extras(requirement))
+        problems = (
+            [problem]
+            if problem is not None
+            else _unsatisfied_requested_extras(requirement)
+        )
+        unsatisfied.extend(
+            UnsatisfiedRequirement(install_target=install_target, problem=problem)
+            for problem in problems
+        )
     return unsatisfied
 
 
@@ -251,10 +316,15 @@ def validate_rollout_backend(
     if rollout_dir.is_relative_to(rollouts_root):
         unsatisfied = _unsatisfied_rollout_requirements(rollout_dir)
         if unsatisfied:
+            problems = "\n".join(f"    - {entry.problem}" for entry in unsatisfied)
+            install_command = _install_command(
+                list(dict.fromkeys(entry.install_target for entry in unsatisfied))
+            )
             return [
-                f"Skipped the `rollouts/{rollout}` backend preflight: this environment "
-                f"does not satisfy the rollout's declared dependencies "
-                f"({'; '.join(unsatisfied)}). The server validates it after installing them."
+                f"Local preflight skipped for rollouts/{rollout}\n"
+                "  Reason: unsatisfied declared dependencies in this Python environment:\n"
+                f"{problems}\n"
+                f"  To enable local preflight: {install_command}"
             ]
 
     # Importing the entrypoint constructs module-level backends and servers;
@@ -265,8 +335,10 @@ def validate_rollout_backend(
     except ModuleNotFoundError as exc:
         # An undeclared dependency, which the gate above cannot see.
         return [
-            f"Skipped the `rollouts/{rollout}` backend preflight: {exc}. "
-            "The server validates it after installing the rollout's dependencies."
+            f"Local preflight skipped for rollouts/{rollout}\n"
+            f"  Reason: rollouts/{rollout}/{entrypoint} could not be imported.\n"
+            f"    ModuleNotFoundError: {exc}\n"
+            "  To enable local preflight: install it into this Python environment."
         ]
     except Exception as exc:
         detail = str(exc)

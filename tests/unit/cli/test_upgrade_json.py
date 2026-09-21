@@ -30,7 +30,7 @@ def test_upgrade_json_captures_subprocess_output(
     monkeypatch.setattr(
         "osmosis_ai.cli.upgrade._fetch_latest_version", lambda: "99.0.0"
     )
-    monkeypatch.setattr("osmosis_ai.cli.upgrade._detect_install_method", lambda: "pipx")
+    monkeypatch.setattr("osmosis_ai.cli.upgrade.detect_install_method", lambda: "pipx")
     monkeypatch.setattr("shutil.which", lambda command: f"/usr/bin/{command}")
 
     def fake_run(cmd, **kwargs):
@@ -65,7 +65,7 @@ def test_upgrade_json_failed_subprocess_is_parseable_nonzero(
     monkeypatch.setattr(
         "osmosis_ai.cli.upgrade._fetch_latest_version", lambda: "99.0.0"
     )
-    monkeypatch.setattr("osmosis_ai.cli.upgrade._detect_install_method", lambda: "pipx")
+    monkeypatch.setattr("osmosis_ai.cli.upgrade.detect_install_method", lambda: "pipx")
     monkeypatch.setattr("shutil.which", lambda command: f"/usr/bin/{command}")
     monkeypatch.setattr(
         "subprocess.run",
@@ -97,7 +97,7 @@ def test_upgrade_json_tries_next_fallback_after_failed_command(
     monkeypatch.setattr(
         "osmosis_ai.cli.upgrade._fetch_latest_version", lambda: "99.0.0"
     )
-    monkeypatch.setattr("osmosis_ai.cli.upgrade._detect_install_method", lambda: "pip")
+    monkeypatch.setattr("osmosis_ai.cli.upgrade.detect_install_method", lambda: "pip")
     monkeypatch.setattr("shutil.which", lambda command: f"/usr/bin/{command}")
 
     calls: list[list[str]] = []
@@ -130,7 +130,7 @@ def test_upgrade_timeout_includes_manual_recovery_in_message(
     monkeypatch.setattr(
         "osmosis_ai.cli.upgrade._fetch_latest_version", lambda: "99.0.0"
     )
-    monkeypatch.setattr("osmosis_ai.cli.upgrade._detect_install_method", lambda: "pipx")
+    monkeypatch.setattr("osmosis_ai.cli.upgrade.detect_install_method", lambda: "pipx")
     monkeypatch.setattr("shutil.which", lambda command: f"/usr/bin/{command}")
 
     def fake_run(cmd, **kwargs):

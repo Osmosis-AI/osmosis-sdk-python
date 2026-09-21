@@ -38,7 +38,7 @@ def _fetch_latest_version() -> str | None:
         return None
 
 
-def _detect_install_method() -> str:
+def detect_install_method() -> str:
     """Detect how the package was installed.
 
     Returns one of: "uv_tool", "pipx", "pip".
@@ -137,7 +137,7 @@ def upgrade() -> OperationResult:
     )
     console.print()
 
-    method = _detect_install_method()
+    method = detect_install_method()
     cmds = _get_upgrade_commands(method)
 
     console.print(f"Detected install method: {method}")
