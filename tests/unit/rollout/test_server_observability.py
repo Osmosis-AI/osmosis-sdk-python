@@ -8,7 +8,7 @@ import pytest
 from opentelemetry.sdk._logs.export import InMemoryLogRecordExporter
 
 from osmosis_ai.rollout.backend.base import ExecutionBackend
-from osmosis_ai.rollout.context import get_rollout_context
+from osmosis_ai.rollout.context import RolloutProgress, get_rollout_context
 from osmosis_ai.rollout.server import app as app_module
 from osmosis_ai.rollout.server.observability import RolloutObservability
 from osmosis_ai.rollout.types import ExecutionOutcome, ExecutionResult, RolloutStatus
@@ -103,7 +103,7 @@ async def test_cancellation_and_lease_expiry_publish_terminal_ownership(
     app = app_module.create_rollout_server(
         backend=Backend(),
         result_wait_timeout_sec=0.01,
-        polling_lease_timeout_sec=0.08,
+        polling_lease_timeout_sec=0.08 if expired else 30,
     )
     async with app.router.lifespan_context(app):
         async with httpx.AsyncClient(
@@ -126,7 +126,7 @@ async def test_cancellation_and_lease_expiry_publish_terminal_ownership(
     records = [dict(row.log_record.attributes) for row in exported.get_finished_logs()]
     assert [row["status"] for row in records].count("queued") == 1
     assert records[-1]["status"] == result.status.value
-    assert records[-1]["status"] in {"failure", "cancelled"}
+    assert records[-1]["status"] == ("failure" if expired else "cancelled")
     assert "run_name" not in records[-1]
 
 
@@ -151,5 +151,58 @@ def test_metadata_is_bounded_and_cannot_override_owner(exported):
             }
         },
     )
+    assert fields is not None
     assert "run_id" not in fields and "run_name" not in fields
     assert fields["server_id"] == "dev-owner"
+
+
+@pytest.mark.parametrize("value", ["x" * 513, "a\nb"])
+@pytest.mark.parametrize(
+    ("field", "env_var"),
+    [
+        ("server_id", "OSMOSIS_ROLLOUT_SERVER_ID"),
+        ("server_name", "_OSMOSIS_ROLLOUT_NAME"),
+        ("namespace", "OSMOSIS_ROLLOUT_NAMESPACE"),
+        ("rollout_id", None),
+        ("run_id", None),
+        ("run_name", None),
+    ],
+)
+def test_invalid_identity_never_exports_a_different_owner(
+    exported, monkeypatch, field, env_var, value
+):
+    if env_var is not None:
+        monkeypatch.setenv(env_var, value)
+    observer = RolloutObservability()
+    observer.start()
+    fields = observer.fields(
+        value if field == "rollout_id" else "episode",
+        {"osmosis_observability": {field: value}},
+    )
+    observer.record(fields, RolloutStatus.RUNNING)
+    observer.close()
+    records = exported.get_finished_logs()
+    if field in {"server_id", "rollout_id"}:
+        assert not records
+    else:
+        assert len(records) == 1
+        attributes = dict(records[0].log_record.attributes)
+        assert field not in attributes
+        assert attributes["server_id"] == "dev-owner"
+        assert attributes["rollout_id"] == "episode"
+
+
+async def test_status_observer_failure_does_not_hold_lock_or_fail_rollout():
+    progress = RolloutProgress()
+    lock_states = []
+
+    def broken_observer(status):
+        lock_states.append(progress.changed.locked())
+        raise RuntimeError("broken observer")
+
+    progress.on_status = broken_observer
+    await progress.set_status(RolloutStatus.RUNNING)
+    assert progress.status == RolloutStatus.RUNNING
+    await progress.set_status(RolloutStatus.SUCCESS)
+    assert await progress.wait_for_status_change() == RolloutStatus.SUCCESS
+    assert lock_states == [False, False]

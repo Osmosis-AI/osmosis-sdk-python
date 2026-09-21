@@ -21,9 +21,14 @@ METADATA_KEY = "osmosis_observability"
 
 def _text(value: object) -> str | None:
     # Explicit text fields only, with bounded size and no control characters.
-    if not isinstance(value, str) or not value.strip() or len(value) > 512:
+    if (
+        not isinstance(value, str)
+        or not value.strip()
+        or len(value) > 512
+        or not value.isprintable()
+    ):
         return None
-    return "".join(c for c in value.strip() if c.isprintable()) or None
+    return value
 
 
 class RolloutObservability:
@@ -31,12 +36,15 @@ class RolloutObservability:
         self.provider: LoggerProvider | None = None
         self.log: Logger | None = None
         self._sequence: int = 0
-        self.owner: dict[str, str] = {
+        owner = {
             "server_id": os.environ.get("OSMOSIS_ROLLOUT_SERVER_ID")
             or os.environ.get("_OSMOSIS_ROLLOUT_INSTANCE_ID")
             or socket.gethostname(),
             "server_name": os.environ.get("_OSMOSIS_ROLLOUT_NAME", ""),
             "namespace": os.environ.get("OSMOSIS_ROLLOUT_NAMESPACE", ""),
+        }
+        self.owner: dict[str, str] = {
+            key: value for key, value in owner.items() if _text(value) is not None
         }
 
     def start(self) -> None:
@@ -67,7 +75,11 @@ class RolloutObservability:
 
     def fields(
         self, rollout_id: str, metadata: Mapping[str, object] | None
-    ) -> dict[str, str]:
+    ) -> dict[str, str] | None:
+        # Invalid required identifiers cannot be truncated or omitted without
+        # merging unrelated owners in the dashboard's deduplication key.
+        if _text(rollout_id) is None or "server_id" not in self.owner:
+            return None
         fields = {"event": "rollout.ownership", "rollout_id": rollout_id, **self.owner}
         supplied = (metadata or {}).get(METADATA_KEY)
         if isinstance(supplied, dict):
@@ -76,8 +88,8 @@ class RolloutObservability:
                     fields[key] = value
         return fields
 
-    def record(self, fields: Mapping[str, str], status: RolloutStatus) -> None:
-        if self.log is None:
+    def record(self, fields: Mapping[str, str] | None, status: RolloutStatus) -> None:
+        if self.log is None or fields is None:
             return
         try:
             self._sequence += 1
