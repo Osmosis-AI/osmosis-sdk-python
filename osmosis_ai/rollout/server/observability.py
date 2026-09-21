@@ -30,6 +30,7 @@ class RolloutObservability:
     def __init__(self) -> None:
         self.provider: LoggerProvider | None = None
         self.log: Logger | None = None
+        self._sequence: int = 0
         self.owner: dict[str, str] = {
             "server_id": os.environ.get("OSMOSIS_ROLLOUT_SERVER_ID")
             or os.environ.get("_OSMOSIS_ROLLOUT_INSTANCE_ID")
@@ -79,11 +80,16 @@ class RolloutObservability:
         if self.log is None:
             return
         try:
+            self._sequence += 1
             self.log.emit(
                 timestamp=time.time_ns(),
                 severity_text="INFO",
                 body="Rollout ownership",
-                attributes={**fields, "status": status.value},
+                attributes={
+                    **fields,
+                    "status": status.value,
+                    "event_sequence": self._sequence,
+                },
             )
         except Exception:
             # Observability failures must never affect admission, leases or results.

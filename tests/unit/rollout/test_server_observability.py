@@ -74,7 +74,7 @@ async def test_ownership_survives_all_phases_without_exporting_inputs(
         "grading",
         terminal.value,
     ]
-    for row in records:
+    for sequence, row in enumerate(records, 1):
         assert row == {
             "event": "rollout.ownership",
             "rollout_id": "episode-1",
@@ -84,6 +84,7 @@ async def test_ownership_survives_all_phases_without_exporting_inputs(
             "run_id": "train-123",
             "run_name": "GLM training",
             "status": row["status"],
+            "event_sequence": sequence,
         }
 
 
