@@ -15,6 +15,7 @@ from fastapi.responses import JSONResponse
 from osmosis_ai.rollout.backend.base import ExecutionBackend
 from osmosis_ai.rollout.context import RolloutContext, RolloutProgress
 from osmosis_ai.rollout.server.lease import InvalidLeaseError
+from osmosis_ai.rollout.server.observability import RolloutObservability
 from osmosis_ai.rollout.server.result_registry import (
     DuplicateRolloutError,
     RolloutFutureRegistry,
@@ -73,6 +74,7 @@ def create_rollout_server(
         _configure_default_logging()
 
     scheduled_tasks: set[asyncio.Task[None]] = set()
+    observability = RolloutObservability()
 
     def _cancel_rollout(rollout_id: str) -> str | None:
         disposition = backend.cancel_rollouts(ids=[rollout_id]).get(rollout_id)
@@ -119,11 +121,13 @@ def create_rollout_server(
         async with AsyncExitStack() as stack:
             if lifespan is not None:
                 await stack.enter_async_context(lifespan(app))
+            observability.start()
             try:
                 yield
             finally:
                 await _drain_scheduled_tasks()
                 await registry.close()
+                await asyncio.to_thread(observability.close)
 
     app = FastAPI(lifespan=_lifespan_with_drain)
     app.state.rollout_futures = registry
@@ -175,12 +179,21 @@ def create_rollout_server(
             raise HTTPException(
                 status_code=409, detail="rollout_id is already registered"
             ) from exc
+        fields = observability.fields(request.rollout_id, request.metadata)
+        entry = registry.entry(request.rollout_id)
+        entry.progress.on_status = partial(observability.record, fields)
+        # Result completion also covers lease expiry and cancellation before the
+        # execution task starts; observing only _run_rollout would miss those.
+        entry.result.add_done_callback(
+            lambda result: observability.record(fields, result.result().status)
+        )
         try:
             task = asyncio.create_task(_run_rollout(request))
             await registry.bind_task(request.rollout_id, task)
         except Exception:
             await registry.discard(request.rollout_id)
             raise
+        observability.record(fields, RolloutStatus.QUEUED)
         scheduled_tasks.add(task)
         task.add_done_callback(partial(_finish_rollout_task, request.rollout_id))
         return RolloutInitResponse(
