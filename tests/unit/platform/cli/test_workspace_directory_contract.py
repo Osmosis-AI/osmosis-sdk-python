@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -608,9 +609,10 @@ def test_validate_rollout_backend_skips_and_warns_on_version_skew(
     lines = warnings[0].splitlines()
     assert lines[0] == "Local preflight skipped for rollouts/demo"
     assert lines[1].startswith("  Reason:")
-    assert any("osmosis-ai" in line for line in lines[2:])
+    assert lines[2].startswith("    - osmosis-ai")
     assert lines[-1] == (
-        f'  To enable local preflight: {sys.executable} -m pip install "osmosis-ai>=999.0.0"'
+        f"  To enable local preflight: {sys.executable} -m pip install "
+        "'osmosis-ai>=999.0.0'"
     )
     assert "server validates" not in warnings[0]
 
@@ -660,8 +662,23 @@ def test_validate_rollout_backend_install_hint_dedupes_and_strips_markers(
     assert len([line for line in lines if line.startswith("    - ")]) == 3
     assert lines[-1] == (
         f"  To enable local preflight: {sys.executable} -m pip install "
-        '"osmosis-ai[server,strands]" "definitely-not-installed-xyz"'
+        "'osmosis-ai[server,strands]' definitely-not-installed-xyz"
     )
+
+
+def test_install_command_quotes_shell_metacharacters(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(sys, "executable", "/venv/bin/python")
+    monkeypatch.setattr(
+        workspace_directory_contract, "detect_install_method", lambda: "pip"
+    )
+    target = "osmosis-ai[harbor] @ git+https://example.com/repo.git@$(whoami)"
+
+    command = workspace_directory_contract._install_command([target])
+
+    assert command == f"/venv/bin/python -m pip install {shlex.quote(target)}"
+    assert '"' not in command
 
 
 @pytest.mark.parametrize(
@@ -670,28 +687,29 @@ def test_validate_rollout_backend_install_hint_dedupes_and_strips_markers(
         (
             "pip",
             ["osmosis-ai[server,strands]", "httpx>=0.27"],
-            '/venv/bin/python -m pip install "osmosis-ai[server,strands]" "httpx>=0.27"',
+            "/venv/bin/python -m pip install 'osmosis-ai[server,strands]' 'httpx>=0.27'",
         ),
         (
             "uv_tool",
             ["osmosis-ai[server,strands]", "httpx>=0.27"],
-            'uv tool install "osmosis-ai[server,strands]" --with "httpx>=0.27"',
+            "uv tool install 'osmosis-ai[server,strands]' --with 'httpx>=0.27'",
         ),
         (
             "uv_tool",
             ["httpx>=0.27"],
-            f'uv tool install "osmosis-ai=={PACKAGE_VERSION}" --with "httpx>=0.27"',
+            f"uv tool install {shlex.quote(f'osmosis-ai=={PACKAGE_VERSION}')} "
+            "--with 'httpx>=0.27'",
         ),
         (
             "pipx",
             ["osmosis-ai[server,strands]", "httpx>=0.27"],
-            'pipx install --force "osmosis-ai[server,strands]" '
-            '&& pipx inject osmosis-ai "httpx>=0.27"',
+            "pipx install --force 'osmosis-ai[server,strands]' "
+            "&& pipx inject osmosis-ai 'httpx>=0.27'",
         ),
         (
             "pipx",
             ["httpx>=0.27"],
-            'pipx inject osmosis-ai "httpx>=0.27"',
+            "pipx inject osmosis-ai 'httpx>=0.27'",
         ),
     ],
 )

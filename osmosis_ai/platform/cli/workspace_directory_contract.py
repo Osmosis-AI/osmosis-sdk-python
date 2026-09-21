@@ -209,7 +209,7 @@ def _install_command(install_targets: list[str]) -> str:
     ``pip install`` would miss a pipx or uv tool venv.
     """
     method = detect_install_method()
-    quoted = [f'"{target}"' for target in install_targets]
+    quoted = [shlex.quote(target) for target in install_targets]
     if method == "pip":
         return f"{shlex.quote(sys.executable)} -m pip install {' '.join(quoted)}"
 
@@ -223,7 +223,11 @@ def _install_command(install_targets: list[str]) -> str:
     injected = [*sdk_targets[1:], *other_targets]
 
     if method == "uv_tool":
-        main = sdk_targets[0] if sdk_targets else f'"{package_name}=={PACKAGE_VERSION}"'
+        main = (
+            sdk_targets[0]
+            if sdk_targets
+            else shlex.quote(f"{package_name}=={PACKAGE_VERSION}")
+        )
         parts = ["uv", "tool", "install", main]
         for target in injected:
             parts.extend(["--with", target])
