@@ -163,6 +163,12 @@ def test_eval_submit_skips_preflight_when_dependency_uninstalled(
 
     assert isinstance(result, OperationResult)
     assert submitted == [True]
+    output = console_capture.getvalue()
+    assert "• Local preflight skipped for rollouts/calculator" in output
+    assert "Reason:" in output
+    assert "No module named 'a_package_that_is_not_installed_xyz'" in output
+    assert "To enable local preflight:" in output
+    assert "server validates" not in output
 
 
 def test_eval_submit_preflight_still_fails_on_syntax_error(

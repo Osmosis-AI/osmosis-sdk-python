@@ -251,10 +251,12 @@ def validate_rollout_backend(
     if rollout_dir.is_relative_to(rollouts_root):
         unsatisfied = _unsatisfied_rollout_requirements(rollout_dir)
         if unsatisfied:
+            problems = "\n".join(f"    - {problem}" for problem in unsatisfied)
             return [
-                f"Skipped the `rollouts/{rollout}` backend preflight: this environment "
-                f"does not satisfy the rollout's declared dependencies "
-                f"({'; '.join(unsatisfied)}). The server validates it after installing them."
+                f"Local preflight skipped for rollouts/{rollout}\n"
+                "  Reason: unsatisfied declared dependencies in this Python environment:\n"
+                f"{problems}\n"
+                "  To enable local preflight: install them into this Python environment."
             ]
 
     # Importing the entrypoint constructs module-level backends and servers;
@@ -265,8 +267,10 @@ def validate_rollout_backend(
     except ModuleNotFoundError as exc:
         # An undeclared dependency, which the gate above cannot see.
         return [
-            f"Skipped the `rollouts/{rollout}` backend preflight: {exc}. "
-            "The server validates it after installing the rollout's dependencies."
+            f"Local preflight skipped for rollouts/{rollout}\n"
+            f"  Reason: rollouts/{rollout}/{entrypoint} could not be imported.\n"
+            f"    ModuleNotFoundError: {exc}\n"
+            "  To enable local preflight: install it into this Python environment."
         ]
     except Exception as exc:
         detail = str(exc)

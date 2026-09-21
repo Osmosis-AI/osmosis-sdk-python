@@ -598,8 +598,42 @@ def test_validate_rollout_backend_skips_and_warns_on_version_skew(
     )
 
     assert len(warnings) == 1
-    assert "rollouts/demo" in warnings[0]
-    assert "osmosis-ai" in warnings[0]
+    lines = warnings[0].splitlines()
+    assert lines[0] == "Local preflight skipped for rollouts/demo"
+    assert lines[1].startswith("  Reason:")
+    assert any("osmosis-ai" in line for line in lines[2:])
+    assert lines[-1].startswith("  To enable local preflight:")
+    assert "server validates" not in warnings[0]
+
+
+def test_validate_rollout_backend_skips_and_warns_on_undeclared_dependency(
+    tmp_path: Path,
+) -> None:
+    project = _make_workspace_directory(tmp_path / "project")
+    _make_rollout(
+        project,
+        "demo",
+        dependencies=_SATISFIED,
+        entrypoint="import a_package_that_is_not_installed_xyz\n",
+    )
+
+    warnings = workspace_directory_contract.validate_rollout_backend(
+        workspace_directory=project,
+        rollout="demo",
+        entrypoint="main.py",
+        command_label="eval submit",
+    )
+
+    assert len(warnings) == 1
+    lines = warnings[0].splitlines()
+    assert lines[0] == "Local preflight skipped for rollouts/demo"
+    assert lines[1].startswith("  Reason:")
+    assert "rollouts/demo/main.py" in lines[1]
+    assert lines[2] == (
+        "    ModuleNotFoundError: No module named 'a_package_that_is_not_installed_xyz'"
+    )
+    assert lines[-1].startswith("  To enable local preflight:")
+    assert "server validates" not in warnings[0]
 
 
 def test_validate_rollout_backend_still_fails_when_environment_matches(
