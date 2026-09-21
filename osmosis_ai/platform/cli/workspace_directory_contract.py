@@ -7,6 +7,7 @@ workspace, distinct from the remote tenant managed by the platform.
 from __future__ import annotations
 
 import tomllib
+from dataclasses import dataclass
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import requires as installed_requirements
 from importlib.metadata import version as installed_version
@@ -184,7 +185,22 @@ def _unsatisfied_requested_extras(requirement: Requirement) -> list[str]:
     return unsatisfied
 
 
-def _unsatisfied_rollout_requirements(rollout_dir: Path) -> list[str]:
+@dataclass(frozen=True)
+class UnsatisfiedRequirement:
+    install_target: str
+    problem: str
+
+
+def _install_target(requirement: Requirement) -> str:
+    # The marker already evaluated true above, so it is noise in the hint.
+    unmarked = Requirement(str(requirement))
+    unmarked.marker = None
+    return str(unmarked)
+
+
+def _unsatisfied_rollout_requirements(
+    rollout_dir: Path,
+) -> list[UnsatisfiedRequirement]:
     """Declared requirements this environment does not satisfy.
 
     Preflight imports the rollout into the workspace-root environment, not the
@@ -204,7 +220,7 @@ def _unsatisfied_rollout_requirements(rollout_dir: Path) -> list[str]:
     if not isinstance(declared, list):
         return []
 
-    unsatisfied: list[str] = []
+    unsatisfied: list[UnsatisfiedRequirement] = []
     for raw in declared:
         if not isinstance(raw, str):
             continue
@@ -214,11 +230,17 @@ def _unsatisfied_rollout_requirements(rollout_dir: Path) -> list[str]:
             continue
         if requirement.marker is not None and not requirement.marker.evaluate():
             continue
+        install_target = _install_target(requirement)
         problem = _requirement_problem(requirement)
-        if problem is not None:
-            unsatisfied.append(problem)
-            continue
-        unsatisfied.extend(_unsatisfied_requested_extras(requirement))
+        problems = (
+            [problem]
+            if problem is not None
+            else _unsatisfied_requested_extras(requirement)
+        )
+        unsatisfied.extend(
+            UnsatisfiedRequirement(install_target=install_target, problem=problem)
+            for problem in problems
+        )
     return unsatisfied
 
 
@@ -251,12 +273,18 @@ def validate_rollout_backend(
     if rollout_dir.is_relative_to(rollouts_root):
         unsatisfied = _unsatisfied_rollout_requirements(rollout_dir)
         if unsatisfied:
-            problems = "\n".join(f"    - {problem}" for problem in unsatisfied)
+            problems = "\n".join(f"    - {entry.problem}" for entry in unsatisfied)
+            install_targets = " ".join(
+                f'"{target}"'
+                for target in dict.fromkeys(
+                    entry.install_target for entry in unsatisfied
+                )
+            )
             return [
                 f"Local preflight skipped for rollouts/{rollout}\n"
                 "  Reason: unsatisfied declared dependencies in this Python environment:\n"
                 f"{problems}\n"
-                "  To enable local preflight: install them into this Python environment."
+                f"  To enable local preflight: pip install {install_targets}"
             ]
 
     # Importing the entrypoint constructs module-level backends and servers;
