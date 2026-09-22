@@ -396,7 +396,9 @@ class HarborBackend(ExecutionBackend):
     ) -> HarborAgentConfig:
         if self.native is not None and isinstance(self.agent, str):
             metadata = container_input.metadata or {}
-            model = metadata.get("harbor_model") or self.model_name
+            model = metadata.get("harbor_model", self.model_name)
+            if self.native.wiring != "opencode":
+                model = model or self.model_name
             url = container_input.chat_completions_url
             if self.native.wiring != "none" and not url:
                 # An empty api_base routes litellm (and the credential) to the
@@ -738,7 +740,9 @@ class HarborBackend(ExecutionBackend):
     def prewarm_agent_config(self, task_dir: Path) -> HarborAgentConfig:
         """Install-only trials never run the agent: no endpoint, no credentials."""
         if self.native is not None and isinstance(self.agent, str):
-            return native_prewarm_agent_config(self.agent, self.native, self.model_name)
+            return native_prewarm_agent_config(
+                self.agent, self.native, self.model_name, self.native_agent_kwargs
+            )
         return self.harness_agent_config(task_dir)
 
     def prewarm_trial_config(self, task: HarborTask) -> TrialConfig:

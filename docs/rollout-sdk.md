@@ -204,7 +204,7 @@ The server creates the polling lease and chooses both the long-poll wait and lea
 
 An admission deadline that expires during an HTTP request does not prove the server rejected the rollout. `RolloutAdmissionTimeoutError` reports that admission may have succeeded; the server requests cancellation of unobserved work when its polling lease expires. The client does not automatically cancel by ID: a lost duplicate-ID rejection could otherwise cancel another active rollout. Use a fresh rollout ID for each new attempt. A deadline reached while waiting to retry an explicit 429 reports only the admission timeout.
 
-Each result GET retries `httpx.RemoteProtocolError` and `httpx.NetworkError` at most twice, after 0.1 and 0.5 seconds, using the same rollout ID, polling lease, and request timeout (the server's result wait plus 10 seconds). Persistent disconnects therefore surface later, after up to two additional requests and their backoff; the per-request timeout is not a total retry deadline. Caller cancellation and deadlines can interrupt both requests and backoff. Timeouts, HTTP errors, and invalid protocol responses are not retried. This recovery does not replay admission or cancellation requests; admission's existing HTTP 429 retry behavior is unchanged.
+Each result GET retries `httpx.RemoteProtocolError`, `httpx.NetworkError`, and `httpx.ReadTimeout` at most twice, after 0.1 and 0.5 seconds, using the same rollout ID, polling lease, and request timeout (the server's result wait plus 10 seconds). A retry starts only when its backoff and full request timeout fit before the last confirmed lease deadline; the retry request also has that wall-clock bound. The deadline is measured from the start of the last successful admission or result request, since receiving a delayed response does not renew the lease. Failed requests cannot extend it. Caller cancellation and deadlines can interrupt both requests and backoff. Other timeouts, HTTP errors, and invalid protocol responses are not retried. This recovery does not replay admission or cancellation requests; admission's existing HTTP 429 retry behavior is unchanged.
 
 ## Server and backends
 
@@ -232,7 +232,7 @@ app = create_rollout_server(backend=backend)
 
 [../osmosis_ai/rollout/backend/harbor/](../osmosis_ai/rollout/backend/harbor/)
 
-`agent=` picks the track. A registered native agent name (`"terminus-2"`, `"mini-swe-agent"`, `"oracle"`) runs Harbor's own agent with the rollout endpoint injected; an `AgentWorkflow` class (or `"module:Class"` path) is packaged into a wheel and installed in the task container at trial start. `grader=None` always uses the task's own `tests/` as the reward source. A `Grader` class is installed as the verifier only when the task does not already contain `tests/test.sh`; an existing task verifier remains authoritative.
+`agent=` picks the track. A registered native agent name (`"terminus-2"`, `"mini-swe-agent"`, `"opencode"`, `"oracle"`) runs Harbor's own agent with the rollout endpoint injected; an `AgentWorkflow` class (or `"module:Class"` path) is packaged into a wheel and installed in the task container at trial start. `grader=None` always uses the task's own `tests/` as the reward source. A `Grader` class is installed as the verifier only when the task does not already contain `tests/test.sh`; an existing task verifier remains authoritative.
 
 ```python
 from pathlib import Path
@@ -245,7 +245,7 @@ from osmosis_ai.rollout.server import create_rollout_server
 backend = HarborBackend(
     orchestrator=TrialQueue(n_concurrent=4),
     tasks_dir=Path("tasks"),
-    agent=MyWorkflow,  # or a native agent name
+    agent=MyWorkflow,  # or a native agent name, such as "opencode"
     grader=MyGrader,  # used when the task has no tests/test.sh
 )
 app = create_rollout_server(backend=backend, lifespan=backend.prewarm_lifespan())
@@ -253,7 +253,8 @@ app = create_rollout_server(backend=backend, lifespan=backend.prewarm_lifespan()
 
 - Tasks come from `tasks_dir` (`task_mode="template"` or `"dataset"`), or per rollout via `metadata["harbor_task"]` — a local path, a registry package `"org/name[@ref]"`, or a git checkout (`metadata["git_url"]`, ideally with a pinned `metadata["git_commit_id"]`).
 - Reward precedence is deterministic: a task-provided `tests/test.sh` wins over `grader=`. To use the SDK grader, supply a task without that file; the backend never overwrites a benchmark's native verifier.
-- `prewarm()` builds every task image and runs agent setup before the server accepts traffic; `prewarm_lifespan()` wraps it as an ASGI lifespan.
+- `prewarm()` builds every task image and runs agent setup before the server accepts traffic; `prewarm_lifespan()` wraps it as an ASGI lifespan. Native agent options, including `native_agent_kwargs={"version": "..."}`, also apply during prewarm.
+- Native OpenCode uses the supplied session endpoint through its OpenAI-compatible provider. Its API key stays in the agent environment. Auto-compaction and pruning are disabled to preserve the training token trajectory; other `native_agent_kwargs["opencode_config"]` settings, such as model context limits, are retained. An omitted `metadata["harbor_model"]` uses the backend's model; an explicit override must be a non-empty `"provider/model"` string. Empty strings, `null`, and other non-string values are rejected.
 - `max_queue_depth` bounds admission (`has_capacity()`), and `cancel_rollouts()` cancels queued or running rollouts by id, prefix, or all.
 - Built-in Daytona environments (`environment_config.type="daytona"` and `environment_config.import_path=None`) with `delete=True` default to auto-stop after 60 minutes of [Daytona-observed inactivity](https://www.daytona.io/docs/en/sandboxes/#what-resets-the-timer) and deletion immediately after stop. This provider-side backstop survives a crashed rollout server; normal teardown and agent/grader timeouts still apply. In the locked Harbor 0.22.0 Linux execution path, Harbor polls command status through the Daytona API every second, refreshing activity while the server drives the command. Processes running inside the sandbox alone do not refresh activity. Increase `environment_config.kwargs["auto_stop_interval_mins"]` for legitimate periods without Daytona interactions (for example, an intermediate multi-step trial waiting for a separate verifier), or set it to `0` to disable auto-stop. Other clients' activity can keep a sandbox alive after a server crash; this policy does not check server health. Explicit `auto_stop_interval_mins` and `auto_delete_interval_mins` values are preserved. No defaults are added for `delete=False`, custom `import_path` environments, or other providers. Harbor 0.22.0 forces immediate deletion for snapshot-backed sandboxes even when a nonzero deletion interval is requested, and rejects nonzero deletion intervals for GPU tasks; the SDK's default of `0` works with both paths.
 - Keep Harbor's `TrialQueue` at its default `RetryConfig(max_retries=0)`. The SDK treats Harbor's `END` event as the terminal rollout result, so queue-level attempt retries are not supported; resubmit with a new rollout id if client-level retry is required.

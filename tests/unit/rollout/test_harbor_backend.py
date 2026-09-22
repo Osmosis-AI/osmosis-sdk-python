@@ -610,6 +610,159 @@ class TestNativeAgents:
         backend = self.backend_for("mini-swe-agent", template_task)
         assert backend.bundle is None
 
+    def test_opencode_uses_session_endpoint_in_native_harbor_agent(
+        self, template_task, tmp_path
+    ):
+        from harbor.agents.factory import AgentFactory
+
+        overrides = {
+            "version": "1.18.27",
+            "opencode_config": {
+                "compaction": {"auto": True},
+                "provider": {
+                    "openai": {
+                        "npm": "@ai-sdk/openai",
+                        "options": {"baseURL": "https://wrong.example/v1"},
+                        "models": {"student": {"limit": {"context": 131072}}},
+                    }
+                },
+            },
+        }
+        backend = self.backend_for(
+            "opencode",
+            template_task,
+            model_name="openai/student",
+            native_agent_kwargs=overrides,
+        )
+        configs = [
+            backend.build_agent_config(
+                template_task,
+                ContainerInput(
+                    rollout_id=name,
+                    chat_completions_url=f"https://trainer/sessions/{name}/v1",
+                    api_key=f"key-{name}",
+                ),
+            )
+            for name in ("first", "second")
+        ]
+        first = AgentFactory.create_agent_from_config(configs[0], tmp_path / "logs")
+        second = AgentFactory.create_agent_from_config(
+            configs[1], tmp_path / "logs-second"
+        )
+        command = first._build_register_config_command()
+        second_command = second._build_register_config_command()
+        assert "https://trainer/sessions/second/v1" in second_command
+        assert "https://trainer/sessions/first/v1" not in second_command
+        assert second._extra_env["OPENAI_API_KEY"] == "key-second"
+        assert "key-second" not in second_command
+        assert "https://trainer/sessions/first/v1" in command
+        assert "@ai-sdk/openai-compatible" in command
+        assert configs[0].model_name == "osmosis-rollout/student"
+        providers = configs[0].kwargs["opencode_config"]["provider"]
+        assert "openai" not in providers
+        assert providers["osmosis-rollout"]["models"]["student"]["limit"] == {
+            "context": 131072
+        }
+        assert "131072" in command
+        assert "key-first" not in command  # key stays in the agent environment
+        # Trial applies the explicit environment to every sandbox command;
+        # custom providers do not infer OPENAI_API_KEY in model_connection.
+        assert first._extra_env["OPENAI_API_KEY"] == "key-first"
+        assert configs[0].kwargs["opencode_config"]["compaction"] == {
+            "auto": False,
+            "prune": False,
+        }
+        assert "second" not in command
+        assert overrides["opencode_config"]["compaction"]["auto"] is True
+        assert (
+            overrides["opencode_config"]["provider"]["openai"]["options"]["baseURL"]
+            == "https://wrong.example/v1"
+        )
+
+    @pytest.mark.parametrize("agent", ["opencode", "mini-swe-agent"])
+    def test_prewarm_preserves_native_version_without_rollout_credentials(
+        self, template_task, agent
+    ):
+        backend = self.backend_for(
+            agent,
+            template_task,
+            native_agent_kwargs={"version": "1.2.3", "custom": {"value": 1}},
+        )
+        config = backend.prewarm_agent_config(template_task)
+        assert config.kwargs["version"] == "1.2.3"
+        assert "OPENAI_API_KEY" not in config.env
+        assert "OPENAI_BASE_URL" not in config.env
+        config.kwargs["custom"]["value"] = 2
+        assert backend.native_agent_kwargs["custom"]["value"] == 1
+
+    @pytest.mark.parametrize(
+        "model",
+        [
+            None,
+            False,
+            0,
+            0.0,
+            "",
+            [],
+            {},
+            42,
+            True,
+            ["openai/student"],
+            {"model": "student"},
+            "student",
+            "/student",
+            "openai/",
+        ],
+    )
+    def test_opencode_rejects_invalid_model_metadata(self, template_task, model):
+        backend = self.backend_for("opencode", template_task)
+        with pytest.raises(ValueError, match="must have the form provider/model"):
+            backend.build_agent_config(
+                template_task,
+                ContainerInput(
+                    rollout_id="r1",
+                    chat_completions_url="https://trainer/sessions/r1/v1",
+                    metadata={"harbor_model": model},
+                ),
+            )
+
+    def test_opencode_preserves_existing_private_provider_configuration(
+        self, template_task, tmp_path
+    ):
+        from harbor.agents.factory import AgentFactory
+
+        providers = {
+            "openai": {"models": {"student": {"limit": {"context": 131072}}}},
+            "osmosis-rollout": {"models": {"other": {"limit": {"context": 8192}}}},
+            "osmosis-rollout-1": {"options": {"baseURL": "https://other.example/v1"}},
+        }
+        backend = self.backend_for(
+            "opencode",
+            template_task,
+            model_name="openai/student",
+            native_agent_kwargs={"opencode_config": {"provider": providers}},
+        )
+        config = backend.build_agent_config(
+            template_task,
+            ContainerInput(
+                rollout_id="r1",
+                chat_completions_url="https://trainer/sessions/r1/v1",
+            ),
+        )
+        configured = config.kwargs["opencode_config"]["provider"]
+        assert config.model_name == "osmosis-rollout-2/student"
+        for name in ("osmosis-rollout", "osmosis-rollout-1"):
+            assert configured[name] == providers[name]
+        assert (
+            configured["osmosis-rollout-2"]["models"] == providers["openai"]["models"]
+        )
+        agent = AgentFactory.create_agent_from_config(config, tmp_path / "logs")
+        command = agent._build_register_config_command()
+        assert '"osmosis-rollout-2"' in command
+        assert "https://trainer/sessions/r1/v1" in command
+        assert "osmosis-rollout-2" not in providers
+        assert "openai" in providers
+
     def test_native_agent_kwargs_merge_into_native_config(self, template_task):
         backend = self.backend_for(
             "mini-swe-agent",

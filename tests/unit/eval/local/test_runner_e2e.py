@@ -608,7 +608,7 @@ async def test_stalled_result_polling_halts_and_rows_resume(
 
     polling_started = asyncio.Event()
 
-    async def stalled(self, admission):
+    async def stalled(self, admission, *, lease_deadline):
         polling_started.set()
         await asyncio.Event().wait()
 
@@ -650,7 +650,7 @@ async def test_a_4xx_admission_is_a_terminal_row_failure(
 async def test_a_4xx_result_poll_halts_and_rows_resume(
     harness: RunnerHarness, monkeypatch: pytest.MonkeyPatch, status_code: int
 ) -> None:
-    async def unreadable(self: Any, admission: Any) -> None:
+    async def unreadable(self: Any, admission: Any, *, lease_deadline: float) -> None:
         raise RolloutProtocolError(
             f"GET /rollout/{admission.rollout_id}/result returned {status_code}",
             status_code=status_code,
