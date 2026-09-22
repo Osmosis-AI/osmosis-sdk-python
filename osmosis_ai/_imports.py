@@ -14,7 +14,7 @@ LazyExports = Mapping[str, tuple[str, str]]
 # which subset it imports. tests/unit/test_public_api_imports.py asserts each
 # set matches the extra declared in pyproject.toml.
 EXTRA_MODULES: Final[Mapping[str, frozenset[str]]] = {
-    "server": frozenset({"click", "fastapi", "uvicorn"}),
+    "server": frozenset({"click", "fastapi", "opentelemetry", "uvicorn"}),
     "strands": frozenset({"aiohttp", "click", "litellm", "mcp", "orjson", "strands"}),
     "openai-agents": frozenset(
         {"agents", "aiohttp", "click", "litellm", "mcp", "orjson"}
@@ -32,7 +32,9 @@ EXTRA_MODULES: Final[Mapping[str, frozenset[str]]] = {
     ),
     "rubric": frozenset({"aiohttp", "click", "litellm", "orjson"}),
     "parquet": frozenset({"pyarrow"}),
-    "eval": frozenset({"click", "fastapi", "litellm", "pyarrow", "uvicorn"}),
+    "eval": frozenset(
+        {"click", "fastapi", "litellm", "opentelemetry", "pyarrow", "uvicorn"}
+    ),
 }
 
 

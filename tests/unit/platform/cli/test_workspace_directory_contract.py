@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import shlex
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 
 from osmosis_ai.cli.errors import CLIError
+from osmosis_ai.consts import PACKAGE_VERSION
 from osmosis_ai.platform.cli import workspace_directory_contract
 from osmosis_ai.platform.cli.workspace_directory_contract import (
     ensure_context_path,
@@ -347,8 +350,9 @@ def test_unsatisfied_requirements_reports_version_skew(tmp_path: Path) -> None:
     )
 
     assert len(unsatisfied) == 1
-    assert "osmosis-ai" in unsatisfied[0]
-    assert ">=999.0.0" in unsatisfied[0]
+    assert unsatisfied[0].install_target == "osmosis-ai>=999.0.0"
+    assert "osmosis-ai" in unsatisfied[0].problem
+    assert ">=999.0.0" in unsatisfied[0].problem
 
 
 def test_unsatisfied_requirements_reports_missing_distribution(
@@ -364,7 +368,8 @@ def test_unsatisfied_requirements_reports_missing_distribution(
     )
 
     assert len(unsatisfied) == 1
-    assert "not installed" in unsatisfied[0]
+    assert unsatisfied[0].install_target == "definitely-not-installed-xyz"
+    assert "not installed" in unsatisfied[0].problem
 
 
 def test_unsatisfied_requirements_reports_missing_extra_dependency(
@@ -403,7 +408,10 @@ def test_unsatisfied_requirements_reports_missing_extra_dependency(
     )
 
     assert unsatisfied == [
-        "osmosis-ai[strands] requires strands-agents, which is not installed"
+        workspace_directory_contract.UnsatisfiedRequirement(
+            install_target="osmosis-ai[strands]",
+            problem="osmosis-ai[strands] requires strands-agents, which is not installed",
+        )
     ]
 
 
@@ -598,8 +606,152 @@ def test_validate_rollout_backend_skips_and_warns_on_version_skew(
     )
 
     assert len(warnings) == 1
-    assert "rollouts/demo" in warnings[0]
-    assert "osmosis-ai" in warnings[0]
+    lines = warnings[0].splitlines()
+    assert lines[0] == "Local preflight skipped for rollouts/demo"
+    assert lines[1].startswith("  Reason:")
+    assert lines[2].startswith("    - osmosis-ai")
+    assert lines[-1] == (
+        f"  To enable local preflight: {sys.executable} -m pip install "
+        "'osmosis-ai>=999.0.0'"
+    )
+    assert "server validates" not in warnings[0]
+
+
+def test_validate_rollout_backend_install_hint_dedupes_and_strips_markers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project = _make_workspace_directory(tmp_path / "project")
+    _make_rollout(
+        project,
+        "demo",
+        dependencies=(
+            "\"osmosis-ai[server,strands]; python_version >= '3.10'\", "
+            '"definitely-not-installed-xyz"'
+        ),
+        entrypoint="",
+    )
+    real_version = workspace_directory_contract.installed_version
+
+    def fake_version(name: str) -> str:
+        if name in {"strands-agents", "fastapi", "definitely-not-installed-xyz"}:
+            raise workspace_directory_contract.PackageNotFoundError(name)
+        return real_version(name)
+
+    monkeypatch.setattr(workspace_directory_contract, "installed_version", fake_version)
+    monkeypatch.setattr(
+        workspace_directory_contract,
+        "installed_requirements",
+        lambda name: (
+            [
+                'strands-agents[litellm]>=1.29.0; extra == "strands"',
+                'fastapi>=0.100.0; extra == "server"',
+            ]
+            if name == "osmosis-ai"
+            else []
+        ),
+    )
+
+    warnings = workspace_directory_contract.validate_rollout_backend(
+        workspace_directory=project,
+        rollout="demo",
+        entrypoint="main.py",
+        command_label="eval submit",
+    )
+
+    lines = warnings[0].splitlines()
+    assert len([line for line in lines if line.startswith("    - ")]) == 3
+    assert lines[-1] == (
+        f"  To enable local preflight: {sys.executable} -m pip install "
+        "'osmosis-ai[server,strands]' definitely-not-installed-xyz"
+    )
+
+
+def test_install_command_quotes_shell_metacharacters(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(sys, "executable", "/venv/bin/python")
+    monkeypatch.setattr(
+        workspace_directory_contract, "detect_install_method", lambda: "pip"
+    )
+    target = "osmosis-ai[harbor] @ git+https://example.com/repo.git@$(whoami)"
+
+    command = workspace_directory_contract._install_command([target])
+
+    assert command == f"/venv/bin/python -m pip install {shlex.quote(target)}"
+    assert '"' not in command
+
+
+@pytest.mark.parametrize(
+    ("method", "targets", "expected"),
+    [
+        (
+            "pip",
+            ["osmosis-ai[server,strands]", "httpx>=0.27"],
+            "/venv/bin/python -m pip install 'osmosis-ai[server,strands]' 'httpx>=0.27'",
+        ),
+        (
+            "uv_tool",
+            ["osmosis-ai[server,strands]", "httpx>=0.27"],
+            "uv tool install 'osmosis-ai[server,strands]' --with 'httpx>=0.27'",
+        ),
+        (
+            "uv_tool",
+            ["httpx>=0.27"],
+            f"uv tool install {shlex.quote(f'osmosis-ai=={PACKAGE_VERSION}')} "
+            "--with 'httpx>=0.27'",
+        ),
+        (
+            "pipx",
+            ["osmosis-ai[server,strands]", "httpx>=0.27"],
+            "pipx install --force 'osmosis-ai[server,strands]' "
+            "&& pipx inject osmosis-ai 'httpx>=0.27'",
+        ),
+        (
+            "pipx",
+            ["httpx>=0.27"],
+            "pipx inject osmosis-ai 'httpx>=0.27'",
+        ),
+    ],
+)
+def test_install_command_targets_the_cli_environment(
+    monkeypatch: pytest.MonkeyPatch, method: str, targets: list[str], expected: str
+) -> None:
+    monkeypatch.setattr(sys, "executable", "/venv/bin/python")
+    monkeypatch.setattr(
+        workspace_directory_contract, "detect_install_method", lambda: method
+    )
+
+    assert workspace_directory_contract._install_command(targets) == expected
+
+
+def test_validate_rollout_backend_skips_and_warns_on_undeclared_dependency(
+    tmp_path: Path,
+) -> None:
+    project = _make_workspace_directory(tmp_path / "project")
+    _make_rollout(
+        project,
+        "demo",
+        dependencies=_SATISFIED,
+        entrypoint="import a_package_that_is_not_installed_xyz\n",
+    )
+
+    warnings = workspace_directory_contract.validate_rollout_backend(
+        workspace_directory=project,
+        rollout="demo",
+        entrypoint="main.py",
+        command_label="eval submit",
+    )
+
+    assert len(warnings) == 1
+    lines = warnings[0].splitlines()
+    assert lines[0] == "Local preflight skipped for rollouts/demo"
+    assert lines[1].startswith("  Reason:")
+    assert "rollouts/demo/main.py" in lines[1]
+    assert lines[2] == (
+        "    ModuleNotFoundError: No module named 'a_package_that_is_not_installed_xyz'"
+    )
+    assert lines[-1].startswith("  To enable local preflight:")
+    assert "server validates" not in warnings[0]
 
 
 def test_validate_rollout_backend_still_fails_when_environment_matches(

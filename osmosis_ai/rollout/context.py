@@ -1,6 +1,8 @@
 import asyncio
+import logging
 import os
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -11,6 +13,8 @@ from osmosis_ai.rollout.types import (
     RolloutSample,
     RolloutStatus,
 )
+
+logger: logging.Logger = logging.getLogger(__name__)
 
 
 class SampleSource(ABC):
@@ -42,6 +46,7 @@ ROLLOUT_ID_ENV = "OSMOSIS_ROLLOUT_ID"
 class RolloutProgress:
     status: RolloutStatus = RolloutStatus.QUEUED
     changed: asyncio.Condition = field(default_factory=asyncio.Condition)
+    on_status: Callable[[RolloutStatus], None] | None = field(default=None, repr=False)
 
     async def set_status(self, status: RolloutStatus) -> None:
         async with self.changed:
@@ -53,6 +58,11 @@ class RolloutProgress:
                 return
             self.status = status
             self.changed.notify_all()
+        if self.on_status is not None:
+            try:
+                self.on_status(status)
+            except Exception:
+                logger.warning("Rollout status observer failed", exc_info=False)
 
     async def wait_for_status_change(self) -> RolloutStatus:
         async with self.changed:
