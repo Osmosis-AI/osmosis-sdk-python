@@ -687,6 +687,67 @@ class TestNativeAgents:
         config.kwargs["custom"]["value"] = 2
         assert backend.native_agent_kwargs["custom"]["value"] == 1
 
+    @pytest.mark.parametrize(
+        "model",
+        [
+            42,
+            True,
+            ["openai/student"],
+            {"model": "student"},
+            "student",
+            "/student",
+            "openai/",
+        ],
+    )
+    def test_opencode_rejects_invalid_model_metadata(self, template_task, model):
+        backend = self.backend_for("opencode", template_task)
+        with pytest.raises(ValueError, match="must have the form provider/model"):
+            backend.build_agent_config(
+                template_task,
+                ContainerInput(
+                    rollout_id="r1",
+                    chat_completions_url="https://trainer/sessions/r1/v1",
+                    metadata={"harbor_model": model},
+                ),
+            )
+
+    def test_opencode_preserves_existing_private_provider_configuration(
+        self, template_task, tmp_path
+    ):
+        from harbor.agents.factory import AgentFactory
+
+        providers = {
+            "openai": {"models": {"student": {"limit": {"context": 131072}}}},
+            "osmosis-rollout": {"models": {"other": {"limit": {"context": 8192}}}},
+            "osmosis-rollout-1": {"options": {"baseURL": "https://other.example/v1"}},
+        }
+        backend = self.backend_for(
+            "opencode",
+            template_task,
+            model_name="openai/student",
+            native_agent_kwargs={"opencode_config": {"provider": providers}},
+        )
+        config = backend.build_agent_config(
+            template_task,
+            ContainerInput(
+                rollout_id="r1",
+                chat_completions_url="https://trainer/sessions/r1/v1",
+            ),
+        )
+        configured = config.kwargs["opencode_config"]["provider"]
+        assert config.model_name == "osmosis-rollout-2/student"
+        for name in ("osmosis-rollout", "osmosis-rollout-1"):
+            assert configured[name] == providers[name]
+        assert (
+            configured["osmosis-rollout-2"]["models"] == providers["openai"]["models"]
+        )
+        agent = AgentFactory.create_agent_from_config(config, tmp_path / "logs")
+        command = agent._build_register_config_command()
+        assert '"osmosis-rollout-2"' in command
+        assert "https://trainer/sessions/r1/v1" in command
+        assert "osmosis-rollout-2" not in providers
+        assert "openai" in providers
+
     def test_native_agent_kwargs_merge_into_native_config(self, template_task):
         backend = self.backend_for(
             "mini-swe-agent",

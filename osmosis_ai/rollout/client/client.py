@@ -4,6 +4,7 @@ import asyncio
 import logging
 import math
 from collections.abc import Generator
+from time import monotonic
 from typing import Any
 
 import httpx
@@ -52,6 +53,8 @@ class RolloutHandle:
         self,
         client: RolloutClient,
         admission: RolloutInitResponse,
+        *,
+        lease_deadline: float | None = None,
     ) -> None:
         self.rollout_id: str = admission.rollout_id
         self.status: RolloutStatus = admission.status
@@ -59,7 +62,13 @@ class RolloutHandle:
         self.status_changed: asyncio.Condition = asyncio.Condition()
         self.polling_finished: bool = False
         self.result_task: asyncio.Task[RolloutResultResponse] = asyncio.create_task(
-            self._wait_for_completion(client, admission)
+            self._wait_for_completion(
+                client,
+                admission,
+                lease_deadline
+                if lease_deadline is not None
+                else monotonic() + admission.polling_lease_timeout_sec,
+            )
         )
 
     def __await__(self) -> Generator[Any, None, RolloutResultResponse]:
@@ -101,10 +110,13 @@ class RolloutHandle:
         self,
         client: RolloutClient,
         admission: RolloutInitResponse,
+        lease_deadline: float,
     ) -> RolloutResultResponse:
         try:
             while True:
-                result = await client._get_result(admission)
+                result, lease_deadline = await client._get_result(
+                    admission, lease_deadline=lease_deadline
+                )
                 async with self.status_changed:
                     self.status = result.status
                     self.latest_result = result
@@ -269,6 +281,7 @@ class RolloutClient:
             async with deadline:
                 while True:
                     response_pending = True
+                    request_started = monotonic()
                     response = await self.http_client.post(
                         f"{self.url}/rollout",
                         json=request.model_dump(mode="json"),
@@ -276,7 +289,12 @@ class RolloutClient:
                     response_pending = False
                     if response.status_code != 429:
                         admission = _admission(response, rollout_id)
-                        return RolloutHandle(self, admission)
+                        return RolloutHandle(
+                            self,
+                            admission,
+                            lease_deadline=request_started
+                            + admission.polling_lease_timeout_sec,
+                        )
                     await asyncio.sleep(_retry_after_seconds(response))
         except TimeoutError as exc:
             if not deadline.expired():
@@ -295,24 +313,39 @@ class RolloutClient:
             raise RolloutAdmissionTimeoutError(message) from exc
 
     async def _get_result(
-        self, admission: RolloutInitResponse
-    ) -> RolloutResultResponse:
+        self, admission: RolloutInitResponse, *, lease_deadline: float
+    ) -> tuple[RolloutResultResponse, float]:
         timeout = admission.result_wait_timeout_sec + _RESULT_READ_GRACE_SEC
         delays = iter(_RESULT_RETRY_DELAYS_SEC)
+        last_error: httpx.TransportError | None = None
         while True:
+            # A successful response confirms renewal when its request reached
+            # the server, not when the long-poll response arrived. A failed
+            # request may never have reached it, so cannot extend this budget.
+            retry_deadline = asyncio.timeout(
+                max(0.0, lease_deadline - monotonic())
+                if last_error is not None
+                else None
+            )
             try:
-                response = await self.http_client.get(
-                    f"{self.url}/rollout/{admission.rollout_id}/result",
-                    headers={POLLING_LEASE_HEADER: admission.polling_lease_token},
-                    timeout=timeout,
-                )
+                async with retry_deadline:
+                    request_started = monotonic()
+                    response = await self.http_client.get(
+                        f"{self.url}/rollout/{admission.rollout_id}/result",
+                        headers={POLLING_LEASE_HEADER: admission.polling_lease_token},
+                        timeout=timeout,
+                    )
+            except TimeoutError as exc:
+                if retry_deadline.expired() and last_error is not None:
+                    raise last_error from exc
+                raise
             except (
                 httpx.RemoteProtocolError,
                 httpx.NetworkError,
                 httpx.ReadTimeout,
             ) as exc:
                 delay = next(delays, None)
-                if delay is None:
+                if delay is None or monotonic() + delay + timeout >= lease_deadline:
                     raise
                 logger.warning(
                     "Retrying result read for rollout %s after %s in %.1fs",
@@ -321,8 +354,14 @@ class RolloutClient:
                     delay,
                 )
                 await asyncio.sleep(delay)
+                if monotonic() + timeout >= lease_deadline:
+                    raise
+                last_error = exc
             else:
-                return _result(response, admission.rollout_id)
+                return (
+                    _result(response, admission.rollout_id),
+                    request_started + admission.polling_lease_timeout_sec,
+                )
 
     async def cancel_rollout(self, rollout_id: str) -> CancelRolloutsResponse:
         request = CancelRolloutsRequest(ids=[rollout_id])

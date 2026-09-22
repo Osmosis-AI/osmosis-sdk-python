@@ -76,6 +76,8 @@ def native_agent_config(
             name=name, model_name=model_name, env=dict(binding.env), kwargs=kwargs
         )
     if binding.wiring == "opencode":
+        if not isinstance(model_name, str):
+            raise ValueError("OpenCode model_name must have the form provider/model")
         provider, separator, model_id = model_name.partition("/")
         if not separator or not provider or not model_id:
             raise ValueError("OpenCode model_name must have the form provider/model")
@@ -86,6 +88,10 @@ def native_agent_config(
         session_provider = "osmosis-rollout"
         providers = config.setdefault("provider", {})
         provider_config = providers.pop(provider, {})
+        suffix = 0
+        while session_provider in providers:
+            suffix += 1
+            session_provider = f"osmosis-rollout-{suffix}"
         providers[session_provider] = provider_config
         provider_config["npm"] = "@ai-sdk/openai-compatible"
         provider_config.setdefault("options", {}).update(

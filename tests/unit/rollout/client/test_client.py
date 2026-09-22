@@ -144,6 +144,111 @@ async def test_exhausted_result_retries_wake_all_lifecycle_waiters(
 
 
 @pytest.mark.parametrize(
+    "admission_delay,progress_delay,error_delay,backoff_delay,expected_polls",
+    [
+        (0.0, None, 40.0, None, 2),
+        (80.0, None, 40.0, None, 1),
+        (0.0, 35.0, 39.0, None, 3),
+        (0.0, None, 0.0, 120.0, 1),
+    ],
+)
+async def test_result_retries_respect_last_confirmed_lease(
+    monkeypatch: pytest.MonkeyPatch,
+    retry_sleep: AsyncMock,
+    admission_delay: float,
+    progress_delay: float | None,
+    error_delay: float,
+    backoff_delay: float | None,
+    expected_polls: int,
+) -> None:
+    now = 0.0
+    polls = 0
+    errors: list[httpx.ReadTimeout] = []
+    monkeypatch.setattr("osmosis_ai.rollout.client.client.monotonic", lambda: now)
+
+    def sleep(delay: float) -> None:
+        nonlocal now
+        now += delay if backoff_delay is None else backoff_delay
+
+    retry_sleep.side_effect = sleep
+
+    def handler(http_request: httpx.Request) -> httpx.Response:
+        nonlocal now, polls
+        if http_request.method == "POST":
+            now += admission_delay
+            return httpx.Response(202, json=admission())
+        polls += 1
+        if polls == 1 and progress_delay is not None:
+            now += progress_delay
+            return httpx.Response(
+                200, json={"rollout_id": ROLLOUT_ID, "status": "running"}
+            )
+        now += error_delay
+        error = httpx.ReadTimeout("lost result response", request=http_request)
+        errors.append(error)
+        raise error
+
+    rollout_client = client(handler)
+    try:
+        with pytest.raises(httpx.ReadTimeout) as raised:
+            await completed(rollout_client)
+        assert raised.value is errors[-1]
+        assert polls == expected_polls
+    finally:
+        await rollout_client.http_client.aclose()
+
+
+async def test_result_retry_has_a_wall_clock_lease_deadline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("osmosis_ai.rollout.client.client._RESULT_READ_GRACE_SEC", 0.01)
+    monkeypatch.setattr(
+        "osmosis_ai.rollout.client.client._RESULT_RETRY_DELAYS_SEC", (0.001,)
+    )
+    polls = 0
+    cancelled = asyncio.Event()
+    error = httpx.ReadTimeout("lost result response")
+
+    async def handler(http_request: httpx.Request) -> httpx.Response:
+        nonlocal polls
+        if http_request.method == "POST":
+            return httpx.Response(
+                202,
+                json=admission()
+                | {
+                    "result_wait_timeout_sec": 0.01,
+                    "polling_lease_timeout_sec": 0.2,
+                },
+            )
+        polls += 1
+        if polls == 1:
+            raise error
+        try:
+            # MockTransport does not enforce HTTPX's per-operation timeouts.
+            await asyncio.Event().wait()
+        finally:
+            cancelled.set()
+        raise AssertionError("unreachable")
+
+    rollout_client = client(handler)
+    try:
+        rollout = await rollout_client.run_rollout_async(**request())
+        async with asyncio.timeout(1.0):
+            errors = await asyncio.gather(
+                rollout.wait_for_running(),
+                rollout.wait_for_grading(),
+                rollout.wait_for_completion(),
+                return_exceptions=True,
+            )
+        assert polls == 2
+        assert cancelled.is_set()
+        assert all(result is error for result in errors)
+        assert rollout.done() and rollout.polling_finished
+    finally:
+        await rollout_client.http_client.aclose()
+
+
+@pytest.mark.parametrize(
     "failure",
     [
         httpx.ConnectTimeout,
