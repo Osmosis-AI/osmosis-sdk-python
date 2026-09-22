@@ -646,7 +646,15 @@ class TestNativeAgents:
             for name in ("first", "second")
         ]
         first = AgentFactory.create_agent_from_config(configs[0], tmp_path / "logs")
+        second = AgentFactory.create_agent_from_config(
+            configs[1], tmp_path / "logs-second"
+        )
         command = first._build_register_config_command()
+        second_command = second._build_register_config_command()
+        assert "https://trainer/sessions/second/v1" in second_command
+        assert "https://trainer/sessions/first/v1" not in second_command
+        assert second._extra_env["OPENAI_API_KEY"] == "key-second"
+        assert "key-second" not in second_command
         assert "https://trainer/sessions/first/v1" in command
         assert "@ai-sdk/openai-compatible" in command
         assert configs[0].model_name == "osmosis-rollout/student"
