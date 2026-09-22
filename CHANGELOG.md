@@ -2,6 +2,24 @@
 
 This file records changes to `osmosis-ai`. For earlier versions, see [GitHub Releases](https://github.com/Osmosis-AI/osmosis-sdk-python/releases).
 
+## 0.3.4rc2 - 2026-09-21
+
+### Added
+
+- `osmosis eval retry <name|id>` retries failed and skipped hosted samples while preserving graded results; local retries can replace uploaded results with `eval upload --replace` or `eval run --retry-failed --upload` ([#368](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/368)).
+- `osmosis model info` and `OsmosisClient.get_base_model()` accept base model names or Hugging Face paths and expose parameter counts, context windows, and available inference pricing ([#370](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/370)).
+- `osmosis dev server up` accepts `--backend ecs|gke` and `--sandbox-environment daytona|opensandbox` to select deployment placement and managed sandbox credentials independently ([#371](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/371)).
+- `HarborBackend(agent="opencode")` runs native OpenCode through the rollout chat-completions endpoint with compaction and pruning disabled; native agent options, including version pins, also apply during prewarm ([#374](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/374)).
+- Rollout servers can export ownership and lifecycle logs over OTLP/HTTP by setting `OSMOSIS_ROLLOUT_OTLP_ENDPOINT`, with server and optional training-run attribution ([#375](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/375)).
+
+### Fixed
+
+- `RolloutClient` now retries transient result-polling read timeouts up to twice and bounds all result retries by the last confirmed polling lease deadline ([#374](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/374)).
+- Identifiable sandbox provider failures now report `HTTP_ERROR`; task-level API errors and generic Harbor API errors without structured status remain `AGENT_ERROR` ([#373](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/373)).
+- CLI failures now show actionable platform and login explanations with consistent HTTP error categories, and skipped rollout preflight warnings include installation guidance for the CLI's environment ([#369](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/369), [#376](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/376)).
+
+[Full changelog](https://github.com/Osmosis-AI/osmosis-sdk-python/compare/v0.3.4rc1...v0.3.4rc2)
+
 ## 0.3.4rc1 - 2026-09-15
 
 ### Fixed
