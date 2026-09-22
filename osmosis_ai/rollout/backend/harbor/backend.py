@@ -396,7 +396,9 @@ class HarborBackend(ExecutionBackend):
     ) -> HarborAgentConfig:
         if self.native is not None and isinstance(self.agent, str):
             metadata = container_input.metadata or {}
-            model = metadata.get("harbor_model") or self.model_name
+            model = metadata.get("harbor_model", self.model_name)
+            if self.native.wiring != "opencode":
+                model = model or self.model_name
             url = container_input.chat_completions_url
             if self.native.wiring != "none" and not url:
                 # An empty api_base routes litellm (and the credential) to the

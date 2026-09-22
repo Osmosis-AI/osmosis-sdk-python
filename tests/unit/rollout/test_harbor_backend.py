@@ -690,6 +690,13 @@ class TestNativeAgents:
     @pytest.mark.parametrize(
         "model",
         [
+            None,
+            False,
+            0,
+            0.0,
+            "",
+            [],
+            {},
             42,
             True,
             ["openai/student"],
