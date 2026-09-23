@@ -10,11 +10,35 @@ from osmosis_ai._imports import (
 
 if TYPE_CHECKING:
     from osmosis_ai.rollout.backend.harbor.backend import HarborBackend
+    from osmosis_ai.rollout.backend.harbor.images import (
+        BuildAndPublishResult,
+        BuildSystem,
+        PublishedEnvironment,
+        PublishedImage,
+        build_and_publish,
+    )
     from osmosis_ai.rollout.backend.harbor.tasks import TaskMode
 
 _EXPORTS: dict[str, tuple[str, str]] = {
     "HarborBackend": ("osmosis_ai.rollout.backend.harbor.backend", "HarborBackend"),
     "TaskMode": ("osmosis_ai.rollout.backend.harbor.tasks", "TaskMode"),
+    "BuildAndPublishResult": (
+        "osmosis_ai.rollout.backend.harbor.images",
+        "BuildAndPublishResult",
+    ),
+    "BuildSystem": ("osmosis_ai.rollout.backend.harbor.images", "BuildSystem"),
+    "PublishedEnvironment": (
+        "osmosis_ai.rollout.backend.harbor.images",
+        "PublishedEnvironment",
+    ),
+    "PublishedImage": (
+        "osmosis_ai.rollout.backend.harbor.images",
+        "PublishedImage",
+    ),
+    "build_and_publish": (
+        "osmosis_ai.rollout.backend.harbor.images",
+        "build_and_publish",
+    ),
 }
 
 
@@ -39,6 +63,11 @@ def __dir__() -> list[str]:
 
 
 __all__ = [
+    "BuildAndPublishResult",
+    "BuildSystem",
     "HarborBackend",
+    "PublishedEnvironment",
+    "PublishedImage",
     "TaskMode",
+    "build_and_publish",
 ]

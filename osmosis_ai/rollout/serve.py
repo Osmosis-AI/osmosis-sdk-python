@@ -8,7 +8,6 @@ import tomllib
 from asyncio import run as run_async
 from collections.abc import Iterator
 from contextlib import contextmanager
-from hashlib import sha256
 from pathlib import Path
 from typing import Annotated, Any, ClassVar, Literal
 
@@ -117,74 +116,20 @@ def _required_directory(path: Path, *, label: str) -> Path:
 
 def _dataset_config_for_source(source: str) -> Any:
     """Translate the CLI's compact dataset source into Harbor configuration."""
-    from harbor.models.job.config import DatasetConfig
+    from osmosis_ai.rollout.backend.harbor.dataset import dataset_config_for_source
 
-    candidate = Path(source).expanduser()
-    if candidate.is_dir():
-        return DatasetConfig(path=candidate.resolve())
-    if source.startswith((".", "/", "~")):
-        raise CLIError(
-            f"Harbor dataset directory does not exist: {candidate.resolve()}",
-            code="NOT_FOUND",
-        )
-    if "://" in source or source.startswith("git@"):
-        return DatasetConfig(repo=source)
-
-    name, separator, ref = source.rpartition("@")
-    if not separator:
-        name, ref = source, None
-    if not name:
-        raise CLIError("--harbor-dataset must be non-empty.", code="VALIDATION")
-    if "/" in name:
-        return DatasetConfig(name=name, ref=ref)
-    return DatasetConfig(name=name, version=ref)
+    return dataset_config_for_source(source)
 
 
 async def _materialize_harbor_dataset(source: str) -> Path:
     """Resolve a local or remote Harbor dataset to a local task directory."""
-    try:
-        from harbor.tasks.client import TaskClient
-        from platformdirs import user_cache_path
-    except ModuleNotFoundError as exc:
-        raise CLIError(
-            "Serving with Harbor requires the Harbor dependencies. Install "
-            "`osmosis-ai[server,harbor]`.",
-            code="VALIDATION",
-        ) from exc
+    from osmosis_ai.rollout.backend.harbor.dataset import resolve_harbor_dataset
 
-    try:
-        dataset = _dataset_config_for_source(source)
-        task_configs = await dataset.get_task_configs()
-        if not task_configs:
-            raise ValueError("dataset contains no valid tasks")
-        if dataset.is_local():
-            assert dataset.path is not None
-            return dataset.path.expanduser().resolve()
-
-        identity = "\n".join(
-            sorted(config.model_dump_json() for config in task_configs)
-        )
-        dataset_dir = (
-            user_cache_path("osmosis")
-            / "harbor-datasets"
-            / sha256(identity.encode()).hexdigest()
-        )
-        dataset_dir.mkdir(parents=True, exist_ok=True)
-        result = await TaskClient().download_tasks(
-            task_ids=[config.get_task_id() for config in task_configs],
-            output_dir=dataset_dir,
-            export=True,
-        )
-        if not result.paths:
-            raise ValueError("dataset contains no downloadable tasks")
-        return dataset_dir
-    except CLIError:
-        raise
-    except Exception as exc:
-        raise CLIError(
-            f"Could not resolve Harbor dataset {source!r}: {exc}",
-            code="VALIDATION",
-        ) from exc
+    resolved = await resolve_harbor_dataset(
+        source,
+        config_factory=_dataset_config_for_source,
+    )
+    return resolved.path
 
 
 def _server_port(port: int | None) -> int:
