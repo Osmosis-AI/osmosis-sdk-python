@@ -2,6 +2,14 @@
 
 This file records changes to `osmosis-ai`. For earlier versions, see [GitHub Releases](https://github.com/Osmosis-AI/osmosis-sdk-python/releases).
 
+## 0.3.4rc3 - 2026-09-23
+
+### Added
+
+- `osmosis images build --repo URL` builds a connected job repository through Monolith and downloads a verified task bundle; `osmosis images info` reports progress. Builds resume across interrupted requests and preserve per-task agent/verifier images. Python client methods expose submission, status, artifacts and short-lived pull credentials ([#378](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/378)).
+
+[Full changelog](https://github.com/Osmosis-AI/osmosis-sdk-python/compare/v0.3.4rc2...v0.3.4rc3)
+
 ## 0.3.4rc2 - 2026-09-21
 
 ### Added
