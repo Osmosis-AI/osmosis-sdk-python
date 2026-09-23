@@ -365,3 +365,39 @@ def test_dev_source_up_does_not_require_local_gateway_code(tmp_path, monkeypatch
         "task_source"
     ] == asdict(SOURCE)
     assert not list(tmp_path.iterdir())
+
+
+def test_gateway_readiness_preserves_source_and_verifier_healthcheck(tmp_path):
+    task = make_task(tmp_path / "tasks/add", separate=True)
+    path = task / "task.toml"
+    path.write_text(
+        path.read_text()
+        + '\n[environment.healthcheck]\ncommand = "test -f /task-ready"\ntimeout_sec = 12\n'
+    )
+    before = path.read_bytes()
+    backend = SourceHarborBackend(
+        tasks_dir=tmp_path / "tasks",
+        task_mode="dataset",
+        agent="opencode",
+        orchestrator=TrialQueue(n_concurrent=1),
+        image_bindings={"add": {"environment": IMAGE, "verifier.environment": IMAGE}},
+        environment_healthcheck={
+            "command": "test -f /route-ready",
+            "timeout_sec": 5,
+            "retries": 30,
+        },
+    )
+    backend.rollouts_dir = tmp_path / "rollouts"
+    trial = backend.prewarm_trial_config(HarborTask(task))
+    raw = tomllib.loads((trial.task.path / "task.toml").read_text())
+    assert (
+        raw["environment"]["healthcheck"]["command"]
+        == "test -f /route-ready && (test -f /task-ready)"
+    )
+    assert raw["environment"]["healthcheck"]["timeout_sec"] == 17
+    assert raw["environment"]["healthcheck"]["retries"] == 30
+    assert (
+        raw["verifier"]["environment"]["healthcheck"]["command"]
+        == "test -f /task-ready"
+    )
+    assert path.read_bytes() == before

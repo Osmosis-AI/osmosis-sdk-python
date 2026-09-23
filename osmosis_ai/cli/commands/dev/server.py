@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import NoReturn
 
 import typer
@@ -31,6 +32,9 @@ def up(
     ref: str | None = typer.Option(
         None, "--ref", help="Full commit SHA from images build."
     ),
+    config: Path | None = typer.Option(
+        None, "--config", help="JSON native Harbor gateway configuration for --url."
+    ),
     no_ttl: bool = typer.Option(
         False, "--no-ttl", help="Disable the 24h auto-teardown."
     ),
@@ -50,9 +54,9 @@ def up(
     ),
 ) -> CommandResult:
     """Provision a remote rollout server for the current rollout folder."""
-    if url is None and (ref is not None or path != "tasks"):
+    if url is None and (ref is not None or path != "tasks" or config is not None):
         raise CLIError(
-            "Source --path and --ref options require --url", code="VALIDATION"
+            "Source --path, --ref and --config options require --url", code="VALIDATION"
         )
     from osmosis_ai.platform.cli.dev_server import up as _up
 
@@ -62,6 +66,7 @@ def up(
         sandbox_environment=sandbox_environment,
         **({"backend": backend} if backend is not None else {}),
         **({"url": url, "path": path, "ref": ref} if url is not None else {}),
+        config=config,
     )
 
 

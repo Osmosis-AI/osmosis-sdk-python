@@ -1183,6 +1183,7 @@ class OsmosisClient:
         sandbox_environment: DevServerSandboxEnvironment | None = None,
         backend: DevServerBackend | None = None,
         task_source: dict[str, str] | None = None,
+        harbor_config: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         return platform_request(
             "/api/cli/dev-rollout-server",
@@ -1195,6 +1196,11 @@ class OsmosisClient:
                 "entrypoint": entrypoint,
                 "ttl_hours": ttl_hours,
                 **({"task_source": task_source} if task_source is not None else {}),
+                **(
+                    {"harbor_config": harbor_config}
+                    if harbor_config is not None
+                    else {}
+                ),
                 **(
                     {"sandbox_environment": sandbox_environment.value}
                     if sandbox_environment is not None

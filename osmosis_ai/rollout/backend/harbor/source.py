@@ -9,6 +9,7 @@ import json
 import os
 import re
 import tempfile
+import tomllib
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +23,7 @@ from osmosis_ai.harbor_images import (
     task_identities,
 )
 from osmosis_ai.rollout.backend.harbor.backend import HarborBackend
+from osmosis_ai.rollout.types.harbor import HarborGatewayConfig
 
 
 class RegistryResolver:
@@ -96,9 +98,22 @@ class RegistryResolver:
 class SourceHarborBackend(HarborBackend):
     """A pinned source has one immutable image binding per environment."""
 
-    def __init__(self, *, image_bindings: dict[str, dict[str, str]], **kwargs: Any):
+    def __init__(
+        self,
+        *,
+        image_bindings: dict[str, dict[str, str]],
+        environment_healthcheck: dict[str, Any] | None = None,
+        **kwargs: Any,
+    ):
+        from harbor.models.task.config import HealthcheckConfig
+
         super().__init__(**kwargs)
         self.image_bindings = image_bindings
+        self.environment_healthcheck = (
+            HealthcheckConfig.model_validate(environment_healthcheck)
+            if environment_healthcheck is not None
+            else None
+        )
         if self.sdk_requirements:
             raise ValueError(
                 "Source images cannot change their build context during rollout"
@@ -113,6 +128,28 @@ class SourceHarborBackend(HarborBackend):
             raise ValueError("Task is outside this gateway's pinned source")
         directory = super().materialize_task(task, rollout_id, container_input)
         bind_task_images(directory, self.image_bindings[name])
+        if self.environment_healthcheck is not None:
+            import toml
+
+            path = directory / "task.toml"
+            raw = tomllib.loads(path.read_text())
+            required = self.environment_healthcheck.model_dump()
+            original = raw["environment"].get("healthcheck")
+            if original:
+                from harbor.models.task.config import HealthcheckConfig
+
+                original = HealthcheckConfig.model_validate(original).model_dump()
+                required["command"] += " && (" + original["command"] + ")"
+                required["timeout_sec"] += original["timeout_sec"]
+                for key in (
+                    "interval_sec",
+                    "start_period_sec",
+                    "start_interval_sec",
+                    "retries",
+                ):
+                    required[key] = max(required[key], original[key])
+            raw["environment"]["healthcheck"] = required
+            path.write_text(toml.dumps(raw))
         return directory
 
 
@@ -124,6 +161,9 @@ def main() -> None:
 
     from osmosis_ai.rollout.server import create_rollout_server
 
+    config = HarborGatewayConfig.model_validate_json(
+        os.environ.pop("_OSMOSIS_HARBOR_CONFIG", "{}")
+    )
     source = TaskSource(**json.loads(os.environ["_OSMOSIS_HARBOR_TASK_SOURCE"]))
     published_repository = os.environ["_OSMOSIS_HARBOR_REGISTRY"]
     registry_root = published_repository.rsplit("/", 1)[0]
@@ -150,22 +190,21 @@ def main() -> None:
         resolver.password = None
         backend = SourceHarborBackend(
             image_bindings=bindings,
-            orchestrator=TrialQueue(
-                n_concurrent=int(os.environ.get("_OSMOSIS_HARBOR_CONCURRENCY", "4"))
-            ),
+            orchestrator=TrialQueue(n_concurrent=config.concurrency),
             tasks_dir=tasks_dir,
             task_mode="dataset",
-            agent=os.environ.get("_OSMOSIS_HARBOR_AGENT", "opencode"),
-            native_agent_kwargs=json.loads(
-                os.environ.get("_OSMOSIS_HARBOR_AGENT_KWARGS", "{}")
-            ),
+            agent=config.agent,
+            native_agent_kwargs=config.native_agent_kwargs,
             environment_config=EnvironmentConfig(
                 type=EnvironmentType.OPENSANDBOX,
-                kwargs=json.loads(
-                    os.environ.get("_OSMOSIS_HARBOR_ENVIRONMENT_KWARGS", "{}")
-                ),
+                kwargs=config.environment_kwargs,
             ),
-            cleanup_successful_trials=True,
+            environment_healthcheck=(
+                config.environment_healthcheck.model_dump()
+                if config.environment_healthcheck is not None
+                else None
+            ),
+            cleanup_successful_trials=config.cleanup_successful_trials,
         )
         representatives = list(
             {bindings[name]["environment"]: name for name in names}.values()

@@ -71,6 +71,29 @@ cached immutable digests and GKE's image-pull identity. Missing images or failed
 prewarm prevent readiness. This mode requires the matching Monolith release
 and source-repository IAM configuration.
 
+Use `dev server up --config gateway.json` to configure the managed Harbor agent
+without adding Python code or changing the task source. For example:
+
+```json
+{
+  "agent": "opencode",
+  "concurrency": 4,
+  "native_agent_kwargs": {"version": "1.18.27"},
+  "environment_kwargs": {"use_server_proxy": true},
+  "cleanup_successful_trials": false
+}
+```
+
+`native_agent_kwargs` and `environment_kwargs` are passed to Harbor's native
+agent and OpenSandbox configuration. Optional `environment_healthcheck` uses
+Harbor's `command`, timing and retry fields; it adds readiness requirements to
+the agent environment in temporary trial copies, preserving the original task
+and separate verifier healthchecks. Configuration defaults and validation live
+in `HarborGatewayConfig`. Keep configuration containing private routing or
+credentials outside Git. Monolith stores it in the encrypted gateway secret
+bundle. Configuration requires the source `--url` path; custom-code gateways
+continue to configure their own backend.
+
 ## Legacy bundle builds
 
 `--repo` retains the prepared task bundle workflow below. `--tasks-dir` remains

@@ -36,6 +36,7 @@ def up(
     url: str | None = None,
     path: str = "tasks",
     ref: str | None = None,
+    config: Path | None = None,
 ) -> OperationResult:
     if url is not None:
         return up_source(
@@ -45,10 +46,11 @@ def up(
             ttl_hours=ttl_hours,
             backend=backend,
             sandbox_environment=sandbox_environment,
+            config=config,
         )
-    if ref is not None or path != "tasks":
+    if ref is not None or path != "tasks" or config is not None:
         raise CLIError(
-            "Source --path and --ref options require --url", code="VALIDATION"
+            "Source --path, --ref and --config options require --url", code="VALIDATION"
         )
     cwd = Path.cwd()
     if not (cwd / "main.py").is_file():
@@ -143,17 +145,30 @@ def up_source(
     ttl_hours: int | None,
     backend: DevServerBackend | None,
     sandbox_environment: DevServerSandboxEnvironment | None,
+    config: Path | None = None,
 ) -> OperationResult:
     from dataclasses import asdict
 
     from osmosis_ai.harbor_images import TaskSource
     from osmosis_ai.platform.cli.workspace_repo import normalize_git_identity
+    from osmosis_ai.rollout.types.harbor import HarborGatewayConfig
 
     identity = normalize_git_identity(url).identity
     try:
         source = TaskSource(f"https://github.com/{identity}", path, ref or "")
     except ValueError as error:
         raise CLIError(str(error), code="VALIDATION") from None
+    harbor_config = None
+    if config is not None:
+        try:
+            harbor_config = HarborGatewayConfig.model_validate_json(
+                config.read_text()
+            ).model_dump(mode="json")
+        except (OSError, ValueError):
+            raise CLIError(
+                "Cannot read a valid Harbor gateway configuration; check --config",
+                code="VALIDATION",
+            ) from None
     backend = backend or DevServerBackend.GKE
     sandbox_environment = sandbox_environment or DevServerSandboxEnvironment.OPENSANDBOX
     if (
@@ -175,11 +190,13 @@ def up_source(
         backend=backend,
         sandbox_environment=sandbox_environment,
         task_source=asdict(source),
+        harbor_config=harbor_config,
     )
     if (
         result.get("task_source") != asdict(source)
         or result.get("backend") != backend.value
         or result.get("sandbox_environment") != sandbox_environment.value
+        or (harbor_config is not None and result.get("harbor_config") != harbor_config)
     ):
         try:
             client.teardown_dev_rollout_server(result["id"], git_identity=identity)
