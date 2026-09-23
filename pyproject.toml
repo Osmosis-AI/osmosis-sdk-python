@@ -27,6 +27,9 @@ dependencies = [
     # owns the dependency; lower bounds still allow patched releases to float.
     "python-dotenv>=1.2.2,<2.0.0",
     "httpx>=0.25.0,<1.0.0",
+    # Transitive via httpx (async TLS). >=4.14.2 is the security floor for
+    # CVE-2026-63374 (TLSStream IDNA host name spoofing) and CVE-2026-64847.
+    "anyio>=4.14.2",
     "pydantic>=2.0.0,<3.0.0",
     # Secure credential storage (system keychain)
     "keyring>=25.0.0",
