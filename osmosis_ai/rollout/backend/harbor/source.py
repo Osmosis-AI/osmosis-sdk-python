@@ -8,7 +8,6 @@ import hashlib
 import json
 import os
 import re
-import subprocess
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -18,6 +17,7 @@ import httpx
 from osmosis_ai.harbor_images import (
     TaskSource,
     bind_task_images,
+    fetch_source,
     materialize_source_tasks,
     task_identities,
 )
@@ -114,15 +114,6 @@ def main() -> None:
     from osmosis_ai.rollout.server import create_rollout_server
 
     source = TaskSource(**json.loads(os.environ["_OSMOSIS_HARBOR_TASK_SOURCE"]))
-    # The managed entrypoint checks out this immutable revision before starting
-    # the SDK. Source repositories do not supply executable gateway code.
-    repository = Path("/workspace")
-    revision = subprocess.check_output(
-        ["git", "rev-parse", "HEAD"], cwd=repository, text=True
-    ).strip()
-    if revision != source.revision:
-        raise ValueError("Checked-out source differs from the configured commit")
-    os.environ.pop("_OSMOSIS_GITHUB_TOKEN", None)
     published_repository = os.environ["_OSMOSIS_HARBOR_REGISTRY"]
     registry_root = published_repository.rsplit("/", 1)[0]
     registry = f"{registry_root}/{source.repository_id(os.environ['_OSMOSIS_ORGANIZATION_ID'])}"
@@ -132,6 +123,8 @@ def main() -> None:
         registry, os.environ.pop("_OSMOSIS_HARBOR_REGISTRY_PASSWORD", None)
     )
     with tempfile.TemporaryDirectory(prefix="harbor-source-") as directory:
+        repository = Path(directory) / "repository"
+        fetch_source(source, os.environ.pop("_OSMOSIS_GITHUB_TOKEN", ""), repository)
         tasks_dir = Path(directory) / "tasks"
         names = asyncio.run(
             materialize_source_tasks(repository, source.path, tasks_dir)

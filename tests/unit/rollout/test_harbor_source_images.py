@@ -1,5 +1,7 @@
 import asyncio
 import hashlib
+import io
+import tarfile
 import tomllib
 from dataclasses import asdict
 from types import SimpleNamespace
@@ -15,6 +17,7 @@ from osmosis_ai.harbor_images import (
     TaskSource,
     bind_task_images,
     environment_identity,
+    fetch_source,
     materialize_source_tasks,
     normalized_context,
     task_identities,
@@ -110,6 +113,98 @@ def test_repository_root_task_id_does_not_depend_on_checkout_name(tmp_path):
         assert asyncio.run(
             materialize_source_tasks(tmp_path / name, ".", tmp_path / (name + "-tasks"))
         ) == ["task"]
+
+
+def test_builder_and_gateway_fetch_identical_pinned_archives(tmp_path, monkeypatch):
+    task = make_task(tmp_path / "input/tasks/add")
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w:gz") as archive:
+        archive.add(tmp_path / "input", arcname="acme-tasks-commit")
+    requested = []
+
+    def handle(request):
+        requested.append(request)
+        if request.url.host == "api.github.com":
+            assert request.url.path.endswith("/tarball/" + SOURCE.revision)
+            return httpx.Response(
+                302,
+                headers={
+                    "location": "https://codeload.github.com/acme/tasks/legacy.tar.gz/"
+                    + SOURCE.revision
+                },
+            )
+        assert request.url.host == "codeload.github.com"
+        return httpx.Response(200, content=buffer.getvalue())
+
+    client = httpx.Client
+    monkeypatch.setattr(
+        httpx,
+        "Client",
+        lambda **kwargs: client(transport=httpx.MockTransport(handle), **kwargs),
+    )
+    for name in ("builder", "gateway"):
+        fetch_source(SOURCE, "private-installation-token", tmp_path / name)
+        assert task_identities(tmp_path / name / "tasks/add") == task_identities(task)
+    assert len(requested) == 4
+
+
+@pytest.mark.parametrize(
+    "location",
+    [
+        "http://codeload.github.com/task",
+        "https://evil.test/task",
+        "https://codeload.github.com:secret/task",
+    ],
+)
+def test_source_fetch_rejects_untrusted_redirect_without_exposing_credentials(
+    tmp_path, monkeypatch, location
+):
+    requests = []
+
+    def handle(request):
+        requests.append(request)
+        return httpx.Response(302, headers={"location": location})
+
+    client = httpx.Client
+    monkeypatch.setattr(
+        httpx,
+        "Client",
+        lambda **kwargs: client(transport=httpx.MockTransport(handle), **kwargs),
+    )
+    with pytest.raises((ValueError, RuntimeError)) as error:
+        fetch_source(SOURCE, "private-installation-token", tmp_path / "source")
+    assert "secret" not in str(error.value)
+    assert "private-installation-token" not in str(error.value)
+    assert len(requests) == 1
+
+
+def test_source_fetch_bounds_download_size(tmp_path, monkeypatch):
+    client = httpx.Client
+    monkeypatch.setattr(
+        httpx,
+        "Client",
+        lambda **kwargs: client(
+            transport=httpx.MockTransport(
+                lambda _: httpx.Response(200, content=b"too large")
+            ),
+            **kwargs,
+        ),
+    )
+    monkeypatch.setattr("osmosis_ai.harbor_images.MAX_SOURCE_BYTES", 1)
+    with pytest.raises(ValueError, match="exceeds"):
+        fetch_source(SOURCE, "token", tmp_path / "source")
+    assert not (tmp_path / "source").exists()
+
+
+def test_gateway_rejects_submodules_like_the_builder(tmp_path):
+    make_task(tmp_path / "repository/tasks/add")
+    (tmp_path / "repository/.gitmodules").write_text("[submodule]")
+    with pytest.raises(ValueError, match="submodules"):
+        asyncio.run(
+            materialize_source_tasks(
+                tmp_path / "repository", "tasks", tmp_path / "tasks"
+            )
+        )
 
 
 def test_discovery_and_trial_binding_preserve_original_source(tmp_path):

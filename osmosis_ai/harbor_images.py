@@ -13,17 +13,20 @@ import os
 import re
 import shutil
 import stat
+import tarfile
 import tempfile
 import tomllib
 from collections.abc import Iterator, Mapping
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
 from importlib.metadata import version
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 POLICY = "harbor-v1"
 PLATFORM = "linux/amd64"
+MAX_SOURCE_BYTES = 2 * 1024**3
 
 
 def relative_path(value: str) -> str:
@@ -74,6 +77,93 @@ class TaskSource:
         suffix = hashlib.sha256(identity.encode()).hexdigest()[:24]
         slug = re.sub(r"[^a-z0-9-]+", "-", name.lower()).strip("-")[:35]
         return f"ht-{slug}-{suffix}"
+
+
+def fetch_source(source: TaskSource, token: str, destination: Path) -> None:
+    """Fetch identical GitHub archives in builders and gateways.
+
+    Git checkouts can apply attributes or filters that change bytes. Both sides
+    use this pinned archive path so those transformations cannot change hashes.
+    """
+    import httpx
+
+    if not token:
+        raise ValueError("GitHub installation credential is required")
+    if destination.exists():
+        raise ValueError("Task source destination already exists")
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    api = source.repository.replace(
+        "https://github.com/", "https://api.github.com/repos/"
+    )
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github+json",
+    }
+    with tempfile.TemporaryDirectory(
+        prefix="harbor-git-", dir=destination.parent
+    ) as directory:
+        root = Path(directory)
+        archive = root / "source.tar.gz"
+        try:
+            with (
+                httpx.Client(timeout=120, follow_redirects=False) as client,
+                ExitStack() as stack,
+            ):
+                response = stack.enter_context(
+                    client.stream(
+                        "GET", f"{api}/tarball/{source.revision}", headers=headers
+                    )
+                )
+                if response.status_code == 302:
+                    location = response.headers.get("location", "")
+                    try:
+                        target = urlsplit(location)
+                        valid = (
+                            target.scheme == "https"
+                            and target.hostname == "codeload.github.com"
+                            and not target.username
+                            and not target.password
+                            and target.port in (None, 443)
+                        )
+                    except ValueError:
+                        valid = False
+                    if not valid:
+                        raise ValueError(
+                            "GitHub returned an unexpected archive location"
+                        )
+                    response.close()
+                    response = stack.enter_context(
+                        client.stream("GET", location, headers=headers)
+                    )
+                if response.status_code == 429 or response.status_code >= 500:
+                    raise RuntimeError("GitHub source is temporarily unavailable")
+                if response.status_code != 200:
+                    raise ValueError(
+                        f"GitHub source download failed (HTTP {response.status_code})"
+                    )
+                size = 0
+                with archive.open("wb") as output:
+                    for chunk in response.iter_bytes(1024 * 1024):
+                        size += len(chunk)
+                        if size > MAX_SOURCE_BYTES:
+                            raise ValueError("GitHub source archive exceeds 2 GiB")
+                        output.write(chunk)
+        except httpx.HTTPError:
+            raise RuntimeError(
+                "Could not download the pinned GitHub task source"
+            ) from None
+        checkout = root / "checkout"
+        with tarfile.open(archive) as contents:
+            size = 0
+            for index, member in enumerate(contents):
+                size += member.size
+                if index >= 100_000 or size > MAX_SOURCE_BYTES:
+                    raise ValueError("GitHub source exceeds extraction limits")
+                contents.extract(member, checkout, filter="data")
+        entries = list(checkout.iterdir())
+        if len(entries) != 1 or not entries[0].is_dir() or entries[0].is_symlink():
+            raise ValueError("GitHub source must contain one root directory")
+        entries[0].rename(destination)
 
 
 @contextmanager
@@ -239,6 +329,8 @@ async def materialize_source_tasks(
 ) -> list[str]:
     """Discover Git folders or resolve a Harbor Hub dataset.toml's pinned tasks."""
     source = repository / relative_path(path)
+    if (repository / ".gitmodules").exists():
+        raise ValueError("Git submodules are unsupported; commit task files directly")
     if not source.resolve(strict=True).is_relative_to(repository.resolve()):
         raise ValueError("Task source escapes repository")
     manifest_path = source if source.is_file() else source / "dataset.toml"

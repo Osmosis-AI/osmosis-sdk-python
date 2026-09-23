@@ -31,8 +31,9 @@ immutable image digests, and Cloud Build IDs. It does not contain credentials.
 No prepared task bundle is downloaded on this path. The same resumable request
 and timeout behavior described below applies.
 
-The gateway runs built-in SDK code and checks out the original pinned source;
-it needs no local `main.py`, dataset download, or task-image JSON file. It
+The gateway runs built-in SDK code and fetches the original pinned source;
+it needs no local `main.py`, dataset download, or task-image JSON file. Builder and gateway use
+the same GitHub archive fetcher so checkout filters cannot change build bytes. It
 independently computes image identities, resolves all required GAR tags to
 verified manifest digests, and prewarms representative agent environments
 before accepting rollouts. Each trial gets a temporary task copy bound to those
