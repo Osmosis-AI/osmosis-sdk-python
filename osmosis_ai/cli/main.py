@@ -348,6 +348,7 @@ def _register_commands() -> None:
     from osmosis_ai.cli.commands.benchmark import app as benchmark_app
     from osmosis_ai.cli.commands.dataset import app as dataset_app
     from osmosis_ai.cli.commands.eval import app as eval_app
+    from osmosis_ai.cli.commands.harbor import app as harbor_app
     from osmosis_ai.cli.commands.model import app as model_app
     from osmosis_ai.cli.commands.rollout import app as rollout_app
     from osmosis_ai.cli.commands.secret import app as secret_app
@@ -370,6 +371,7 @@ def _register_commands() -> None:
     app.add_typer(eval_app, name=cmdreg.GROUP_EVAL, rich_help_panel=_WORKFLOW)
     app.add_typer(benchmark_app, name=cmdreg.GROUP_BENCHMARK, rich_help_panel=_WORKFLOW)
     app.add_typer(rollout_app, name=cmdreg.GROUP_ROLLOUT, rich_help_panel=_WORKFLOW)
+    app.add_typer(harbor_app, name=cmdreg.GROUP_HARBOR, rich_help_panel=_WORKFLOW)
     app.add_typer(template_app, name=cmdreg.GROUP_TEMPLATE, rich_help_panel=_WORKFLOW)
 
     from osmosis_ai.cli.commands.dev import app as dev_app

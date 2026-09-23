@@ -17,6 +17,7 @@ GROUP_MODEL = "model"
 GROUP_EVAL = "eval"
 GROUP_BENCHMARK = "benchmark"
 GROUP_ROLLOUT = "rollout"
+GROUP_HARBOR = "harbor"
 GROUP_TEMPLATE = "template"
 GROUP_DEV = "dev"
 GROUP_AUTH = "auth"
@@ -38,6 +39,7 @@ COMMAND_GROUPS: frozenset[str] = frozenset(
         GROUP_EVAL,
         GROUP_BENCHMARK,
         GROUP_ROLLOUT,
+        GROUP_HARBOR,
         GROUP_TEMPLATE,
         GROUP_DEV,
         GROUP_AUTH,
