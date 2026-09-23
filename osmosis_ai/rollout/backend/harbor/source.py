@@ -1,0 +1,180 @@
+"""Run original Harbor tasks against images published by source image builds."""
+
+from __future__ import annotations
+
+import asyncio
+import base64
+import hashlib
+import json
+import os
+import re
+import subprocess
+import tempfile
+from pathlib import Path
+from typing import Any
+
+import httpx
+
+from osmosis_ai.harbor_images import (
+    TaskSource,
+    bind_task_images,
+    materialize_source_tasks,
+    task_identities,
+)
+from osmosis_ai.rollout.backend.harbor.backend import HarborBackend
+
+
+class RegistryResolver:
+    def __init__(self, repository: str, password: str | None = None):
+        if not re.fullmatch(
+            r"[a-z0-9-]+-docker\.pkg\.dev/[a-z0-9.-]+/[a-z0-9-]+", repository
+        ):
+            raise ValueError("Source images require a managed GAR repository")
+        self.repository = repository
+        self.password = password
+        self._cache: dict[str, str] = {}
+
+    def resolve(self, tag: str) -> str:
+        if tag in self._cache:
+            return self._cache[tag]
+        host, path = self.repository.split("/", 1)
+        config = (
+            Path(os.environ.get("DOCKER_CONFIG", str(Path.home() / ".docker")))
+            / "config.json"
+        )
+        auth = (
+            httpx.BasicAuth("oauth2accesstoken", self.password)
+            if self.password
+            else None
+        )
+        if auth is None and config.is_file():
+            entry = json.loads(config.read_text()).get("auths", {}).get(host, {})
+            if entry.get("auth"):
+                username, password = (
+                    base64.b64decode(entry["auth"]).decode().split(":", 1)
+                )
+                auth = httpx.BasicAuth(username, password)
+        # Read the refreshed Docker credential on each cache miss. Never follow
+        # redirects or a registry-provided authentication URL with credentials.
+        with httpx.Client(auth=auth, timeout=30, follow_redirects=False) as client:
+            response = client.get(
+                f"https://{host}/v2/{path}/environment/manifests/{tag}",
+                headers={
+                    "Accept": ", ".join(
+                        (
+                            "application/vnd.oci.image.manifest.v1+json",
+                            "application/vnd.docker.distribution.manifest.v2+json",
+                            "application/vnd.oci.image.index.v1+json",
+                            "application/vnd.docker.distribution.manifest.list.v2+json",
+                        )
+                    )
+                },
+            )
+        if response.status_code != 200:
+            raise RuntimeError(
+                f"Source image is unavailable (GAR HTTP {response.status_code}); run 'osmosis images build' for this source first"
+            )
+        digest = "sha256:" + hashlib.sha256(response.content).hexdigest()
+        if response.headers.get("docker-content-digest") != digest:
+            raise ValueError("GAR manifest digest verification failed")
+        image = f"{self.repository}/environment@{digest}"
+        self._cache[tag] = image
+        return image
+
+
+class SourceHarborBackend(HarborBackend):
+    """A pinned source has one immutable image binding per environment."""
+
+    def __init__(self, *, image_bindings: dict[str, dict[str, str]], **kwargs: Any):
+        super().__init__(**kwargs)
+        self.image_bindings = image_bindings
+        if self.sdk_requirements:
+            raise ValueError(
+                "Source images cannot change their build context during rollout"
+            )
+
+    def materialize_task(
+        self, task: Any, rollout_id: str, container_input: Any
+    ) -> Path:
+        original = Path(task.path).resolve()
+        name = original.relative_to(self.tasks_dir.resolve()).as_posix()
+        if name not in self.image_bindings:
+            raise ValueError("Task is outside this gateway's pinned source")
+        directory = super().materialize_task(task, rollout_id, container_input)
+        bind_task_images(directory, self.image_bindings[name])
+        return directory
+
+
+def main() -> None:
+    import uvicorn
+    from harbor.models.environment_type import EnvironmentType
+    from harbor.models.trial.config import EnvironmentConfig
+    from harbor.trial.queue import TrialQueue
+
+    from osmosis_ai.rollout.server import create_rollout_server
+
+    source = TaskSource(**json.loads(os.environ["_OSMOSIS_HARBOR_TASK_SOURCE"]))
+    # The managed entrypoint checks out this immutable revision before starting
+    # the SDK. Source repositories do not supply executable gateway code.
+    repository = Path("/workspace")
+    revision = subprocess.check_output(
+        ["git", "rev-parse", "HEAD"], cwd=repository, text=True
+    ).strip()
+    if revision != source.revision:
+        raise ValueError("Checked-out source differs from the configured commit")
+    os.environ.pop("_OSMOSIS_GITHUB_TOKEN", None)
+    published_repository = os.environ["_OSMOSIS_HARBOR_REGISTRY"]
+    registry_root = published_repository.rsplit("/", 1)[0]
+    registry = f"{registry_root}/{source.repository_id(os.environ['_OSMOSIS_ORGANIZATION_ID'])}"
+    if published_repository != registry:
+        raise ValueError("Registry namespace does not match the pinned task source")
+    resolver = RegistryResolver(
+        registry, os.environ.pop("_OSMOSIS_HARBOR_REGISTRY_PASSWORD", None)
+    )
+    with tempfile.TemporaryDirectory(prefix="harbor-source-") as directory:
+        tasks_dir = Path(directory) / "tasks"
+        names = asyncio.run(
+            materialize_source_tasks(repository, source.path, tasks_dir)
+        )
+        bindings = {
+            name: {
+                role: resolver.resolve(identity.tag)
+                for role, identity in task_identities(tasks_dir / name).items()
+            }
+            for name in names
+        }
+        resolver.password = None
+        backend = SourceHarborBackend(
+            image_bindings=bindings,
+            orchestrator=TrialQueue(
+                n_concurrent=int(os.environ.get("_OSMOSIS_HARBOR_CONCURRENCY", "4"))
+            ),
+            tasks_dir=tasks_dir,
+            task_mode="dataset",
+            agent=os.environ.get("_OSMOSIS_HARBOR_AGENT", "opencode"),
+            native_agent_kwargs=json.loads(
+                os.environ.get("_OSMOSIS_HARBOR_AGENT_KWARGS", "{}")
+            ),
+            environment_config=EnvironmentConfig(
+                type=EnvironmentType.OPENSANDBOX,
+                kwargs=json.loads(
+                    os.environ.get("_OSMOSIS_HARBOR_ENVIRONMENT_KWARGS", "{}")
+                ),
+            ),
+            cleanup_successful_trials=True,
+        )
+        representatives = list(
+            {bindings[name]["environment"]: name for name in names}.values()
+        )
+        app = create_rollout_server(
+            backend=backend, lifespan=backend.prewarm_lifespan(representatives)
+        )
+        uvicorn.run(
+            app,
+            host="0.0.0.0",
+            port=int(os.environ.get("_OSMOSIS_ROLLOUT_PORT", "8000")),
+        )
+
+
+if __name__ == "__main__":
+    main()

@@ -1,5 +1,81 @@
 # Repository image builds
 
+## Source-based Harbor tasks
+
+```bash
+osmosis images build --url https://github.com/acme/training-tasks \
+  --path tasks --ref main --output images.json
+
+# Use source.revision from images.json for the gateway.
+osmosis dev server up --url https://github.com/acme/training-tasks \
+  --path tasks --ref FULL_COMMIT_SHA --backend gke \
+  --sandbox-environment opensandbox
+
+osmosis dev server list --url https://github.com/acme/training-tasks
+osmosis dev server logs SERVER_ID --url https://github.com/acme/training-tasks
+osmosis dev server down SERVER_ID --url https://github.com/acme/training-tasks
+```
+
+`--path` selects a directory of Harbor task folders, a directory containing
+a Harbor Hub `dataset.toml`, or the manifest file itself. Hub task references
+must contain immutable `sha256:` digests. Task IDs are relative to the submitted
+root; Hub task IDs retain their `org/name`. `--path .` selects the repository
+root. Source repositories must be connected to the authenticated workspace.
+
+`--url` submits the `source-v1` image layout. Monolith pins the requested Git
+ref, builds or mirrors each unique agent and verifier environment, and returns
+a manifest. The SDK saves the verified mapping to `images.json` under
+`--output-dir`, and to `--output` when supplied. The JSON contains the source
+commit, hash policy, environment hashes, full context checksums, stable tags,
+immutable image digests, and Cloud Build IDs. It does not contain credentials.
+No prepared task bundle is downloaded on this path. The same resumable request
+and timeout behavior described below applies.
+
+The gateway runs built-in SDK code and checks out the original pinned source;
+it needs no local `main.py`, dataset download, or task-image JSON file. It
+independently computes image identities, resolves all required GAR tags to
+verified manifest digests, and prewarms representative agent environments
+before accepting rollouts. Each trial gets a temporary task copy bound to those
+digests. Source files stay unchanged. A gateway serves one pinned source;
+requests select tasks using `metadata.harbor_task_id`.
+
+### Identity and publication
+
+The shared `osmosis_ai.harbor_images` module owns the `harbor-v1` policy:
+
+- Harbor **0.22.0**, Linux/amd64, and no caller-supplied build arguments.
+- Build contexts use Git file modes (644 or 755). Harbor's 16-character
+  container-context hash is paired with a full SHA-256 of the normalized
+  context and policy. Instructions and runtime-injected credentials are excluded.
+- Tags are `harbor-v1-<environment-hash>-<full-checksum>` on the
+  `environment` package. Prebuilt references get a distinct identity derived
+  from the reference and policy, then are mirrored.
+- GAR repository IDs contain a readable GitHub org/repo/path prefix plus a
+  hash of the full source namespace and workspace UUID. Git revisions do not
+  affect the repository name, so unchanged environments can be reused.
+- Only successful Cloud Build attempts publish stable tags. GAR enforces tag
+  immutability; the first successful publication wins. Tags identify build
+  snapshots, while `@sha256:` identifies the resulting OCI content. Networked
+  builds and mutable base references are not promises of reproducible bytes.
+
+Change a build input (preferably a pinned base digest) to publish a new image.
+Changes to the shared build policy require a new policy version. Explicit
+separate verifier contexts are hashed independently; inherited verifier
+environments reuse the agent image while preserving verifier configuration.
+Optional `image-build.toml` trainer images appear in `named_images.trainer`.
+
+Registry lookup uses a short-lived read credential delivered through the
+managed gateway's secret bundle. Once startup resolves the source, trials use
+cached immutable digests and GKE's image-pull identity. Missing images or failed
+prewarm prevent readiness. This mode requires the matching Monolith release
+and source-repository IAM configuration.
+
+## Legacy bundle builds
+
+`--repo` retains the prepared task bundle workflow below. `--tasks-dir` remains
+an alias of `--path`; dev-server startup without `--url` retains custom gateway
+code from the current rollout folder.
+
 The [command shell](../osmosis_ai/cli/commands/images.py) delegates to
 [images.py](../osmosis_ai/platform/cli/images.py) and
 [OsmosisClient](../osmosis_ai/platform/api/client.py). Monolith owns source

@@ -1,6 +1,7 @@
 """Build the images declared by a connected job repository."""
 
 from pathlib import Path
+from typing import Any
 
 import typer
 
@@ -13,8 +14,13 @@ app: typer.Typer = typer.Typer(
 
 @app.command("build")
 def build(
-    repository: str = typer.Option(
-        ..., "--repo", help="Connected GitHub repository URL (HTTPS or SSH)."
+    repository: str | None = typer.Option(
+        None, "--repo", help="Legacy bundle build from a connected GitHub repository."
+    ),
+    url: str | None = typer.Option(
+        None,
+        "--url",
+        help="GitHub task source; publish deterministic images without a task bundle.",
     ),
     ref: str = typer.Option(
         "HEAD",
@@ -22,7 +28,13 @@ def build(
         help="Branch, tag, or commit; defaults to the repository's default branch.",
     ),
     tasks_dir: str = typer.Option(
-        "tasks", "--tasks-dir", help="Task directory relative to the repository root."
+        "tasks",
+        "--path",
+        "--tasks-dir",
+        help="Task directory or dataset.toml relative to the repository root.",
+    ),
+    output: Path | None = typer.Option(
+        None, "--output", help="Write the verified task-to-image JSON to this file."
     ),
     output_dir: Path = typer.Option(
         Path(".osmosis/images"),
@@ -46,17 +58,26 @@ def build(
         help="Local wait limit in seconds; remote builds continue afterward.",
     ),
 ) -> CommandResult:
-    """Discover all tasks, build their images remotely, and download the task bundle."""
+    """Build Harbor environments remotely and return their task-to-image mapping."""
+    from osmosis_ai.cli.errors import CLIError
     from osmosis_ai.platform.cli.images import build as run
 
+    if bool(url) == bool(repository):
+        raise CLIError("Specify exactly one of --url or --repo", code="VALIDATION")
+    options: dict[str, Any] = {}
+    if url:
+        options["image_layout"] = "source-v1"
+    if output:
+        options["output"] = output
     return run(
-        repository=repository,
+        repository=url or repository or "",
         ref=ref,
         tasks_dir=tasks_dir,
         output_dir=output_dir,
         request_id=request_id,
         wait=wait,
         timeout=timeout,
+        **options,
     )
 
 
@@ -64,7 +85,7 @@ def build(
 def info(
     request_id: str = typer.Argument(..., help="Image build request UUID."),
     repository: str = typer.Option(
-        ..., "--repo", help="Connected GitHub repository URL."
+        ..., "--url", "--repo", help="Connected GitHub repository URL."
     ),
 ) -> CommandResult:
     """Show the pinned commit, task count, and image progress."""

@@ -501,6 +501,86 @@ def test_cli_repo_only_json_submission(tmp_path, monkeypatch):
     assert "tasks" not in body
 
 
+def test_cli_source_build_submits_versioned_contract(tmp_path, monkeypatch):
+    from osmosis_ai.cli.main import _register_commands, app
+
+    _register_commands()
+    client = Mock()
+    client.submit_image_build.return_value = {"phase": "queued"}
+    monkeypatch.setattr(images, "OsmosisClient", lambda: client)
+    result = CliRunner().invoke(
+        app,
+        [
+            "--json",
+            "images",
+            "build",
+            "--url",
+            "https://github.com/acme/job",
+            "--path",
+            ".",
+            "--ref",
+            "main",
+            "--no-wait",
+            "--output-dir",
+            str(tmp_path),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    body = client.submit_image_build.call_args.kwargs
+    assert body["image_layout"] == "source-v1"
+    assert body["tasks_dir"] == "."
+
+
+def test_source_manifest_export_never_downloads_task_bundle(tmp_path, monkeypatch):
+    from dataclasses import asdict
+
+    from osmosis_ai.harbor_images import EnvironmentIdentity, TaskSource
+
+    source = TaskSource("https://github.com/acme/job", "tasks", "a" * 40)
+    identity = EnvironmentIdentity("a" * 16, "b" * 64)
+    image = {
+        "key": "key",
+        "image": "us-west1-docker.pkg.dev/project/repo/environment@sha256:" + "c" * 64,
+        "tag": "us-west1-docker.pkg.dev/project/repo/environment:" + identity.tag,
+        "environment_hash": identity.environment_hash,
+        "context_sha256": identity.context_sha256,
+    }
+    manifest = {
+        "schema_version": "source-v1",
+        "hash_policy": identity.policy,
+        "source": asdict(source),
+        "images": [image],
+        "tasks": [{"task": "add", "environments": {"environment": "key"}}],
+    }
+    state = images.prepare_request(
+        tmp_path,
+        source.repository,
+        source.revision,
+        source.path,
+        image_layout="source-v1",
+    )
+    client = Mock()
+    client.get_image_build_artifacts.return_value = {"manifest": {}}
+    downloads = []
+
+    def download(reference, access, destination):
+        downloads.append(destination.name)
+        destination.write_text(json.dumps(manifest))
+
+    monkeypatch.setattr(images, "download", download)
+    status = {
+        "source_revision": source.revision,
+        "result": {"manifest": {}, "task_count": 1, "bundle": None},
+    }
+    summary = images.collect(client, state, status, tmp_path)
+    assert downloads == ["manifest.json"]
+    assert summary["tasks"]["add"]["environment"]["image"] == image["image"]
+    assert not (tmp_path / "tasks").exists()
+    manifest["source"]["revision"] = "b" * 40
+    with pytest.raises(CLIError, match="does not match"):
+        images.collect(client, state, status, tmp_path)
+
+
 def test_download_uses_signed_access_without_platform_auth_and_checks_bytes(
     tmp_path, monkeypatch
 ):
