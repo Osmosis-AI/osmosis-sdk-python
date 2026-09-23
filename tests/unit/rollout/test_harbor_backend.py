@@ -3,6 +3,9 @@
 import asyncio
 import json
 import os
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
@@ -1637,6 +1640,112 @@ class TestArtifactLifecycle:
         relocated = tmp_path / "durable" / "r1" / "artifacts" / "out.txt"
         assert relocated.read_text() == "[REDACTED]"
         # The successful trial was moved only after the durable copy existed.
+        assert not (tmp_path / "trials" / "trial-r1").exists()
+        assert not (tmp_path / "rollouts" / "r1").exists()
+
+    @staticmethod
+    async def succeed(queue, config):
+        artifacts = config.trials_dir / config.trial_name / "artifacts"
+        artifacts.mkdir(parents=True)
+        (artifacts / "out.txt").write_text("evidence")
+        result = trial_result(verifier_result=SimpleNamespace(rewards={"reward": 1.0}))
+        await queue.fire("end", SimpleNamespace(config=config, result=result))
+        return result
+
+    @staticmethod
+    def slow_relocate(monkeypatch, before):
+        from osmosis_ai.rollout.backend.harbor import backend as backend_module
+
+        real = backend_module.relocate_trial_artifacts
+
+        def relocate(*args, **kwargs):
+            before()
+            return real(*args, **kwargs)
+
+        monkeypatch.setattr(backend_module, "relocate_trial_artifacts", relocate)
+
+    async def test_slow_archive_does_not_block_event_loop(
+        self, template_task, tmp_path, monkeypatch
+    ):
+        # Result long polls and /health share this loop; a blocking archive on
+        # slow artifact storage starved them into client read timeouts.
+        from osmosis_ai.rollout.context import RolloutContext
+
+        self.slow_relocate(monkeypatch, lambda: time.sleep(0.5))
+        backend = self.backend_for(template_task, tmp_path, FakeQueue(self.succeed))
+        request = ExecutionRequest(id="r1", prompt=[{"role": "user", "content": "go"}])
+        lags: list[float] = []
+
+        async def ticker():
+            loop = asyncio.get_running_loop()
+            while True:
+                start = loop.time()
+                await asyncio.sleep(0.05)
+                lags.append(loop.time() - start - 0.05)
+
+        tick = asyncio.create_task(ticker())
+        await asyncio.sleep(0)
+        try:
+            with RolloutContext(
+                chat_completions_url="http://t/v1", api_key="rk-1", rollout_id="r1"
+            ):
+                await backend.execute(request)
+            # The outcome is returned only once the durable copy exists.
+            assert (tmp_path / "durable" / "r1" / "artifacts" / "out.txt").exists()
+            # Let a tick that spanned a stall record its lag.
+            await asyncio.sleep(0.1)
+        finally:
+            tick.cancel()
+
+        assert lags and max(lags) < 0.1, f"event loop lag: {lags}"
+
+    @pytest.mark.parametrize("queued", [False, True], ids=["running", "queued"])
+    async def test_cancel_during_archive_propagates_and_archive_completes(
+        self, template_task, tmp_path, monkeypatch, queued
+    ):
+        # Only a forced shutdown cancel can interrupt the archive await. It must
+        # propagate without dropping the archive, whether a worker is running it
+        # or it still waits in a saturated pool's queue.
+        from osmosis_ai.rollout.context import RolloutContext
+
+        entered = threading.Event()
+        release = threading.Event()
+        backend = self.backend_for(template_task, tmp_path, FakeQueue(self.succeed))
+        if queued:
+            backend.archive_executor = ThreadPoolExecutor(max_workers=1)
+            backend.archive_executor.submit(release.wait, 5)
+            submit = backend.archive_executor.submit
+
+            def record(*args, **kwargs):
+                future = submit(*args, **kwargs)
+                entered.set()
+                return future
+
+            monkeypatch.setattr(backend.archive_executor, "submit", record)
+        else:
+
+            def block():
+                entered.set()
+                release.wait(5)
+
+            self.slow_relocate(monkeypatch, block)
+        request = ExecutionRequest(id="r1", prompt=[{"role": "user", "content": "go"}])
+
+        async def execute():
+            with RolloutContext(
+                chat_completions_url="http://t/v1", api_key="rk-1", rollout_id="r1"
+            ):
+                await backend.execute(request)
+
+        task = asyncio.create_task(execute())
+        assert await asyncio.to_thread(entered.wait, 5)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+        release.set()
+        await asyncio.to_thread(backend.archive_executor.shutdown)
+        assert (tmp_path / "durable" / "r1" / "artifacts" / "out.txt").exists()
         assert not (tmp_path / "trials" / "trial-r1").exists()
         assert not (tmp_path / "rollouts" / "r1").exists()
 
