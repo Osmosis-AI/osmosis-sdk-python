@@ -5,8 +5,10 @@ from __future__ import annotations
 import os
 import sys
 import tomllib
+from asyncio import run as run_async
 from collections.abc import Iterator
 from contextlib import contextmanager
+from hashlib import sha256
 from pathlib import Path
 from typing import Annotated, Any, ClassVar, Literal
 
@@ -31,8 +33,6 @@ class SimpleBackendConfig(_ServeConfigModel):
 class HarborBackendConfig(_ServeConfigModel):
     """Configuration for the Harbor rollout backend."""
 
-    tasks_dir: Path = Path("tasks")
-    task_mode: Literal["template", "dataset"] = "template"
     agent: str
     grader: str | None = None
     workflow_config: str | None = None
@@ -113,6 +113,78 @@ def _required_directory(path: Path, *, label: str) -> Path:
     if not path.is_dir():
         raise CLIError(f"{label} does not exist: {path}", code="NOT_FOUND")
     return path
+
+
+def _dataset_config_for_source(source: str) -> Any:
+    """Translate the CLI's compact dataset source into Harbor configuration."""
+    from harbor.models.job.config import DatasetConfig
+
+    candidate = Path(source).expanduser()
+    if candidate.is_dir():
+        return DatasetConfig(path=candidate.resolve())
+    if source.startswith((".", "/", "~")):
+        raise CLIError(
+            f"Harbor dataset directory does not exist: {candidate.resolve()}",
+            code="NOT_FOUND",
+        )
+    if "://" in source or source.startswith("git@"):
+        return DatasetConfig(repo=source)
+
+    name, separator, ref = source.rpartition("@")
+    if not separator:
+        name, ref = source, None
+    if not name:
+        raise CLIError("--harbor-dataset must be non-empty.", code="VALIDATION")
+    if "/" in name:
+        return DatasetConfig(name=name, ref=ref)
+    return DatasetConfig(name=name, version=ref)
+
+
+async def _materialize_harbor_dataset(source: str) -> Path:
+    """Resolve a local or remote Harbor dataset to a local task directory."""
+    try:
+        from harbor.tasks.client import TaskClient
+        from platformdirs import user_cache_path
+    except ModuleNotFoundError as exc:
+        raise CLIError(
+            "Serving with Harbor requires the Harbor dependencies. Install "
+            "`osmosis-ai[server,harbor]`.",
+            code="VALIDATION",
+        ) from exc
+
+    try:
+        dataset = _dataset_config_for_source(source)
+        task_configs = await dataset.get_task_configs()
+        if not task_configs:
+            raise ValueError("dataset contains no valid tasks")
+        if dataset.is_local():
+            assert dataset.path is not None
+            return dataset.path.expanduser().resolve()
+
+        identity = "\n".join(
+            sorted(config.model_dump_json() for config in task_configs)
+        )
+        dataset_dir = (
+            user_cache_path("osmosis")
+            / "harbor-datasets"
+            / sha256(identity.encode()).hexdigest()
+        )
+        dataset_dir.mkdir(parents=True, exist_ok=True)
+        result = await TaskClient().download_tasks(
+            task_ids=[config.get_task_id() for config in task_configs],
+            output_dir=dataset_dir,
+            export=True,
+        )
+        if not result.paths:
+            raise ValueError("dataset contains no downloadable tasks")
+        return dataset_dir
+    except CLIError:
+        raise
+    except Exception as exc:
+        raise CLIError(
+            f"Could not resolve Harbor dataset {source!r}: {exc}",
+            code="VALIDATION",
+        ) from exc
 
 
 def _server_port(port: int | None) -> int:
@@ -197,13 +269,12 @@ def _serve_simple(
 def _serve_harbor(
     config: HarborBackendConfig,
     *,
+    dataset_source: str,
     rollout_dir: Path,
     host: str,
     port: int | None,
 ) -> None:
-    resolved_tasks_dir = _resolve_path(config.tasks_dir, rollout_dir)
-    assert resolved_tasks_dir is not None
-    _required_directory(resolved_tasks_dir, label="Harbor tasks directory")
+    resolved_tasks_dir = run_async(_materialize_harbor_dataset(dataset_source))
     resolved_trials_dir = _resolve_path(config.trials_dir, rollout_dir)
 
     with _rollout_context(rollout_dir):
@@ -234,7 +305,7 @@ def _serve_harbor(
             backend = HarborBackend(
                 orchestrator=TrialQueue(n_concurrent=config.concurrency),
                 tasks_dir=resolved_tasks_dir,
-                task_mode=config.task_mode,
+                task_mode="dataset",
                 agent=config.agent,
                 native_agent_kwargs=config.native_agent_kwargs,
                 model_name=config.native_model_name,
@@ -260,13 +331,35 @@ def _serve_harbor(
         _run_server(backend=backend, host=host, port=port)
 
 
-def serve(config_path: Path, *, host: str, port: int | None) -> None:
+def serve(
+    config_path: Path,
+    *,
+    harbor_dataset: str | None,
+    host: str,
+    port: int | None,
+) -> None:
     """Run the rollout server declared by ``config_path``."""
     config, rollout_dir = load_serve_config(config_path)
     if config.backend == "simple":
+        if harbor_dataset is not None:
+            raise CLIError(
+                '--harbor-dataset can only be used with backend = "harbor".',
+                code="VALIDATION",
+            )
         _serve_simple(config.simple, rollout_dir=rollout_dir, host=host, port=port)
     else:
-        _serve_harbor(config.harbor, rollout_dir=rollout_dir, host=host, port=port)
+        if harbor_dataset is None or not harbor_dataset.strip():
+            raise CLIError(
+                '--harbor-dataset is required with backend = "harbor".',
+                code="VALIDATION",
+            )
+        _serve_harbor(
+            config.harbor,
+            dataset_source=harbor_dataset,
+            rollout_dir=rollout_dir,
+            host=host,
+            port=port,
+        )
 
 
 __all__ = [
