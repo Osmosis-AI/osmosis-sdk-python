@@ -84,7 +84,15 @@ class TestPublicSurface:
     def test_package_exports(self):
         import osmosis_ai.rollout.backend.harbor as harbor_package
 
-        assert harbor_package.__all__ == ["HarborBackend", "TaskMode"]
+        assert harbor_package.__all__ == [
+            "BuildAndPublishResult",
+            "BuildSystem",
+            "HarborBackend",
+            "PublishedEnvironment",
+            "PublishedImage",
+            "TaskMode",
+            "build_and_publish",
+        ]
         assert harbor_package.HarborBackend is HarborBackend
 
     def test_health_identifies_the_backend(self, template_task):
