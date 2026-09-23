@@ -25,6 +25,7 @@ import shutil
 import traceback
 import uuid
 from collections.abc import AsyncIterator, Callable, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from pathlib import Path
 from typing import Any
@@ -261,6 +262,13 @@ class HarborBackend(ExecutionBackend):
         self.fetch_locks: dict[str, asyncio.Lock] = {}
         self.running: int = 0
         self.finished: TtlCache[str, dict[str, Any]] = TtlCache(STATUS_RETENTION_SEC)
+        # Archiving blocks on artifact storage (a Mountpoint S3 filesystem in
+        # cloud eval), so it runs off the event loop. A dedicated pool keeps it
+        # out of the loop's default executor, which DNS resolution and
+        # trajectory writes share.
+        self.archive_executor: ThreadPoolExecutor = ThreadPoolExecutor(
+            thread_name_prefix="harbor-archive"
+        )
 
         orchestrator.add_hook(TrialEvent.START, self.on_trial_started)
         orchestrator.add_hook(TrialEvent.VERIFICATION_START, self.on_verification_start)
@@ -568,7 +576,20 @@ class HarborBackend(ExecutionBackend):
             if trial_cancelled(getattr(trial_result, "exception_info", None)):
                 self.cleanup_rollout_residue(request.id, include_trial=True)
             else:
-                self.archive_trial(request.id, trial_result, pending)
+                # The outcome still waits for the durable copy. Only a forced
+                # shutdown cancel interrupts this await: the trial has ended,
+                # so /rollout/cancel reports not_found. The shield keeps that
+                # cancel from dropping an archive still queued behind a busy
+                # pool; the executor finishes it before interpreter exit.
+                await asyncio.shield(
+                    asyncio.get_running_loop().run_in_executor(
+                        self.archive_executor,
+                        self.archive_trial,
+                        request.id,
+                        trial_result,
+                        pending,
+                    )
+                )
             return outcome
 
     def scrub_trial_credentials(self, rollout_id: str, api_key: str | None) -> None:

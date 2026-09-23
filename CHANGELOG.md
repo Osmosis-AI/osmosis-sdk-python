@@ -19,6 +19,7 @@ This file records changes to `osmosis-ai`. For earlier versions, see [GitHub Rel
 
 ### Fixed
 
+- Harbor artifact archiving no longer blocks the event loop or stalls result polling on slow storage; rollouts still wait for archiving to finish before returning results ([#386](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/386)).
 - `RolloutClient` retries transient result-polling disconnects and read timeouts up to twice within the last confirmed polling lease deadline; remove custom result-GET retry wrappers to avoid nested retries ([#366](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/366), [#374](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/374)).
 - Identifiable sandbox provider failures now report `HTTP_ERROR`; task-level API errors and generic Harbor API errors without structured status remain `AGENT_ERROR` ([#373](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/373)).
 - CLI failures now show actionable platform and login explanations with consistent HTTP error categories, and skipped rollout preflight warnings include installation guidance for the CLI's environment ([#369](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/369), [#376](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/376)).
