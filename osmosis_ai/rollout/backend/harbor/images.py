@@ -119,26 +119,56 @@ async def _run_command(command: Sequence[str]) -> tuple[int, str, str]:
     )
 
 
-def _google_image_describe_command(image: str, *, project: str) -> list[str] | None:
+def _google_image_lookup_command(image: str, *, project: str) -> list[str] | None:
     registry = image.split("/", 1)[0]
-    common = [
-        "--project",
-        project,
-        "--format=value(image_summary.digest)",
-    ]
     if registry == "gcr.io" or registry.endswith(".gcr.io"):
-        return ["gcloud", "container", "images", "describe", image, *common]
+        return [
+            "gcloud",
+            "container",
+            "images",
+            "describe",
+            image,
+            "--project",
+            project,
+            "--format=value(image_summary.digest)",
+        ]
     if registry.endswith("-docker.pkg.dev"):
-        return ["gcloud", "artifacts", "docker", "images", "describe", image, *common]
+        image_path, separator, tag = image.rpartition(":")
+        if not separator:
+            return None
+        return [
+            "gcloud",
+            "artifacts",
+            "docker",
+            "images",
+            "list",
+            image_path,
+            "--include-tags",
+            f"--filter=tags:{tag}",
+            "--project",
+            project,
+            "--format=json",
+        ]
     return None
 
 
 async def _google_image_digest(image: str, *, project: str) -> str | None:
-    command = _google_image_describe_command(image, project=project)
+    command = _google_image_lookup_command(image, project=project)
     if command is None:
         return None
     returncode, output, _error = await _run_command(command)
     if returncode != 0:
+        return None
+    if "artifacts" in command:
+        image_path, _, tag = image.rpartition(":")
+        try:
+            results = json.loads(output)
+        except json.JSONDecodeError:
+            return None
+        for result in results:
+            if result.get("package") == image_path and tag in result.get("tags", []):
+                digest = str(result.get("version", ""))
+                return digest if digest.startswith("sha256:") else None
         return None
     digest = output.strip()
     return digest if digest.startswith("sha256:") else None
@@ -177,6 +207,16 @@ def _cloud_build_digest(output: str, image: str) -> str | None:
     return None
 
 
+def _cloud_build_payload(output: str) -> dict[str, object]:
+    try:
+        payload = json.loads(output)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("Google Cloud Build returned invalid JSON") from exc
+    if not isinstance(payload, dict):
+        raise RuntimeError("Google Cloud Build returned an invalid response")
+    return payload
+
+
 class GoogleCloudBuildImageBuilder:
     """Submit image builds to Google Cloud Build."""
 
@@ -189,7 +229,7 @@ class GoogleCloudBuildImageBuilder:
         self.region = region
 
     async def build_and_push(self, request: BuildRequest) -> PublishedImage:
-        if _google_image_describe_command(request.image, project=self.project) is None:
+        if _google_image_lookup_command(request.image, project=self.project) is None:
             raise ValueError(
                 "google-cloud-build currently requires a Google Artifact Registry "
                 "or Google Container Registry image repository"
@@ -209,12 +249,16 @@ class GoogleCloudBuildImageBuilder:
                 "builds",
                 "submit",
                 "--quiet",
+                "--async",
+                "--suppress-logs",
                 "--project",
                 self.project,
                 "--region",
                 self.region,
                 "--config",
                 config_file.name,
+                "--gcs-source-staging-dir",
+                f"gs://{self.project}_cloudbuild/source",
                 "--format=json",
                 str(request.context),
             ]
@@ -225,10 +269,54 @@ class GoogleCloudBuildImageBuilder:
             raise RuntimeError(
                 f"Google Cloud Build failed for {request.image}: {details}"
             )
+        payload = _cloud_build_payload(output)
+        build_id = payload.get("id")
+        if not isinstance(build_id, str) or not build_id:
+            raise RuntimeError("Google Cloud Build did not return a build ID")
+
+        output = await self._wait_for_build(build_id, request.image)
         digest = _cloud_build_digest(output, request.image)
         if digest is None:
             digest = await _google_image_digest(request.image, project=self.project)
         return PublishedImage(image=request.image, digest=digest)
+
+    async def _wait_for_build(self, build_id: str, image: str) -> str:
+        terminal_failures = {
+            "CANCELLED",
+            "EXPIRED",
+            "FAILURE",
+            "INTERNAL_ERROR",
+            "TIMEOUT",
+        }
+        while True:
+            command = [
+                "gcloud",
+                "builds",
+                "describe",
+                build_id,
+                "--project",
+                self.project,
+                "--region",
+                self.region,
+                "--format=json",
+            ]
+            returncode, output, error = await _run_command(command)
+            if returncode != 0:
+                details = error.strip() or output.strip()
+                raise RuntimeError(
+                    f"Could not read Google Cloud Build {build_id}: {details}"
+                )
+            payload = _cloud_build_payload(output)
+            status = payload.get("status")
+            if status == "SUCCESS":
+                return output
+            if status in terminal_failures:
+                failure = payload.get("failureInfo")
+                detail = failure.get("detail") if isinstance(failure, dict) else None
+                raise RuntimeError(
+                    f"Google Cloud Build failed for {image}: {detail or status}"
+                )
+            await asyncio.sleep(2)
 
 
 def _image_base(repository: str) -> str:

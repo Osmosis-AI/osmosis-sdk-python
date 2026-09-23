@@ -137,16 +137,20 @@ async def test_google_cloud_builder_submits_generated_config(
         return None
 
     async def fake_run(command: list[str]) -> tuple[int, str, str]:
-        submitted["command"] = command
-        config_path = Path(command[command.index("--config") + 1])
-        submitted["config"] = json.loads(config_path.read_text())
+        if command[:3] == ["gcloud", "builds", "submit"]:
+            submitted["command"] = command
+            config_path = Path(command[command.index("--config") + 1])
+            submitted["config"] = json.loads(config_path.read_text())
+            return 0, '{"id":"build-1","status":"QUEUED"}', ""
+        assert command[:3] == ["gcloud", "builds", "describe"]
         return (
             0,
             json.dumps(
                 {
+                    "status": "SUCCESS",
                     "results": {
                         "images": [{"name": request.image, "digest": "sha256:def"}]
-                    }
+                    },
                 }
             ),
             "build logs",
@@ -161,11 +165,49 @@ async def test_google_cloud_builder_submits_generated_config(
 
     assert result.immutable_image.endswith("@sha256:def")
     assert submitted["command"][:3] == ["gcloud", "builds", "submit"]
+    assert "--async" in submitted["command"]
+    assert "--suppress-logs" in submitted["command"]
+    assert (
+        submitted["command"][submitted["command"].index("--gcs-source-staging-dir") + 1]
+        == "gs://acme_cloudbuild/source"
+    )
     config = submitted["config"]
     assert isinstance(config, dict)
     assert config["images"] == [request.image]
     step = config["steps"][0]
     assert "--build-arg=VERSION=1" in step["args"]
+
+
+async def test_google_artifact_registry_lookup_uses_tag_listing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    image = "us-west1-docker.pkg.dev/acme/repo/harbor:osmosis--abc"
+
+    async def fake_run(command: list[str]) -> tuple[int, str, str]:
+        assert command[:5] == [
+            "gcloud",
+            "artifacts",
+            "docker",
+            "images",
+            "list",
+        ]
+        return (
+            0,
+            json.dumps(
+                [
+                    {
+                        "package": "us-west1-docker.pkg.dev/acme/repo/harbor",
+                        "tags": ["osmosis--abc"],
+                        "version": "sha256:def",
+                    }
+                ]
+            ),
+            "",
+        )
+
+    monkeypatch.setattr(images, "_run_command", fake_run)
+
+    assert await images._google_image_digest(image, project="acme") == "sha256:def"
 
 
 @pytest.mark.parametrize(
