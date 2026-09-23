@@ -16,6 +16,10 @@ Workspace-scoped platform commands normally derive `X-Osmosis-Git` from the curr
 
 Train and eval submit remain source-backed. With `--workspace`, their config argument must be absolute; the CLI locates the containing Osmosis Git workspace, checks the selected workspace's connected repository against that Git identity, and submits with only `X-Osmosis-Workspace`. The local Git identity is retained in structured output because it is real source context, not inferred platform state. Without `--workspace`, their existing current-directory behavior is unchanged.
 
+`images build --repo URL` selects a connected job repository explicitly and
+does not require a local checkout. See [image-builds.md](./image-builds.md) for
+its source and artifact contract.
+
 ## Authentication storage and environments
 
 `OSMOSIS_TOKEN` is the highest-priority implicit authentication source and is intended for CI/CD, agents, and other non-interactive processes; an explicit `auth login --token` overrides it and persists the supplied token. Set `OSMOSIS_TOKEN_PLATFORM_URL` to the same normalized origin as `OSMOSIS_PLATFORM_URL`; this binding is required whenever the active platform is not the default platform and recommended in all environments. For backward compatibility, an unbound environment token is accepted only for the default platform URL. Interactive/device login and `auth login --token` persist credentials in the operating-system keyring; the JSON file under `~/.config/osmosis/` then contains only non-secret metadata. Existing file-backed tokens remain readable for migration.

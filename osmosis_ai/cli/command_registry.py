@@ -14,6 +14,7 @@ STANDALONE_UPGRADE = "upgrade"
 GROUP_DATASET = "dataset"
 GROUP_TRAIN = "train"
 GROUP_MODEL = "model"
+GROUP_IMAGES = "images"
 GROUP_EVAL = "eval"
 GROUP_BENCHMARK = "benchmark"
 GROUP_ROLLOUT = "rollout"
@@ -35,6 +36,7 @@ COMMAND_GROUPS: frozenset[str] = frozenset(
         GROUP_DATASET,
         GROUP_TRAIN,
         GROUP_MODEL,
+        GROUP_IMAGES,
         GROUP_EVAL,
         GROUP_BENCHMARK,
         GROUP_ROLLOUT,

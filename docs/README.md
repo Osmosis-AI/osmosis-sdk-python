@@ -37,6 +37,7 @@ The single `osmosis-ai` distribution always includes the CLI and framework-neutr
 - [troubleshooting.md](./troubleshooting.md) — engineering issues (rollout timeouts, event-loop blocking, concurrency tuning).
 - [cli.md](./cli.md) — CLI internals for contributors (command shells, lazy imports, JSON envelopes).
 - [run-downloads.md](./run-downloads.md) — eval and benchmark download commands, platform route contracts, fixed local layouts, resume, confirmation, and retry behavior.
+- [image-builds.md](./image-builds.md) — repository image submission, task discovery, commit pinning, resume, and verified artifacts.
 
 ## See also
 
