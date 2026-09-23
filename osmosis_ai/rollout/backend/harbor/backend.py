@@ -578,14 +578,17 @@ class HarborBackend(ExecutionBackend):
             else:
                 # The outcome still waits for the durable copy. Only a forced
                 # shutdown cancel interrupts this await: the trial has ended,
-                # so /rollout/cancel reports not_found. The worker then
-                # finishes on its own, before interpreter exit.
-                await asyncio.get_running_loop().run_in_executor(
-                    self.archive_executor,
-                    self.archive_trial,
-                    request.id,
-                    trial_result,
-                    pending,
+                # so /rollout/cancel reports not_found. The shield keeps that
+                # cancel from dropping an archive still queued behind a busy
+                # pool; the executor finishes it before interpreter exit.
+                await asyncio.shield(
+                    asyncio.get_running_loop().run_in_executor(
+                        self.archive_executor,
+                        self.archive_trial,
+                        request.id,
+                        trial_result,
+                        pending,
+                    )
                 )
             return outcome
 

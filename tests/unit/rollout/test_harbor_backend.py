@@ -5,6 +5,7 @@ import json
 import os
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
@@ -1698,22 +1699,36 @@ class TestArtifactLifecycle:
 
         assert lags and max(lags) < 0.1, f"event loop lag: {lags}"
 
+    @pytest.mark.parametrize("queued", [False, True], ids=["running", "queued"])
     async def test_cancel_during_archive_propagates_and_archive_completes(
-        self, template_task, tmp_path, monkeypatch
+        self, template_task, tmp_path, monkeypatch, queued
     ):
         # Only a forced shutdown cancel can interrupt the archive await. It must
-        # propagate, and must not tear down the trial the worker is still copying.
+        # propagate without dropping the archive, whether a worker is running it
+        # or it still waits in a saturated pool's queue.
         from osmosis_ai.rollout.context import RolloutContext
 
         entered = threading.Event()
         release = threading.Event()
-
-        def block():
-            entered.set()
-            release.wait(5)
-
-        self.slow_relocate(monkeypatch, block)
         backend = self.backend_for(template_task, tmp_path, FakeQueue(self.succeed))
+        if queued:
+            backend.archive_executor = ThreadPoolExecutor(max_workers=1)
+            backend.archive_executor.submit(release.wait, 5)
+            submit = backend.archive_executor.submit
+
+            def record(*args, **kwargs):
+                future = submit(*args, **kwargs)
+                entered.set()
+                return future
+
+            monkeypatch.setattr(backend.archive_executor, "submit", record)
+        else:
+
+            def block():
+                entered.set()
+                release.wait(5)
+
+            self.slow_relocate(monkeypatch, block)
         request = ExecutionRequest(id="r1", prompt=[{"role": "user", "content": "go"}])
 
         async def execute():
