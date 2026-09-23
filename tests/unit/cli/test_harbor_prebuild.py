@@ -18,14 +18,16 @@ def test_prebuild_forwards_remote_dataset_and_google_options(
         captured["dataset"] = dataset
         captured.update(kwargs)
         image = images.PublishedImage(
-            "us-west1-docker.pkg.dev/acme/repo/harbor:osmosis--abc",
+            "us-west1-docker.pkg.dev/acme/repo/one:abc",
             "sha256:def",
         )
         return images.BuildAndPublishResult(
             dataset=dataset,
             dataset_path=tmp_path / "cached",
             task_count=2,
-            environments=(images.PublishedEnvironment(image, "abc", ("one", "two")),),
+            environments=(
+                images.PublishedEnvironment("abc", (image,), ("one", "two")),
+            ),
         )
 
     monkeypatch.setattr(images, "build_and_publish", fake_build)
@@ -37,25 +39,22 @@ def test_prebuild_forwards_remote_dataset_and_google_options(
             "prebuild",
             "https://github.com/acme/tasks.git",
             "--image-repository",
-            "us-west1-docker.pkg.dev/acme/repo/harbor",
+            "us-west1-docker.pkg.dev/acme/repo",
             "--build-system",
             "google-cloud-build",
             "--gcp-project",
             "acme",
             "--gcp-region",
             "us-west1",
-            "--build-arg",
-            "VERSION=1",
         ]
     )
 
     assert rc == 0
     assert captured == {
         "dataset": "https://github.com/acme/tasks.git",
-        "image_repository": "us-west1-docker.pkg.dev/acme/repo/harbor",
+        "image_repository": "us-west1-docker.pkg.dev/acme/repo",
         "build_system": "google-cloud-build",
         "platform": "linux/amd64",
-        "build_args": {"VERSION": "1"},
         "buildx_builder": None,
         "gcp_project": "acme",
         "gcp_region": "us-west1",
@@ -63,27 +62,22 @@ def test_prebuild_forwards_remote_dataset_and_google_options(
     payload = json.loads(capsys.readouterr().out)
     assert payload["operation"] == "harbor.prebuild"
     assert payload["resource"]["task_count"] == 2
+    assert payload["resource"]["environment_count"] == 1
+    assert payload["resource"]["image_count"] == 1
     assert payload["resource"]["images"][0]["immutable_image"].endswith("@sha256:def")
 
 
-def test_prebuild_rejects_invalid_build_arg(monkeypatch, capsys) -> None:
+def test_prebuild_does_not_expose_non_harbor_build_args(capsys) -> None:
     rc = cli.main(
         [
-            "--json",
             "harbor",
             "prebuild",
-            "./tasks",
-            "--image-repository",
-            "example.com/acme/harbor",
-            "--build-arg",
-            "INVALID",
+            "--help",
         ]
     )
 
-    assert rc == 1
-    payload = json.loads(capsys.readouterr().err)
-    assert payload["error"]["code"] == "VALIDATION"
-    assert "KEY=VALUE" in payload["error"]["message"]
+    assert rc == 0
+    assert "--build-arg" not in capsys.readouterr().out
 
 
 def test_google_cloud_build_requires_project_and_region(capsys) -> None:
