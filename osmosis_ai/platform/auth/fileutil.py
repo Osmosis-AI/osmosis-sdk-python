@@ -29,6 +29,8 @@ def atomic_write_json(
     data: Any,
     mode: int = 0o600,
     indent: int = 2,
+    *,
+    secure_parent: bool = True,
 ) -> None:
     """Atomically write JSON data to a file with proper permissions.
 
@@ -40,9 +42,13 @@ def atomic_write_json(
         data: Data to serialize as JSON.
         mode: File permissions (default: 0o600 for owner-only read/write).
         indent: JSON indentation (default: 2).
+        secure_parent: Restrict the parent directory to owner-only access.
     """
     parent = path.parent
-    ensure_secure_dir(parent)
+    if secure_parent:
+        ensure_secure_dir(parent)
+    else:
+        parent.mkdir(parents=True, exist_ok=True)
 
     # Create temp file in same directory for atomic rename.
     # Set permissions on the fd BEFORE os.replace() so the file already has

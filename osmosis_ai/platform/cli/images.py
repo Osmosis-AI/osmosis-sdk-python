@@ -23,6 +23,7 @@ from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.cli.output import DetailResult, OperationResult, detail_fields
 from osmosis_ai.platform.api.client import OsmosisClient
 from osmosis_ai.platform.auth.config import get_platform_url
+from osmosis_ai.platform.auth.fileutil import atomic_write_json
 from osmosis_ai.platform.auth.platform_client import PlatformAPIError
 from osmosis_ai.platform.cli.workspace_repo import normalize_git_identity
 
@@ -31,15 +32,7 @@ _MAX_BYTES = 2 * 1024**3
 
 
 def write_json(path: Path, data: dict[str, Any]) -> None:
-    descriptor, name = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.")
-    temporary = Path(name)
-    try:
-        with os.fdopen(descriptor, "w") as handle:
-            json.dump(data, handle, indent=2)
-            handle.write("\n")
-        temporary.replace(path)
-    finally:
-        temporary.unlink(missing_ok=True)
+    atomic_write_json(path, data, secure_parent=False)
 
 
 def prepare_request(
@@ -238,6 +231,85 @@ def _tree_identity(root: Path) -> dict[str, Any]:
     return result
 
 
+def _extract_bundle(bundle: Path, root: Path) -> None:
+    size = 0
+    try:
+        with tarfile.open(bundle) as archive:
+            for index, member in enumerate(archive):
+                size += member.size
+                if (
+                    index >= 100000
+                    or size > _MAX_BYTES
+                    or not (member.isfile() or member.isdir())
+                ):
+                    raise CLIError(
+                        "Task bundle exceeds extraction limits or contains unsupported entries",
+                        code="PLATFORM_ERROR",
+                    )
+                archive.extract(member, root, filter="data")
+    except tarfile.TarError:
+        raise CLIError(
+            "Task bundle is invalid or contains unsafe archive entries",
+            code="PLATFORM_ERROR",
+        ) from None
+
+
+def _task_bindings(
+    root: Path, tasks_dir: str, tasks: dict[str, Any], images: dict[str, str]
+) -> dict[str, Any]:
+    prefix = tasks_dir + "/"
+    bindings = {}
+    source = root / tasks_dir
+    selected_root = source.resolve()
+    for name, roles in tasks.items():
+        if not name.startswith(prefix) or not (root / name).resolve().is_relative_to(
+            selected_root
+        ):
+            raise CLIError(
+                "Published task is outside the selected directory",
+                code="PLATFORM_ERROR",
+            )
+        config = tomllib.loads((root / name / "task.toml").read_text())
+        environments = {"environment": config["environment"]}
+        owners = [
+            ("", config),
+            *((f"steps.{i}.", step) for i, step in enumerate(config.get("steps", []))),
+        ]
+        for role_prefix, owner in owners:
+            verifier = owner.get("verifier", {}).get("environment")
+            if verifier is not None:
+                environments[role_prefix + "verifier.environment"] = verifier
+        if roles.keys() != environments.keys():
+            raise CLIError(
+                "Published verifier/agent roles differ from the task",
+                code="PLATFORM_ERROR",
+            )
+        mapped = {}
+        for role, key in roles.items():
+            if not isinstance(key, str) or key not in images:
+                raise CLIError(
+                    "Published task references an undefined image",
+                    code="PLATFORM_ERROR",
+                )
+            if environments[role].get("docker_image") != images[key]:
+                raise CLIError(
+                    "Published task image binding is inconsistent",
+                    code="PLATFORM_ERROR",
+                )
+            mapped[role] = images[key]
+        bindings[name.removeprefix(prefix)] = mapped
+    discovered = set()
+    for current, directories, files in os.walk(source):
+        if "task.toml" in files:
+            discovered.add(Path(current).relative_to(root).as_posix())
+            directories.clear()
+    if discovered != set(tasks):
+        raise CLIError(
+            "Task bundle inventory differs from the manifest", code="PLATFORM_ERROR"
+        )
+    return bindings
+
+
 def collect(
     client: OsmosisClient, state: dict[str, Any], status: dict[str, Any], output: Path
 ) -> dict[str, Any]:
@@ -273,87 +345,11 @@ def collect(
             "Named image is missing from the manifest", code="PLATFORM_ERROR"
         )
     download(result["bundle"], access["bundle"], output / "bundle.tar.gz")
-    prefix = state["request"]["tasks_dir"] + "/"
-    bindings = {}
     with tempfile.TemporaryDirectory(prefix="image-bundle-", dir=output) as directory:
         root = Path(directory)
-        size = 0
-        try:
-            with tarfile.open(output / "bundle.tar.gz") as archive:
-                for index, member in enumerate(archive):
-                    size += member.size
-                    if (
-                        index >= 100000
-                        or size > _MAX_BYTES
-                        or not (member.isfile() or member.isdir())
-                    ):
-                        raise CLIError(
-                            "Task bundle exceeds extraction limits or contains unsupported entries",
-                            code="PLATFORM_ERROR",
-                        )
-                    archive.extract(member, root, filter="data")
-        except tarfile.TarError:
-            raise CLIError(
-                "Task bundle is invalid or contains unsafe archive entries",
-                code="PLATFORM_ERROR",
-            ) from None
+        _extract_bundle(output / "bundle.tar.gz", root)
+        bindings = _task_bindings(root, state["request"]["tasks_dir"], tasks, images)
         source = root / state["request"]["tasks_dir"]
-        selected_root = source.resolve()
-        for name, roles in tasks.items():
-            if not name.startswith(prefix) or not (
-                root / name
-            ).resolve().is_relative_to(selected_root):
-                raise CLIError(
-                    "Published task is outside the selected directory",
-                    code="PLATFORM_ERROR",
-                )
-            config = tomllib.loads((root / name / "task.toml").read_text())
-            expected = {"environment"}
-            owners = [
-                ("", config),
-                *(
-                    (f"steps.{i}.", step)
-                    for i, step in enumerate(config.get("steps", []))
-                ),
-            ]
-            for role_prefix, owner in owners:
-                if owner.get("verifier", {}).get("environment") is not None:
-                    expected.add(role_prefix + "verifier.environment")
-            if set(roles) != expected:
-                raise CLIError(
-                    "Published verifier/agent roles differ from the task",
-                    code="PLATFORM_ERROR",
-                )
-            mapped = {}
-            for role, key in roles.items():
-                if not isinstance(key, str) or key not in images:
-                    raise CLIError(
-                        "Published task references an undefined image",
-                        code="PLATFORM_ERROR",
-                    )
-                table: Any = config
-                for component in role.split("."):
-                    table = (
-                        table[int(component)]
-                        if isinstance(table, list)
-                        else table[component]
-                    )
-                if table.get("docker_image") != images[key]:
-                    raise CLIError(
-                        "Published task image binding is inconsistent",
-                        code="PLATFORM_ERROR",
-                    )
-                mapped[role] = images[key]
-            bindings[name.removeprefix(prefix)] = mapped
-        discovered = set()
-        for current, directories, files in os.walk(source):
-            if "task.toml" in files:
-                discovered.add(Path(current).relative_to(root).as_posix())
-                directories.clear()
-        if discovered != set(tasks):
-            raise CLIError(
-                "Task bundle inventory differs from the manifest", code="PLATFORM_ERROR"
-            )
         destination = output / "tasks"
         if destination.is_symlink():
             raise CLIError(

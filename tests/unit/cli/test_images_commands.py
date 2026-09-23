@@ -411,7 +411,9 @@ def test_atomic_state_write_does_not_follow_existing_symlinks(tmp_path):
     destination.symlink_to(victim)
     predictable_temporary = tmp_path / "request.tmp"
     predictable_temporary.symlink_to(victim)
+    tmp_path.chmod(0o755)
     images.write_json(destination, {"request_id": "new"})
+    assert tmp_path.stat().st_mode & 0o777 == 0o755
     assert victim.read_text() == "preserve"
     assert not destination.is_symlink()
     assert json.loads(destination.read_text()) == {"request_id": "new"}
