@@ -109,7 +109,7 @@ class SourceHarborBackend(HarborBackend):
 
         super().__init__(**kwargs)
         self.image_bindings = image_bindings
-        self.environment_healthcheck = (
+        self._environment_healthcheck: HealthcheckConfig | None = (
             HealthcheckConfig.model_validate(environment_healthcheck)
             if environment_healthcheck is not None
             else None
@@ -128,12 +128,12 @@ class SourceHarborBackend(HarborBackend):
             raise ValueError("Task is outside this gateway's pinned source")
         directory = super().materialize_task(task, rollout_id, container_input)
         bind_task_images(directory, self.image_bindings[name])
-        if self.environment_healthcheck is not None:
+        if self._environment_healthcheck is not None:
             import toml
 
             path = directory / "task.toml"
             raw = tomllib.loads(path.read_text())
-            required = self.environment_healthcheck.model_dump()
+            required = self._environment_healthcheck.model_dump()
             original = raw["environment"].get("healthcheck")
             if original:
                 from harbor.models.task.config import HealthcheckConfig

@@ -1,6 +1,6 @@
 """Configuration for the managed native Harbor gateway, independent of task source."""
 
-from typing import Any
+from typing import Any, ClassVar
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -8,7 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field
 class HarborHealthcheckConfig(BaseModel):
     """Portable subset of Harbor's native HealthcheckConfig for the bare CLI."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config: ClassVar[ConfigDict] = ConfigDict(extra="forbid")
     command: str = Field(min_length=1)
     interval_sec: float = Field(default=5, gt=0)
     timeout_sec: float = Field(default=30, gt=0)
@@ -18,7 +18,7 @@ class HarborHealthcheckConfig(BaseModel):
 
 
 class HarborGatewayConfig(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config: ClassVar[ConfigDict] = ConfigDict(extra="forbid")
 
     agent: str = Field(default="opencode", pattern=r"^[a-z][a-z0-9-]*$")
     native_agent_kwargs: dict[str, Any] = Field(default_factory=dict)
