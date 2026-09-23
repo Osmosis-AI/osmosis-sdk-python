@@ -44,6 +44,10 @@ def prepare_request(
     image_layout: str | None = None,
 ) -> dict[str, Any]:
     identity = normalize_git_identity(repository).identity
+    if tasks_dir == "." and image_layout != "source-v1":
+        raise CLIError(
+            "Repository-root task paths require --url source builds", code="VALIDATION"
+        )
     if (
         not ref
         or len(ref) > 255
@@ -325,7 +329,12 @@ def collect(
         state["request_id"], git_identity=state["inputs"]["git_identity"]
     )
     download(result["manifest"], access["manifest"], output / "manifest.json")
-    manifest = json.loads((output / "manifest.json").read_text())
+    try:
+        manifest = json.loads((output / "manifest.json").read_text())
+    except json.JSONDecodeError:
+        raise CLIError(
+            "Published image manifest is not valid JSON", code="PLATFORM_ERROR"
+        ) from None
     if state["request"].get("image_layout") == "source-v1":
         return collect_source_manifest(state, status, manifest, output)
     if (
@@ -387,6 +396,19 @@ def collect_source_manifest(
     manifest: dict[str, Any],
     output: Path,
 ) -> dict[str, Any]:
+    try:
+        summary = _source_manifest_summary(state, status, manifest)
+    except (KeyError, TypeError, ValueError, AttributeError):
+        raise CLIError(
+            "Source image manifest does not match this build", code="PLATFORM_ERROR"
+        ) from None
+    write_json(output / "images.json", summary)
+    return summary
+
+
+def _source_manifest_summary(
+    state: dict[str, Any], status: dict[str, Any], manifest: dict[str, Any]
+) -> dict[str, Any]:
     from osmosis_ai.harbor_images import POLICY, TaskSource
 
     source = TaskSource(**manifest["source"])
@@ -398,8 +420,8 @@ def collect_source_manifest(
         or source.path != request["tasks_dir"]
         or source.revision != status["source_revision"]
         or (
-            re.fullmatch(r"[0-9a-f]{40}", request["ref"])
-            and source.revision != request["ref"]
+            re.fullmatch(r"[0-9a-fA-F]{40}", request["ref"])
+            and source.revision != request["ref"].lower()
         )
         or len(manifest["tasks"]) != status["result"]["task_count"]
     ):
@@ -429,8 +451,27 @@ def collect_source_manifest(
             for name, bindings in tasks.items()
         },
     }
-    write_json(output / "images.json", summary)
     return summary
+
+
+def validate_output_path(output_dir: Path, output: Path | None) -> None:
+    if output is None:
+        return
+    destination = output.resolve()
+    reserved = {
+        (output_dir / name).resolve()
+        for name in ("request.json", "status.json", "manifest.json", "bundle.tar.gz")
+    }
+    if (
+        destination == output_dir.resolve()
+        or destination in reserved
+        or destination.is_relative_to((output_dir / "tasks").resolve())
+        or output.is_dir()
+    ):
+        raise CLIError(
+            "--output must not overwrite build state or downloaded tasks; choose a separate JSON file",
+            code="VALIDATION",
+        )
 
 
 def build(
@@ -445,6 +486,7 @@ def build(
     image_layout: str | None = None,
     output: Path | None = None,
 ) -> OperationResult:
+    validate_output_path(output_dir, output)
     state = prepare_request(
         output_dir, repository, ref, tasks_dir, request_id, image_layout
     )
@@ -455,6 +497,9 @@ def build(
         if output is not None:
             output.parent.mkdir(parents=True, exist_ok=True)
             write_json(output, summary)
+    message = f"Image build {status['phase']}. State saved in {output_dir}"
+    if output is not None and status["phase"] != "completed":
+        message += f". Export {output} is not ready; rerun the same command with --wait to collect it after completion."
     return OperationResult(
         operation="images.build",
         status=status["phase"],
@@ -462,8 +507,16 @@ def build(
             "request_id": state["request_id"],
             **status,
             "output_dir": str(output_dir),
+            **(
+                {
+                    "output_file": str(output),
+                    "output_ready": status["phase"] == "completed",
+                }
+                if output is not None
+                else {}
+            ),
         },
-        message=f"Image build {status['phase']}. State saved in {output_dir}",
+        message=message,
     )
 
 

@@ -903,3 +903,31 @@ def test_up_command_rejects_unknown_backend(monkeypatch):
     monkeypatch.setattr(dev_server_module, "up", up)
     assert CliRunner().invoke(app, ["up", "--backend", "docker"]).exit_code == 2
     up.assert_not_called()
+
+
+@pytest.mark.parametrize("options", [["--ref", "a" * 40], ["--path", "custom/tasks"]])
+def test_up_rejects_source_options_without_url(monkeypatch, options):
+    from osmosis_ai.cli.commands.dev.server import app
+
+    up = Mock()
+    monkeypatch.setattr(dev_server_module, "up", up)
+    result = CliRunner().invoke(app, ["up", *options])
+    assert result.exit_code != 0
+    assert isinstance(result.exception, CLIError)
+    assert "require --url" in str(result.exception)
+    up.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [{"ref": "a" * 40}, {"path": "custom/tasks"}, {"url": "", "ref": "a" * 40}],
+)
+def test_up_source_validation_precedes_local_provisioning(monkeypatch, kwargs):
+    resolve = Mock()
+    monkeypatch.setattr(
+        dev_server_module, "resolve_git_workspace_directory_context", resolve
+    )
+    with pytest.raises(CLIError) as error:
+        dev_server_module.up(ttl_hours=24, **kwargs)
+    assert error.value.code == "VALIDATION"
+    resolve.assert_not_called()

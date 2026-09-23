@@ -1,6 +1,7 @@
 import asyncio
 import hashlib
 import io
+import json
 import tarfile
 import tomllib
 from dataclasses import asdict
@@ -277,7 +278,9 @@ async def test_hub_manifest_downloads_exact_task_digests(tmp_path, monkeypatch):
     assert (tmp_path / "tasks/acme/add/task.toml").is_file()
 
 
-def test_registry_resolves_verifies_and_caches_manifest(monkeypatch):
+def test_registry_resolves_verifies_and_caches_manifest(tmp_path, monkeypatch):
+    monkeypatch.setenv("DOCKER_CONFIG", str(tmp_path))
+    (tmp_path / "config.json").write_text("malformed local credentials")
     content = b'{"schemaVersion":2}'
     digest = "sha256:" + hashlib.sha256(content).hexdigest()
     response = httpx.Response(
@@ -299,11 +302,42 @@ def test_registry_resolves_verifies_and_caches_manifest(monkeypatch):
     client.get.return_value = httpx.Response(404)
     with pytest.raises(RuntimeError, match="images build"):
         resolver.resolve("missing")
+    for status in (401, 403):
+        client.get.return_value = httpx.Response(status)
+        with pytest.raises(RuntimeError, match="Registry authentication failed"):
+            resolver.resolve("unauthorized")
     client.get.return_value = httpx.Response(
         200, content=content, headers={"docker-content-digest": "sha256:" + "b" * 64}
     )
     with pytest.raises(ValueError, match="verification"):
         resolver.resolve("corrupt")
+
+
+@pytest.mark.parametrize(
+    "config",
+    [
+        "invalid JSON",
+        "[]",
+        json.dumps({"auths": {"us-west1-docker.pkg.dev": {"auth": "not base64!"}}}),
+        json.dumps({"auths": {"us-west1-docker.pkg.dev": {"auth": "bm9jb2xvbg=="}}}),
+    ],
+)
+def test_malformed_docker_credentials_fail_cleanly(tmp_path, monkeypatch, config):
+    monkeypatch.setenv("DOCKER_CONFIG", str(tmp_path))
+    (tmp_path / "config.json").write_text(config)
+    client = Mock()
+    monkeypatch.setattr(httpx, "Client", client)
+    resolver = RegistryResolver("us-west1-docker.pkg.dev/project/repo")
+    with pytest.raises(
+        RuntimeError, match="Registry credentials could not be read"
+    ) as error:
+        resolver.resolve("tag")
+    assert config not in str(error.value)
+    client.assert_not_called()
+
+
+def test_task_source_normalizes_full_sha_case():
+    assert TaskSource(SOURCE.repository, SOURCE.path, "aB" * 20).revision == "ab" * 20
 
 
 def test_dev_source_up_does_not_require_local_gateway_code(tmp_path, monkeypatch):

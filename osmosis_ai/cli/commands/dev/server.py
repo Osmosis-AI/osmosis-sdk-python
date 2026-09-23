@@ -4,6 +4,7 @@ from typing import NoReturn
 
 import typer
 
+from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.cli.options import all_option, limit_option
 from osmosis_ai.cli.output import CommandResult
 from osmosis_ai.platform.constants import (
@@ -49,6 +50,10 @@ def up(
     ),
 ) -> CommandResult:
     """Provision a remote rollout server for the current rollout folder."""
+    if url is None and (ref is not None or path != "tasks"):
+        raise CLIError(
+            "Source --path and --ref options require --url", code="VALIDATION"
+        )
     from osmosis_ai.platform.cli.dev_server import up as _up
 
     return _up(
@@ -56,7 +61,7 @@ def up(
         yes=yes,
         sandbox_environment=sandbox_environment,
         **({"backend": backend} if backend is not None else {}),
-        **({"url": url, "path": path, "ref": ref} if url else {}),
+        **({"url": url, "path": path, "ref": ref} if url is not None else {}),
     )
 
 

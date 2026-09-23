@@ -34,7 +34,9 @@ def build(
         help="Task directory or dataset.toml relative to the repository root.",
     ),
     output: Path | None = typer.Option(
-        None, "--output", help="Write the verified task-to-image JSON to this file."
+        None,
+        "--output",
+        help="Write verified task-to-image JSON here after the build completes.",
     ),
     output_dir: Path = typer.Option(
         Path(".osmosis/images"),
@@ -49,7 +51,7 @@ def build(
     wait: bool = typer.Option(
         True,
         "--wait/--no-wait",
-        help="Wait for completion and download the prepared tasks.",
+        help="Wait for completion and collect the verified build artifacts.",
     ),
     timeout: float = typer.Option(
         10800,

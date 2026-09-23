@@ -64,6 +64,7 @@ class TaskSource:
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "repository", github_repository(self.repository))
+        object.__setattr__(self, "revision", self.revision.lower())
         relative_path(self.path)
         if not re.fullmatch(r"[a-f0-9]{40}", self.revision):
             raise ValueError("Task source revision must be a full Git commit SHA")

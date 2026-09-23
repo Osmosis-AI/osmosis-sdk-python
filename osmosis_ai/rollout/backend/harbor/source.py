@@ -48,12 +48,19 @@ class RegistryResolver:
             else None
         )
         if auth is None and config.is_file():
-            entry = json.loads(config.read_text()).get("auths", {}).get(host, {})
-            if entry.get("auth"):
-                username, password = (
-                    base64.b64decode(entry["auth"]).decode().split(":", 1)
-                )
-                auth = httpx.BasicAuth(username, password)
+            try:
+                entry = json.loads(config.read_text()).get("auths", {}).get(host, {})
+                if entry.get("auth"):
+                    username, password = (
+                        base64.b64decode(entry["auth"], validate=True)
+                        .decode()
+                        .split(":", 1)
+                    )
+                    auth = httpx.BasicAuth(username, password)
+            except (OSError, ValueError, TypeError, AttributeError):
+                raise RuntimeError(
+                    "Registry credentials could not be read; refresh Docker login or use a managed source gateway"
+                ) from None
         # Read the refreshed Docker credential on each cache miss. Never follow
         # redirects or a registry-provided authentication URL with credentials.
         with httpx.Client(auth=auth, timeout=30, follow_redirects=False) as client:
@@ -69,6 +76,10 @@ class RegistryResolver:
                         )
                     )
                 },
+            )
+        if response.status_code in (401, 403):
+            raise RuntimeError(
+                "Registry authentication failed; refresh Docker login or start a new managed source gateway"
             )
         if response.status_code != 200:
             raise RuntimeError(

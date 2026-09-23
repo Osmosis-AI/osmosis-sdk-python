@@ -46,6 +46,10 @@ def up(
             backend=backend,
             sandbox_environment=sandbox_environment,
         )
+    if ref is not None or path != "tasks":
+        raise CLIError(
+            "Source --path and --ref options require --url", code="VALIDATION"
+        )
     cwd = Path.cwd()
     if not (cwd / "main.py").is_file():
         raise CLIError(
