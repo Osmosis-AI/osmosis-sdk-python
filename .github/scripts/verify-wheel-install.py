@@ -25,6 +25,7 @@ from packaging.markers import default_environment
 from packaging.requirements import Requirement
 
 BASE_REQUIREMENTS = {
+    "anyio",
     "cryptography",
     "httpx",
     "keyring",
