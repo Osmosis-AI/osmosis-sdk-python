@@ -1,7 +1,8 @@
 """<your-rollout>: placeholder rollout server created by `osmosis rollout init`.
 
-Fill in two methods, then run `python main.py` to start a FastAPI rollout
-server on $_OSMOSIS_ROLLOUT_PORT (default 8000):
+Fill in two methods, then run `osmosis rollout serve rollout.toml` from this
+directory to start a FastAPI rollout server on $_OSMOSIS_ROLLOUT_PORT (default
+8000). This module remains directly executable for compatibility:
 
   - MyAgentWorkflow.run():  drive the LLM and register a sample source.
   - MyGrader.grade():       turn the sample into a scalar reward.

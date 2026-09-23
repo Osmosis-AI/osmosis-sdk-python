@@ -1,7 +1,13 @@
 # `<your-rollout>`
 
 Placeholder rollout created by `osmosis rollout init`. Edit `main.py` to fill in
-`MyAgentWorkflow.run()` and `MyGrader.grade()`.
+`MyAgentWorkflow.run()` and `MyGrader.grade()`, then run its declarative server
+config from the workspace directory:
+
+```bash
+uv run --project rollouts/<your-rollout> \
+  osmosis rollout serve rollouts/<your-rollout>/rollout.toml
+```
 
 Submit an evaluation run from the workspace directory:
 

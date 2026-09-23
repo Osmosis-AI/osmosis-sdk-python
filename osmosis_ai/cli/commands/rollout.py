@@ -1,8 +1,9 @@
-"""Rollout commands: list."""
+"""Rollout commands."""
 
 from __future__ import annotations
 
-from typing import Annotated
+from pathlib import Path
+from typing import Annotated, NoReturn
 
 import typer
 
@@ -10,9 +11,45 @@ from osmosis_ai.cli.options import all_option, limit_option
 from osmosis_ai.cli.output import CommandResult
 
 app: typer.Typer = typer.Typer(
-    help="Manage rollouts (init, list).",
+    help="Create, serve, and list rollouts.",
     no_args_is_help=True,
 )
+
+
+def _server_finished() -> NoReturn:
+    """Exit cleanly after Uvicorn returns without invoking result rendering."""
+    from osmosis_ai.cli.output import get_output_context
+
+    get_output_context().output_emitted = True
+    raise typer.Exit(0)
+
+
+@app.command("serve")
+def serve(
+    config_path: Path = typer.Argument(
+        ...,
+        exists=False,
+        file_okay=True,
+        dir_okay=False,
+        readable=False,
+        resolve_path=False,
+        help="Path to rollout server config TOML file.",
+        metavar="CONFIG",
+    ),
+    host: str = typer.Option("0.0.0.0", "--host", help="Server bind host."),
+    port: int | None = typer.Option(
+        None,
+        "--port",
+        min=1,
+        max=65535,
+        help="Server port; defaults to _OSMOSIS_ROLLOUT_PORT or 8000.",
+    ),
+) -> NoReturn:
+    """Run the rollout server declared by a TOML config."""
+    from osmosis_ai.rollout.serve import serve as _serve
+
+    _serve(config_path, host=host, port=port)
+    _server_finished()
 
 
 @app.command("init")
