@@ -89,10 +89,25 @@ def test_timeout_preserves_remote_job_and_no_wait_returns_immediately(
     assert (
         images.wait_for_build(client, saved, tmp_path, 30, False)["phase"] == "queued"
     )
-    monkeypatch.setattr(images.time, "monotonic", Mock(side_effect=[0, 31]))
+    client.reset_mock()
+    clock = Mock(side_effect=[0, 1, 31, 31])
+    monkeypatch.setattr(images.time, "monotonic", clock)
+    monkeypatch.setattr(images.time, "sleep", lambda _: None)
     with pytest.raises(CLIError, match="cloud builds continue"):
         images.wait_for_build(client, saved, tmp_path, 30, True)
-    assert client.method_calls == [client.method_calls[0]]
+    client.submit_image_build.assert_called_once_with(**saved["request"])
+    client.get_image_build.assert_not_called()
+    assert json.loads((tmp_path / "status.json").read_text())["phase"] == "queued"
+    clock.side_effect = [40, 41]
+    client.submit_image_build.return_value = {"phase": "completed"}
+    resumed = state(tmp_path)
+    assert resumed["request_id"] == saved["request_id"]
+    assert (
+        images.wait_for_build(client, resumed, tmp_path, 30, True)["phase"]
+        == "completed"
+    )
+    assert len(client.method_calls) == 2
+    assert client.method_calls[0] == client.method_calls[1]
 
 
 def fixture_artifacts(tmp_path, corruption=None):
@@ -102,11 +117,23 @@ def fixture_artifacts(tmp_path, corruption=None):
     if corruption == "binding":
         config = config.replace(b"registry/task", b"registry/other")
     with tarfile.open(fileobj=buffer, mode="w:gz") as archive:
-        member = tarfile.TarInfo("tasks/group/one/task.toml")
+        member = tarfile.TarInfo(
+            "outside/task.toml"
+            if corruption == "outside-directory"
+            else "tasks/group/one/task.toml"
+        )
         member.size = len(config)
         archive.addfile(member, io.BytesIO(config))
         if corruption == "traversal":
             archive.addfile(tarfile.TarInfo("../../outside"))
+        if corruption in ("unlisted-task", "nested-fixture"):
+            member = tarfile.TarInfo(
+                "tasks/group/two/task.toml"
+                if corruption == "unlisted-task"
+                else "tasks/group/one/environment/fixture/task.toml"
+            )
+            member.size = len(config)
+            archive.addfile(member, io.BytesIO(config))
     bundle_bytes = buffer.getvalue()
 
     def reference(name, data):
@@ -132,6 +159,8 @@ def fixture_artifacts(tmp_path, corruption=None):
     }
     if corruption == "roles":
         manifest["tasks"][0]["environments"].pop("verifier.environment")
+    if corruption == "outside-directory":
+        manifest["tasks"][0]["task"] = "tasks/../outside"
     manifest_bytes = json.dumps(manifest).encode()
     ref = reference("manifest", manifest_bytes)
     status = {
@@ -153,7 +182,16 @@ def fixture_artifacts(tmp_path, corruption=None):
 
 
 @pytest.mark.parametrize(
-    "corruption", [None, "revision", "binding", "roles", "traversal"]
+    "corruption",
+    [
+        None,
+        "revision",
+        "binding",
+        "roles",
+        "traversal",
+        "outside-directory",
+        "unlisted-task",
+    ],
 )
 def test_download_validates_commit_task_roles_and_preserves_local_edits(
     tmp_path, monkeypatch, corruption
@@ -181,6 +219,89 @@ def test_download_validates_commit_task_roles_and_preserves_local_edits(
     with pytest.raises(CLIError, match="changed locally"):
         images.collect(client, saved, status, tmp_path)
     assert "secret" not in (tmp_path / "request.json").read_text()
+
+
+def test_nested_codebase_fixture_is_not_an_additional_task(tmp_path, monkeypatch):
+    saved = state(tmp_path)
+    status, access, files = fixture_artifacts(tmp_path, "nested-fixture")
+    client = Mock()
+    client.get_image_build_artifacts.return_value = access
+    monkeypatch.setattr(
+        images,
+        "download",
+        lambda reference, capability, path: path.write_bytes(files[reference["name"]]),
+    )
+    assert set(images.collect(client, saved, status, tmp_path)["tasks"]) == {
+        "group/one"
+    }
+
+
+def test_atomic_state_write_does_not_follow_existing_symlinks(tmp_path):
+    victim = tmp_path / "victim"
+    victim.write_text("preserve")
+    destination = tmp_path / "request.json"
+    destination.symlink_to(victim)
+    predictable_temporary = tmp_path / "request.tmp"
+    predictable_temporary.symlink_to(victim)
+    images.write_json(destination, {"request_id": "new"})
+    assert victim.read_text() == "preserve"
+    assert not destination.is_symlink()
+    assert json.loads(destination.read_text()) == {"request_id": "new"}
+    assert destination.stat().st_mode & 0o777 == 0o600
+    assert {p.name for p in tmp_path.iterdir()} == {
+        "victim",
+        "request.json",
+        "request.tmp",
+    }
+
+
+@pytest.mark.parametrize("valid_checksum", [True, False])
+def test_atomic_download_preserves_symlink_target_and_failed_transfer(
+    tmp_path, monkeypatch, valid_checksum
+):
+    content = b"new artifact"
+    victim = tmp_path / "victim"
+    victim.write_bytes(b"preserve")
+    destination = tmp_path / "manifest.json"
+    destination.symlink_to(victim)
+    opener = Mock()
+    opener.open.return_value = io.BytesIO(content)
+    monkeypatch.setattr(images.urllib.request, "build_opener", lambda *args: opener)
+    reference = {
+        "sha256": hashlib.sha256(content).hexdigest() if valid_checksum else "bad"
+    }
+    capability = {
+        "reference": reference,
+        "url": "https://storage.googleapis.com/artifact",
+    }
+    if valid_checksum:
+        images.download(reference, capability, destination)
+        assert destination.read_bytes() == content
+        assert not destination.is_symlink()
+    else:
+        with pytest.raises(CLIError, match="checksum"):
+            images.download(reference, capability, destination)
+        assert destination.is_symlink()
+    assert victim.read_bytes() == b"preserve"
+    assert {p.name for p in tmp_path.iterdir()} == {"victim", "manifest.json"}
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://[invalid/path?secret",
+        "https://storage.googleapis.com:bad/path?secret",
+        "https://storage.googleapis.com:65536/path?secret",
+    ],
+)
+def test_malformed_download_origin_has_safe_platform_error(tmp_path, url):
+    with pytest.raises(
+        CLIError, match="Unexpected image artifact download origin"
+    ) as error:
+        images.download({}, {"reference": {}, "url": url}, tmp_path / "artifact")
+    assert error.value.code == "PLATFORM_ERROR"
+    assert "secret" not in str(error.value)
+    assert not (tmp_path / "artifact").exists()
 
 
 def test_cli_repo_only_json_submission(tmp_path, monkeypatch):

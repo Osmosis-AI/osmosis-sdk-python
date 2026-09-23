@@ -36,7 +36,9 @@ to `tasks`. The SDK normalizes HTTPS and SSH URLs and sends the same repository
 identity in the body and `X-Osmosis-Git`. The API can derive that scope from the
 repository body for callers without a workspace header. It checks workspace
 membership and repository identity before forwarding a server-derived
-organization and GitHub installation ID. No task array or credentials are sent.
+organization and GitHub installation ID. The request body contains no task array,
+repository credentials or registry credentials. The CLI sends your Osmosis token
+in the Authorization header to authenticate to the platform.
 
 Submission returns HTTP 202 with `request_id`, `status_url` and the initial
 status. `GET /api/cli/image-builds/{request_id}` reports `phase`,
@@ -81,7 +83,9 @@ fixing a terminal build failure.
 seconds (10,800 by default), then reports that remote work continues. Rerun
 the same command to resume; local timeout or interruption does not cancel builds.
 
-After completion the CLI obtains fresh download capabilities and validates
+During submission and polling, `status.json` records the latest progress or failure
+details, including with `--no-wait`. After completion the CLI obtains fresh
+download capabilities and validates
 checksums, source revision, task count, and agent/verifier image bindings. It
 writes `manifest.json`, `bundle.tar.gz`, `images.json` and prepared `tasks/`
 under `--output-dir` (default `.osmosis/images`). It refuses to replace locally

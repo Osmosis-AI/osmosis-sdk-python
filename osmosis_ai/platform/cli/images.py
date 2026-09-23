@@ -31,12 +31,15 @@ _MAX_BYTES = 2 * 1024**3
 
 
 def write_json(path: Path, data: dict[str, Any]) -> None:
-    temporary = path.with_suffix(".tmp")
-    descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(descriptor, "w") as handle:
-        json.dump(data, handle, indent=2)
-        handle.write("\n")
-    temporary.replace(path)
+    descriptor, name = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.")
+    temporary = Path(name)
+    try:
+        with os.fdopen(descriptor, "w") as handle:
+            json.dump(data, handle, indent=2)
+            handle.write("\n")
+        temporary.replace(path)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def prepare_request(
@@ -165,28 +168,36 @@ def download(reference: dict[str, Any], access: dict[str, Any], path: Path) -> N
             "Download reference differs from the published artifact",
             code="PLATFORM_ERROR",
         )
-    parsed = urlsplit(access["url"])
-    host = parsed.hostname or ""
-    if (
-        parsed.scheme != "https"
-        or not (
-            host == "storage.googleapis.com" or host.endswith(".storage.googleapis.com")
+    try:
+        parsed = urlsplit(access["url"])
+        host = parsed.hostname or ""
+        valid_origin = (
+            parsed.scheme == "https"
+            and (
+                host == "storage.googleapis.com"
+                or host.endswith(".storage.googleapis.com")
+            )
+            and not parsed.username
+            and not parsed.password
+            and parsed.port in (None, 443)
         )
-        or parsed.username
-        or parsed.password
-        or parsed.port not in (None, 443)
-    ):
+    except ValueError:
+        valid_origin = False
+    if not valid_origin:
         raise CLIError(
             "Unexpected image artifact download origin", code="PLATFORM_ERROR"
         )
     digest = hashlib.sha256()
     size = 0
+    temporary = None
     try:
+        descriptor, name = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.")
+        temporary = Path(name)
         with (
+            os.fdopen(descriptor, "wb") as output,
             urllib.request.build_opener(_NoRedirect).open(
                 access["url"], timeout=300
             ) as source,
-            path.open("wb") as output,
         ):
             while chunk := source.read(1024 * 1024):
                 size += len(chunk)
@@ -196,13 +207,17 @@ def download(reference: dict[str, Any], access: dict[str, Any], path: Path) -> N
                     )
                 output.write(chunk)
                 digest.update(chunk)
+        if digest.hexdigest() != reference["sha256"]:
+            raise CLIError("Image artifact checksum mismatch", code="PLATFORM_ERROR")
+        temporary.replace(path)
     except (urllib.error.URLError, OSError):
         raise CLIError(
             "Image artifact transfer failed; rerun to obtain fresh download access",
             code="PLATFORM_ERROR",
         ) from None
-    if digest.hexdigest() != reference["sha256"]:
-        raise CLIError("Image artifact checksum mismatch", code="PLATFORM_ERROR")
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
 
 
 def _tree_identity(root: Path) -> dict[str, Any]:
@@ -272,10 +287,12 @@ def collect(
                         code="PLATFORM_ERROR",
                     )
                 archive.extract(member, root, filter="data")
+        source = root / state["request"]["tasks_dir"]
+        selected_root = source.resolve()
         for name, roles in tasks.items():
             if not name.startswith(prefix) or not (
                 root / name
-            ).resolve().is_relative_to(root):
+            ).resolve().is_relative_to(selected_root):
                 raise CLIError(
                     "Published task is outside the selected directory",
                     code="PLATFORM_ERROR",
@@ -313,7 +330,15 @@ def collect(
                     )
                 mapped[role] = images[key]
             bindings[name.removeprefix(prefix)] = mapped
-        source = root / state["request"]["tasks_dir"]
+        discovered = set()
+        for current, directories, files in os.walk(source):
+            if "task.toml" in files:
+                discovered.add(Path(current).relative_to(root).as_posix())
+                directories.clear()
+        if discovered != set(tasks):
+            raise CLIError(
+                "Task bundle inventory differs from the manifest", code="PLATFORM_ERROR"
+            )
         destination = output / "tasks"
         if destination.exists():
             if _tree_identity(destination) != _tree_identity(source):
