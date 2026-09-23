@@ -109,14 +109,18 @@ def wait_for_build(
     deadline = time.monotonic() + timeout
     submitted = False
     previous = None
-    while time.monotonic() < deadline:
+    while (remaining := deadline - time.monotonic()) > 0:
         try:
             status = (
                 client.get_image_build(
-                    state["request_id"], git_identity=state["inputs"]["git_identity"]
+                    state["request_id"],
+                    git_identity=state["inputs"]["git_identity"],
+                    timeout=min(30, remaining),
                 )
                 if submitted
-                else client.submit_image_build(**state["request"])
+                else client.submit_image_build(
+                    **state["request"], timeout=min(30, remaining)
+                )
             )
             submitted = True
             write_json(output / "status.json", status)
@@ -274,19 +278,25 @@ def collect(
     with tempfile.TemporaryDirectory(prefix="image-bundle-", dir=output) as directory:
         root = Path(directory)
         size = 0
-        with tarfile.open(output / "bundle.tar.gz") as archive:
-            for index, member in enumerate(archive):
-                size += member.size
-                if (
-                    index >= 100000
-                    or size > _MAX_BYTES
-                    or not (member.isfile() or member.isdir())
-                ):
-                    raise CLIError(
-                        "Task bundle exceeds extraction limits or contains unsupported entries",
-                        code="PLATFORM_ERROR",
-                    )
-                archive.extract(member, root, filter="data")
+        try:
+            with tarfile.open(output / "bundle.tar.gz") as archive:
+                for index, member in enumerate(archive):
+                    size += member.size
+                    if (
+                        index >= 100000
+                        or size > _MAX_BYTES
+                        or not (member.isfile() or member.isdir())
+                    ):
+                        raise CLIError(
+                            "Task bundle exceeds extraction limits or contains unsupported entries",
+                            code="PLATFORM_ERROR",
+                        )
+                    archive.extract(member, root, filter="data")
+        except tarfile.TarError:
+            raise CLIError(
+                "Task bundle is invalid or contains unsafe archive entries",
+                code="PLATFORM_ERROR",
+            ) from None
         source = root / state["request"]["tasks_dir"]
         selected_root = source.resolve()
         for name, roles in tasks.items():
@@ -316,6 +326,11 @@ def collect(
                 )
             mapped = {}
             for role, key in roles.items():
+                if not isinstance(key, str) or key not in images:
+                    raise CLIError(
+                        "Published task references an undefined image",
+                        code="PLATFORM_ERROR",
+                    )
                 table: Any = config
                 for component in role.split("."):
                     table = (
@@ -340,6 +355,10 @@ def collect(
                 "Task bundle inventory differs from the manifest", code="PLATFORM_ERROR"
             )
         destination = output / "tasks"
+        if destination.is_symlink():
+            raise CLIError(
+                "Downloaded tasks path must not be a symlink", code="CONFLICT"
+            )
         if destination.exists():
             if _tree_identity(destination) != _tree_identity(source):
                 raise CLIError(

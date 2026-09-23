@@ -76,6 +76,7 @@ class OsmosisClient:
         ref: str = "HEAD",
         tasks_dir: str = "tasks",
         credentials: Credentials | None = None,
+        timeout: float = 30,
     ) -> dict[str, Any]:
         """Build every Harbor task in a connected repository at one revision."""
         from osmosis_ai.platform.cli.workspace_repo import normalize_git_identity
@@ -92,6 +93,7 @@ class OsmosisClient:
             },
             credentials=credentials,
             git_identity=identity,
+            timeout=timeout,
         )
 
     def get_image_build(
@@ -100,11 +102,13 @@ class OsmosisClient:
         *,
         git_identity: str,
         credentials: Credentials | None = None,
+        timeout: float = 30,
     ) -> dict[str, Any]:
         return platform_request(
             f"/api/cli/image-builds/{_safe_path(request_id)}",
             credentials=credentials,
             git_identity=git_identity,
+            timeout=timeout,
         )
 
     def get_image_build_artifacts(
