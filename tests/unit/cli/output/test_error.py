@@ -348,6 +348,13 @@ def test_dev_server_up_command_path_from_argv(monkeypatch: pytest.MonkeyPatch) -
     assert command_path_for_error(None) == "dev server up"
 
 
+def test_rollout_serve_command_path_from_argv(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "sys.argv", ["osmosis", "--json", "rollout", "serve", "rollout.toml"]
+    )
+    assert command_path_for_error(None) == "rollout serve"
+
+
 def test_eval_cache_is_not_a_three_token_command(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
