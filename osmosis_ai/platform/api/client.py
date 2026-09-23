@@ -68,6 +68,75 @@ class OsmosisClient:
     ``git_identity`` is ``None``.
     """
 
+    def submit_image_build(
+        self,
+        *,
+        request_id: str,
+        repository: str,
+        ref: str = "HEAD",
+        tasks_dir: str = "tasks",
+        credentials: Credentials | None = None,
+    ) -> dict[str, Any]:
+        """Build every Harbor task in a connected repository at one revision."""
+        from osmosis_ai.platform.cli.workspace_repo import normalize_git_identity
+
+        identity = normalize_git_identity(repository).identity
+        return platform_request(
+            "/api/cli/image-builds",
+            method="POST",
+            data={
+                "request_id": request_id,
+                "repository": f"https://github.com/{identity}",
+                "ref": ref,
+                "tasks_dir": tasks_dir,
+            },
+            credentials=credentials,
+            git_identity=identity,
+        )
+
+    def get_image_build(
+        self,
+        request_id: str,
+        *,
+        git_identity: str,
+        credentials: Credentials | None = None,
+    ) -> dict[str, Any]:
+        return platform_request(
+            f"/api/cli/image-builds/{_safe_path(request_id)}",
+            credentials=credentials,
+            git_identity=git_identity,
+        )
+
+    def get_image_build_artifacts(
+        self,
+        request_id: str,
+        *,
+        git_identity: str,
+        credentials: Credentials | None = None,
+    ) -> dict[str, Any]:
+        return platform_request(
+            f"/api/cli/image-builds/{_safe_path(request_id)}/artifacts",
+            credentials=credentials,
+            git_identity=git_identity,
+        )
+
+    def get_image_pull_credentials(
+        self,
+        request_id: str,
+        *,
+        image: str,
+        git_identity: str,
+        credentials: Credentials | None = None,
+    ) -> dict[str, Any]:
+        """Return short-lived registry credentials; never persist or log them."""
+        return platform_request(
+            f"/api/cli/image-builds/{_safe_path(request_id)}/pull-credentials",
+            method="POST",
+            data={"image": image},
+            credentials=credentials,
+            git_identity=git_identity,
+        )
+
     def _get_logs(
         self,
         resource_path: str,
