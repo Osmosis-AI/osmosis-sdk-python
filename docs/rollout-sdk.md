@@ -299,7 +299,6 @@ For Harbor, the same file selects the Harbor backend and contains its settings:
 backend = "harbor"
 
 [harbor]
-tasks_dir = "multiply_harbor_task"
 agent = "multiply_rollout.workflow:MultiplyWorkflow"
 workflow_config = "multiply_rollout.workflow:multiply_workflow_config"
 grader = "multiply_rollout.grader:MultiplyGrader"
@@ -330,7 +329,17 @@ uv run --project rollouts/<name> \
   osmosis rollout serve rollouts/<name>/rollout.toml
 ```
 
-The command listens on `--host 0.0.0.0` and `--port`, with `_OSMOSIS_ROLLOUT_PORT` or 8000 as the port fallback. These remain CLI/environment settings because they describe the current server process rather than the backend. `harbor.tasks_dir` and `harbor.trials_dir` resolve relative to the config file.
+Harbor serving additionally requires a dataset supplied at runtime:
+
+```bash
+uv run --project rollouts/<name> \
+  osmosis rollout serve rollouts/<name>/rollout.toml \
+  --harbor-dataset ./path/to/tasks
+```
+
+`--harbor-dataset` accepts a local dataset folder, a Harbor dataset reference such as `org/name@sha256:...`, or a Git dataset URL. Remote datasets are resolved with Harbor and cached locally before the server starts. The CLI always configures `HarborBackend` in dataset mode; `tasks_dir` and `task_mode` are not part of `rollout.toml`.
+
+The command listens on `--host 0.0.0.0` and `--port`, with `_OSMOSIS_ROLLOUT_PORT` or 8000 as the port fallback. These remain CLI/environment settings because they describe the current server process rather than the backend. `harbor.trials_dir` resolves relative to the config file.
 
 The existing scaffolded `main.py` remains supported for entrypoint-based evaluation and deployment flows; those flows are not changed by the serve command.
 
