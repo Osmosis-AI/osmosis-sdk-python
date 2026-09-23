@@ -8,6 +8,8 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+import toml
+from harbor.environments.definition import environment_content_hash
 from harbor.trial.queue import TrialQueue
 from pydantic import ValidationError
 
@@ -498,6 +500,53 @@ class TestPatchDockerfileWithSdk:
             patch_dockerfile_with_sdk=False,
         )
         assert backend.sdk_requirements is None
+
+
+class TestPrebuiltImages:
+    def test_materialized_task_uses_content_addressed_image(
+        self, template_task, tmp_path
+    ):
+        repository = "us-west1-docker.pkg.dev/acme/harbor-sandbox/harbor"
+        backend = HarborBackend(
+            orchestrator=TrialQueue(n_concurrent=1),
+            tasks_dir=template_task,
+            agent="mini-swe-agent",
+            image_repository=repository,
+        )
+        backend.rollouts_dir = tmp_path / "rollouts"
+
+        task_dir = backend.materialize_task(
+            HarborTask(template_task),
+            "r1",
+            ContainerInput(
+                rollout_id="r1",
+                prompt=[{"role": "user", "content": "test"}],
+            ),
+        )
+
+        expected = (
+            f"{repository}:{environment_content_hash(template_task / 'environment')}"
+        )
+        assert toml.load(task_dir / "task.toml")["environment"]["docker_image"] == (
+            expected
+        )
+        assert "environment" not in toml.load(template_task / "task.toml")
+
+    def test_image_repository_rejects_serve_time_environment_patch(
+        self, template_task, monkeypatch
+    ):
+        monkeypatch.setattr(
+            "osmosis_ai.rollout.backend.harbor.backend._resolve_backend_bundle",
+            lambda **kwargs: SimpleNamespace(requirements=["httpx"]),
+        )
+
+        with pytest.raises(ValueError, match="patch_dockerfile_with_sdk=false"):
+            HarborBackend(
+                orchestrator=TrialQueue(n_concurrent=1),
+                tasks_dir=template_task,
+                bundle=Path("bundle.whl"),
+                image_repository="example.com/acme/harbor",
+            )
 
 
 class TestBundleBackend:

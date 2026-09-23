@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 from pathlib import Path
 
 import pytest
+import toml
 from harbor.environments.definition import environment_content_hash
-from harbor.environments.gke import GKEEnvironment
 
 from osmosis_ai.rollout.backend.harbor import images
 from osmosis_ai.rollout.backend.harbor.dataset import ResolvedHarborDataset
@@ -22,19 +23,37 @@ def make_task(root: Path, name: str, dockerfile: str = "FROM python:3.12\n") -> 
     return task
 
 
-def test_image_reference_matches_harbor_gke_contract() -> None:
-    environment = object.__new__(GKEEnvironment)
-    environment.registry_location = "us-west1"
-    environment.project_id = "acme"
-    environment.registry_name = "harbor-sandbox"
-    environment.environment_name = "multiply-0000"
-    environment.__dict__["environment_id"] = "abc123"
+def test_prebuilt_image_reference_uses_harbor_environment_hash(tmp_path: Path) -> None:
+    task = make_task(tmp_path, "one")
+    expected_hash = environment_content_hash(task / "environment")
 
-    assert images._harbor_image_reference(
-        "us-west1-docker.pkg.dev/acme/harbor-sandbox",
-        environment_name="multiply-0000",
-        environment_id="abc123",
-    ) == environment._get_image_url()
+    assert (
+        images.prebuilt_image_reference(
+            "us-west1-docker.pkg.dev/acme/repo/harbor/",
+            task / "environment",
+        )
+        == f"us-west1-docker.pkg.dev/acme/repo/harbor:{expected_hash}"
+    )
+
+
+def test_configure_task_prebuilt_image_only_changes_materialized_copy(
+    tmp_path: Path,
+) -> None:
+    source = make_task(tmp_path, "source")
+    materialized = tmp_path / "materialized"
+    shutil.copytree(source, materialized)
+
+    image = images.configure_task_prebuilt_image(
+        materialized,
+        "example.com/acme/harbor",
+    )
+
+    assert "docker_image" not in toml.load(source / "task.toml").get("environment", {})
+    assert toml.load(materialized / "task.toml")["environment"]["docker_image"] == image
+    assert image == images.prebuilt_image_reference(
+        "example.com/acme/harbor",
+        source / "environment",
+    )
 
 
 async def test_build_and_publish_deduplicates_environments(
@@ -54,14 +73,11 @@ async def test_build_and_publish_deduplicates_environments(
     class FakeBuilder:
         async def build_and_push(
             self, request: images.BuildRequest
-        ) -> tuple[images.PublishedImage, ...]:
+        ) -> images.PublishedImage:
             requests.append(request)
             assert not (request.context / "osmosis-requirements.txt").exists()
             assert request.dockerfile.read_text() == "FROM python:3.12\n"
-            return tuple(
-                images.PublishedImage(image, "sha256:abc")
-                for image in request.images
-            )
+            return images.PublishedImage(request.image, "sha256:abc")
 
     monkeypatch.setattr(images, "resolve_harbor_dataset", fake_resolve)
     monkeypatch.setattr(
@@ -70,7 +86,7 @@ async def test_build_and_publish_deduplicates_environments(
 
     result = await images.build_and_publish(
         "https://github.com/acme/tasks.git",
-        image_repository="us-west1-docker.pkg.dev/acme/images",
+        image_repository="us-west1-docker.pkg.dev/acme/images/harbor",
         build_system="google-cloud-build",
         gcp_project="acme",
         gcp_region="us-west1",
@@ -83,12 +99,11 @@ async def test_build_and_publish_deduplicates_environments(
     expected_hash = environment_content_hash(first / "environment")
     assert environment.content_hash == expected_hash
     assert environment.task_names == ("test/one", "test/two")
-    assert tuple(image.image for image in environment.images) == (
-        f"us-west1-docker.pkg.dev/acme/images/one:{expected_hash}",
-        f"us-west1-docker.pkg.dev/acme/images/two:{expected_hash}",
+    assert environment.image.image == (
+        f"us-west1-docker.pkg.dev/acme/images/harbor:{expected_hash}"
     )
     assert requests[0].context == first / "environment"
-    assert requests[0].images == tuple(image.image for image in environment.images)
+    assert requests[0].image == environment.image.image
     assert "uv venv" not in (first / "environment" / "Dockerfile").read_text()
 
 
@@ -116,10 +131,7 @@ async def test_buildx_builder_uses_harbor_and_restores_selected_builder(
     request = images.BuildRequest(
         context=tmp_path,
         dockerfile=tmp_path / "Dockerfile",
-        images=(
-            "example.com/acme/one:abc",
-            "example.com/acme/two:abc",
-        ),
+        image="example.com/acme/harbor:abc",
         platform="linux/amd64",
     )
     captured: dict[str, object] = {}
@@ -131,35 +143,21 @@ async def test_buildx_builder_uses_harbor_and_restores_selected_builder(
         captured.update(kwargs)
         captured["selected_builder"] = os.environ.get("BUILDX_BUILDER")
 
-    async def fake_run(command: list[str]) -> tuple[int, str, str]:
-        captured["alias_command"] = command
-        return 0, "", ""
-
     monkeypatch.setattr(
         "harbor.environments.docker.utils.remote_docker_image_exists", missing
     )
     monkeypatch.setattr(
         "harbor.environments.docker.utils.build_docker_image_with_buildx", fake_build
     )
-    monkeypatch.setattr(images, "_run_command", fake_run)
     monkeypatch.setenv("BUILDX_BUILDER", "previous")
 
     result = await images.BuildxImageBuilder(builder="remote").build_and_push(request)
 
-    assert tuple(image.image for image in result) == request.images
-    assert captured["docker_image_name"] == request.images[0]
+    assert result.image == request.image
+    assert captured["docker_image_name"] == request.image
     assert captured["build_args"] == {}
     assert captured["push"] is True
     assert captured["selected_builder"] == "remote"
-    assert captured["alias_command"] == [
-        "docker",
-        "buildx",
-        "imagetools",
-        "create",
-        "--tag",
-        request.images[1],
-        request.images[0],
-    ]
     assert os.environ["BUILDX_BUILDER"] == "previous"
 
 
@@ -171,19 +169,15 @@ async def test_google_cloud_builder_submits_generated_config(
     request = images.BuildRequest(
         context=tmp_path,
         dockerfile=dockerfile,
-        images=(
-            "us-west1-docker.pkg.dev/acme/repo/one:abc",
-            "us-west1-docker.pkg.dev/acme/repo/two:abc",
-        ),
+        image="us-west1-docker.pkg.dev/acme/repo/harbor:abc",
         platform="linux/amd64",
     )
     submitted: dict[str, object] = {}
 
-    async def missing_images(
-        image_names: tuple[str, ...], *, project: str
-    ) -> dict[str, str]:
+    async def missing_image(image: str, *, project: str) -> None:
+        assert image == request.image
         assert project == "acme"
-        return {}
+        return None
 
     async def fake_run(command: list[str]) -> tuple[int, str, str]:
         if command[:3] == ["gcloud", "builds", "submit"]:
@@ -198,74 +192,43 @@ async def test_google_cloud_builder_submits_generated_config(
                 {
                     "status": "SUCCESS",
                     "results": {
-                        "images": [
-                            {"name": image, "digest": "sha256:def"}
-                            for image in request.images
-                        ]
+                        "images": [{"name": request.image, "digest": "sha256:def"}]
                     },
                 }
             ),
             "build logs",
         )
 
-    monkeypatch.setattr(images, "_google_image_digests", missing_images)
+    monkeypatch.setattr(images, "_google_image_digest", missing_image)
     monkeypatch.setattr(images, "_run_command", fake_run)
 
     result = await images.GoogleCloudBuildImageBuilder(
         project="acme", region="us-west1"
     ).build_and_push(request)
 
-    assert all(image.immutable_image.endswith("@sha256:def") for image in result)
-    assert submitted["command"][:3] == ["gcloud", "builds", "submit"]
-    assert "--async" in submitted["command"]
-    assert "--suppress-logs" in submitted["command"]
-    assert (
-        submitted["command"][submitted["command"].index("--gcs-source-staging-dir") + 1]
-        == "gs://acme_cloudbuild/source"
+    assert result.immutable_image.endswith("@sha256:def")
+    command = submitted["command"]
+    assert isinstance(command, list)
+    assert command[:3] == ["gcloud", "builds", "submit"]
+    assert "--async" in command
+    assert "--suppress-logs" in command
+    assert command[command.index("--gcs-source-staging-dir") + 1] == (
+        "gs://acme_cloudbuild/source"
     )
-    assert "--timeout=2400" in submitted["command"]
+    assert "--timeout=2400" in command
     config = submitted["config"]
     assert isinstance(config, dict)
-    assert config["images"] == [request.images[0]]
-    build_step, alias_step = config["steps"]
-    assert f"--tag={request.images[0]}" in build_step["args"]
+    assert config["images"] == [request.image]
+    assert len(config["steps"]) == 1
+    build_step = config["steps"][0]
+    assert f"--tag={request.image}" in build_step["args"]
     assert "--build-arg" not in build_step["args"]
-    assert alias_step["entrypoint"] == "sh"
-    assert alias_step["args"][0] == "-ceu"
-    assert f"docker tag {request.images[0]} {request.images[1]}" in alias_step["args"][1]
-    assert f"docker push {request.images[1]}" in alias_step["args"][1]
-
-
-def test_google_cloud_config_batches_large_harbor_datasets(tmp_path: Path) -> None:
-    dockerfile = tmp_path / "Dockerfile"
-    dockerfile.write_text("FROM python:3.12\n")
-    image_names = tuple(
-        f"us-west1-docker.pkg.dev/acme/repo/multiply-{index:04d}:abc123"
-        for index in range(300)
-    )
-
-    config = images._cloud_build_config(
-        images.BuildRequest(
-            context=tmp_path,
-            dockerfile=dockerfile,
-            images=image_names,
-            platform="linux/amd64",
-        )
-    )
-
-    assert config["images"] == [image_names[0]]
-    assert len(config["steps"]) > 2
-    for step in config["steps"]:
-        assert len(step["args"]) <= 100
-        assert all(len(argument) <= 10_000 for argument in step["args"])
-    alias_scripts = "\n".join(step["args"][1] for step in config["steps"][1:])
-    assert sum(f"docker push {image}" in alias_scripts for image in image_names[1:]) == 299
 
 
 async def test_google_artifact_registry_lookup_uses_tag_listing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    image = "us-west1-docker.pkg.dev/acme/repo/harbor:osmosis--abc"
+    image = "us-west1-docker.pkg.dev/acme/repo/harbor:abc"
 
     async def fake_run(command: list[str]) -> tuple[int, str, str]:
         assert command[:5] == [
@@ -281,7 +244,7 @@ async def test_google_artifact_registry_lookup_uses_tag_listing(
                 [
                     {
                         "package": "us-west1-docker.pkg.dev/acme/repo/harbor",
-                        "tags": ["osmosis--abc"],
+                        "tags": ["abc"],
                         "version": "sha256:def",
                     }
                 ]
@@ -300,4 +263,4 @@ async def test_google_artifact_registry_lookup_uses_tag_listing(
 )
 def test_image_repository_must_not_include_tag_or_digest(repository: str) -> None:
     with pytest.raises(ValueError):
-        images._image_repository(repository)
+        images.normalize_image_repository(repository)

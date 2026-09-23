@@ -44,6 +44,7 @@ backend = "harbor"
 [harbor]
 agent = "mini-swe-agent"
 environment = "daytona"
+image_repository = "us-west1-docker.pkg.dev/acme/repo/harbor"
 concurrency = 12
 cleanup_successful_trials = false
 patch_dockerfile_with_sdk = false
@@ -63,6 +64,9 @@ auto_stop_interval_mins = 30
     assert config.backend == "harbor"
     assert config.harbor.native_agent_kwargs == {"max_seq_len": 8192}
     assert config.harbor.environment_kwargs == {"auto_stop_interval_mins": 30}
+    assert config.harbor.image_repository == (
+        "us-west1-docker.pkg.dev/acme/repo/harbor"
+    )
     assert rollout_dir == tmp_path
 
 
@@ -215,6 +219,7 @@ backend = "harbor"
 [harbor]
 agent = "mini-swe-agent"
 environment = "daytona"
+image_repository = "us-west1-docker.pkg.dev/acme/repo/harbor"
 concurrency = 12
 native_model_name = "openai/test-model"
 trials_dir = "trials"
@@ -277,6 +282,9 @@ auto_stop_interval_mins = 30
     assert backend_kwargs["environment_config"].kwargs == {
         "auto_stop_interval_mins": 30
     }
+    assert backend_kwargs["image_repository"] == (
+        "us-west1-docker.pkg.dev/acme/repo/harbor"
+    )
     assert backend_kwargs["orchestrator"].n_concurrent == 12
     assert backend_kwargs["cleanup_successful_trials"] is False
     assert backend_kwargs["patch_dockerfile_with_sdk"] is False

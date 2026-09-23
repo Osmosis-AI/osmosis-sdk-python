@@ -25,9 +25,7 @@ def test_prebuild_forwards_remote_dataset_and_google_options(
             dataset=dataset,
             dataset_path=tmp_path / "cached",
             task_count=2,
-            environments=(
-                images.PublishedEnvironment("abc", (image,), ("one", "two")),
-            ),
+            environments=(images.PublishedEnvironment("abc", image, ("one", "two")),),
         )
 
     monkeypatch.setattr(images, "build_and_publish", fake_build)
