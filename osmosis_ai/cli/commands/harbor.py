@@ -26,8 +26,8 @@ def prebuild(
         ...,
         "--image-repository",
         help=(
-            "Registry prefix used by Harbor serve. Each task is published as "
-            "<prefix>/<task-name>:<Harbor environment ID>."
+            "Image repository used by Harbor serve. Each distinct environment "
+            "is published as <repository>:<Harbor environment ID>."
         ),
     ),
     build_system: str = typer.Option(
@@ -87,13 +87,12 @@ def prebuild(
 
     images = [
         {
-            "image": image.image,
-            "immutable_image": image.immutable_image,
-            "digest": image.digest,
+            "image": environment.image.image,
+            "immutable_image": environment.image.immutable_image,
+            "digest": environment.image.digest,
             "content_hash": environment.content_hash,
         }
         for environment in result.environments
-        for image in environment.images
     ]
     image_label = "image" if len(images) == 1 else "images"
     task_label = "task" if result.task_count == 1 else "tasks"
@@ -112,7 +111,7 @@ def prebuild(
             f"Published {len(images)} Harbor {image_label} for "
             f"{result.task_count} {task_label}."
         ),
-        display_next_steps=[image["immutable_image"] for image in images],
+        display_next_steps=[image["image"] for image in images],
     )
 
 

@@ -38,6 +38,7 @@ class HarborBackendConfig(_ServeConfigModel):
     grader_config: str | None = None
     environment: str = "docker"
     environment_kwargs: dict[str, Any] | None = None
+    image_repository: str | None = None
     native_agent_kwargs: dict[str, Any] | None = None
     concurrency: int = Field(default=4, ge=1)
     native_model_name: str = "openai/osmosis-rollout"
@@ -262,6 +263,7 @@ def _serve_harbor(
                     type=environment_type,
                     kwargs=config.environment_kwargs or {},
                 ),
+                image_repository=config.image_repository,
                 trials_dir=resolved_trials_dir,
                 cleanup_successful_trials=config.cleanup_successful_trials,
                 patch_dockerfile_with_sdk=config.patch_dockerfile_with_sdk,

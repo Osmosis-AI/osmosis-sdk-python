@@ -182,6 +182,7 @@ class HarborBackend(ExecutionBackend):
         code_dir: Path | None = None,
         bundle: Path | None = None,
         environment_config: HarborEnvironmentConfig | None = None,
+        image_repository: str | None = None,
         trials_dir: Path | None = None,
         cleanup_successful_trials: bool = True,
         patch_dockerfile_with_sdk: bool | None = None,
@@ -243,6 +244,18 @@ class HarborBackend(ExecutionBackend):
             if patch_dockerfile_with_sdk and self.bundle
             else None
         )
+        self.image_repository: str | None = None
+        if image_repository is not None:
+            from osmosis_ai.rollout.backend.harbor.images import (
+                normalize_image_repository,
+            )
+
+            if self.sdk_requirements:
+                raise ValueError(
+                    "image_repository cannot be combined with serve-time SDK "
+                    "Dockerfile patching; set patch_dockerfile_with_sdk=false"
+                )
+            self.image_repository = normalize_image_repository(image_repository)
 
         root = Path(f"/tmp/osmosis-harbor-{self.tasks_dir.name}")
         self.rollouts_dir: Path = root / "rollouts"
@@ -477,7 +490,7 @@ class HarborBackend(ExecutionBackend):
     def materialize_task(
         self, task: HarborTask, rollout_id: str, container_input: ContainerInput
     ) -> Path:
-        return task.materialize(
+        task_dir = task.materialize(
             self.rollouts_dir / rollout_id,
             container_input,
             grader_script=self.bundle.grader_script if self.bundle else None,
@@ -487,6 +500,13 @@ class HarborBackend(ExecutionBackend):
             # stage the api_key without a consumer.
             write_input=self.bundle is not None and self.native is None,
         )
+        if self.image_repository is not None:
+            from osmosis_ai.rollout.backend.harbor.images import (
+                configure_task_prebuilt_image,
+            )
+
+            configure_task_prebuilt_image(task_dir, self.image_repository)
+        return task_dir
 
     async def execute(
         self,
