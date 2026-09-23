@@ -5,16 +5,19 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-import shutil
+import shlex
 import tempfile
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
 from osmosis_ai.rollout.backend.harbor.dataset import resolve_harbor_dataset
 from osmosis_ai.rollout.backend.harbor.tasks import HarborTask
+
+if TYPE_CHECKING:
+    from harbor.models.task.task import Task
 
 
 class BuildSystem(StrEnum):
@@ -26,9 +29,7 @@ class BuildSystem(StrEnum):
 class BuildRequest:
     context: Path
     dockerfile: Path
-    image_base: str
-    image: str
-    build_args: Mapping[str, str]
+    images: tuple[str, ...]
     platform: str
 
 
@@ -47,8 +48,8 @@ class PublishedImage:
 
 @dataclass(frozen=True)
 class PublishedEnvironment:
-    image: PublishedImage
     content_hash: str
+    images: tuple[PublishedImage, ...]
     task_names: tuple[str, ...]
 
 
@@ -61,30 +62,59 @@ class BuildAndPublishResult:
 
 
 class ImageBuilder(Protocol):
-    async def build_and_push(self, request: BuildRequest) -> PublishedImage: ...
+    async def build_and_push(
+        self, request: BuildRequest
+    ) -> tuple[PublishedImage, ...]: ...
 
 
 class BuildxImageBuilder:
-    """Publish through Harbor's Buildx image builder."""
+    """Publish Harbor-compatible image references with Buildx."""
 
     def __init__(self, *, builder: str | None = None) -> None:
         self.builder = builder
 
-    async def build_and_push(self, request: BuildRequest) -> PublishedImage:
-        from harbor.environments.docker.utils import ensure_docker_image_built
+    async def build_and_push(
+        self, request: BuildRequest
+    ) -> tuple[PublishedImage, ...]:
+        from harbor.environments.docker.utils import (
+            build_docker_image_with_buildx,
+            remote_docker_image_exists,
+        )
+
+        if not request.images:
+            return ()
+        primary, *aliases = request.images
 
         previous_builder = os.environ.get("BUILDX_BUILDER")
         if self.builder is not None:
             os.environ["BUILDX_BUILDER"] = self.builder
         try:
-            image = await ensure_docker_image_built(
-                docker_name=request.image_base,
-                docker_build_context=request.context,
-                dockerfile_path=request.dockerfile,
-                build_args=request.build_args,
-                platform=request.platform,
-                push=True,
-            )
+            if not await remote_docker_image_exists(primary):
+                with tempfile.TemporaryDirectory(
+                    prefix="osmosis-harbor-buildx-"
+                ) as temp:
+                    await build_docker_image_with_buildx(
+                        docker_image_name=primary,
+                        context=request.context,
+                        dockerfile_path=request.dockerfile,
+                        build_log_path=Path(temp) / "build.log",
+                        build_args={},
+                        platform=request.platform,
+                        push=True,
+                    )
+
+            if aliases:
+                command = ["docker", "buildx", "imagetools", "create"]
+                for alias in aliases:
+                    command.extend(("--tag", alias))
+                command.append(primary)
+                returncode, output, error = await _run_command(command)
+                if returncode != 0:
+                    details = error.strip() or output.strip()
+                    raise RuntimeError(
+                        f"Failed to publish Harbor image aliases for {primary}: "
+                        f"{details}"
+                    )
         finally:
             if self.builder is not None:
                 if previous_builder is None:
@@ -92,12 +122,7 @@ class BuildxImageBuilder:
                 else:
                     os.environ["BUILDX_BUILDER"] = previous_builder
 
-        if image != request.image:
-            raise RuntimeError(
-                f"Harbor produced unexpected image name {image!r}; "
-                f"expected {request.image!r}"
-            )
-        return PublishedImage(image=image)
+        return tuple(PublishedImage(image=image) for image in request.images)
 
 
 async def _run_command(command: Sequence[str]) -> tuple[int, str, str]:
@@ -174,37 +199,136 @@ async def _google_image_digest(image: str, *, project: str) -> str | None:
     return digest if digest.startswith("sha256:") else None
 
 
+def _artifact_registry_root(image: str) -> str | None:
+    parts = image.split("/")
+    if len(parts) < 4 or not parts[0].endswith("-docker.pkg.dev"):
+        return None
+    return "/".join(parts[:3])
+
+
+async def _google_image_digests(
+    image_names: Sequence[str], *, project: str
+) -> dict[str, str]:
+    """Read a Harbor environment's tags with one Artifact Registry request."""
+    if not image_names:
+        return {}
+
+    roots = {_artifact_registry_root(image) for image in image_names}
+    tags = {image.rpartition(":")[2] for image in image_names}
+    if None in roots or len(roots) != 1 or len(tags) != 1:
+        resolved = await asyncio.gather(
+            *(_google_image_digest(image, project=project) for image in image_names)
+        )
+        return {
+            image: digest
+            for image, digest in zip(image_names, resolved, strict=True)
+            if digest is not None
+        }
+
+    root = roots.pop()
+    assert root is not None
+    tag = tags.pop()
+    command = [
+        "gcloud",
+        "artifacts",
+        "docker",
+        "images",
+        "list",
+        root,
+        "--include-tags",
+        f"--filter=tags:{tag}",
+        "--project",
+        project,
+        "--format=json",
+    ]
+    returncode, output, _error = await _run_command(command)
+    if returncode != 0:
+        return {}
+    try:
+        results = json.loads(output)
+    except json.JSONDecodeError:
+        return {}
+
+    expected = set(image_names)
+    digests: dict[str, str] = {}
+    for result in results:
+        package = result.get("package")
+        digest = str(result.get("version", ""))
+        if not isinstance(package, str) or not digest.startswith("sha256:"):
+            continue
+        for result_tag in result.get("tags", []):
+            image = f"{package}:{result_tag}"
+            if image in expected:
+                digests[image] = digest
+    return digests
+
+
 def _cloud_build_config(request: BuildRequest) -> dict[str, object]:
     dockerfile = request.dockerfile.relative_to(request.context).as_posix()
-    args = [
-        "build",
-        f"--file={dockerfile}",
-        *[
-            f"--build-arg={key}={value}"
-            for key, value in sorted(request.build_args.items())
-        ],
-        f"--platform={request.platform}",
-        f"--tag={request.image}",
-        ".",
+    primary, *aliases = request.images
+    steps: list[dict[str, object]] = [
+        {
+            "name": "gcr.io/cloud-builders/docker",
+            "args": [
+                "build",
+                f"--file={dockerfile}",
+                f"--platform={request.platform}",
+                f"--tag={primary}",
+                ".",
+            ],
+        }
     ]
+
+    # Cloud Build limits each step to 100 arguments and each argument to 10 KB.
+    # Tag and push aliases in bounded shell scripts while reusing the one image
+    # built above. Artifact Registry deduplicates the shared layers.
+    scripts: list[str] = []
+    current: list[str] = []
+    current_size = 0
+    for alias in aliases:
+        command = shlex.join(["docker", "tag", primary, alias]) + "\n" + shlex.join(
+            ["docker", "push", alias]
+        )
+        if current and current_size + len(command) + 1 > 8_000:
+            scripts.append("\n".join(current))
+            current = []
+            current_size = 0
+        current.append(command)
+        current_size += len(command) + 1
+    if current:
+        scripts.append("\n".join(current))
+
+    steps.extend(
+        {
+            "name": "gcr.io/cloud-builders/docker",
+            "entrypoint": "sh",
+            "args": ["-ceu", script],
+        }
+        for script in scripts
+    )
     return {
-        "steps": [{"name": "gcr.io/cloud-builders/docker", "args": args}],
-        "images": [request.image],
+        "steps": steps,
+        "images": [primary],
     }
 
 
-def _cloud_build_digest(output: str, image: str) -> str | None:
+def _cloud_build_digests(output: str) -> dict[str, str]:
     try:
         payload = json.loads(output)
     except json.JSONDecodeError:
-        return None
+        return {}
     images = payload.get("results", {}).get("images", [])
+    digests: dict[str, str] = {}
     for result in images:
-        if result.get("name") == image:
-            digest = result.get("digest")
-            if isinstance(digest, str) and digest.startswith("sha256:"):
-                return digest
-    return None
+        name = result.get("name")
+        digest = result.get("digest")
+        if (
+            isinstance(name, str)
+            and isinstance(digest, str)
+            and digest.startswith("sha256:")
+        ):
+            digests[name] = digest
+    return digests
 
 
 def _cloud_build_payload(output: str) -> dict[str, object]:
@@ -228,15 +352,27 @@ class GoogleCloudBuildImageBuilder:
         self.project = project
         self.region = region
 
-    async def build_and_push(self, request: BuildRequest) -> PublishedImage:
-        if _google_image_lookup_command(request.image, project=self.project) is None:
+    async def build_and_push(
+        self, request: BuildRequest
+    ) -> tuple[PublishedImage, ...]:
+        if not request.images:
+            return ()
+        if any(
+            _google_image_lookup_command(image, project=self.project) is None
+            for image in request.images
+        ):
             raise ValueError(
                 "google-cloud-build currently requires a Google Artifact Registry "
                 "or Google Container Registry image repository"
             )
-        digest = await _google_image_digest(request.image, project=self.project)
-        if digest is not None:
-            return PublishedImage(image=request.image, digest=digest)
+        digests = await _google_image_digests(
+            request.images, project=self.project
+        )
+        if len(digests) == len(request.images):
+            return tuple(
+                PublishedImage(image=image, digest=digests[image])
+                for image in request.images
+            )
 
         config = _cloud_build_config(request)
         with tempfile.NamedTemporaryFile(
@@ -255,6 +391,7 @@ class GoogleCloudBuildImageBuilder:
                 self.project,
                 "--region",
                 self.region,
+                "--timeout=2400",
                 "--config",
                 config_file.name,
                 "--gcs-source-staging-dir",
@@ -267,18 +404,23 @@ class GoogleCloudBuildImageBuilder:
         if returncode != 0:
             details = error.strip() or output.strip()
             raise RuntimeError(
-                f"Google Cloud Build failed for {request.image}: {details}"
+                f"Google Cloud Build failed for {request.images[0]}: {details}"
             )
         payload = _cloud_build_payload(output)
         build_id = payload.get("id")
         if not isinstance(build_id, str) or not build_id:
             raise RuntimeError("Google Cloud Build did not return a build ID")
 
-        output = await self._wait_for_build(build_id, request.image)
-        digest = _cloud_build_digest(output, request.image)
-        if digest is None:
-            digest = await _google_image_digest(request.image, project=self.project)
-        return PublishedImage(image=request.image, digest=digest)
+        output = await self._wait_for_build(build_id, request.images[0])
+        digests = _cloud_build_digests(output)
+        if len(digests) != len(request.images):
+            digests.update(
+                await _google_image_digests(request.images, project=self.project)
+            )
+        return tuple(
+            PublishedImage(image=image, digest=digests.get(image))
+            for image in request.images
+        )
 
     async def _wait_for_build(self, build_id: str, image: str) -> str:
         terminal_failures = {
@@ -319,13 +461,20 @@ class GoogleCloudBuildImageBuilder:
             await asyncio.sleep(2)
 
 
-def _image_base(repository: str) -> str:
+def _image_repository(repository: str) -> str:
     repository = repository.strip().rstrip("/")
     if not repository:
         raise ValueError("image_repository must be non-empty")
     if "@" in repository or ":" in repository.rsplit("/", 1)[-1]:
         raise ValueError("image_repository must not include a tag or digest")
-    return f"{repository}:osmosis"
+    return repository
+
+
+def _harbor_image_reference(
+    repository: str, *, environment_name: str, environment_id: str
+) -> str:
+    """Match Harbor's content-addressed GKE/SkyPilot image convention."""
+    return f"{repository}/{environment_name}:{environment_id}"
 
 
 def _select_builder(
@@ -352,10 +501,9 @@ def _select_builder(
     return GoogleCloudBuildImageBuilder(project=gcp_project, region=gcp_region)
 
 
-def _stage_environment(
-    task_path: Path,
-    destination: Path,
-) -> tuple[Path, Path]:
+def _task_environment(task_path: Path) -> tuple[Task, Path, Path]:
+    from harbor.models.task.task import Task
+
     task = HarborTask(task_path)
     task.reject_symlinks()
     source = task.path / "environment"
@@ -365,9 +513,7 @@ def _stage_environment(
             f"Harbor task {task.path.name!r} has no environment/Dockerfile; "
             "prebuild currently supports Dockerfile environments only"
         )
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copytree(source, destination)
-    return destination, destination / "Dockerfile"
+    return Task(task.path, disable_verification=True), source, dockerfile
 
 
 async def build_and_publish(
@@ -376,7 +522,6 @@ async def build_and_publish(
     image_repository: str,
     build_system: BuildSystem | str = BuildSystem.BUILDX,
     platform: str = "linux/amd64",
-    build_args: Mapping[str, str] | None = None,
     buildx_builder: str | None = None,
     gcp_project: str | None = None,
     gcp_region: str | None = None,
@@ -392,7 +537,7 @@ async def build_and_publish(
     if not platform.strip():
         raise ValueError("platform must be non-empty")
 
-    image_base = _image_base(image_repository)
+    repository = _image_repository(image_repository)
     builder = _select_builder(
         selected_system,
         buildx_builder=buildx_builder,
@@ -401,47 +546,50 @@ async def build_and_publish(
     )
     resolved = await resolve_harbor_dataset(dataset, disable_verification=True)
 
-    from harbor.utils.container_cache import docker_build_context_hash
+    from harbor.environments.definition import environment_content_hash
 
-    arguments = dict(build_args or {})
-    grouped: dict[str, tuple[Path, Path, list[str]]] = {}
-    with tempfile.TemporaryDirectory(prefix="osmosis-harbor-prebuild-") as temp:
-        staging = Path(temp)
-        for index, task_path in enumerate(resolved.task_paths):
-            context, dockerfile = _stage_environment(task_path, staging / str(index))
-            content_hash = docker_build_context_hash(
+    grouped: dict[str, tuple[Path, Path, list[str], list[str]]] = {}
+    for task_path in resolved.task_paths:
+        task, context, dockerfile = _task_environment(task_path)
+        content_hash = environment_content_hash(
+            context,
+            docker_image=task.config.environment.docker_image,
+        )
+        image = _harbor_image_reference(
+            repository,
+            environment_name=task.short_name,
+            environment_id=content_hash,
+        )
+        existing = grouped.get(content_hash)
+        if existing is None:
+            grouped[content_hash] = (
+                context,
+                dockerfile,
+                [task.name],
+                [image],
+            )
+        else:
+            existing[2].append(task.name)
+            if image not in existing[3]:
+                existing[3].append(image)
+
+    environments: list[PublishedEnvironment] = []
+    for content_hash, (context, dockerfile, task_names, image_names) in grouped.items():
+        published = await builder.build_and_push(
+            BuildRequest(
                 context=context,
-                dockerfile_path=dockerfile,
-                build_args=arguments,
+                dockerfile=dockerfile,
+                images=tuple(image_names),
                 platform=platform,
             )
-            existing = grouped.get(content_hash)
-            if existing is None:
-                grouped[content_hash] = (context, dockerfile, [task_path.name])
-            else:
-                existing[2].append(task_path.name)
-                shutil.rmtree(context)
-
-        environments: list[PublishedEnvironment] = []
-        for content_hash, (context, dockerfile, task_names) in grouped.items():
-            image = f"{image_base}--{content_hash}"
-            published = await builder.build_and_push(
-                BuildRequest(
-                    context=context,
-                    dockerfile=dockerfile,
-                    image_base=image_base,
-                    image=image,
-                    build_args=arguments,
-                    platform=platform,
-                )
+        )
+        environments.append(
+            PublishedEnvironment(
+                content_hash=content_hash,
+                images=published,
+                task_names=tuple(task_names),
             )
-            environments.append(
-                PublishedEnvironment(
-                    image=published,
-                    content_hash=content_hash,
-                    task_names=tuple(task_names),
-                )
-            )
+        )
 
     return BuildAndPublishResult(
         dataset=dataset,

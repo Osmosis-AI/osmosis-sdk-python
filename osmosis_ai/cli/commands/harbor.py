@@ -15,24 +15,6 @@ app: typer.Typer = typer.Typer(
 )
 
 
-def _parse_build_args(values: list[str] | None) -> dict[str, str]:
-    parsed: dict[str, str] = {}
-    for value in values or []:
-        key, separator, argument = value.partition("=")
-        if not separator or not key:
-            raise CLIError(
-                f"Invalid --build-arg {value!r}; expected KEY=VALUE.",
-                code="VALIDATION",
-            )
-        if key in parsed:
-            raise CLIError(
-                f"Duplicate --build-arg key {key!r}.",
-                code="VALIDATION",
-            )
-        parsed[key] = argument
-    return parsed
-
-
 @app.command("prebuild")
 def prebuild(
     dataset: str = typer.Argument(
@@ -43,7 +25,10 @@ def prebuild(
     image_repository: str = typer.Option(
         ...,
         "--image-repository",
-        help="Registry repository that receives the content-addressed images.",
+        help=(
+            "Registry prefix used by Harbor serve. Each task is published as "
+            "<prefix>/<task-name>:<Harbor environment ID>."
+        ),
     ),
     build_system: str = typer.Option(
         "buildx",
@@ -53,12 +38,7 @@ def prebuild(
     platform: str = typer.Option(
         "linux/amd64",
         "--platform",
-        help="Target container platform included in the image hash.",
-    ),
-    build_args: list[str] = typer.Option(
-        None,
-        "--build-arg",
-        help="Docker build argument as KEY=VALUE; repeat for multiple arguments.",
+        help="Target container platform; it must match the Harbor serve runtime.",
     ),
     builder: str | None = typer.Option(
         None,
@@ -93,7 +73,6 @@ def prebuild(
                 image_repository=image_repository,
                 build_system=build_system,
                 platform=platform,
-                build_args=_parse_build_args(build_args),
                 buildx_builder=builder,
                 gcp_project=gcp_project,
                 gcp_region=gcp_region,
@@ -108,14 +87,13 @@ def prebuild(
 
     images = [
         {
-            "image": environment.image.image,
-            "immutable_image": environment.image.immutable_image,
-            "digest": environment.image.digest,
+            "image": image.image,
+            "immutable_image": image.immutable_image,
+            "digest": image.digest,
             "content_hash": environment.content_hash,
-            "task_count": len(environment.task_names),
-            "tasks": list(environment.task_names),
         }
         for environment in result.environments
+        for image in environment.images
     ]
     image_label = "image" if len(images) == 1 else "images"
     task_label = "task" if result.task_count == 1 else "tasks"
@@ -126,7 +104,8 @@ def prebuild(
             "dataset": result.dataset,
             "dataset_path": str(result.dataset_path),
             "task_count": result.task_count,
-            "environment_count": len(images),
+            "environment_count": len(result.environments),
+            "image_count": len(images),
             "images": images,
         },
         message=(
