@@ -339,6 +339,47 @@ uv run --project rollouts/<name> \
 
 `--harbor-dataset` accepts a local dataset folder, a Harbor dataset reference such as `org/name@sha256:...`, or a Git dataset URL. Remote datasets are resolved with Harbor and cached locally before the server starts. The CLI always configures `HarborBackend` in dataset mode; `tasks_dir` and `task_mode` are not part of `rollout.toml`.
 
+For a Harbor GKE rollout, task images can be built and published before the
+server starts:
+
+```bash
+osmosis harbor prebuild ./path/to/tasks \
+  --image-repository us-west1-docker.pkg.dev/gke-rollout/harbor-sandbox \
+  --build-system google-cloud-build \
+  --gcp-project gke-rollout \
+  --gcp-region us-west1
+```
+
+The repository argument is the same registry prefix represented by
+`registry_location`, `project_id`, and `registry_name` in the GKE environment
+configuration:
+
+```toml
+[harbor]
+environment = "gke"
+patch_dockerfile_with_sdk = false
+
+[harbor.environment_kwargs]
+project_id = "gke-rollout"
+region = "us-west1"
+registry_location = "us-west1"
+registry_name = "harbor-sandbox"
+cluster_name = "YOUR_CLUSTER"
+namespace = "default"
+```
+
+Prebuild uses Harbor's `environment_content_hash` unchanged and publishes each
+image as `<registry-prefix>/<task-short-name>:<environment-id>`, which is the
+reference Harbor's GKE provider checks before building. Identical environments
+are built once and published under each task name Harbor expects. The `buildx`
+executor uses the same references and can target any registry accepted by the
+configured Docker builder.
+
+Prebuild does not modify the task environment. If serve-time configuration
+patches the Dockerfile, that intentionally produces a different Harbor
+environment ID; set `patch_dockerfile_with_sdk = false` when the prebuilt image
+must be reused.
+
 The command listens on `--host 0.0.0.0` and `--port`, with `_OSMOSIS_ROLLOUT_PORT` or 8000 as the port fallback. These remain CLI/environment settings because they describe the current server process rather than the backend. `harbor.trials_dir` resolves relative to the config file.
 
 The existing scaffolded `main.py` remains supported for entrypoint-based evaluation and deployment flows; those flows are not changed by the serve command.
