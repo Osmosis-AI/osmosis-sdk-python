@@ -8,6 +8,7 @@ import tarfile
 import zipfile
 from email.parser import BytesParser
 from pathlib import Path, PurePosixPath
+from typing import NoReturn
 
 FORBIDDEN_PACKAGE_PATHS = (
     "osmosis_ai/cli/commands/dev/",
@@ -28,25 +29,26 @@ FORBIDDEN_SYMBOLS = (
 )
 
 
+def fail(message: str) -> NoReturn:
+    # Explicit exits, not asserts, so ``python -O`` cannot skip the checks.
+    raise SystemExit(message)
+
+
 def check_member(name: str, content: bytes) -> None:
     parts = PurePosixPath(name).parts
-    assert "osmo" not in parts, f"Private osmo module shipped: {name}"
     if "osmosis_ai" in parts:
         package_path = "/".join(parts[parts.index("osmosis_ai") :])
-        assert not package_path.startswith(FORBIDDEN_PACKAGE_PATHS), (
-            f"Internal module shipped: {name}"
-        )
+        if package_path.startswith(FORBIDDEN_PACKAGE_PATHS):
+            fail(f"Internal module shipped: {name}")
         if name.endswith(".py"):
             for symbol in FORBIDDEN_SYMBOLS:
-                assert symbol not in content, (
-                    f"Internal API {symbol.decode()} shipped in {name}"
-                )
+                if symbol in content:
+                    fail(f"Internal API {symbol.decode()} shipped in {name}")
     if parts[-1] in {"METADATA", "PKG-INFO"}:
         metadata = BytesParser().parsebytes(content, headersonly=True)
         for requirement in metadata.get_all("Requires-Dist", []):
-            assert not re.match(r"osmo(?:\W|$)", requirement, re.IGNORECASE), (
-                f"Public artifact has a private dependency: {requirement}"
-            )
+            if re.match(r"osmo(?:\W|$)", requirement, re.IGNORECASE):
+                fail(f"Public artifact has a private dependency: {requirement}")
 
 
 def check_artifact(path: Path) -> None:
@@ -60,7 +62,8 @@ def check_artifact(path: Path) -> None:
             for member in archive.getmembers():
                 if member.isfile():
                     source = archive.extractfile(member)
-                    assert source is not None
+                    if source is None:
+                        fail(f"Unreadable sdist member: {member.name}")
                     check_member(member.name, source.read())
     else:
         raise ValueError(f"Unsupported release artifact: {path}")
@@ -69,7 +72,9 @@ def check_artifact(path: Path) -> None:
 
 if __name__ == "__main__":
     artifacts = [Path(argument) for argument in sys.argv[1:]]
-    assert any(path.suffix == ".whl" for path in artifacts), "Missing wheel"
-    assert any(path.name.endswith(".tar.gz") for path in artifacts), "Missing sdist"
+    if not any(path.suffix == ".whl" for path in artifacts):
+        fail("Missing wheel")
+    if not any(path.name.endswith(".tar.gz") for path in artifacts):
+        fail("Missing sdist")
     for artifact in artifacts:
         check_artifact(artifact)

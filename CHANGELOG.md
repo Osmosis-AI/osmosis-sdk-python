@@ -2,13 +2,6 @@
 
 This file records changes to `osmosis-ai`. For earlier versions, see [GitHub Releases](https://github.com/Osmosis-AI/osmosis-sdk-python/releases).
 
-## 0.3.5rc1 - Unreleased
-
-### Changed
-
-- Internal managed development server commands and their dedicated API client methods, models, and serializers have moved to the private `osmo` CLI. Use `osmo dev server up|down|list|logs`; these commands are no longer included in the public SDK.
-- The public CLI exposes a small composition API so downstream tools can reuse its command tree, global options, and invocation behavior.
-
 ## 0.3.4 - 2026-09-23
 
 ### Added

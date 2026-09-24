@@ -702,7 +702,7 @@ def test_secret_delete_requires_scope_confirmation_without_yes(
             called["deleted"] = True
 
     monkeypatch.setattr(secret_module, "OsmosisClient", FakeClient)
-    # --json + non-interactive => require_confirmation emits INTERACTIVE_REQUIRED
+    # --json + non-interactive => require_confirmation raises INTERACTIVE_REQUIRED
     exit_code = cli.main(
         ["--json", "secret", "delete", "OPENAI_API_KEY", "--scope", "workspace"]
     )

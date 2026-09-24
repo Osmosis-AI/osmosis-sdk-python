@@ -316,7 +316,6 @@ def _handle_cli_error(
     argv: list[str] | None,
     exit_code: int = 1,
     root_command: Command | None = None,
-    cli_version: str = PACKAGE_VERSION,
 ) -> int:
     output = _output_context_for_error(exc, argv)
     classified = None
@@ -332,7 +331,6 @@ def _handle_cli_error(
             command=command_path_for_error(
                 ctx, argv=command_argv, root_command=root_command
             ),
-            cli_version=cli_version,
         )
     else:
         _print_error(str(exc))
@@ -476,7 +474,6 @@ def run_cli(
     cli_app: typer.Typer,
     argv: list[str] | None = None,
     *,
-    cli_version: str = PACKAGE_VERSION,
     prog_name: str | None = None,
 ) -> int:
     """Run an SDK-composed application with shared output and exit semantics.
@@ -492,8 +489,8 @@ def run_cli(
         if isinstance(cli_app, typer.Typer):
             from typer.main import get_command
 
-            _validate_command_names(cli_app)
             root_command = get_command(cli_app)
+            _validate_command_names(cli_app)
             result = root_command.main(
                 args=argv,
                 prog_name=prog_name or cli_app.info.name or "osmosis",
@@ -521,16 +518,13 @@ def run_cli(
             argv=argv,
             exit_code=exc.exit_code,
             root_command=root_command,
-            cli_version=cli_version,
         )
     except (KeyboardInterrupt, typer.Abort):
         return 130
     except Exception as exc:
         # CLIError, PlatformAPIError, AuthenticationExpiredError and anything
         # else funnel through classify_error() into the structured envelope.
-        return _handle_cli_error(
-            exc, argv=argv, root_command=root_command, cli_version=cli_version
-        )
+        return _handle_cli_error(exc, argv=argv, root_command=root_command)
 
 
 def main(argv: list[str] | None = None) -> int:

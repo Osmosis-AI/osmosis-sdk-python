@@ -196,23 +196,53 @@ def test_duplicate_nested_and_flattened_names_are_rejected(
         ),
     ],
 )
-def test_errors_use_the_composed_tree_and_distribution_version(
+def test_errors_use_the_composed_tree_and_sdk_version(
     arguments: list[str],
     command: str,
     exit_code: int,
     code: str,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    assert (
-        cli.run_cli(_extended_app(), [*arguments, "--json"], cli_version="1.2.3")
-        == exit_code
-    )
+    assert cli.run_cli(_extended_app(), [*arguments, "--json"]) == exit_code
     captured = capsys.readouterr()
     assert captured.out == ""
     envelope = json.loads(captured.err)
     assert envelope["command"] == command
-    assert envelope["cli_version"] == "1.2.3"
+    assert envelope["cli_version"] == cli.PACKAGE_VERSION
     assert envelope["error"]["code"] == code
+
+
+@pytest.mark.parametrize("group", ["dev", "deploy"])
+def test_confirmation_errors_use_the_composed_tree(
+    group: str,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from osmosis_ai.cli.prompts import require_confirmation
+
+    target = cli.create_app(name="osmo")
+    # Names the public CLI once removed must resolve as extensions.
+    for name in ("dev", "deploy"):
+        extension = typer.Typer()
+        server = typer.Typer()
+
+        @server.command()
+        def up() -> None:
+            require_confirmation("Start the server?", yes=False)
+
+        extension.add_typer(server, name="server")
+        target.add_typer(extension, name=name)
+
+    arguments = ["--json", group, "server", "up"]
+    monkeypatch.setattr("sys.argv", ["osmo", *arguments])
+    assert cli.run_cli(target, arguments) == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    envelope = json.loads(captured.err)
+    assert envelope["command"] == f"{group} server up"
+    assert envelope["cli_version"] == cli.PACKAGE_VERSION
+    assert envelope["error"]["code"] == "INTERACTIVE_REQUIRED"
+    assert envelope["error"]["details"] == {"prompt": "Start the server?"}
 
 
 @pytest.mark.parametrize("shell", ["bash", "zsh", "fish"])

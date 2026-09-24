@@ -11,13 +11,6 @@ from osmosis_ai.cli._click_compat import (
     UsageError,
     get_current_context,
 )
-from osmosis_ai.cli.command_registry import (
-    COMMAND_GROUPS,
-    REMOVED_TOP_LEVEL_COMMANDS,
-    REMOVED_TWO_TOKEN_COMMANDS,
-    STANDALONE_COMMANDS,
-    THREE_TOKEN_PREFIXES,
-)
 from osmosis_ai.cli.errors import CLIError, CLIErrorCode
 from osmosis_ai.cli.output.jsonutil import dump_cli_json
 from osmosis_ai.consts import PACKAGE_VERSION
@@ -126,41 +119,6 @@ def emit_internal_debug(exc: BaseException, classified: CLIError | None = None) 
     sys.stderr.flush()
 
 
-def _argv_command_path(argv: list[str]) -> str:
-    skip_flags = {"--json", "--plain", "--version", "-V", "--help", "-h"}
-    value_options = {"--env-file", "--platform", "--workspace"}
-    tokens: list[str] = []
-    i = 0
-    while i < len(argv):
-        token = argv[i]
-        if token in skip_flags:
-            i += 1
-            continue
-        if token in value_options:
-            i += 2
-            continue
-        if token.startswith("-"):
-            i += 1
-            continue
-        tokens.append(token)
-        i += 1
-    if not tokens:
-        return "<root>"
-
-    command = tokens[0]
-    if command in STANDALONE_COMMANDS or command in REMOVED_TOP_LEVEL_COMMANDS:
-        return command
-    if len(tokens) == 1:
-        return command
-    if (command, tokens[1]) in REMOVED_TWO_TOKEN_COMMANDS:
-        return " ".join(tokens[:2])
-    if len(tokens) >= 3 and (command, tokens[1]) in THREE_TOKEN_PREFIXES:
-        return " ".join(tokens[:3])
-    if command in COMMAND_GROUPS:
-        return " ".join(tokens[:2])
-    return command
-
-
 def _tree_command_path(root: Command, argv: list[str]) -> str:
     """Read a command path from the actual tree without running callbacks."""
     from typer.core import TyperGroup, TyperOption
@@ -225,36 +183,22 @@ def command_path_for_error(
 ) -> str:
     """Resolve the command path for the error envelope.
 
-    When supplied, the live root command includes extensions and determines
-    the path even when parsing failed before entering a subcommand.
-    Otherwise prefer Click's ``command_path`` when the context is inside a
-    subcommand. Fall back to argv parsed against the same name catalog
-    ``_register_commands`` uses. Removed commands are the exception: they only
-    exist in argv (the Click context stops at the parent group), so they are
-    matched first.
+    ``run_cli`` passes the composed root command, so the path is read from the
+    actual tree (extensions included) even when parsing failed before entering
+    a subcommand. Without a root, use the Click context's subcommand path, or
+    ``<root>`` when neither is available.
     """
-    arguments = argv if argv is not None else sys.argv[1:]
     if root_command is not None:
-        return _tree_command_path(root_command, arguments)
-    argv_path = _argv_command_path(arguments)
-    tokens = argv_path.split()
-    if tokens and (
-        tokens[0] in REMOVED_TOP_LEVEL_COMMANDS
-        or (len(tokens) == 2 and (tokens[0], tokens[1]) in REMOVED_TWO_TOKEN_COMMANDS)
-    ):
-        return argv_path
-    if ctx is not None:
-        click_path = _click_subcommand_path(ctx)
-        if click_path is not None:
-            return click_path
-    return argv_path
+        return _tree_command_path(
+            root_command, argv if argv is not None else sys.argv[1:]
+        )
+    return (ctx and _click_subcommand_path(ctx)) or "<root>"
 
 
 def emit_structured_error_to_stderr(
     err: CLIError,
     *,
     command: str | None = None,
-    cli_version: str | None = None,
 ) -> None:
     """Write the JSON-mode error envelope to stderr."""
     if command is None:
@@ -264,7 +208,7 @@ def emit_structured_error_to_stderr(
     envelope: dict[str, Any] = {
         "schema_version": 1,
         "command": command,
-        "cli_version": cli_version or PACKAGE_VERSION,
+        "cli_version": PACKAGE_VERSION,
         "error": {
             "code": err.code,
             "message": err.message,
@@ -285,7 +229,6 @@ def emit_structured_warning_to_stderr(
     message: str,
     *,
     code: str | None = None,
-    cli_version: str | None = None,
 ) -> None:
     """Write a JSON-mode warning envelope (one line) to stderr.
 
@@ -297,7 +240,7 @@ def emit_structured_warning_to_stderr(
     """
     envelope: dict[str, Any] = {
         "schema_version": 1,
-        "cli_version": cli_version or PACKAGE_VERSION,
+        "cli_version": PACKAGE_VERSION,
         "warning": {
             "code": code,
             "message": message,
