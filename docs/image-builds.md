@@ -6,14 +6,6 @@
 osmosis images build --url https://github.com/acme/training-tasks \
   --path tasks --ref main --output images.json
 
-# Use source.revision from images.json for the gateway.
-osmosis dev server up --url https://github.com/acme/training-tasks \
-  --path tasks --ref FULL_COMMIT_SHA --backend gke \
-  --sandbox-environment opensandbox
-
-osmosis dev server list --url https://github.com/acme/training-tasks
-osmosis dev server logs SERVER_ID --url https://github.com/acme/training-tasks
-osmosis dev server down SERVER_ID --url https://github.com/acme/training-tasks
 ```
 
 `--path` selects a directory of Harbor task folders, a directory containing
@@ -30,15 +22,6 @@ commit, hash policy, environment hashes, full context checksums, stable tags,
 immutable image digests, and Cloud Build IDs. It does not contain credentials.
 No prepared task bundle is downloaded on this path. The same resumable request
 and timeout behavior described below applies.
-
-The gateway runs built-in SDK code and fetches the original pinned source;
-it needs no local `main.py`, dataset download, or task-image JSON file. Builder and gateway use
-the same GitHub archive fetcher so checkout filters cannot change build bytes. It
-independently computes image identities, resolves all required GAR tags to
-verified manifest digests, and prewarms representative agent environments
-before accepting rollouts. Each trial gets a temporary task copy bound to those
-digests. Source files stay unchanged. A gateway serves one pinned source;
-requests select tasks using `metadata.harbor_task_id`.
 
 ### Identity and publication
 
@@ -65,42 +48,10 @@ separate verifier contexts are hashed independently; inherited verifier
 environments reuse the agent image while preserving verifier configuration.
 Optional `image-build.toml` trainer images appear in `named_images.trainer`.
 
-Registry lookup uses a short-lived read credential delivered through the
-managed gateway's secret bundle. Once startup resolves the source, trials use
-cached immutable digests and GKE's image-pull identity. Missing images or failed
-prewarm prevent readiness. This mode requires the matching Monolith release
-and source-repository IAM configuration.
-
-Use `dev server up --config gateway.json` to configure the managed Harbor agent
-without adding Python code or changing the task source. For example:
-
-```json
-{
-  "agent": "opencode",
-  "concurrency": 4,
-  "native_agent_kwargs": {"version": "1.18.27"},
-  "environment_kwargs": {"use_server_proxy": true},
-  "cleanup_successful_trials": false
-}
-```
-
-`native_agent_kwargs` and `environment_kwargs` are passed to Harbor's native
-agent and OpenSandbox configuration. Source gateways use OpenSandbox's server
-proxy by default and derive its protocol from the configured service URL;
-explicit environment options take precedence. Optional `environment_healthcheck` uses
-Harbor's `command`, timing and retry fields; it adds readiness requirements to
-the agent environment in temporary trial copies, preserving the original task
-and separate verifier healthchecks. Configuration defaults and validation live
-in `HarborGatewayConfig`. Keep configuration containing private routing or
-credentials outside Git. Monolith stores it in the encrypted gateway secret
-bundle. Configuration requires the source `--url` path; custom-code gateways
-continue to configure their own backend.
-
 ## Legacy bundle builds
 
 `--repo` retains the prepared task bundle workflow below. `--tasks-dir` remains
-an alias of `--path`; dev-server startup without `--url` retains custom gateway
-code from the current rollout folder.
+an alias of `--path`.
 
 The [command shell](../osmosis_ai/cli/commands/images.py) delegates to
 [images.py](../osmosis_ai/platform/cli/images.py) and

@@ -1,11 +1,9 @@
 from __future__ import annotations
 
-from pathlib import Path
 from typing import NoReturn
 
 import typer
 
-from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.cli.options import all_option, limit_option
 from osmosis_ai.cli.output import CommandResult
 from osmosis_ai.platform.constants import (
@@ -21,20 +19,6 @@ app: typer.Typer = typer.Typer(
 
 @app.command("up")
 def up(
-    url: str | None = typer.Option(
-        None, "--url", help="GitHub Harbor task source; use the built-in gateway."
-    ),
-    path: str = typer.Option(
-        "tasks",
-        "--path",
-        help="Task directory or dataset.toml relative to the repository root.",
-    ),
-    ref: str | None = typer.Option(
-        None, "--ref", help="Full commit SHA from images build."
-    ),
-    config: Path | None = typer.Option(
-        None, "--config", help="JSON native Harbor gateway configuration for --url."
-    ),
     no_ttl: bool = typer.Option(
         False, "--no-ttl", help="Disable the 24h auto-teardown."
     ),
@@ -54,10 +38,6 @@ def up(
     ),
 ) -> CommandResult:
     """Provision a remote rollout server for the current rollout folder."""
-    if url is None and (ref is not None or path != "tasks" or config is not None):
-        raise CLIError(
-            "Source --path, --ref and --config options require --url", code="VALIDATION"
-        )
     from osmosis_ai.platform.cli.dev_server import up as _up
 
     return _up(
@@ -65,29 +45,21 @@ def up(
         yes=yes,
         sandbox_environment=sandbox_environment,
         **({"backend": backend} if backend is not None else {}),
-        **({"url": url, "path": path, "ref": ref} if url is not None else {}),
-        config=config,
     )
 
 
 @app.command("down")
 def down(
-    url: str | None = typer.Option(
-        None, "--url", help="Connected repository; no local checkout required."
-    ),
     server_id: str = typer.Argument(..., help="The rollout server id from `up`."),
 ) -> CommandResult:
     """Tear down a remote rollout server."""
     from osmosis_ai.platform.cli.dev_server import down as _down
 
-    return _down(server_id, **({"url": url} if url else {}))
+    return _down(server_id)
 
 
 @app.command("logs")
 def logs(
-    url: str | None = typer.Option(
-        None, "--url", help="Connected repository; no local checkout required."
-    ),
     server_id: str = typer.Argument(..., help="The rollout server id from `up`."),
     follow: bool = typer.Option(
         None,
@@ -108,18 +80,15 @@ def logs(
     from osmosis_ai.platform.cli.dev_server import logs as _logs
 
     # _logs always raises typer.Exit or KeyboardInterrupt; there is no CommandResult.
-    _logs(server_id, follow=follow, tail=tail, **({"url": url} if url else {}))
+    _logs(server_id, follow=follow, tail=tail)
 
 
 @app.command("list")
 def list_servers(
-    url: str | None = typer.Option(
-        None, "--url", help="Connected repository; no local checkout required."
-    ),
     limit: int = limit_option("Maximum number of rollout servers to show."),
     all_: bool = all_option("Show all rollout servers."),
 ) -> CommandResult:
     """List active rollout servers for the current workspace."""
     from osmosis_ai.platform.cli.dev_server import list_servers as _list
 
-    return _list(limit=limit, all_=all_, **({"url": url} if url else {}))
+    return _list(limit=limit, all_=all_)
