@@ -300,6 +300,8 @@ def test_command_path_falls_back_to_argv_when_no_context(monkeypatch) -> None:
     [
         ["--platform", "https://example.invalid", "--json", "auth", "whoami"],
         ["--env-file", "dev.env", "--json", "auth", "whoami"],
+        ["--workspace", "dev", "--json", "auth", "whoami"],
+        ["--workspace=dev", "--json", "auth", "whoami"],
     ],
 )
 def test_command_path_skips_value_taking_root_options(argv: list[str]) -> None:
@@ -343,9 +345,9 @@ def test_command_path_prefers_click_context_over_argv() -> None:
     assert command_path_for_error(nested, argv=["train", "list"]) == "dataset list"
 
 
-def test_dev_server_up_command_path_from_argv(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_removed_dev_command_path_from_argv(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("sys.argv", ["osmosis", "--json", "dev", "server", "up"])
-    assert command_path_for_error(None) == "dev server up"
+    assert command_path_for_error(None) == "dev"
 
 
 def test_eval_cache_is_not_a_three_token_command(

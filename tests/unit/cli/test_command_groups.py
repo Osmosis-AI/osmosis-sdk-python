@@ -17,6 +17,7 @@ PRESERVED_ROOT_COMMANDS = [
     "dataset",
     "train",
     "model",
+    "images",
     "benchmark",
     "rollout",
     "template",
@@ -26,10 +27,8 @@ PRESERVED_ROOT_COMMANDS = [
     "secret",
 ]
 
-# Commands registered but intentionally hidden from --help output.
-HIDDEN_ROOT_COMMANDS = [
-    "dev",
-]
+# Internal-only commands must not remain registered or advertised.
+REMOVED_ROOT_COMMANDS = ["dev"]
 
 
 PRESERVED_HELP_COMMANDS = [
@@ -72,7 +71,7 @@ def _root_command_names() -> set[str]:
 
 
 def _root_help_command_names(output: str) -> set[str]:
-    expected_command_names = set(PRESERVED_ROOT_COMMANDS) | set(HIDDEN_ROOT_COMMANDS)
+    expected_command_names = set(PRESERVED_ROOT_COMMANDS) | set(REMOVED_ROOT_COMMANDS)
     command_names = set()
     for line in output.splitlines():
         cleaned = ANSI_ESCAPE.sub("", line).strip()
@@ -103,8 +102,8 @@ def test_root_command_registry_includes_supported_groups():
     for command in PRESERVED_ROOT_COMMANDS:
         assert command in root_commands
 
-    for command in HIDDEN_ROOT_COMMANDS:
-        assert command in root_commands
+    for command in REMOVED_ROOT_COMMANDS:
+        assert command not in root_commands
 
 
 def test_root_help_surface_lists_supported_groups(capfd):
@@ -116,7 +115,7 @@ def test_root_help_surface_lists_supported_groups(capfd):
     for command in PRESERVED_ROOT_COMMANDS:
         assert command in root_help_commands
 
-    for command in HIDDEN_ROOT_COMMANDS:
+    for command in REMOVED_ROOT_COMMANDS:
         assert command not in root_help_commands
 
 
@@ -159,3 +158,9 @@ def test_help_command_nudges_to_help_flag(capfd):
     assert rc != 0
     assert "Use 'osmosis --help'" in captured.err
     assert "Did you mean" not in captured.err
+
+
+@pytest.mark.parametrize("args", [["dev"], ["dev", "server", "--help"]])
+def test_internal_commands_are_unavailable(args, capfd):
+    assert main(args) == 2
+    assert "No such command" in capfd.readouterr().err

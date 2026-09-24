@@ -5,7 +5,12 @@ from __future__ import annotations
 import sys
 from typing import Any
 
-from osmosis_ai.cli._click_compat import Context, UsageError, get_current_context
+from osmosis_ai.cli._click_compat import (
+    Command,
+    Context,
+    UsageError,
+    get_current_context,
+)
 from osmosis_ai.cli.command_registry import (
     COMMAND_GROUPS,
     REMOVED_TOP_LEVEL_COMMANDS,
@@ -123,7 +128,7 @@ def emit_internal_debug(exc: BaseException, classified: CLIError | None = None) 
 
 def _argv_command_path(argv: list[str]) -> str:
     skip_flags = {"--json", "--plain", "--version", "-V", "--help", "-h"}
-    value_options = {"--env-file", "--platform"}
+    value_options = {"--env-file", "--platform", "--workspace"}
     tokens: list[str] = []
     i = 0
     while i < len(argv):
@@ -156,6 +161,43 @@ def _argv_command_path(argv: list[str]) -> str:
     return command
 
 
+def _tree_command_path(root: Command, argv: list[str]) -> str:
+    """Read a command path from the actual tree without running callbacks."""
+    from typer.core import TyperGroup, TyperOption
+
+    command = root
+    path: list[str] = []
+    index = 0
+    while isinstance(command, TyperGroup):
+        options = {
+            name: parameter
+            for parameter in command.params
+            if isinstance(parameter, TyperOption)
+            for name in (*parameter.opts, *parameter.secondary_opts)
+        }
+        while index < len(argv):
+            token = argv[index]
+            index += 1
+            if token == "--":
+                break
+            if not token.startswith("-"):
+                index -= 1
+                break
+            option = options.get(token.partition("=")[0])
+            if option is not None and not option.is_flag and "=" not in token:
+                index += option.nargs
+        if index >= len(argv):
+            break
+        name = argv[index]
+        path.append(name)
+        index += 1
+        child = command.get_command(Context(command), name)
+        if child is None:
+            break
+        command = child
+    return " ".join(path) or "<root>"
+
+
 def _click_subcommand_path(ctx: Context) -> str | None:
     path = ctx.command_path.strip()
     if not path:
@@ -179,16 +221,22 @@ def command_path_for_error(
     ctx: Context | None,
     *,
     argv: list[str] | None = None,
+    root_command: Command | None = None,
 ) -> str:
     """Resolve the command path for the error envelope.
 
-    Prefer Click's ``command_path`` when the context is already inside a
+    When supplied, the live root command includes extensions and determines
+    the path even when parsing failed before entering a subcommand.
+    Otherwise prefer Click's ``command_path`` when the context is inside a
     subcommand. Fall back to argv parsed against the same name catalog
     ``_register_commands`` uses. Removed commands are the exception: they only
     exist in argv (the Click context stops at the parent group), so they are
     matched first.
     """
-    argv_path = _argv_command_path(argv if argv is not None else sys.argv[1:])
+    arguments = argv if argv is not None else sys.argv[1:]
+    if root_command is not None:
+        return _tree_command_path(root_command, arguments)
+    argv_path = _argv_command_path(arguments)
     tokens = argv_path.split()
     if tokens and (
         tokens[0] in REMOVED_TOP_LEVEL_COMMANDS

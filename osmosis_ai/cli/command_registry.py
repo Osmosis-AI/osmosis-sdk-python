@@ -19,7 +19,6 @@ GROUP_EVAL = "eval"
 GROUP_BENCHMARK = "benchmark"
 GROUP_ROLLOUT = "rollout"
 GROUP_TEMPLATE = "template"
-GROUP_DEV = "dev"
 GROUP_AUTH = "auth"
 GROUP_SECRET = "secret"
 
@@ -41,7 +40,6 @@ COMMAND_GROUPS: frozenset[str] = frozenset(
         GROUP_BENCHMARK,
         GROUP_ROLLOUT,
         GROUP_TEMPLATE,
-        GROUP_DEV,
         GROUP_AUTH,
         GROUP_SECRET,
     }
@@ -51,13 +49,13 @@ COMMAND_GROUPS: frozenset[str] = frozenset(
 THREE_TOKEN_PREFIXES: frozenset[tuple[str, str]] = frozenset(
     {
         (GROUP_BENCHMARK, "runs"),
-        (GROUP_DEV, "server"),
     }
 )
 
 REMOVED_TOP_LEVEL_COMMANDS: frozenset[str] = frozenset(
     {
         "deploy",
+        "dev",
         "deployment",
         "init",
         "link",
