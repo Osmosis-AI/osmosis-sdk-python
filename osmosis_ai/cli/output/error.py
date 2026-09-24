@@ -123,6 +123,10 @@ def _tree_command_path(root: Command, argv: list[str]) -> str:
     """Read a command path from the actual tree without running callbacks."""
     from typer.core import TyperGroup, TyperOption
 
+    from osmosis_ai.cli.output.context import hoist_format_selectors
+
+    # Parse the same argv Click sees; run_cli hoists the format selectors.
+    argv = hoist_format_selectors(argv)
     command = root
     path: list[str] = []
     index = 0
@@ -142,7 +146,10 @@ def _tree_command_path(root: Command, argv: list[str]) -> str:
                 index -= 1
                 break
             option = options.get(token.partition("=")[0])
-            if option is not None and not option.is_flag and "=" not in token:
+            if option is None:
+                # Click rejects an unknown option at this group.
+                return " ".join(path) or "<root>"
+            if not option.is_flag and "=" not in token:
                 index += option.nargs
         if index >= len(argv):
             break

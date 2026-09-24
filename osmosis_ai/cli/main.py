@@ -444,6 +444,8 @@ def _validate_command_names(target: typer.Typer, path: str = "") -> set[str]:
     """Reject registrations that Typer would otherwise silently overwrite."""
     from typer.main import get_command_name, solve_typer_info_defaults
 
+    from osmosis_ai.cli.errors import CLIError
+
     names: set[str] = set()
     for command in target.registered_commands:
         name = command.name
@@ -451,7 +453,7 @@ def _validate_command_names(target: typer.Typer, path: str = "") -> set[str]:
             name = get_command_name(command.callback.__name__)
         if name is not None:
             if name in names:
-                raise ValueError(f"Duplicate CLI command: {path}{name}")
+                raise CLIError(f"Duplicate CLI command: {path}{name}", code="INTERNAL")
             names.add(name)
     for group in target.registered_groups:
         name = solve_typer_info_defaults(group).name
@@ -465,7 +467,9 @@ def _validate_command_names(target: typer.Typer, path: str = "") -> set[str]:
         # Unnamed Typer groups flatten their children into the parent.
         for registered_name in {name} if name else children:
             if registered_name in names:
-                raise ValueError(f"Duplicate CLI command: {path}{registered_name}")
+                raise CLIError(
+                    f"Duplicate CLI command: {path}{registered_name}", code="INTERNAL"
+                )
             names.add(registered_name)
     return names
 

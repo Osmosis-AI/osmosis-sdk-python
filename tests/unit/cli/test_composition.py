@@ -130,6 +130,12 @@ def test_duplicate_root_names_are_rejected_before_running(
 
     assert cli.run_cli(target, ["extension"]) == 1
     assert "Duplicate CLI command: extension" in capsys.readouterr().err
+    assert cli.run_cli(target, ["--json", "extension"]) == 1
+    assert json.loads(capsys.readouterr().err)["error"] == {
+        "code": "INTERNAL",
+        "message": "Duplicate CLI command: extension",
+        "details": {},
+    }
     assert not called
 
 
