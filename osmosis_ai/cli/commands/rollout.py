@@ -36,6 +36,11 @@ def serve(
         help="Path to rollout server config TOML file.",
         metavar="CONFIG",
     ),
+    harbor_dataset: str | None = typer.Option(
+        None,
+        "--harbor-dataset",
+        help="Local folder, Harbor dataset reference, or Git dataset URL.",
+    ),
     host: str = typer.Option("0.0.0.0", "--host", help="Server bind host."),
     port: int | None = typer.Option(
         None,
@@ -48,7 +53,12 @@ def serve(
     """Run the rollout server declared by a TOML config."""
     from osmosis_ai.rollout.serve import serve as _serve
 
-    _serve(config_path, host=host, port=port)
+    _serve(
+        config_path,
+        harbor_dataset=harbor_dataset,
+        host=host,
+        port=port,
+    )
     _server_finished()
 
 

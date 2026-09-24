@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -41,8 +42,6 @@ def test_load_harbor_config(tmp_path: Path) -> None:
 backend = "harbor"
 
 [harbor]
-tasks_dir = "dataset"
-task_mode = "dataset"
 agent = "mini-swe-agent"
 environment = "daytona"
 concurrency = 12
@@ -62,7 +61,6 @@ auto_stop_interval_mins = 30
     config, rollout_dir = serve_module.load_serve_config(config_path)
 
     assert config.backend == "harbor"
-    assert config.harbor.tasks_dir == Path("dataset")
     assert config.harbor.native_agent_kwargs == {"max_seq_len": 8192}
     assert config.harbor.environment_kwargs == {"auto_stop_interval_mins": 30}
     assert rollout_dir == tmp_path
@@ -80,6 +78,14 @@ auto_stop_interval_mins = 30
         (
             'backend = "harbor"\n[harbor]\nagent = "mini-swe-agent"\nconcurrency = 0\n',
             "concurrency",
+        ),
+        (
+            'backend = "harbor"\n[harbor]\nagent = "mini-swe-agent"\ntasks_dir = "tasks"\n',
+            "tasks_dir",
+        ),
+        (
+            'backend = "harbor"\n[harbor]\nagent = "mini-swe-agent"\ntask_mode = "dataset"\n',
+            "task_mode",
         ),
     ],
 )
@@ -175,7 +181,12 @@ grader_config = "demo.grader:grader_config"
     )
     monkeypatch.setattr(serve_module, "_run_server", fake_run_server)
 
-    serve_module.serve(config_path, host="127.0.0.1", port=8123)
+    serve_module.serve(
+        config_path,
+        harbor_dataset=None,
+        host="127.0.0.1",
+        port=8123,
+    )
 
     assert captured["backend_kwargs"] == {
         "workflow": "demo.workflow:Workflow",
@@ -202,8 +213,6 @@ def test_serve_harbor_constructs_backend_from_config(
 backend = "harbor"
 
 [harbor]
-tasks_dir = "dataset"
-task_mode = "dataset"
 agent = "mini-swe-agent"
 environment = "daytona"
 concurrency = 12
@@ -240,9 +249,22 @@ auto_stop_interval_mins = 30
     monkeypatch.setattr(
         "osmosis_ai.rollout.backend.harbor.HarborBackend", FakeHarborBackend
     )
+
+    async def fake_materialize_dataset(source: str) -> Path:
+        captured["dataset_source"] = source
+        return tasks_dir
+
+    monkeypatch.setattr(
+        serve_module, "_materialize_harbor_dataset", fake_materialize_dataset
+    )
     monkeypatch.setattr(serve_module, "_run_server", fake_run_server)
 
-    serve_module.serve(config_path, host="127.0.0.1", port=8124)
+    serve_module.serve(
+        config_path,
+        harbor_dataset="org/math@sha256:abc",
+        host="127.0.0.1",
+        port=8124,
+    )
 
     backend_kwargs = captured["backend_kwargs"]
     assert backend_kwargs["tasks_dir"] == tasks_dir.resolve()
@@ -261,6 +283,7 @@ auto_stop_interval_mins = 30
     assert backend_kwargs["max_queue_depth"] == 24
     assert captured["host"] == "127.0.0.1"
     assert captured["port"] == 8124
+    assert captured["dataset_source"] == "org/math@sha256:abc"
 
 
 @pytest.mark.parametrize("field", ["code_dir", "bundle"])
@@ -272,3 +295,88 @@ def test_harbor_rejects_internal_packaging_fields(tmp_path: Path, field: str) ->
 
     with pytest.raises(CLIError, match=field):
         serve_module.load_serve_config(config_path)
+
+
+def test_harbor_requires_dataset_flag(tmp_path: Path) -> None:
+    config_path = tmp_path / "rollout.toml"
+    config_path.write_text('backend = "harbor"\n[harbor]\nagent = "mini-swe-agent"\n')
+
+    with pytest.raises(CLIError, match="--harbor-dataset is required"):
+        serve_module.serve(
+            config_path,
+            harbor_dataset=None,
+            host="127.0.0.1",
+            port=8000,
+        )
+
+
+def test_simple_rejects_dataset_flag(tmp_path: Path) -> None:
+    config_path = tmp_path / "rollout.toml"
+    config_path.write_text('backend = "simple"\n[simple]\nworkflow = "demo:Workflow"\n')
+
+    with pytest.raises(CLIError, match="only be used"):
+        serve_module.serve(
+            config_path,
+            harbor_dataset="./tasks",
+            host="127.0.0.1",
+            port=8000,
+        )
+
+
+def test_dataset_source_supports_local_and_remote_forms(tmp_path: Path) -> None:
+    local = tmp_path / "tasks"
+    local.mkdir()
+
+    local_config = serve_module._dataset_config_for_source(str(local))
+    package_config = serve_module._dataset_config_for_source("acme/code@sha256:abc")
+    repo_config = serve_module._dataset_config_for_source(
+        "https://github.com/acme/tasks.git@abc123"
+    )
+
+    assert local_config.path == local
+    assert package_config.name == "acme/code"
+    assert package_config.ref == "sha256:abc"
+    assert repo_config.repo == "https://github.com/acme/tasks.git@abc123"
+
+
+async def test_remote_dataset_is_materialized_in_content_addressed_cache(
+    monkeypatch, tmp_path: Path
+) -> None:
+    task_id = object()
+
+    class FakeTaskConfig:
+        def model_dump_json(self) -> str:
+            return '{"name":"acme/task","ref":"sha256:def"}'
+
+        def get_task_id(self) -> object:
+            return task_id
+
+    class FakeDatasetConfig:
+        async def get_task_configs(self) -> list[FakeTaskConfig]:
+            return [FakeTaskConfig()]
+
+        def is_local(self) -> bool:
+            return False
+
+    captured: dict[str, Any] = {}
+
+    class FakeTaskClient:
+        async def download_tasks(self, **kwargs: Any) -> SimpleNamespace:
+            captured.update(kwargs)
+            output_dir = kwargs["output_dir"]
+            return SimpleNamespace(paths=[output_dir / "task"])
+
+    monkeypatch.setattr(
+        serve_module,
+        "_dataset_config_for_source",
+        lambda source: FakeDatasetConfig(),
+    )
+    monkeypatch.setattr("harbor.tasks.client.TaskClient", FakeTaskClient)
+    monkeypatch.setattr("platformdirs.user_cache_path", lambda name: tmp_path)
+
+    resolved = await serve_module._materialize_harbor_dataset("acme/dataset@v1")
+
+    assert resolved.parent == tmp_path / "harbor-datasets"
+    assert captured["task_ids"] == [task_id]
+    assert captured["output_dir"] == resolved
+    assert captured["export"] is True
