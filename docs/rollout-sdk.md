@@ -279,7 +279,60 @@ Note that `HarborBackend` still resolves — with a different constructor. Port 
 
 ### Running a server
 
-There is no `osmosis rollout serve` command. Scaffold a server with `osmosis rollout init <name>`, which writes `rollouts/<name>/main.py` wiring `LocalBackend` + `create_rollout_server` + `uvicorn` ([../osmosis_ai/templates/_scaffolds/rollout/main.py.tpl](../osmosis_ai/templates/_scaffolds/rollout/main.py.tpl)), then run `python rollouts/<name>/main.py` from the workspace root (it listens on `_OSMOSIS_ROLLOUT_PORT`, default 8000).
+`osmosis rollout serve` constructs the backend from a TOML file; no Python backend factory is required. Run it through the rollout project's environment so the dependencies declared in that rollout's `pyproject.toml` are available. Relative paths and Python imports resolve from the directory containing the config.
+
+For the simple in-process backend, create `rollout.toml` alongside the rollout's `pyproject.toml`:
+
+```toml
+backend = "simple"
+
+[simple]
+workflow = "multiply_rollout.workflow:MultiplyWorkflow"
+workflow_config = "multiply_rollout.workflow:multiply_workflow_config"
+grader = "multiply_rollout.grader:MultiplyGrader"
+grader_config = "multiply_rollout.grader:multiply_grader_config"
+```
+
+For Harbor, the same file selects the Harbor backend and contains its settings:
+
+```toml
+backend = "harbor"
+
+[harbor]
+tasks_dir = "multiply_harbor_task"
+agent = "multiply_rollout.workflow:MultiplyWorkflow"
+workflow_config = "multiply_rollout.workflow:multiply_workflow_config"
+grader = "multiply_rollout.grader:MultiplyGrader"
+grader_config = "multiply_rollout.grader:multiply_grader_config"
+environment = "daytona"
+concurrency = 1000
+```
+
+`harbor.agent` also accepts a native Harbor agent name such as `mini-swe-agent`. Native-agent and environment options are ordinary nested TOML tables:
+
+```toml
+[harbor.native_agent_kwargs]
+max_seq_len = 8192
+
+[harbor.native_agent_kwargs.config.agent]
+step_limit = 5
+
+[harbor.environment_kwargs]
+auto_stop_interval_mins = 30
+```
+
+`harbor.native_model_name` optionally changes the logical model identifier passed to a native agent; it defaults to `openai/osmosis-rollout` and has no effect on Python workflow agents. Other optional Harbor fields include `grader`, `grader_config`, `trials_dir`, `cleanup_successful_trials`, `patch_dockerfile_with_sdk`, `agent_setup_timeout_sec`, and `max_queue_depth`. When a workflow or grader needs bundling, the CLI always builds it from the directory containing `rollout.toml`; the lower-level `HarborBackend.code_dir` and `HarborBackend.bundle` controls are not part of the TOML schema.
+
+Start either backend by passing its config:
+
+```bash
+uv run --project rollouts/<name> \
+  osmosis rollout serve rollouts/<name>/rollout.toml
+```
+
+The command listens on `--host 0.0.0.0` and `--port`, with `_OSMOSIS_ROLLOUT_PORT` or 8000 as the port fallback. These remain CLI/environment settings because they describe the current server process rather than the backend. `harbor.tasks_dir` and `harbor.trials_dir` resolve relative to the config file.
+
+The existing scaffolded `main.py` remains supported for entrypoint-based evaluation and deployment flows; those flows are not changed by the serve command.
 
 ## Integrations
 

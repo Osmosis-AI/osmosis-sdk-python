@@ -56,6 +56,7 @@ def test_rollout_init_json_writes_full_scaffold(monkeypatch, tmp_path, capsys) -
 
     files = payload["resource"]["files"]
     assert "rollouts/my-agent/main.py" in files
+    assert "rollouts/my-agent/rollout.toml" in files
     assert "rollouts/my-agent/pyproject.toml" in files
     assert "rollouts/my-agent/README.md" in files
     assert "configs/eval/my-agent.toml" in files
@@ -63,6 +64,7 @@ def test_rollout_init_json_writes_full_scaffold(monkeypatch, tmp_path, capsys) -
 
     rollout_dir = workspace_directory / "rollouts" / "my-agent"
     assert (rollout_dir / "main.py").is_file()
+    assert (rollout_dir / "rollout.toml").is_file()
     assert (rollout_dir / "pyproject.toml").is_file()
     assert (rollout_dir / "README.md").is_file()
     assert (workspace_directory / "configs" / "eval" / "my-agent.toml").is_file()
@@ -88,6 +90,11 @@ def test_rollout_init_substitutes_rollout_name_in_emitted_files(
     assert "my-agent" in main_py
     assert "<your-rollout>" not in main_py
 
+    serve_toml = (rollout_dir / "rollout.toml").read_text(encoding="utf-8")
+    assert 'backend = "simple"' in serve_toml
+    assert 'workflow = "main:MyAgentWorkflow"' in serve_toml
+    assert 'grader = "main:MyGrader"' in serve_toml
+
     readme = (rollout_dir / "README.md").read_text(encoding="utf-8")
     assert "my-agent" in readme
     assert "<your-rollout>" not in readme
@@ -103,6 +110,7 @@ def test_rollout_init_plain_next_steps_use_existing_commands(
     captured = capsys.readouterr()
 
     assert rc == 0
+    assert "osmosis rollout serve rollouts/my-agent/rollout.toml" in captured.out
     assert "osmosis eval submit configs/eval/my-agent.toml" in captured.out
     assert "osmosis train submit configs/training/my-agent.toml" in captured.out
     assert "osmosis rollout validate" not in captured.out
@@ -129,7 +137,7 @@ def test_rollout_init_main_py_is_a_runnable_rollout_server(
         workspace_directory / "rollouts" / "my-agent" / "pyproject.toml"
     ).read_text(encoding="utf-8")
     assert '"osmosis-ai[server]>=0.3.0,<0.4"' in pyproject_toml
-    assert "osmosis rollout serve" not in main_py
+    assert "osmosis rollout serve rollout.toml" in main_py
     assert "def main()" in main_py
     assert 'if __name__ == "__main__":' in main_py
     assert "uvicorn.run(" in main_py
@@ -423,3 +431,4 @@ def test_rollout_help_lists_init(capfd) -> None:
     assert rc == 0
     assert "init" in out
     assert "list" in out
+    assert "serve" in out

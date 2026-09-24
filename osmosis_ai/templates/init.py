@@ -26,6 +26,7 @@ _SCAFFOLD_PACKAGE = "osmosis_ai.templates._scaffolds.rollout"
 # is replaced with the rollout name at render time.
 _SCAFFOLD_LAYOUT: tuple[tuple[str, str], ...] = (
     ("main.py.tpl", "rollouts/{name}/main.py"),
+    ("rollout.toml.tpl", "rollouts/{name}/rollout.toml"),
     ("pyproject.toml.tpl", "rollouts/{name}/pyproject.toml"),
     ("README.md.tpl", "rollouts/{name}/README.md"),
     ("eval.toml.tpl", "configs/eval/{name}.toml"),
@@ -182,6 +183,8 @@ def init_command(name: str, *, force: bool = False) -> OperationResult:
 
     next_steps = [
         f"pip install -e rollouts/{name}",
+        "uv run --project "
+        f"rollouts/{name} osmosis rollout serve rollouts/{name}/rollout.toml",
         f"osmosis eval submit configs/eval/{name}.toml",
         f"osmosis train submit configs/training/{name}.toml",
     ]

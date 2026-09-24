@@ -58,6 +58,7 @@ PRESERVED_HELP_COMMANDS = [
     ["benchmark", "runs", "stop", "--help"],
     ["benchmark", "runs", "download", "--help"],
     ["rollout", "--help"],
+    ["rollout", "serve", "--help"],
     ["template", "--help"],
     ["eval", "--help"],
     ["eval", "logs", "--help"],
