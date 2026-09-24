@@ -861,6 +861,7 @@ def test_up_command_forwards_provider(monkeypatch, provider):
     result = CliRunner().invoke(app, ["up", "--sandbox-environment", provider, "--yes"])
     assert result.exit_code == 0, result.output
     up.assert_called_once_with(
+        config=None,
         ttl_hours=24,
         yes=True,
         sandbox_environment=DevServerSandboxEnvironment(provider),
@@ -889,6 +890,7 @@ def test_up_command_forwards_deployment_backend(monkeypatch, backend):
     )
     assert result.exit_code == 0, result.output
     up.assert_called_once_with(
+        config=None,
         ttl_hours=24,
         yes=True,
         sandbox_environment=DevServerSandboxEnvironment.OPENSANDBOX,
@@ -903,3 +905,132 @@ def test_up_command_rejects_unknown_backend(monkeypatch):
     monkeypatch.setattr(dev_server_module, "up", up)
     assert CliRunner().invoke(app, ["up", "--backend", "docker"]).exit_code == 2
     up.assert_not_called()
+
+
+@pytest.mark.parametrize("options", [["--ref", "a" * 40], ["--path", "custom/tasks"]])
+def test_up_rejects_source_options_without_url(monkeypatch, options):
+    from osmosis_ai.cli.commands.dev.server import app
+
+    up = Mock()
+    monkeypatch.setattr(dev_server_module, "up", up)
+    result = CliRunner().invoke(app, ["up", *options])
+    assert result.exit_code != 0
+    assert isinstance(result.exception, CLIError)
+    assert "require --url" in str(result.exception)
+    up.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [{"ref": "a" * 40}, {"path": "custom/tasks"}, {"url": "", "ref": "a" * 40}],
+)
+def test_up_source_validation_precedes_local_provisioning(monkeypatch, kwargs):
+    resolve = Mock()
+    monkeypatch.setattr(
+        dev_server_module, "resolve_git_workspace_directory_context", resolve
+    )
+    with pytest.raises(CLIError) as error:
+        dev_server_module.up(ttl_hours=24, **kwargs)
+    assert error.value.code == "VALIDATION"
+    resolve.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "command,args", [("down", ["r1"]), ("logs", ["r1"]), ("list", [])]
+)
+@pytest.mark.parametrize("url", ["", " "])
+def test_lifecycle_rejects_empty_source_url_without_local_fallback(
+    monkeypatch, command, args, url
+):
+    from osmosis_ai.cli.commands.dev.server import app
+
+    resolve = Mock(side_effect=AssertionError("must not use the local workspace"))
+    client = Mock()
+    monkeypatch.setattr(
+        dev_server_module, "resolve_git_workspace_directory_context", resolve
+    )
+    monkeypatch.setattr(dev_server_module, "OsmosisClient", client)
+    result = CliRunner().invoke(app, [command, *args, "--url", url])
+    assert isinstance(result.exception, CLIError)
+    assert result.exception.code == "VALIDATION"
+    resolve.assert_not_called()
+    client.assert_not_called()
+
+
+@pytest.mark.parametrize("echo_config", [True, False])
+def test_source_gateway_config_is_validated_forwarded_and_acknowledged(
+    tmp_path, monkeypatch, echo_config
+):
+    import json
+
+    from osmosis_ai.rollout.types.harbor import HarborGatewayConfig
+
+    config_path = tmp_path / "gateway.json"
+    supplied = {
+        "concurrency": 8,
+        "native_agent_kwargs": {"version": "1.18.27"},
+        "environment_healthcheck": {"command": "test -d /app"},
+    }
+    config_path.write_text(json.dumps(supplied))
+    normalized = HarborGatewayConfig.model_validate(supplied).model_dump(mode="json")
+    source = {
+        "repository": "https://github.com/acme/tasks",
+        "path": "tasks",
+        "revision": "a" * 40,
+    }
+    client = Mock()
+    client.provision_dev_rollout_server.return_value = {
+        "id": "server",
+        "url": "https://gateway.test",
+        "backend": "gke",
+        "sandbox_environment": "opensandbox",
+        "task_source": source,
+        **({"harbor_config": normalized} if echo_config else {}),
+    }
+    monkeypatch.setattr(dev_server_module, "OsmosisClient", lambda: client)
+    kwargs = dict(
+        url=source["repository"],
+        path=source["path"],
+        ref=source["revision"],
+        ttl_hours=24,
+        config=config_path,
+    )
+    if echo_config:
+        dev_server_module.up(**kwargs)
+        client.teardown_dev_rollout_server.assert_not_called()
+    else:
+        with pytest.raises(CLIError):
+            dev_server_module.up(**kwargs)
+        client.teardown_dev_rollout_server.assert_called_once()
+    assert (
+        client.provision_dev_rollout_server.call_args.kwargs["harbor_config"]
+        == normalized
+    )
+
+
+@pytest.mark.parametrize(
+    "config",
+    [
+        "invalid-json",
+        '{"unknown": "private-value"}',
+        '{"concurrency": 0}',
+        '{"environment_healthcheck": {"command": ""}}',
+        '{"environment_healthcheck": {"command": "true", "retries": 0}}',
+    ],
+)
+def test_invalid_gateway_config_fails_before_provisioning(
+    tmp_path, monkeypatch, config
+):
+    config_path = tmp_path / "gateway.json"
+    config_path.write_text(config)
+    client = Mock()
+    monkeypatch.setattr(dev_server_module, "OsmosisClient", client)
+    with pytest.raises(CLIError, match="check --config") as error:
+        dev_server_module.up(
+            url="https://github.com/acme/tasks",
+            ref="a" * 40,
+            ttl_hours=24,
+            config=config_path,
+        )
+    assert "private-value" not in str(error.value)
+    client.assert_not_called()

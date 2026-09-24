@@ -75,6 +75,7 @@ class OsmosisClient:
         repository: str,
         ref: str = "HEAD",
         tasks_dir: str = "tasks",
+        image_layout: str | None = None,
         credentials: Credentials | None = None,
         timeout: float = 30,
     ) -> dict[str, Any]:
@@ -90,6 +91,7 @@ class OsmosisClient:
                 "repository": f"https://github.com/{identity}",
                 "ref": ref,
                 "tasks_dir": tasks_dir,
+                **({"image_layout": image_layout} if image_layout else {}),
             },
             credentials=credentials,
             git_identity=identity,
@@ -1180,6 +1182,8 @@ class OsmosisClient:
         git_identity: str,
         sandbox_environment: DevServerSandboxEnvironment | None = None,
         backend: DevServerBackend | None = None,
+        task_source: dict[str, str] | None = None,
+        harbor_config: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         return platform_request(
             "/api/cli/dev-rollout-server",
@@ -1191,6 +1195,12 @@ class OsmosisClient:
                 "repository_path": repository_path,
                 "entrypoint": entrypoint,
                 "ttl_hours": ttl_hours,
+                **({"task_source": task_source} if task_source is not None else {}),
+                **(
+                    {"harbor_config": harbor_config}
+                    if harbor_config is not None
+                    else {}
+                ),
                 **(
                     {"sandbox_environment": sandbox_environment.value}
                     if sandbox_environment is not None
