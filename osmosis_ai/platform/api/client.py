@@ -71,6 +71,7 @@ class OsmosisClient:
         repository: str,
         ref: str = "HEAD",
         tasks_dir: str = "tasks",
+        image_layout: str | None = None,
         credentials: Credentials | None = None,
         timeout: float = 30,
     ) -> dict[str, Any]:
@@ -86,6 +87,7 @@ class OsmosisClient:
                 "repository": f"https://github.com/{identity}",
                 "ref": ref,
                 "tasks_dir": tasks_dir,
+                **({"image_layout": image_layout} if image_layout else {}),
             },
             credentials=credentials,
             git_identity=identity,
