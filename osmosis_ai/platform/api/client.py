@@ -2,15 +2,13 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator, Sequence
+from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any
 from urllib.parse import quote, urlencode
 
-from osmosis_ai.platform.auth.platform_client import platform_request, platform_stream
+from osmosis_ai.platform.auth.platform_client import platform_request
 from osmosis_ai.platform.constants import (
     DEFAULT_PAGE_SIZE,
-    DevServerBackend,
-    DevServerSandboxEnvironment,
 )
 
 from .models import (
@@ -24,7 +22,6 @@ from .models import (
     EvalRunImportUploads,
     EvalRunMetrics,
     EvaluationRunDetail,
-    LogEntry,
     LogsPage,
     LoraModelDetail,
     LoraModelSummary,
@@ -32,7 +29,6 @@ from .models import (
     PaginatedBenchmarkRuns,
     PaginatedBenchmarks,
     PaginatedDatasets,
-    PaginatedDevRolloutServers,
     PaginatedEnvironmentSecrets,
     PaginatedEvaluationRuns,
     PaginatedLoraModels,
@@ -1167,126 +1163,6 @@ class OsmosisClient:
             credentials=credentials,
             git_identity=git_identity,
         )
-
-    # ── Dev Rollout Servers ───────────────────────────────────────
-
-    def provision_dev_rollout_server(
-        self,
-        *,
-        rollout_name: str,
-        commit_sha: str,
-        repository_path: str,
-        entrypoint: str,
-        ttl_hours: int | None,
-        credentials: Credentials | None = None,
-        git_identity: str,
-        sandbox_environment: DevServerSandboxEnvironment | None = None,
-        backend: DevServerBackend | None = None,
-        task_source: dict[str, str] | None = None,
-        harbor_config: dict[str, Any] | None = None,
-    ) -> dict[str, Any]:
-        return platform_request(
-            "/api/cli/dev-rollout-server",
-            method="POST",
-            data={
-                **({"backend": backend.value} if backend is not None else {}),
-                "rollout_name": rollout_name,
-                "commit_sha": commit_sha,
-                "repository_path": repository_path,
-                "entrypoint": entrypoint,
-                "ttl_hours": ttl_hours,
-                **({"task_source": task_source} if task_source is not None else {}),
-                **(
-                    {"harbor_config": harbor_config}
-                    if harbor_config is not None
-                    else {}
-                ),
-                **(
-                    {"sandbox_environment": sandbox_environment.value}
-                    if sandbox_environment is not None
-                    else {}
-                ),
-            },
-            credentials=credentials,
-            git_identity=git_identity,
-        )
-
-    def teardown_dev_rollout_server(
-        self,
-        server_id: str,
-        *,
-        credentials: Credentials | None = None,
-        git_identity: str,
-    ) -> dict[str, Any]:
-        return platform_request(
-            f"/api/cli/dev-rollout-server/{_safe_path(server_id)}",
-            method="DELETE",
-            data={},
-            credentials=credentials,
-            git_identity=git_identity,
-        )
-
-    def get_dev_rollout_server_logs(
-        self,
-        server_id: str,
-        *,
-        limit: int = DEFAULT_PAGE_SIZE,
-        cursor: str | None = None,
-        direction: str = "older",
-        credentials: Credentials | None = None,
-        git_identity: str,
-    ) -> LogsPage:
-        """Fetch one page of dev rollout server logs.
-
-        Without ``cursor``, ``direction="older"`` returns the most recent page;
-        ``direction="newer"`` pages forward for live follow.
-        """
-        return self._get_logs(
-            f"/api/cli/dev-rollout-server/{_safe_path(server_id)}",
-            limit=limit,
-            cursor=cursor,
-            direction=direction,
-            credentials=credentials,
-            git_identity=git_identity,
-        )
-
-    def stream_dev_rollout_server_logs(
-        self,
-        server_id: str,
-        *,
-        tail: int = DEFAULT_PAGE_SIZE,
-        credentials: Credentials | None = None,
-        git_identity: str,
-    ) -> Iterator[LogEntry]:
-        """Stream a dev rollout server's logs live via Server-Sent Events.
-
-        The server sends the most recent ``tail`` lines first, then pushes new
-        lines as they arrive. The iterator ends when the stream closes (e.g. the
-        server is torn down).
-        """
-        qs = urlencode({"tail": tail})
-        for data in platform_stream(
-            f"/api/cli/dev-rollout-server/{_safe_path(server_id)}/logs/stream?{qs}",
-            credentials=credentials,
-            git_identity=git_identity,
-        ):
-            yield LogEntry.from_dict(data)
-
-    def list_dev_rollout_servers(
-        self,
-        limit: int = DEFAULT_PAGE_SIZE,
-        offset: int = 0,
-        *,
-        credentials: Credentials | None = None,
-        git_identity: str,
-    ) -> PaginatedDevRolloutServers:
-        qs = urlencode({"limit": limit, "offset": offset})
-        data = platform_request(
-            f"/api/cli/dev-rollout-server?{qs}",
-            credentials=credentials,
-            git_identity=git_identity,
-        )
-        return PaginatedDevRolloutServers.from_dict(data)
 
     # ── Workspaces ────────────────────────────────────────────────
 

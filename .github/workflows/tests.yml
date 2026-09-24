@@ -118,6 +118,9 @@ jobs:
       - name: Check package
         run: uvx twine check --strict dist/*
 
+      - name: Verify public artifacts exclude internal tooling
+        run: uv run --no-project --python 3.12 python .github/scripts/verify-public-artifacts.py dist/*.whl dist/*.tar.gz
+
       - name: Verify artifact filenames match package version
         run: |
           VERSION=$(uv run --no-project --python 3.12 python -c 'import re, pathlib; text = pathlib.Path("osmosis_ai/consts.py").read_text(); print(re.search(r"^PACKAGE_VERSION\s*=\s*\"([^\"]+)\"", text, re.MULTILINE).group(1))')

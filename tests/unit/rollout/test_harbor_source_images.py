@@ -13,7 +13,6 @@ from osmosis_ai.harbor_images import (
     TaskSource,
     materialize_source_tasks,
 )
-from osmosis_ai.platform.cli.dev_server import up_source
 from osmosis_ai.rollout.backend.harbor.source import (
     RegistryResolver,
     SourceHarborBackend,
@@ -144,33 +143,6 @@ def test_registry_rejects_unsupported_docker_helpers_before_request(
     ):
         resolver.resolve("tag")
     client.assert_not_called()
-
-
-def test_dev_source_up_does_not_require_local_gateway_code(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
-    client = Mock()
-    client.provision_dev_rollout_server.return_value = {
-        "id": "server",
-        "url": "https://gateway.test",
-        "backend": "gke",
-        "sandbox_environment": "opensandbox",
-        "task_source": asdict(SOURCE),
-    }
-    monkeypatch.setattr(
-        "osmosis_ai.platform.cli.dev_server.OsmosisClient", lambda: client
-    )
-    up_source(
-        url=SOURCE.repository,
-        path=SOURCE.path,
-        ref=SOURCE.revision,
-        ttl_hours=24,
-        backend=None,
-        sandbox_environment=None,
-    )
-    assert client.provision_dev_rollout_server.call_args.kwargs[
-        "task_source"
-    ] == asdict(SOURCE)
-    assert not list(tmp_path.iterdir())
 
 
 def test_gateway_readiness_preserves_source_and_verifier_healthcheck(tmp_path):

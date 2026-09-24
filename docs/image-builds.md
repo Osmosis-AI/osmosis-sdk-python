@@ -48,8 +48,6 @@ separate verifier contexts are hashed independently; inherited verifier
 environments reuse the agent image while preserving verifier configuration.
 Optional `image-build.toml` trainer images appear in `named_images.trainer`.
 
-For rollout setup, see [managed source gateways](harbor-source-gateways.md).
-
 ## Legacy bundle builds
 
 `--repo` retains the prepared task bundle workflow below. `--tasks-dir` remains

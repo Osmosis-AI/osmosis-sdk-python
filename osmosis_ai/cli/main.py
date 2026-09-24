@@ -4,7 +4,10 @@ import difflib
 import os
 import sys
 import warnings
+from collections.abc import Callable
+from functools import wraps
 from pathlib import Path
+from typing import Any
 
 import typer
 import typer.core
@@ -49,9 +52,10 @@ class OsmosisGroup(typer.core.TyperGroup):
             if args:
                 cmd_name = args[0]
                 if cmd_name == "help":
+                    program = ctx.find_root().info_name or "osmosis"
                     raise UsageError(
-                        "No such command 'help'. Use 'osmosis --help', "
-                        "or 'osmosis <command> --help' for a specific command."
+                        f"No such command 'help'. Use '{program} --help', "
+                        f"or '{program} <command> --help' for a specific command."
                     ) from None
                 candidates = []
                 for name in self.list_commands(ctx):
@@ -69,18 +73,20 @@ class OsmosisGroup(typer.core.TyperGroup):
             raise
 
 
-app: typer.Typer = typer.Typer(
-    name="osmosis",
-    cls=OsmosisGroup,
-    no_args_is_help=True,
-    add_completion=False,
-    context_settings={"help_option_names": ["-h", "--help"]},
-    result_callback=render_command_result,
-    # OsmosisGroup owns suggestions: single candidate, hidden commands
-    # filtered, and the 'help' nudge. Typer's built-in suggester would
-    # append its own (unfiltered, multi-candidate) line on top.
-    suggest_commands=False,
-)
+def _new_app(name: str) -> typer.Typer:
+    return typer.Typer(
+        name=name,
+        cls=OsmosisGroup,
+        no_args_is_help=True,
+        add_completion=False,
+        context_settings={"help_option_names": ["-h", "--help"]},
+        result_callback=render_command_result,
+        # OsmosisGroup owns suggestions, including filtering hidden commands.
+        suggest_commands=False,
+    )
+
+
+app: typer.Typer = _new_app("osmosis")
 
 _AUTH_PROFILE_ENV_VARS = {
     "OSMOSIS_PLATFORM_URL",
@@ -309,6 +315,7 @@ def _handle_cli_error(
     *,
     argv: list[str] | None,
     exit_code: int = 1,
+    root_command: Command | None = None,
 ) -> int:
     output = _output_context_for_error(exc, argv)
     classified = None
@@ -321,7 +328,9 @@ def _handle_cli_error(
         command_argv = argv if argv is not None else sys.argv[1:]
         emit_structured_error_to_stderr(
             classified,
-            command=command_path_for_error(ctx, argv=command_argv),
+            command=command_path_for_error(
+                ctx, argv=command_argv, root_command=root_command
+            ),
         )
     else:
         _print_error(str(exc))
@@ -334,7 +343,15 @@ def _register_commands() -> None:
     global _registered
     if _registered:
         return
+    _add_commands(app)
     _registered = True
+
+
+def _add_commands(
+    target: typer.Typer,
+    upgrade_command: Callable[..., Any] | None = None,
+) -> None:
+    """Register public commands on an independent root application."""
     # Typer's documented ``add_completion=True`` path initializes shell classes
     # through this public helper, but also exposes install/show completion
     # options. Keep those options hidden while preserving Typer's zsh/fish env
@@ -361,47 +378,130 @@ def _register_commands() -> None:
     from osmosis_ai.cli.commands.quickstart import HELP as QUICKSTART_HELP
     from osmosis_ai.cli.commands.quickstart import quickstart
 
-    app.command(
+    target.command(
         cmdreg.STANDALONE_QUICKSTART, help=QUICKSTART_HELP, rich_help_panel=_WORKFLOW
     )(quickstart)
 
-    app.add_typer(dataset_app, name=cmdreg.GROUP_DATASET, rich_help_panel=_WORKFLOW)
-    app.add_typer(train_app, name=cmdreg.GROUP_TRAIN, rich_help_panel=_WORKFLOW)
-    app.add_typer(images_app, name=cmdreg.GROUP_IMAGES, rich_help_panel=_WORKFLOW)
-    app.add_typer(model_app, name=cmdreg.GROUP_MODEL, rich_help_panel=_WORKFLOW)
-    app.add_typer(eval_app, name=cmdreg.GROUP_EVAL, rich_help_panel=_WORKFLOW)
-    app.add_typer(benchmark_app, name=cmdreg.GROUP_BENCHMARK, rich_help_panel=_WORKFLOW)
-    app.add_typer(rollout_app, name=cmdreg.GROUP_ROLLOUT, rich_help_panel=_WORKFLOW)
-    app.add_typer(template_app, name=cmdreg.GROUP_TEMPLATE, rich_help_panel=_WORKFLOW)
+    target.add_typer(dataset_app, name=cmdreg.GROUP_DATASET, rich_help_panel=_WORKFLOW)
+    target.add_typer(train_app, name=cmdreg.GROUP_TRAIN, rich_help_panel=_WORKFLOW)
+    target.add_typer(images_app, name=cmdreg.GROUP_IMAGES, rich_help_panel=_WORKFLOW)
+    target.add_typer(model_app, name=cmdreg.GROUP_MODEL, rich_help_panel=_WORKFLOW)
+    target.add_typer(eval_app, name=cmdreg.GROUP_EVAL, rich_help_panel=_WORKFLOW)
+    target.add_typer(
+        benchmark_app, name=cmdreg.GROUP_BENCHMARK, rich_help_panel=_WORKFLOW
+    )
+    target.add_typer(rollout_app, name=cmdreg.GROUP_ROLLOUT, rich_help_panel=_WORKFLOW)
+    target.add_typer(
+        template_app, name=cmdreg.GROUP_TEMPLATE, rich_help_panel=_WORKFLOW
+    )
 
-    from osmosis_ai.cli.commands.dev import app as dev_app
-
-    app.add_typer(dev_app, name=cmdreg.GROUP_DEV, hidden=True)
-
-    app.add_typer(auth_app, name=cmdreg.GROUP_AUTH, rich_help_panel=_PLATFORM)
-    app.add_typer(secret_app, name=cmdreg.GROUP_SECRET, rich_help_panel=_PLATFORM)
+    target.add_typer(auth_app, name=cmdreg.GROUP_AUTH, rich_help_panel=_PLATFORM)
+    target.add_typer(secret_app, name=cmdreg.GROUP_SECRET, rich_help_panel=_PLATFORM)
 
     from osmosis_ai.cli.commands.workspace import doctor
 
-    app.command(cmdreg.STANDALONE_DOCTOR, rich_help_panel=_WORKFLOW)(doctor)
+    target.command(cmdreg.STANDALONE_DOCTOR, rich_help_panel=_WORKFLOW)(doctor)
 
     from osmosis_ai.cli.upgrade import upgrade
 
-    app.command(cmdreg.STANDALONE_UPGRADE, rich_help_panel=_PLATFORM)(upgrade)
+    target.command(cmdreg.STANDALONE_UPGRADE, rich_help_panel=_PLATFORM)(
+        upgrade_command if upgrade_command is not None else upgrade
+    )
 
 
-def main(argv: list[str] | None = None) -> int:
-    """Entry point for the Osmosis CLI."""
+def create_app(
+    *,
+    name: str = "osmosis",
+    version_callback: Callable[[], None] | None = None,
+    upgrade_command: Callable[..., Any] | None = None,
+) -> typer.Typer:
+    """Create a public CLI root that callers can extend with Typer commands.
+
+    Each call registers the public command tree on a fresh root, without
+    modifying the module-level application. Version and upgrade are explicit
+    customization points for distributions with their own release channel.
+    Command handlers, root options, and output behavior remain SDK-owned.
+    """
+    from copy import deepcopy
+
+    target = _new_app(name)
+
+    @wraps(_callback)
+    def callback(*args: Any, **kwargs: Any) -> None:
+        if kwargs.get("version") and version_callback is not None:
+            version_callback()
+            raise typer.Exit()
+        _callback(*args, **kwargs)
+
+    target.callback(invoke_without_command=True)(callback)
+    _add_commands(target, upgrade_command)
+    # Typer registrations are mutable, including nested groups. Copy their
+    # metadata while retaining the original handler functions.
+    return deepcopy(target)
+
+
+def _validate_command_names(target: typer.Typer, path: str = "") -> set[str]:
+    """Reject registrations that Typer would otherwise silently overwrite."""
+    from typer.main import get_command_name, solve_typer_info_defaults
+
+    from osmosis_ai.cli.errors import CLIError
+
+    names: set[str] = set()
+    for command in target.registered_commands:
+        name = command.name
+        if not name and command.callback is not None:
+            name = get_command_name(command.callback.__name__)
+        if name is not None:
+            if name in names:
+                raise CLIError(f"Duplicate CLI command: {path}{name}", code="INTERNAL")
+            names.add(name)
+    for group in target.registered_groups:
+        name = solve_typer_info_defaults(group).name
+        children = (
+            _validate_command_names(
+                group.typer_instance, f"{path}{name} " if name else path
+            )
+            if group.typer_instance is not None
+            else set()
+        )
+        # Unnamed Typer groups flatten their children into the parent.
+        for registered_name in {name} if name else children:
+            if registered_name in names:
+                raise CLIError(
+                    f"Duplicate CLI command: {path}{registered_name}", code="INTERNAL"
+                )
+            names.add(registered_name)
+    return names
+
+
+def run_cli(
+    cli_app: typer.Typer,
+    argv: list[str] | None = None,
+    *,
+    prog_name: str | None = None,
+) -> int:
+    """Run an SDK-composed application with shared output and exit semantics.
+
+    The application's name controls help and shell completion unless an
+    entry point supplies its console alias. Duplicate names at any level are
+    rejected before a command handler can run.
+    """
     argv = argv if argv is not None else sys.argv[1:]
-    # Bare -V/--version skips command registration. Combined with other flags
-    # (e.g. --json --version) still goes through Typer so output stays identical.
-    if argv == ["--version"] or argv == ["-V"]:
-        _emit_version()
-        return 0
-    _register_commands()
     argv = hoist_format_selectors(argv)
+    root_command: Command | None = None
     try:
-        result = app(argv, standalone_mode=False)
+        if isinstance(cli_app, typer.Typer):
+            from typer.main import get_command
+
+            root_command = get_command(cli_app)
+            _validate_command_names(cli_app)
+            result = root_command.main(
+                args=argv,
+                prog_name=prog_name or cli_app.info.name or "osmosis",
+                standalone_mode=False,
+            )
+        else:
+            result = cli_app(argv, standalone_mode=False)
         # standalone_mode=False returns the command result on success, or the
         # exit code when the run ended via typer.Exit (Typer also converts
         # Ctrl-C into Exit(130) internally).
@@ -417,13 +517,31 @@ def main(argv: list[str] | None = None) -> int:
     except SystemExit as e:
         return int(e.code) if e.code is not None else 0
     except UsageError as exc:
-        return _handle_cli_error(exc, argv=argv, exit_code=exc.exit_code)
+        return _handle_cli_error(
+            exc,
+            argv=argv,
+            exit_code=exc.exit_code,
+            root_command=root_command,
+        )
     except (KeyboardInterrupt, typer.Abort):
         return 130
     except Exception as exc:
         # CLIError, PlatformAPIError, AuthenticationExpiredError and anything
         # else funnel through classify_error() into the structured envelope.
-        return _handle_cli_error(exc, argv=argv)
+        return _handle_cli_error(exc, argv=argv, root_command=root_command)
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Entry point for the Osmosis CLI."""
+    argv = argv if argv is not None else sys.argv[1:]
+    # Bare version queries retain the import-light startup path.
+    if argv == ["--version"] or argv == ["-V"]:
+        _emit_version()
+        return 0
+    _register_commands()
+    executable = Path(sys.argv[0]).name
+    program = executable if executable in {"osmosis-ai", "osmosis_ai"} else "osmosis"
+    return run_cli(app, argv, prog_name=program)
 
 
 if __name__ == "__main__":

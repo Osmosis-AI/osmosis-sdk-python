@@ -249,9 +249,8 @@ def _confirmation_needs_prompt(
     """Whether the caller still has to ask a human, shared by both guards.
 
     False when ``--yes`` already answered. Non-interactive sessions never reach
-    a prompt at all: they raise here, after JSON mode has emitted the
-    structured ``INTERACTIVE_REQUIRED`` envelope and plain mode has written the
-    same context to stderr.
+    a prompt at all: they raise ``INTERACTIVE_REQUIRED`` here, after plain mode
+    has written the same context to stderr.
     """
     if yes:
         return False
@@ -288,19 +287,11 @@ def _confirmation_needs_prompt(
         sys.stderr.write("\n".join(lines) + "\n")
         sys.stderr.flush()
 
-    err = CLIError(
+    raise CLIError(
         "Use --yes to confirm in non-interactive mode.",
         code="INTERACTIVE_REQUIRED",
         details=details,
     )
-    if output.format is OutputFormat.json:
-        import typer
-
-        from osmosis_ai.cli.output import emit_structured_error_to_stderr
-
-        emit_structured_error_to_stderr(err)
-        raise typer.Exit(1)
-    raise err
 
 
 def _exit_on_decline() -> None:
@@ -325,13 +316,13 @@ def require_confirmation(
 
     Does nothing when *yes* is True (``--yes`` flag). In rich + interactive
     sessions prompts the user with questionary and exits cleanly on decline.
-    In JSON mode emits a structured ``INTERACTIVE_REQUIRED`` error envelope
-    (so agents/CI can see exactly what they are being asked to confirm) and
-    exits 1. In plain mode writes the prompt + context to stderr and raises
-    :class:`CLIError`.
+    Otherwise raises an ``INTERACTIVE_REQUIRED`` :class:`CLIError`; in JSON
+    mode ``run_cli`` renders it as the structured error envelope (so agents/CI
+    can see exactly what they are being asked to confirm), and plain mode
+    first writes the prompt + context to stderr.
 
     The optional *summary*, *notes*, and *warnings* carry the same context
-    the rich panel showed: the JSON envelope embeds them as structured
+    the rich panel showed: the error details embed them as structured
     fields, and the plain-mode stderr output prints them inline.
 
     Callers inside an event loop must use :func:`require_confirmation_async`.
@@ -355,7 +346,7 @@ async def require_confirmation_async(
 ) -> None:
     """:func:`require_confirmation` for callers inside an event loop.
 
-    Same contract, same non-interactive envelopes; only the prompt itself is
+    Same contract, same non-interactive errors; only the prompt itself is
     awaited rather than run on a nested loop.
     """
     if not _confirmation_needs_prompt(

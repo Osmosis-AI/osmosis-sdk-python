@@ -11,6 +11,7 @@ from typing import Any
 import pytest
 import typer
 import typer.core
+from typer.main import get_command
 
 import osmosis_ai.cli.main as cli_main
 from osmosis_ai.cli._click_compat import Context
@@ -288,52 +289,50 @@ def test_cli_error_is_returned_unchanged() -> None:
     assert classify_error(original) is original
 
 
-def test_command_path_falls_back_to_argv_when_no_context(monkeypatch) -> None:
-    monkeypatch.setattr(
-        "sys.argv", ["osmosis", "--json", "dataset", "list", "--limit", "5"]
-    )
-    assert command_path_for_error(None) == "dataset list"
-
-
-@pytest.mark.parametrize(
-    "argv",
-    [
-        ["--platform", "https://example.invalid", "--json", "auth", "whoami"],
-        ["--env-file", "dev.env", "--json", "auth", "whoami"],
-    ],
-)
-def test_command_path_skips_value_taking_root_options(argv: list[str]) -> None:
-    assert command_path_for_error(None, argv=argv) == "auth whoami"
-
-
 @pytest.mark.parametrize(
     ("argv", "expected"),
     [
         (
-            ["osmosis", "--json", "benchmark", "info", "HLE"],
-            "benchmark info",
+            ["--platform", "https://example.invalid", "--json", "auth", "whoami"],
+            "auth whoami",
         ),
+        (["--env-file", "dev.env", "--json", "auth", "whoami"], "auth whoami"),
+        (["--workspace", "dev", "--json", "auth", "whoami"], "auth whoami"),
+        (["--workspace=dev", "--json", "auth", "whoami"], "auth whoami"),
+        (["auth", "--json", "whoami"], "auth whoami"),
+        (["auth", "whoami", "--json"], "auth whoami"),
+        (["--json", "dataset", "list", "--limit", "5"], "dataset list"),
+        (["--json", "benchmark", "info", "HLE"], "benchmark info"),
         (
-            ["osmosis", "--json", "benchmark", "runs", "download", "hle-smoke"],
+            ["--json", "benchmark", "runs", "download", "hle-smoke"],
             "benchmark runs download",
         ),
+        (["--json", "eval", "cache", "clear"], "eval cache"),
+        (["--json", "doctor", "extra"], "doctor"),
+        (["--json", "upgrade"], "upgrade"),
+        (["--json", "deploy", "ckpt-name"], "deploy"),
+        (["--json", "dev", "server", "up"], "dev"),
+        (["--json", "dataset", "delete", "x"], "dataset delete"),
+        (["--json", "definitely-unknown", "extra"], "definitely-unknown"),
+        (["--json", "auth", "definitely-unknown", "extra"], "auth definitely-unknown"),
+        (["--json", "--bad", "value", "dataset", "list"], "<root>"),
+        (["--json", "dataset", "--bad", "value", "list"], "dataset"),
+        (["--json", "dataset", "list", "--bad", "value"], "dataset list"),
+        (["--json"], "<root>"),
+        ([], "<root>"),
     ],
 )
-def test_benchmark_command_path_falls_back_to_full_command(
-    monkeypatch: pytest.MonkeyPatch,
-    argv: list[str],
-    expected: str,
+def test_command_path_reads_the_public_command_tree(
+    argv: list[str], expected: str
 ) -> None:
-    monkeypatch.setattr("sys.argv", argv)
-    assert command_path_for_error(None) == expected
+    root = get_command(cli_main.create_app())
+    assert command_path_for_error(None, argv=argv, root_command=root) == expected
 
 
-def test_command_path_fallback_excludes_top_level_argument(monkeypatch) -> None:
-    monkeypatch.setattr("sys.argv", ["osmosis", "--json", "deploy", "ckpt-name"])
-    assert command_path_for_error(None) == "deploy"
-
-
-def test_command_path_prefers_click_context_over_argv() -> None:
+def test_command_path_without_root_uses_click_context(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("sys.argv", ["osmosis", "--json", "train", "list"])
     parent = Context(typer.core.TyperCommand(name="osmosis"))
     parent.info_name = "osmosis"
     middle = Context(typer.core.TyperCommand(name="dataset"), parent=parent)
@@ -341,32 +340,7 @@ def test_command_path_prefers_click_context_over_argv() -> None:
     nested = Context(typer.core.TyperCommand(name="list"), parent=middle)
     nested.info_name = "list"
     assert command_path_for_error(nested, argv=["train", "list"]) == "dataset list"
-
-
-def test_dev_server_up_command_path_from_argv(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("sys.argv", ["osmosis", "--json", "dev", "server", "up"])
-    assert command_path_for_error(None) == "dev server up"
-
-
-def test_eval_cache_is_not_a_three_token_command(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr("sys.argv", ["osmosis", "--json", "eval", "cache", "clear"])
-    assert command_path_for_error(None) == "eval cache"
-
-
-def test_command_registry_matches_registered_app() -> None:
-    from osmosis_ai.cli.command_registry import COMMAND_GROUPS, STANDALONE_COMMANDS
-
-    cli_main._register_commands()
-    group_names = {info.name for info in cli_main.app.registered_groups}
-    command_names = {info.name for info in cli_main.app.registered_commands}
-    assert group_names == COMMAND_GROUPS
-    assert command_names == STANDALONE_COMMANDS
-
-
-def test_command_path_root_when_argv_empty(monkeypatch) -> None:
-    monkeypatch.setattr("sys.argv", ["osmosis"])
+    assert command_path_for_error(parent, argv=["train", "list"]) == "<root>"
     assert command_path_for_error(None) == "<root>"
 
 
@@ -408,27 +382,12 @@ def test_command_path_strips_multi_token_program_name() -> None:
         typer.core.TyperCommand(name="root"),
         info_name="python -m osmosis_ai.cli.main",
     )
-    assert (
-        command_path_for_error(root, argv=["definitely-unknown", "extra"])
-        == "definitely-unknown"
-    )
+    assert command_path_for_error(root) == "<root>"
 
     child = Context(
         typer.core.TyperCommand(name="dataset"), info_name="dataset", parent=root
     )
-    assert command_path_for_error(child, argv=["dataset", "list"]) == "dataset"
-
-
-def test_command_path_removed_two_token_command_wins_over_context() -> None:
-    """The Click context stops at the group; removed commands only exist in argv."""
-    root = Context(typer.core.TyperCommand(name="osmosis"), info_name="osmosis")
-    child = Context(
-        typer.core.TyperCommand(name="dataset"), info_name="dataset", parent=root
-    )
-    assert (
-        command_path_for_error(child, argv=["--json", "dataset", "delete", "x"])
-        == "dataset delete"
-    )
+    assert command_path_for_error(child) == "dataset"
 
 
 def test_main_maps_click_abort_to_interrupt_exit_code(
