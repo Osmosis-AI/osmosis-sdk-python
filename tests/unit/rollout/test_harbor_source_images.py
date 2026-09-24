@@ -116,7 +116,9 @@ def test_repository_root_task_id_does_not_depend_on_checkout_name(tmp_path):
         ) == ["task"]
 
 
-def test_builder_and_gateway_fetch_identical_pinned_archives(tmp_path, monkeypatch, caplog):
+def test_builder_and_gateway_fetch_identical_pinned_archives(
+    tmp_path, monkeypatch, caplog
+):
     caplog.set_level("INFO", logger="httpx")
     task = make_task(tmp_path / "input/tasks/add")
     buffer = io.BytesIO()
