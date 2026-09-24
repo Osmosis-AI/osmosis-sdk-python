@@ -29,6 +29,11 @@ cached immutable digests and GKE's image-pull identity. Missing images or failed
 prewarm prevent readiness. This mode requires the matching Monolith release
 and source-repository IAM configuration.
 
+Managed credentials take precedence over local Docker configuration. Direct
+resolver use supports inline Docker `auth` entries; Docker `credHelpers` and
+`credsStore` configurations are rejected with an explicit instruction to use a
+managed source gateway.
+
 Use `dev server up --config gateway.json` to configure the managed Harbor agent
 without adding Python code or changing the task source. For example:
 

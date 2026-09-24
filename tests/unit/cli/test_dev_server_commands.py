@@ -935,6 +935,28 @@ def test_up_source_validation_precedes_local_provisioning(monkeypatch, kwargs):
     resolve.assert_not_called()
 
 
+@pytest.mark.parametrize(
+    "command,args", [("down", ["r1"]), ("logs", ["r1"]), ("list", [])]
+)
+@pytest.mark.parametrize("url", ["", " "])
+def test_lifecycle_rejects_empty_source_url_without_local_fallback(
+    monkeypatch, command, args, url
+):
+    from osmosis_ai.cli.commands.dev.server import app
+
+    resolve = Mock(side_effect=AssertionError("must not use the local workspace"))
+    client = Mock()
+    monkeypatch.setattr(
+        dev_server_module, "resolve_git_workspace_directory_context", resolve
+    )
+    monkeypatch.setattr(dev_server_module, "OsmosisClient", client)
+    result = CliRunner().invoke(app, [command, *args, "--url", url])
+    assert isinstance(result.exception, CLIError)
+    assert result.exception.code == "VALIDATION"
+    resolve.assert_not_called()
+    client.assert_not_called()
+
+
 @pytest.mark.parametrize("echo_config", [True, False])
 def test_source_gateway_config_is_validated_forwarded_and_acknowledged(
     tmp_path, monkeypatch, echo_config

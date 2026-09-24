@@ -52,7 +52,14 @@ class RegistryResolver:
         )
         if auth is None and config.is_file():
             try:
-                entry = json.loads(config.read_text()).get("auths", {}).get(host, {})
+                credentials = json.loads(config.read_text())
+                if credentials.get("credHelpers", {}).get(host) or credentials.get(
+                    "credsStore"
+                ):
+                    raise RuntimeError(
+                        "Docker credential helpers are unsupported; start a managed source gateway to obtain registry credentials"
+                    )
+                entry = credentials.get("auths", {}).get(host, {})
                 if entry.get("auth"):
                     username, password = (
                         base64.b64decode(entry["auth"], validate=True)

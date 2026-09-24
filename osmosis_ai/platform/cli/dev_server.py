@@ -221,7 +221,7 @@ def up_source(
 
 
 def server_scope(url: str | None) -> dict[str, Any]:
-    if url:
+    if url is not None:
         from osmosis_ai.platform.cli.workspace_repo import normalize_git_identity
 
         return {"git_identity": normalize_git_identity(url).identity}

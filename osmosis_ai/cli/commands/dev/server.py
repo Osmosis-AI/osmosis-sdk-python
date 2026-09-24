@@ -80,7 +80,7 @@ def down(
     """Tear down a remote rollout server."""
     from osmosis_ai.platform.cli.dev_server import down as _down
 
-    return _down(server_id, **({"url": url} if url else {}))
+    return _down(server_id, **({"url": url} if url is not None else {}))
 
 
 @app.command("logs")
@@ -108,7 +108,9 @@ def logs(
     from osmosis_ai.platform.cli.dev_server import logs as _logs
 
     # _logs always raises typer.Exit or KeyboardInterrupt; there is no CommandResult.
-    _logs(server_id, follow=follow, tail=tail, **({"url": url} if url else {}))
+    _logs(
+        server_id, follow=follow, tail=tail, **({"url": url} if url is not None else {})
+    )
 
 
 @app.command("list")
@@ -122,4 +124,4 @@ def list_servers(
     """List active rollout servers for the current workspace."""
     from osmosis_ai.platform.cli.dev_server import list_servers as _list
 
-    return _list(limit=limit, all_=all_, **({"url": url} if url else {}))
+    return _list(limit=limit, all_=all_, **({"url": url} if url is not None else {}))

@@ -55,9 +55,16 @@ def test_discovery_and_trial_binding_preserve_original_source(tmp_path):
     assert (destination / "group/add/task.toml").read_bytes() == before
 
 
-def test_registry_resolves_verifies_and_caches_manifest(tmp_path, monkeypatch):
+@pytest.mark.parametrize(
+    "config",
+    [
+        "malformed local credentials",
+        json.dumps({"credHelpers": {"us-west1-docker.pkg.dev": "gcloud"}}),
+    ],
+)
+def test_registry_resolves_verifies_and_caches_manifest(tmp_path, monkeypatch, config):
     monkeypatch.setenv("DOCKER_CONFIG", str(tmp_path))
-    (tmp_path / "config.json").write_text("malformed local credentials")
+    (tmp_path / "config.json").write_text(config)
     content = b'{"schemaVersion":2}'
     digest = "sha256:" + hashlib.sha256(content).hexdigest()
     response = httpx.Response(
@@ -110,6 +117,32 @@ def test_malformed_docker_credentials_fail_cleanly(tmp_path, monkeypatch, config
     ) as error:
         resolver.resolve("tag")
     assert config not in str(error.value)
+    client.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "config",
+    [
+        {"credHelpers": {"us-west1-docker.pkg.dev": "gcloud"}},
+        {"credsStore": "desktop"},
+        {
+            "credHelpers": {"us-west1-docker.pkg.dev": "gcloud"},
+            "auths": {"us-west1-docker.pkg.dev": {"auth": "dXNlcjpwYXNz"}},
+        },
+    ],
+)
+def test_registry_rejects_unsupported_docker_helpers_before_request(
+    tmp_path, monkeypatch, config
+):
+    monkeypatch.setenv("DOCKER_CONFIG", str(tmp_path))
+    (tmp_path / "config.json").write_text(json.dumps(config))
+    client = Mock()
+    monkeypatch.setattr(httpx, "Client", client)
+    resolver = RegistryResolver("us-west1-docker.pkg.dev/project/repo")
+    with pytest.raises(
+        RuntimeError, match=r"Docker credential helpers.*managed source gateway"
+    ):
+        resolver.resolve("tag")
     client.assert_not_called()
 
 
