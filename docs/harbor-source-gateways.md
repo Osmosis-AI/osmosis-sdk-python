@@ -26,8 +26,8 @@ requests select tasks using `metadata.harbor_task_id`.
 Registry lookup uses a short-lived read credential delivered through the
 managed gateway's secret bundle. Once startup resolves the source, trials use
 cached immutable digests and GKE's image-pull identity. Missing images or failed
-prewarm prevent readiness. This mode requires the matching Monolith release
-and source-repository IAM configuration.
+prewarm prevent readiness. The managed service must support source gateways
+and have access to the source image repository.
 
 Managed credentials take precedence over local Docker configuration. Direct
 resolver use supports inline Docker `auth` entries; Docker `credHelpers` and
@@ -55,6 +55,6 @@ Harbor's `command`, timing and retry fields; it adds readiness requirements to
 the agent environment in temporary trial copies, preserving the original task
 and separate verifier healthchecks. Configuration defaults and validation live
 in `HarborGatewayConfig`. Keep configuration containing private routing or
-credentials outside Git. Monolith stores it in the encrypted gateway secret
-bundle. Configuration requires the source `--url` path; custom-code gateways
-continue to configure their own backend.
+credentials outside Git. The managed service stores it in the encrypted gateway
+secret bundle. Configuration requires the source `--url` path; custom-code
+gateways continue to configure their own backend.
