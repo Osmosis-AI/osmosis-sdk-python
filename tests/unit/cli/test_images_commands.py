@@ -98,6 +98,7 @@ def test_info_normalizes_repository_and_returns_build_progress(monkeypatch):
         {"ref": "main\n"},
         {"ref": "main\x7f"},
         {"tasks_dir": ".."},
+        {"tasks_dir": "."},
         {"tasks_dir": "../tasks"},
         {"tasks_dir": "/tasks"},
         {"tasks_dir": "tasks//one"},
@@ -499,6 +500,229 @@ def test_cli_repo_only_json_submission(tmp_path, monkeypatch):
     body = client.submit_image_build.call_args.kwargs
     assert body["tasks_dir"] == "tasks" and body["ref"] == "HEAD"
     assert "tasks" not in body
+
+
+def test_cli_source_build_submits_versioned_contract(tmp_path, monkeypatch):
+    from osmosis_ai.cli.main import _register_commands, app
+
+    _register_commands()
+    client = Mock()
+    client.submit_image_build.return_value = {"phase": "queued"}
+    monkeypatch.setattr(images, "OsmosisClient", lambda: client)
+    result = CliRunner().invoke(
+        app,
+        [
+            "--json",
+            "images",
+            "build",
+            "--url",
+            "https://github.com/acme/job",
+            "--path",
+            ".",
+            "--ref",
+            "main",
+            "--no-wait",
+            "--output-dir",
+            str(tmp_path),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    body = client.submit_image_build.call_args.kwargs
+    assert body["image_layout"] == "source-v1"
+    assert body["tasks_dir"] == "."
+
+
+@pytest.fixture
+def source_manifest_build(tmp_path):
+    from dataclasses import asdict
+
+    from osmosis_ai.harbor_images import EnvironmentIdentity, TaskSource
+
+    source = TaskSource("https://github.com/acme/job", "tasks", "a" * 40)
+    identity = EnvironmentIdentity("a" * 16, "b" * 64)
+    image = {
+        "key": "key",
+        "image": "us-west1-docker.pkg.dev/project/repo/environment@sha256:" + "c" * 64,
+        "tag": "us-west1-docker.pkg.dev/project/repo/environment:" + identity.tag,
+        "environment_hash": identity.environment_hash,
+        "context_sha256": identity.context_sha256,
+    }
+    manifest = {
+        "schema_version": "source-v1",
+        "hash_policy": identity.policy,
+        "source": asdict(source),
+        "images": [image],
+        "tasks": [{"task": "add", "environments": {"environment": "key"}}],
+    }
+    state = images.prepare_request(
+        tmp_path,
+        source.repository,
+        source.revision,
+        source.path,
+        image_layout="source-v1",
+    )
+    status = {
+        "source_revision": source.revision,
+        "result": {"manifest": {}, "task_count": 1, "bundle": None},
+    }
+    return state, status, manifest
+
+
+def test_source_manifest_export_never_downloads_task_bundle(
+    tmp_path, monkeypatch, source_manifest_build
+):
+    state, status, manifest = source_manifest_build
+    client = Mock()
+    client.get_image_build_artifacts.return_value = {"manifest": {}}
+    downloads = []
+
+    def download(reference, access, destination):
+        downloads.append(destination.name)
+        destination.write_text(json.dumps(manifest))
+
+    monkeypatch.setattr(images, "download", download)
+    summary = images.collect(client, state, status, tmp_path)
+    assert downloads == ["manifest.json"]
+    assert (
+        summary["tasks"]["add"]["environment"]["image"]
+        == manifest["images"][0]["image"]
+    )
+    assert not (tmp_path / "tasks").exists()
+    manifest["source"]["revision"] = "b" * 40
+    with pytest.raises(CLIError, match="does not match"):
+        images.collect(client, state, status, tmp_path)
+
+
+@pytest.mark.parametrize(
+    "corruption",
+    [
+        "missing-source",
+        "extra-source-key",
+        "invalid-revision",
+        "invalid-path",
+        "missing-images",
+        "invalid-image",
+        "invalid-bindings",
+    ],
+)
+def test_malformed_source_manifest_reports_platform_error(
+    tmp_path, source_manifest_build, corruption
+):
+    state, status, manifest = source_manifest_build
+    if corruption == "missing-source":
+        del manifest["source"]
+    elif corruption == "extra-source-key":
+        manifest["source"]["unexpected"] = "value"
+    elif corruption == "invalid-revision":
+        manifest["source"]["revision"] = "main"
+    elif corruption == "invalid-path":
+        manifest["source"]["path"] = "../tasks"
+    elif corruption == "missing-images":
+        del manifest["images"]
+    elif corruption == "invalid-image":
+        manifest["images"] = [None]
+    else:
+        manifest["tasks"][0]["environments"] = None
+    with pytest.raises(CLIError, match="does not match") as error:
+        images.collect_source_manifest(state, status, manifest, tmp_path)
+    assert error.value.code == "PLATFORM_ERROR"
+    assert not (tmp_path / "images.json").exists()
+
+
+def test_non_json_source_manifest_reports_platform_error(
+    tmp_path, monkeypatch, source_manifest_build
+):
+    state, status, _ = source_manifest_build
+    client = Mock()
+    client.get_image_build_artifacts.return_value = {"manifest": {}}
+    monkeypatch.setattr(
+        images, "download", lambda reference, access, path: path.write_text("invalid")
+    )
+    with pytest.raises(CLIError, match="not valid JSON") as error:
+        images.collect(client, state, status, tmp_path)
+    assert error.value.code == "PLATFORM_ERROR"
+
+
+@pytest.mark.parametrize("ref", ["A" * 40, "aA" * 20])
+def test_source_manifest_enforces_case_insensitive_pinned_sha(
+    tmp_path, source_manifest_build, ref
+):
+    state, status, manifest = source_manifest_build
+    state["request"]["ref"] = ref
+    images.collect_source_manifest(state, status, manifest, tmp_path)
+    # A self-consistent response at a different commit must still fail the request pin.
+    status["source_revision"] = manifest["source"]["revision"] = "b" * 40
+    with pytest.raises(CLIError, match="does not match"):
+        images.collect_source_manifest(state, status, manifest, tmp_path)
+
+
+@pytest.mark.parametrize(
+    "relative",
+    [
+        "request.json",
+        "status.json",
+        "manifest.json",
+        "bundle.tar.gz",
+        "tasks/add/task.toml",
+        ".",
+    ],
+)
+@pytest.mark.parametrize("alias", [False, True])
+def test_output_cannot_overwrite_build_state(tmp_path, monkeypatch, relative, alias):
+    output_dir = tmp_path / "build"
+    destination = output_dir / relative
+    if alias:
+        link = tmp_path / "export.json"
+        link.symlink_to(destination)
+        destination = link
+    client = Mock()
+    monkeypatch.setattr(images, "OsmosisClient", client)
+    with pytest.raises(CLIError, match="must not overwrite") as error:
+        images.build(
+            repository="https://github.com/acme/job",
+            ref="main",
+            tasks_dir="tasks",
+            output_dir=output_dir,
+            request_id=None,
+            wait=False,
+            timeout=30,
+            image_layout="source-v1",
+            output=destination,
+        )
+    assert error.value.code == "VALIDATION"
+    assert not output_dir.exists()
+    client.assert_not_called()
+
+
+def test_no_wait_export_reports_pending_then_resumes(tmp_path, monkeypatch):
+    client = Mock()
+    client.submit_image_build.return_value = {"phase": "queued"}
+    monkeypatch.setattr(images, "OsmosisClient", lambda: client)
+    summary = {"tasks": {"add": {"environment": "image"}}}
+    collect = Mock(return_value=summary)
+    monkeypatch.setattr(images, "collect", collect)
+    destination = tmp_path / "exports/images.json"
+    kwargs = dict(
+        repository="https://github.com/acme/job",
+        ref="main",
+        tasks_dir="tasks",
+        output_dir=tmp_path / "build",
+        request_id=None,
+        wait=False,
+        timeout=30,
+        image_layout="source-v1",
+        output=destination,
+    )
+    pending = images.build(**kwargs)
+    assert pending.resource["output_ready"] is False
+    assert "not ready" in pending.message
+    assert not destination.exists()
+    collect.assert_not_called()
+    client.submit_image_build.return_value = {"phase": "completed"}
+    completed = images.build(**kwargs)
+    assert completed.resource["output_ready"] is True
+    assert completed.resource["request_id"] == pending.resource["request_id"]
+    assert json.loads(destination.read_text()) == summary
 
 
 def test_download_uses_signed_access_without_platform_auth_and_checks_bytes(

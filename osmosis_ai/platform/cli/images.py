@@ -41,15 +41,20 @@ def prepare_request(
     ref: str,
     tasks_dir: str,
     request_id: str | None = None,
+    image_layout: str | None = None,
 ) -> dict[str, Any]:
     identity = normalize_git_identity(repository).identity
+    if tasks_dir == "." and image_layout != "source-v1":
+        raise CLIError(
+            "Repository-root task paths require --url source builds", code="VALIDATION"
+        )
     if (
         not ref
         or len(ref) > 255
         or any(ord(char) < 32 or ord(char) == 127 for char in ref)
     ):
         raise CLIError("ref must be a branch, tag, or commit SHA", code="VALIDATION")
-    if (
+    if tasks_dir != "." and (
         "\\" in tasks_dir
         or "\0" in tasks_dir
         or any(part in ("", ".", "..") for part in tasks_dir.split("/"))
@@ -69,13 +74,19 @@ def prepare_request(
         "repository": f"https://github.com/{identity}",
         "ref": ref,
         "tasks_dir": tasks_dir,
+        **({"image_layout": image_layout} if image_layout else {}),
     }
     path = output / "request.json"
     if path.exists():
         saved = json.loads(path.read_text())
         if (
             saved["inputs"] != inputs
-            or {key: saved["request"].get(key) for key in request} != request
+            or {
+                key: value
+                for key, value in saved["request"].items()
+                if key != "request_id"
+            }
+            != request
             or (request_id and saved["request_id"] != request_id)
         ):
             raise CLIError(
@@ -318,7 +329,14 @@ def collect(
         state["request_id"], git_identity=state["inputs"]["git_identity"]
     )
     download(result["manifest"], access["manifest"], output / "manifest.json")
-    manifest = json.loads((output / "manifest.json").read_text())
+    try:
+        manifest = json.loads((output / "manifest.json").read_text())
+    except json.JSONDecodeError:
+        raise CLIError(
+            "Published image manifest is not valid JSON", code="PLATFORM_ERROR"
+        ) from None
+    if state["request"].get("image_layout") == "source-v1":
+        return collect_source_manifest(state, status, manifest, output)
     if (
         manifest["source_revision"] != status["source_revision"]
         or manifest["bundle"] != result["bundle"]
@@ -372,6 +390,90 @@ def collect(
     return summary
 
 
+def collect_source_manifest(
+    state: dict[str, Any],
+    status: dict[str, Any],
+    manifest: dict[str, Any],
+    output: Path,
+) -> dict[str, Any]:
+    try:
+        summary = _source_manifest_summary(state, status, manifest)
+    except (KeyError, TypeError, ValueError, AttributeError):
+        raise CLIError(
+            "Source image manifest does not match this build", code="PLATFORM_ERROR"
+        ) from None
+    write_json(output / "images.json", summary)
+    return summary
+
+
+def _source_manifest_summary(
+    state: dict[str, Any], status: dict[str, Any], manifest: dict[str, Any]
+) -> dict[str, Any]:
+    from osmosis_ai.harbor_images import POLICY, TaskSource
+
+    source = TaskSource(**manifest["source"])
+    request = state["request"]
+    if (
+        manifest.get("schema_version") != "source-v1"
+        or manifest.get("hash_policy") != POLICY
+        or source.repository != request["repository"]
+        or source.path != request["tasks_dir"]
+        or source.revision != status["source_revision"]
+        or (
+            re.fullmatch(r"[0-9a-fA-F]{40}", request["ref"])
+            and source.revision != request["ref"].lower()
+        )
+        or len(manifest["tasks"]) != status["result"]["task_count"]
+    ):
+        raise CLIError(
+            "Source image manifest does not match this build", code="PLATFORM_ERROR"
+        )
+    images = {entry["key"]: entry for entry in manifest["images"]}
+    tasks = {entry["task"]: entry["environments"] for entry in manifest["tasks"]}
+    if len(images) != len(manifest["images"]) or len(tasks) != len(manifest["tasks"]):
+        raise CLIError(
+            "Source image manifest contains duplicate identities", code="PLATFORM_ERROR"
+        )
+    for bindings in tasks.values():
+        if "environment" not in bindings or any(
+            key not in images for key in bindings.values()
+        ):
+            raise CLIError(
+                "Source image manifest is missing a required image",
+                code="PLATFORM_ERROR",
+            )
+    if any(not _IMAGE.fullmatch(entry["image"]) for entry in images.values()):
+        raise CLIError("Source images must be pinned by digest", code="PLATFORM_ERROR")
+    summary = {
+        **manifest,
+        "tasks": {
+            name: {role: images[key] for role, key in bindings.items()}
+            for name, bindings in tasks.items()
+        },
+    }
+    return summary
+
+
+def validate_output_path(output_dir: Path, output: Path | None) -> None:
+    if output is None:
+        return
+    destination = output.resolve()
+    reserved = {
+        (output_dir / name).resolve()
+        for name in ("request.json", "status.json", "manifest.json", "bundle.tar.gz")
+    }
+    if (
+        destination == output_dir.resolve()
+        or destination in reserved
+        or destination.is_relative_to((output_dir / "tasks").resolve())
+        or output.is_dir()
+    ):
+        raise CLIError(
+            "--output must not overwrite build state or downloaded tasks; choose a separate JSON file",
+            code="VALIDATION",
+        )
+
+
 def build(
     *,
     repository: str,
@@ -381,12 +483,23 @@ def build(
     request_id: str | None,
     wait: bool,
     timeout: float,
+    image_layout: str | None = None,
+    output: Path | None = None,
 ) -> OperationResult:
-    state = prepare_request(output_dir, repository, ref, tasks_dir, request_id)
+    validate_output_path(output_dir, output)
+    state = prepare_request(
+        output_dir, repository, ref, tasks_dir, request_id, image_layout
+    )
     client = OsmosisClient()
     status = wait_for_build(client, state, output_dir, timeout, wait)
     if status["phase"] == "completed":
-        collect(client, state, status, output_dir)
+        summary = collect(client, state, status, output_dir)
+        if output is not None:
+            output.parent.mkdir(parents=True, exist_ok=True)
+            write_json(output, summary)
+    message = f"Image build {status['phase']}. State saved in {output_dir}"
+    if output is not None and status["phase"] != "completed":
+        message += f". Export {output} is not ready; rerun the same command with --wait to collect it after completion."
     return OperationResult(
         operation="images.build",
         status=status["phase"],
@@ -394,8 +507,16 @@ def build(
             "request_id": state["request_id"],
             **status,
             "output_dir": str(output_dir),
+            **(
+                {
+                    "output_file": str(output),
+                    "output_ready": status["phase"] == "completed",
+                }
+                if output is not None
+                else {}
+            ),
         },
-        message=f"Image build {status['phase']}. State saved in {output_dir}",
+        message=message,
     )
 
 
