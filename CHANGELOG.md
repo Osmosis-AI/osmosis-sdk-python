@@ -2,6 +2,25 @@
 
 This file records changes to `osmosis-ai`. For earlier versions, see [GitHub Releases](https://github.com/Osmosis-AI/osmosis-sdk-python/releases).
 
+## 0.3.5rc1 - 2026-09-24
+
+### Breaking Changes
+
+- The internal `osmosis dev server up|down|list|logs` commands are removed from the public SDK; internal users run the same commands from the private `osmo` CLI as `osmo dev server ...` ([#389](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/389)).
+- The dedicated dev-server Python API is removed: the `OsmosisClient` methods `provision_dev_rollout_server`, `teardown_dev_rollout_server`, `get_dev_rollout_server_logs`, `stream_dev_rollout_server_logs`, and `list_dev_rollout_servers`, the `DevRolloutServerInfo` and `PaginatedDevRolloutServers` models, the `DevServerSandboxEnvironment` and `DevServerBackend` enums, and `serialize_dev_rollout_server` ([#389](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/389)).
+
+### Added
+
+- `osmosis images build --url URL --path PATH --ref REF` builds Harbor task images from a pinned GitHub task directory or Harbor Hub `dataset.toml` without downloading a task bundle, and `--output` writes the verified task-to-image JSON mapping ([#387](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/387), [#390](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/390)).
+- `HarborGatewayConfig` in `osmosis_ai.rollout.types.harbor` validates the native Harbor agent, concurrency, environment, and healthcheck settings used by managed source gateways ([#390](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/390)).
+- `osmosis_ai.cli.main.create_app()` and `run_cli()` let downstream CLIs reuse the public command tree, root options, and output handling while adding their own commands, version reporting, and upgrade command ([#389](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/389)).
+
+### Changed
+
+- JSON error envelopes resolve `command` from the invoked command tree: unknown subcommands are kept (for example `dataset lst`), `--workspace` values are no longer reported as the command, and `osmosis_ai.cli.output.command_path_for_error()` without `root_command` no longer reads `sys.argv` ([#389](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/389)).
+
+[Full changelog](https://github.com/Osmosis-AI/osmosis-sdk-python/compare/v0.3.4...v0.3.5rc1)
+
 ## 0.3.4 - 2026-09-23
 
 ### Added
