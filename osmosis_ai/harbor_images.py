@@ -117,6 +117,7 @@ def fetch_source(source: TaskSource, token: str, destination: Path) -> None:
                 )
                 if response.status_code == 302:
                     location = response.headers.get("location", "")
+                    target = None
                     try:
                         target = urlsplit(location)
                         valid = (
@@ -128,13 +129,19 @@ def fetch_source(source: TaskSource, token: str, destination: Path) -> None:
                         )
                     except ValueError:
                         valid = False
-                    if not valid:
+                    if not valid or target is None:
                         raise ValueError(
                             "GitHub returned an unexpected archive location"
                         )
                     response.close()
                     response = stack.enter_context(
-                        client.stream("GET", location, headers=headers)
+                        # The installation header also authenticates codeload.
+                        # Keep GitHub's signed query out of HTTP request logs.
+                        client.stream(
+                            "GET",
+                            target._replace(query="", fragment="").geturl(),
+                            headers=headers,
+                        )
                     )
                 if response.status_code == 429 or response.status_code >= 500:
                     raise RuntimeError("GitHub source is temporarily unavailable")

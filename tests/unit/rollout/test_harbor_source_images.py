@@ -116,7 +116,8 @@ def test_repository_root_task_id_does_not_depend_on_checkout_name(tmp_path):
         ) == ["task"]
 
 
-def test_builder_and_gateway_fetch_identical_pinned_archives(tmp_path, monkeypatch):
+def test_builder_and_gateway_fetch_identical_pinned_archives(tmp_path, monkeypatch, caplog):
+    caplog.set_level("INFO", logger="httpx")
     task = make_task(tmp_path / "input/tasks/add")
     buffer = io.BytesIO()
     with tarfile.open(fileobj=buffer, mode="w:gz") as archive:
@@ -132,9 +133,12 @@ def test_builder_and_gateway_fetch_identical_pinned_archives(tmp_path, monkeypat
                 headers={
                     "location": "https://codeload.github.com/acme/tasks/legacy.tar.gz/"
                     + SOURCE.revision
+                    + "?token=private-download-token"
                 },
             )
         assert request.url.host == "codeload.github.com"
+        assert request.url.query == b""
+        assert request.headers["authorization"] == "Bearer private-installation-token"
         return httpx.Response(200, content=buffer.getvalue())
 
     client = httpx.Client
@@ -147,6 +151,8 @@ def test_builder_and_gateway_fetch_identical_pinned_archives(tmp_path, monkeypat
         fetch_source(SOURCE, "private-installation-token", tmp_path / name)
         assert task_identities(tmp_path / name / "tasks/add") == task_identities(task)
     assert len(requested) == 4
+    assert "private-download-token" not in caplog.text
+    assert "private-installation-token" not in caplog.text
 
 
 @pytest.mark.parametrize(
