@@ -33,7 +33,25 @@ def up(
     yes: bool = False,
     sandbox_environment: DevServerSandboxEnvironment | None = None,
     backend: DevServerBackend | None = None,
+    url: str | None = None,
+    path: str = "tasks",
+    ref: str | None = None,
+    config: Path | None = None,
 ) -> OperationResult:
+    if url is not None:
+        return up_source(
+            url=url,
+            path=path,
+            ref=ref,
+            ttl_hours=ttl_hours,
+            backend=backend,
+            sandbox_environment=sandbox_environment,
+            config=config,
+        )
+    if ref is not None or path != "tasks" or config is not None:
+        raise CLIError(
+            "Source --path, --ref and --config options require --url", code="VALIDATION"
+        )
     cwd = Path.cwd()
     if not (cwd / "main.py").is_file():
         raise CLIError(
@@ -65,6 +83,7 @@ def up(
     repository_path = str(cwd.resolve().relative_to(ctx.workspace_directory))
     rollout_name = cwd.name
     client = OsmosisClient()
+    options: dict[str, Any] = {"backend": backend} if backend is not None else {}
     result: dict[str, Any] = client.provision_dev_rollout_server(
         rollout_name=rollout_name,
         commit_sha=state.head_sha,
@@ -74,7 +93,7 @@ def up(
         credentials=ctx.credentials,
         git_identity=ctx.git_identity,
         sandbox_environment=sandbox_environment,
-        **({"backend": backend} if backend is not None else {}),
+        **options,
     )
     unconfirmed = None
     if backend is not None and result.get("backend") != backend.value:
@@ -118,13 +137,104 @@ def up(
     )
 
 
-def down(server_id: str) -> OperationResult:
+def up_source(
+    *,
+    url: str,
+    path: str,
+    ref: str | None,
+    ttl_hours: int | None,
+    backend: DevServerBackend | None,
+    sandbox_environment: DevServerSandboxEnvironment | None,
+    config: Path | None = None,
+) -> OperationResult:
+    from dataclasses import asdict
+
+    from osmosis_ai.harbor_images import TaskSource
+    from osmosis_ai.platform.cli.workspace_repo import normalize_git_identity
+    from osmosis_ai.rollout.types.harbor import HarborGatewayConfig
+
+    identity = normalize_git_identity(url).identity
+    try:
+        source = TaskSource(f"https://github.com/{identity}", path, ref or "")
+    except ValueError as error:
+        raise CLIError(str(error), code="VALIDATION") from None
+    harbor_config = None
+    if config is not None:
+        try:
+            harbor_config = HarborGatewayConfig.model_validate_json(
+                config.read_text()
+            ).model_dump(mode="json")
+        except (OSError, ValueError):
+            raise CLIError(
+                "Cannot read a valid Harbor gateway configuration; check --config",
+                code="VALIDATION",
+            ) from None
+    backend = backend or DevServerBackend.GKE
+    sandbox_environment = sandbox_environment or DevServerSandboxEnvironment.OPENSANDBOX
+    if (
+        backend != DevServerBackend.GKE
+        or sandbox_environment != DevServerSandboxEnvironment.OPENSANDBOX
+    ):
+        raise CLIError(
+            "Source gateways require --backend gke --sandbox-environment opensandbox",
+            code="VALIDATION",
+        )
+    client = OsmosisClient()
+    result = client.provision_dev_rollout_server(
+        rollout_name="harbor-source",
+        commit_sha=source.revision,
+        repository_path=".",
+        entrypoint="/opt/osmosis/harbor/source_main.py",
+        ttl_hours=ttl_hours,
+        git_identity=identity,
+        backend=backend,
+        sandbox_environment=sandbox_environment,
+        task_source=asdict(source),
+        harbor_config=harbor_config,
+    )
+    if (
+        result.get("task_source") != asdict(source)
+        or result.get("backend") != backend.value
+        or result.get("sandbox_environment") != sandbox_environment.value
+        or (harbor_config is not None and result.get("harbor_config") != harbor_config)
+    ):
+        try:
+            client.teardown_dev_rollout_server(result["id"], git_identity=identity)
+        except Exception:
+            raise CLIError(
+                f"Platform did not confirm source configuration and teardown failed; stop server {result['id']} before retrying",
+                code="VALIDATION",
+            ) from None
+        raise CLIError(
+            "Platform did not confirm source gateway configuration; teardown requested",
+            code="VALIDATION",
+        )
+    return OperationResult(
+        operation="dev.server.up",
+        status="success",
+        resource=result,
+        message=f"Source gateway provisioning at {result['url']}; readiness requires all images and agent prewarm to succeed.",
+        display_next_steps=[f"api_key: {result['api_key']}"]
+        if result.get("api_key")
+        else [],
+    )
+
+
+def server_scope(url: str | None) -> dict[str, Any]:
+    if url:
+        from osmosis_ai.platform.cli.workspace_repo import normalize_git_identity
+
+        return {"git_identity": normalize_git_identity(url).identity}
     ctx = resolve_git_workspace_directory_context()
+    return {"credentials": ctx.credentials, "git_identity": ctx.git_identity}
+
+
+def down(server_id: str, *, url: str | None = None) -> OperationResult:
+    scope = server_scope(url)
     client = OsmosisClient()
     result: dict[str, Any] = client.teardown_dev_rollout_server(
         server_id,
-        credentials=ctx.credentials,
-        git_identity=ctx.git_identity,
+        **scope,
     )
     return OperationResult(
         operation="dev.server.down",
@@ -134,10 +244,10 @@ def down(server_id: str) -> OperationResult:
     )
 
 
-def list_servers(*, limit: int, all_: bool) -> ListResult:
+def list_servers(*, limit: int, all_: bool, url: str | None = None) -> ListResult:
     effective_limit, fetch_all = validate_list_options(limit=limit, all_=all_)
 
-    ctx = resolve_git_workspace_directory_context()
+    scope = server_scope(url)
     output = get_output_context()
     client = OsmosisClient()
     with output.status("Fetching rollout servers..."):
@@ -145,8 +255,7 @@ def list_servers(*, limit: int, all_: bool) -> ListResult:
             lambda lim, off: client.list_dev_rollout_servers(
                 limit=lim,
                 offset=off,
-                credentials=ctx.credentials,
-                git_identity=ctx.git_identity,
+                **scope,
             ),
             items_attr="dev_rollout_servers",
             limit=effective_limit,
@@ -203,13 +312,15 @@ def _emit_entries(entries: list[LogEntry], fmt: OutputFormat) -> None:
         )
 
 
-def logs(server_id: str, *, follow: bool | None, tail: int) -> NoReturn:
+def logs(
+    server_id: str, *, follow: bool | None, tail: int, url: str | None = None
+) -> NoReturn:
     """Show logs for a remote rollout server.
 
     In rich mode logs stream live (attach); with ``--json``/``--plain`` the last
     ``tail`` lines are printed and the command exits unless ``follow`` is forced.
     """
-    ctx = resolve_git_workspace_directory_context()
+    scope = server_scope(url)
     output = get_output_context()
     fmt = output.format
     effective_follow = follow if follow is not None else (fmt is OutputFormat.rich)
@@ -222,8 +333,7 @@ def logs(server_id: str, *, follow: bool | None, tail: int) -> NoReturn:
             for entry in client.stream_dev_rollout_server_logs(
                 server_id,
                 tail=tail,
-                credentials=ctx.credentials,
-                git_identity=ctx.git_identity,
+                **scope,
             ):
                 _emit_entries([entry], fmt)
         except KeyboardInterrupt:
@@ -234,8 +344,7 @@ def logs(server_id: str, *, follow: bool | None, tail: int) -> NoReturn:
         page = client.get_dev_rollout_server_logs(
             server_id,
             limit=tail,
-            credentials=ctx.credentials,
-            git_identity=ctx.git_identity,
+            **scope,
         )
         _emit_entries(page.logs, fmt)
 
