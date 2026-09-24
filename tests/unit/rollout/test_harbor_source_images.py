@@ -409,3 +409,68 @@ def test_gateway_readiness_preserves_source_and_verifier_healthcheck(tmp_path):
         == "test -f /task-ready"
     )
     assert path.read_bytes() == before
+
+
+@pytest.mark.parametrize(
+    ("domain", "overrides", "expected"),
+    [
+        (
+            "http://opensandbox.internal",
+            {},
+            {"protocol": "http", "use_server_proxy": True},
+        ),
+        (
+            "https://opensandbox.example.com",
+            {},
+            {"protocol": "https", "use_server_proxy": True},
+        ),
+        (
+            "opensandbox.example.com",
+            {},
+            {"protocol": "https", "use_server_proxy": True},
+        ),
+        (
+            "",
+            {"domain": "http://custom.internal"},
+            {
+                "domain": "http://custom.internal",
+                "protocol": "http",
+                "use_server_proxy": True,
+            },
+        ),
+        (
+            "http://opensandbox.internal",
+            {"protocol": "https", "use_server_proxy": False},
+            {"protocol": "https", "use_server_proxy": False},
+        ),
+    ],
+)
+def test_source_gateway_transport_matches_service_and_preserves_overrides(
+    monkeypatch, domain, overrides, expected
+):
+    from osmosis_ai.rollout.backend.harbor import source
+
+    monkeypatch.setenv("OPENSANDBOX_DOMAIN", domain)
+    monkeypatch.setenv(
+        "_OSMOSIS_HARBOR_CONFIG", json.dumps({"environment_kwargs": overrides})
+    )
+    monkeypatch.setenv("_OSMOSIS_HARBOR_TASK_SOURCE", json.dumps(asdict(SOURCE)))
+    monkeypatch.setenv("_OSMOSIS_ORGANIZATION_ID", ORG)
+    monkeypatch.setenv(
+        "_OSMOSIS_HARBOR_REGISTRY",
+        "us-west1-docker.pkg.dev/project/" + SOURCE.repository_id(ORG),
+    )
+    monkeypatch.setattr(
+        source,
+        "fetch_source",
+        lambda _source, _token, root: make_task(root / "tasks/add"),
+    )
+    monkeypatch.setattr(source.RegistryResolver, "resolve", lambda *_: IMAGE)
+    backend = Mock()
+    monkeypatch.setattr(source, "SourceHarborBackend", backend)
+    monkeypatch.setattr("osmosis_ai.rollout.server.create_rollout_server", Mock())
+    monkeypatch.setattr("uvicorn.run", Mock())
+
+    source.main()
+
+    assert backend.call_args.kwargs["environment_config"].kwargs == expected

@@ -85,7 +85,9 @@ without adding Python code or changing the task source. For example:
 ```
 
 `native_agent_kwargs` and `environment_kwargs` are passed to Harbor's native
-agent and OpenSandbox configuration. Optional `environment_healthcheck` uses
+agent and OpenSandbox configuration. Source gateways use OpenSandbox's server
+proxy by default and derive its protocol from the configured service URL;
+explicit environment options take precedence. Optional `environment_healthcheck` uses
 Harbor's `command`, timing and retry fields; it adds readiness requirements to
 the agent environment in temporary trial copies, preserving the original task
 and separate verifier healthchecks. Configuration defaults and validation live
