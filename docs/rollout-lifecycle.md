@@ -59,7 +59,10 @@ bounded drain and cancellation cleanup.
 ## Native Harbor evidence
 
 After Harbor finishes and scrubs its files, the backend retains a sanitized copy
-at `<artifact_root>/<rollout_id>/harbor/`. The artifact root uses the existing
+at `<artifact_root>/<rollout_id>/harbor/`. Harbor rejects rollout IDs containing
+colons or control characters before starting trial work so their evidence paths
+remain portable. Other backends keep their existing rollout ID contract.
+The artifact root uses the existing
 `_OSMOSIS_ROLLOUT_ARTIFACT_ROOT` setting. The copy contains `result.json`, selected
 native logs under `logs/`, and `manifest.json`. Configuration and task source
 files are excluded. Existing `artifacts/`, `logs/` and `trajectory.json` keep
