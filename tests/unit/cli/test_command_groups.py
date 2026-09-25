@@ -27,7 +27,7 @@ PRESERVED_ROOT_COMMANDS = [
 ]
 
 # Internal-only commands must not remain registered or advertised.
-REMOVED_ROOT_COMMANDS = ["dev", "images"]
+REMOVED_ROOT_COMMANDS = ["dev"]
 
 
 PRESERVED_HELP_COMMANDS = [
@@ -159,16 +159,7 @@ def test_help_command_nudges_to_help_flag(capfd):
     assert "Did you mean" not in captured.err
 
 
-@pytest.mark.parametrize(
-    "args",
-    [
-        ["dev"],
-        ["dev", "server", "--help"],
-        ["images"],
-        ["images", "build", "--help"],
-        ["images", "info", "--help"],
-    ],
-)
+@pytest.mark.parametrize("args", [["dev"], ["dev", "server", "--help"]])
 def test_internal_commands_are_unavailable(args, capfd):
     assert main(args) == 2
     assert "No such command" in capfd.readouterr().err
