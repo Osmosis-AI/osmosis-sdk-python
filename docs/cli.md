@@ -7,7 +7,7 @@
 The console scripts `osmosis`, `osmosis-ai`, and `osmosis_ai` all map to `osmosis_ai.cli.main:main`. [../osmosis_ai/cli/main.py](../osmosis_ai/cli/main.py):
 
 - `main()` calls `_register_commands()` once, then delegates to `run_cli(app, argv, prog_name=...)`. The program name is the invoked executable for the `osmosis-ai` and `osmosis_ai` aliases (so help and completion keep the alias) and `osmosis` otherwise. `run_cli` runs the command tree with `standalone_mode=False` so it can map exceptions to exit codes itself.
-- Public commands are registered in `_add_commands()`, which both the module-level `app` (via `_register_commands()`) and `create_app()` use; add new public commands there, named from [../osmosis_ai/cli/command_registry.py](../osmosis_ai/cli/command_registry.py). It imports each command group **lazily inside the function**. Groups attach via `add_typer(...)`; the standalone `quickstart` / `doctor` / `upgrade` commands attach via `command(...)`. Two `rich_help_panel`s split the help: `Workflow Commands` (`quickstart`, `dataset`, `train`, `images`, `model`, `eval`, `benchmark`, `rollout`, `template`, `doctor`) and `Platform Commands` (`auth`, `secret`, `upgrade`).
+- Public commands are registered in `_add_commands()`, which both the module-level `app` (via `_register_commands()`) and `create_app()` use; add new public commands there, named from [../osmosis_ai/cli/command_registry.py](../osmosis_ai/cli/command_registry.py). It imports each command group **lazily inside the function**. Groups attach via `add_typer(...)`; the standalone `quickstart` / `doctor` / `upgrade` commands attach via `command(...)`. Two `rich_help_panel`s split the help: `Workflow Commands` (`quickstart`, `dataset`, `train`, `model`, `eval`, `benchmark`, `rollout`, `template`, `doctor`) and `Platform Commands` (`auth`, `secret`, `upgrade`).
 - The root `_callback` resolves `--json` / `--plain`, builds an `OutputContext`, installs it on the Typer context, and registers `verify_output_emitted` on close. The CLI loads an explicit `--env-file` / `OSMOSIS_ENV_FILE`, or otherwise discovers the nearest `.env` from the working directory upward. Non-empty process variables take precedence, overlapping dotenv auth values must agree, and `--platform` overrides `OSMOSIS_PLATFORM_URL` for one invocation. Non-HTTPS non-loopback platform URLs are refused unless `OSMOSIS_ALLOW_INSECURE_PLATFORM_URL=1`. `hoist_format_selectors` lets the format flags appear anywhere on the line.
 
 ## Composing another CLI
@@ -21,10 +21,6 @@ The SDK owns command handlers, root options, authentication, environment loading
 Workspace-scoped platform commands normally derive `X-Osmosis-Git` from the current Osmosis workspace directory. A root `--workspace <name>` selection instead sends only `X-Osmosis-Workspace` and skips local Git and scaffold discovery; the selection is per invocation and is not persisted. This applies to benchmark catalog/run commands and submit, dataset/model/secret commands, and train/eval list, info, logs, retry, and stop. Structured output records `workspace.name` for an explicit selection and does not fabricate `git` or `workspace_directory` fields.
 
 Train and eval submit remain source-backed. With `--workspace`, their config argument must be absolute; the CLI locates the containing Osmosis Git workspace, checks the selected workspace's connected repository against that Git identity, and submits with only `X-Osmosis-Workspace`. The local Git identity is retained in structured output because it is real source context, not inferred platform state. Without `--workspace`, their existing current-directory behavior is unchanged.
-
-`images build --repo URL` selects a connected job repository explicitly and
-does not require a local checkout. See [image-builds.md](./image-builds.md) for
-its source and artifact contract.
 
 ## Authentication storage and environments
 

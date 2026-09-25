@@ -17,7 +17,6 @@ PRESERVED_ROOT_COMMANDS = [
     "dataset",
     "train",
     "model",
-    "images",
     "benchmark",
     "rollout",
     "template",
