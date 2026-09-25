@@ -333,9 +333,13 @@ def bind_task_images(directory: Path, bindings: Mapping[str, str]) -> None:
 
 
 async def materialize_source_tasks(
-    repository: Path, path: str, destination: Path
+    repository: Path, path: str, destination: Path, *, allow_empty: bool = False
 ) -> list[str]:
-    """Discover Git folders or resolve a Harbor Hub dataset.toml's pinned tasks."""
+    """Discover Git folders or resolve a Harbor Hub dataset.toml's pinned tasks.
+
+    ``allow_empty`` permits a folder with no discovered tasks; an explicit
+    dataset manifest must always contain uniquely named, pinned tasks.
+    """
     source = repository / relative_path(path)
     if (repository / ".gitmodules").exists():
         raise ValueError("Git submodules are unsupported; commit task files directly")
@@ -377,7 +381,7 @@ async def materialize_source_tasks(
             validate_task_files(root)
             shutil.copytree(root, destination / name)
             dirs.clear()
-    if not names:
+    if not names and not allow_empty:
         raise ValueError("Task source contains no Harbor tasks")
     return names
 
