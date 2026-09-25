@@ -75,6 +75,7 @@ from osmosis_ai.rollout.backend.harbor.environment import (
     sandbox_reaches_host_loopback,
     uses_local_docker_runtime,
 )
+from osmosis_ai.rollout.backend.harbor.evidence import retain_trial_evidence
 from osmosis_ai.rollout.backend.harbor.native_agents import (
     NativeAgentBinding,
     native_agent_config,
@@ -105,12 +106,35 @@ from osmosis_ai.rollout.types import (
     RolloutStatus,
 )
 from osmosis_ai.rollout.utils.errors import categorize_error_type, categorize_exception
+from osmosis_ai.rollout.utils.evidence import evidence_path
 from osmosis_ai.rollout.utils.file_artifacts import default_artifact_root
 from osmosis_ai.rollout.utils.imports import ensure_import_path, resolve_object
 from osmosis_ai.rollout.utils.rewards import validate_sample_has_reward
 from osmosis_ai.rollout.utils.ttl_cache import TtlCache
 
 logger: logging.Logger = logging.getLogger(__name__)
+
+
+async def _finish_archive(future: asyncio.Future[None]) -> None:
+    # Execute must remain in flight until finalization settles, even if a
+    # shutdown cancels its task repeatedly. A drain can time out while waiting,
+    # but must never report idle while this executor still writes evidence.
+    cancelled = False
+    while not future.done():
+        try:
+            await asyncio.shield(future)
+        except asyncio.CancelledError:
+            cancelled = True
+        except Exception:
+            if not cancelled:
+                raise
+            logger.exception("Trial archive failed after cancellation")
+    if cancelled:
+        if not future.cancelled():
+            future.exception()
+        raise asyncio.CancelledError
+    future.result()
+
 
 HARNESS_AGENT_IMPORT_PATH = (
     "osmosis_ai.rollout.backend.harbor.harness_agent:OsmosisHarnessInstalledAgent"
@@ -500,6 +524,9 @@ class HarborBackend(ExecutionBackend):
         self,
         request: ExecutionRequest,
     ) -> ExecutionOutcome:
+        # Harbor IDs become native evidence directory names. Fail before queuing
+        # work whose identity could not be retained and exported portably.
+        evidence_path(request.id)
         pending = PendingTrial()
         pending.label = request.label
         pending.grade = request.grade
@@ -536,6 +563,15 @@ class HarborBackend(ExecutionBackend):
         except asyncio.CancelledError:
             self.pending.pop(request.id, None)
             self.record_outcome(request.id, RolloutStatus.CANCELLED)
+            await _finish_archive(
+                asyncio.get_running_loop().run_in_executor(
+                    self.archive_executor,
+                    self.archive_cancelled_trial,
+                    request.id,
+                    None,
+                    pending,
+                )
+            )
             self.cleanup_rollout_residue(request.id, include_trial=True)
             if not pending.cancel_requested:
                 # An external canceller (uvicorn shutdown, task group) owns
@@ -547,7 +583,15 @@ class HarborBackend(ExecutionBackend):
         except Exception as e:
             self.pending.pop(request.id, None)
             try:
-                self.scrub_trial_credentials(request.id, pending.api_key)
+                await _finish_archive(
+                    asyncio.get_running_loop().run_in_executor(
+                        self.archive_executor,
+                        self.archive_interrupted_trial,
+                        request.id,
+                        None,
+                        pending,
+                    )
+                )
             except CredentialScrubError:
                 logger.exception("Trial %s retains files after scrub", request.id)
             self.cleanup_rollout_residue(request.id, include_trial=False)
@@ -573,23 +617,17 @@ class HarborBackend(ExecutionBackend):
                 grader=failure if request.grade else None,
             )
         else:
-            if trial_cancelled(getattr(trial_result, "exception_info", None)):
-                self.cleanup_rollout_residue(request.id, include_trial=True)
-            else:
-                # The outcome still waits for the durable copy. Only a forced
-                # shutdown cancel interrupts this await: the trial has ended,
-                # so /rollout/cancel reports not_found. The shield keeps that
-                # cancel from dropping an archive still queued behind a busy
-                # pool; the executor finishes it before interpreter exit.
-                await asyncio.shield(
-                    asyncio.get_running_loop().run_in_executor(
-                        self.archive_executor,
-                        self.archive_trial,
-                        request.id,
-                        trial_result,
-                        pending,
-                    )
+            # Completion includes the durable copy, including cancelled trials.
+            # A forced shutdown cannot drop an archive queued in the executor.
+            await _finish_archive(
+                asyncio.get_running_loop().run_in_executor(
+                    self.archive_executor,
+                    self.archive_trial,
+                    request.id,
+                    trial_result,
+                    pending,
                 )
+            )
             return outcome
 
     def scrub_trial_credentials(self, rollout_id: str, api_key: str | None) -> None:
@@ -674,6 +712,9 @@ class HarborBackend(ExecutionBackend):
         secrets before ``submit()`` returns, so any earlier relocation (e.g.
         from a trial hook) copies unredacted content into durable storage.
         """
+        if trial_cancelled(getattr(trial_result, "exception_info", None)):
+            self.archive_cancelled_trial(rollout_id, trial_result, pending)
+            return
         # Scrub before anything is merged, relocated, or preserved, so no
         # durable copy is made from an unredacted trial tree. A failed scrub
         # aborts archiving entirely — but the staging dir, which always holds
@@ -687,9 +728,13 @@ class HarborBackend(ExecutionBackend):
         # Retained before the trial directory can be removed below; a failed
         # retention keeps it, since the trial dir is then the only copy.
         retained = retain_trial_logs(self.trials_dir, self.artifact_root, rollout_id)
+        evidence_retained = self._retain_native_evidence(
+            rollout_id, trial_result, pending
+        )
         delete_trial = bool(
             self.cleanup_successful_trials
             and retained
+            and evidence_retained
             and trial_result is not None
             and getattr(trial_result, "exception_info", None) is None
             and not pending.preserve_trial
@@ -701,6 +746,53 @@ class HarborBackend(ExecutionBackend):
             self.cleanup_rollout_residue(
                 rollout_id, include_trial=delete_trial and relocated
             )
+
+    def _retain_native_evidence(
+        self, rollout_id: str, trial_result: Any, pending: PendingTrial
+    ) -> bool:
+        try:
+            return retain_trial_evidence(
+                self.trials_dir / f"{TRIAL_NAME_PREFIX}{rollout_id}",
+                self.artifact_root,
+                rollout_id,
+                api_key=pending.api_key,
+                trial_result=trial_result,
+                process_id=pending.rollout_context.process_id
+                if pending.rollout_context
+                else None,
+            )
+        except (OSError, ValueError):
+            logger.warning(
+                "Could not finalize native evidence for rollout %s", rollout_id
+            )
+            return False
+
+    def archive_cancelled_trial(
+        self, rollout_id: str, trial_result: Any, pending: PendingTrial
+    ) -> None:
+        # Cancellation may bypass upstream credential scrubbing. Retain only
+        # the sanitized native surface, then remove the untrusted working tree.
+        try:
+            try:
+                self.scrub_trial_credentials(rollout_id, pending.api_key)
+            finally:
+                self._retain_native_evidence(rollout_id, trial_result, pending)
+        finally:
+            self.cleanup_rollout_residue(rollout_id, include_trial=True)
+            if (self.rollouts_dir / rollout_id).exists() or (
+                self.trials_dir / f"{TRIAL_NAME_PREFIX}{rollout_id}"
+            ).exists():
+                raise CredentialScrubError("Cancelled trial cleanup did not complete")
+
+    def archive_interrupted_trial(
+        self, rollout_id: str, trial_result: Any, pending: PendingTrial
+    ) -> None:
+        # An exception from submit() also has no upstream scrubbing guarantee.
+        try:
+            self.scrub_trial_credentials(rollout_id, pending.api_key)
+            self._retain_native_evidence(rollout_id, trial_result, pending)
+        finally:
+            self.cleanup_rollout_residue(rollout_id, include_trial=False)
 
     def cleanup_rollout_residue(self, rollout_id: str, *, include_trial: bool) -> None:
         """Remove per-rollout staging (and optionally the trial directory).

@@ -100,6 +100,23 @@ class TestPublicSurface:
         assert backend.health()["backend"] == "harbor"
         assert backend.health()["chat_endpoint"]["environment"] == "docker"
 
+    @pytest.mark.parametrize("rollout_id", ["run:1", "run\n1", "run\x7f1", "run\x851"])
+    async def test_unsafe_evidence_ids_fail_before_harbor_work(
+        self, template_task, rollout_id, monkeypatch
+    ):
+        from unittest.mock import AsyncMock
+
+        queue = TrialQueue(n_concurrent=1)
+        submit = AsyncMock()
+        monkeypatch.setattr(queue, "submit", submit)
+        backend = HarborBackend(
+            orchestrator=queue, tasks_dir=template_task, agent="terminus-2"
+        )
+        with pytest.raises(ValueError, match="safe relative path"):
+            await backend.execute(ExecutionRequest(id=rollout_id, prompt=[]))
+        submit.assert_not_awaited()
+        assert not backend.pending
+
     @pytest.mark.parametrize(
         ("environment_type", "host_system", "requires_public_url"),
         [
@@ -1608,6 +1625,95 @@ class TestArtifactLifecycle:
         backend.artifact_root = tmp_path / "durable"
         return backend
 
+    async def test_cancelled_trial_cleanup_fails_closed_when_deletion_is_denied(
+        self, template_task, tmp_path, monkeypatch
+    ):
+        import shutil
+
+        backend = self.backend_for(template_task, tmp_path, FakeQueue())
+        directory = backend.trials_dir / "trial-r1"
+        directory.mkdir(parents=True)
+        secret = "controller-key-that-must-not-survive"
+        protected = directory / "trial.log"
+        protected.write_text(secret)
+        (directory / "result.json").write_text('{"api_key": "' + secret + '"}')
+        (backend.rollouts_dir / "r1").mkdir()
+        original_read = Path.read_bytes
+        original_remove = shutil.rmtree
+
+        def denied_read(path):
+            if path == protected:
+                raise PermissionError("denied")
+            return original_read(path)
+
+        def denied_remove(path, *args, **kwargs):
+            if Path(path) != directory:
+                return original_remove(path, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "read_bytes", denied_read)
+        monkeypatch.setattr(shutil, "rmtree", denied_remove)
+        monkeypatch.setattr(backend, "_delete_unscrubbable", lambda path: False)
+        pending = PendingTrial()
+        pending.api_key = secret
+        with pytest.raises(CredentialScrubError, match="cleanup did not complete"):
+            backend.archive_cancelled_trial("r1", None, pending)
+        assert directory.exists()
+        assert not (backend.rollouts_dir / "r1").exists()
+        assert secret not in (directory / "result.json").read_text()
+        assert secret not in "".join(
+            path.read_text()
+            for path in backend.artifact_root.rglob("*")
+            if path.is_file()
+        )
+
+    @pytest.mark.parametrize(
+        "ending", ["cancelled_error", "cancelled_result", "exception"]
+    )
+    async def test_interrupted_trials_retain_only_sanitized_native_evidence(
+        self, template_task, tmp_path, ending
+    ):
+        from osmosis_ai.rollout.context import RolloutContext
+        from osmosis_ai.rollout.utils.evidence import verify_trial_evidence
+
+        async def run(queue, config):
+            directory = config.trials_dir / config.trial_name
+            (directory / "agent").mkdir(parents=True)
+            (directory / "artifacts").mkdir()
+            (directory / "result.json").write_text('{"token": "result-secret"}')
+            (directory / "agent/log.txt").write_text("OTHER_TOKEN=other-secret")
+            (directory / "artifacts/raw.txt").write_text("raw-secret")
+            if ending == "cancelled_error":
+                raise asyncio.CancelledError
+            if ending == "exception":
+                raise RuntimeError("interrupted")
+            result = trial_result(
+                exception_info=SimpleNamespace(
+                    exception_type="CancelledError",
+                    exception_message="cancelled",
+                    exception_traceback="",
+                    occurred_at=None,
+                )
+            )
+            await queue.fire("end", SimpleNamespace(config=config, result=result))
+            return result
+
+        backend = self.backend_for(template_task, tmp_path, FakeQueue(run))
+        request = ExecutionRequest(id="r1", prompt=[{"role": "user", "content": "go"}])
+        with RolloutContext(chat_completions_url="http://t/v1", rollout_id="r1"):
+            if ending == "cancelled_error":
+                with pytest.raises(asyncio.CancelledError):
+                    await backend.execute(request)
+            else:
+                await backend.execute(request)
+        retained = backend.artifact_root / "r1"
+        assert {path.name for path in retained.iterdir()} == {"harbor"}
+        assert verify_trial_evidence(retained / "harbor", "r1")["complete"]
+        assert "secret" not in "".join(
+            path.read_text() for path in retained.rglob("*") if path.is_file()
+        )
+        assert not (backend.rollouts_dir / "r1").exists()
+        assert (backend.trials_dir / "trial-r1").exists() == (ending == "exception")
+
     async def test_artifacts_relocate_only_after_harbor_scrub(
         self, template_task, tmp_path
     ):
@@ -1627,6 +1733,7 @@ class TestArtifactLifecycle:
             await queue.fire("end", event)
             # Harbor's scrub runs here: after hooks, before submit() returns.
             (artifacts / "out.txt").write_text("[REDACTED]")
+            (artifacts.parent / "result.json").write_text('{"reward": 1.0}')
             return result
 
         queue = FakeQueue(run)
@@ -1648,6 +1755,7 @@ class TestArtifactLifecycle:
         artifacts = config.trials_dir / config.trial_name / "artifacts"
         artifacts.mkdir(parents=True)
         (artifacts / "out.txt").write_text("evidence")
+        (artifacts.parent / "result.json").write_text('{"reward": 1.0}')
         result = trial_result(verifier_result=SimpleNamespace(rewards={"reward": 1.0}))
         await queue.fire("end", SimpleNamespace(config=config, result=result))
         return result
@@ -1703,9 +1811,8 @@ class TestArtifactLifecycle:
     async def test_cancel_during_archive_propagates_and_archive_completes(
         self, template_task, tmp_path, monkeypatch, queued
     ):
-        # Only a forced shutdown cancel can interrupt the archive await. It must
-        # propagate without dropping the archive, whether a worker is running it
-        # or it still waits in a saturated pool's queue.
+        # Forced shutdown cancellation propagates only once evidence finalizes,
+        # whether the archive is running or queued behind a saturated pool.
         from osmosis_ai.rollout.context import RolloutContext
 
         entered = threading.Event()
@@ -1740,10 +1847,14 @@ class TestArtifactLifecycle:
         task = asyncio.create_task(execute())
         assert await asyncio.to_thread(entered.wait, 5)
         task.cancel()
+        await asyncio.sleep(0.01)
+        assert not task.done()
+        task.cancel()
+        await asyncio.sleep(0.01)
+        assert not task.done()
+        release.set()
         with pytest.raises(asyncio.CancelledError):
             await task
-
-        release.set()
         await asyncio.to_thread(backend.archive_executor.shutdown)
         assert (tmp_path / "durable" / "r1" / "artifacts" / "out.txt").exists()
         assert not (tmp_path / "trials" / "trial-r1").exists()

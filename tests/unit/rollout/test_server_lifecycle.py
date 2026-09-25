@@ -7,6 +7,7 @@ import pytest
 
 from osmosis_ai.rollout.backend.base import ExecutionBackend
 from osmosis_ai.rollout.client import RolloutClient, RolloutProtocolError
+from osmosis_ai.rollout.context import get_rollout_context
 from osmosis_ai.rollout.server import app as server_module
 from osmosis_ai.rollout.server import create_rollout_server
 from osmosis_ai.rollout.types import ExecutionOutcome, ExecutionResult, RolloutStatus
@@ -14,6 +15,7 @@ from osmosis_ai.rollout.types import ExecutionOutcome, ExecutionResult, RolloutS
 
 class Backend(ExecutionBackend):
     async def execute(self, request):
+        self.process_id = get_rollout_context().process_id
         return ExecutionOutcome(workflow=ExecutionResult(status=RolloutStatus.SUCCESS))
 
 
@@ -47,7 +49,8 @@ def no_archive(monkeypatch):
 
 
 async def test_authenticated_drain_fences_admission_and_is_idempotent():
-    app = create_rollout_server(backend=Backend(), api_key="secret")
+    backend = Backend()
+    app = create_rollout_server(backend=backend, api_key="secret")
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app), base_url="http://test"
     ) as http:
@@ -63,6 +66,7 @@ async def test_authenticated_drain_fences_admission_and_is_idempotent():
             rollout_id="one",
         )
         assert result.status == RolloutStatus.SUCCESS
+        assert backend.process_id == health["process_id"]
         drained = await client.drain(timeout_sec=0)
         assert drained.drained and not drained.accepting_rollouts
         assert drained.process_id == health["process_id"]
@@ -103,6 +107,22 @@ async def test_drain_waits_through_trajectory_finalization(monkeypatch):
         assert not waiting.done()
         finish.set()
         assert (await waiting).drained
+    await app.state.rollout_futures.close()
+
+
+async def test_non_harbor_backends_keep_existing_colon_ids():
+    app = create_rollout_server(backend=Backend())
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app), base_url="http://test"
+    ) as http:
+        client = RolloutClient(url="http://test", http_client=http)
+        result = await client.run_rollout(
+            initial_messages=[],
+            chat_completions_url="https://model.example/v1",
+            rollout_id="run:1",
+        )
+        assert result.status == RolloutStatus.SUCCESS
+        assert (await client.drain(timeout_sec=1)).rollout_ids == ["run:1"]
     await app.state.rollout_futures.close()
 
 
