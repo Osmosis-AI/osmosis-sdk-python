@@ -1,6 +1,7 @@
 from copy import deepcopy
 
 import pytest
+from pydantic import ValidationError
 
 from osmosis_ai.source_images import SourceImageBuildResult, SourceImageManifest
 
@@ -34,27 +35,34 @@ def test_raw_and_resolved_manifests_are_distinct_and_preserve_identity():
         resolved.tasks["group/one"]["environment"].model_dump()["context_sha256"]
         == "b" * 64
     )
-    with pytest.raises(ValueError):
+    with pytest.raises(ValidationError, match="valid dictionary"):
         SourceImageBuildResult.model_validate(manifest())
-    with pytest.raises(ValueError):
+    with pytest.raises(ValidationError, match="valid list"):
         SourceImageManifest.model_validate(resolved.model_dump())
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="Select task IDs"):
         resolved.select_task_ids(["unknown"])
 
 
+@pytest.mark.parametrize("field", ["key", "image"])
+def test_validated_source_image_identity_cannot_be_changed(field):
+    image = SourceImageManifest.model_validate(manifest()).images[0]
+    with pytest.raises(ValidationError, match="Instance is frozen"):
+        setattr(image, field, "mutable-substitute")
+
+
 @pytest.mark.parametrize(
-    "kind",
+    "kind,reason",
     [
-        "source",
-        "task",
-        "image",
-        "duplicate_task",
-        "duplicate_image",
-        "binding",
-        "named",
+        ("source", "full Git commit SHA"),
+        ("task", "relative to the repository root"),
+        ("image", "pinned by digest"),
+        ("duplicate_task", "Duplicate source task IDs"),
+        ("duplicate_image", "Duplicate source image keys"),
+        ("binding", "missing a required image binding"),
+        ("named", "absent from the image inventory"),
     ],
 )
-def test_invalid_published_inventory_is_rejected(kind):
+def test_invalid_published_inventory_is_rejected(kind, reason):
     data = manifest()
     if kind == "source":
         data["source"]["revision"] = "main"
@@ -70,7 +78,7 @@ def test_invalid_published_inventory_is_rejected(kind):
         data["tasks"][0]["environments"]["environment"] = "missing"
     else:
         data["named_images"]["runtime"] = "registry.example/missing@sha256:" + "c" * 64
-    with pytest.raises(ValueError):
+    with pytest.raises(ValidationError, match=reason):
         SourceImageManifest.model_validate(data)
 
 
@@ -78,7 +86,9 @@ def test_invalid_published_inventory_is_rejected(kind):
 def test_resolved_inventory_rejects_nonportable_task_ids(task):
     data = SourceImageManifest.model_validate(manifest()).resolved().model_dump()
     data["tasks"][task] = data["tasks"].pop("group/one")
-    with pytest.raises(ValueError):
+    with pytest.raises(
+        ValidationError, match=r"source root|relative to the repository root"
+    ):
         SourceImageBuildResult.model_validate(data)
 
 
@@ -87,5 +97,5 @@ def test_resolved_binding_cannot_substitute_a_different_image():
     data["tasks"]["group/one"]["environment"]["image"] = (
         "registry.example/env@sha256:" + "f" * 64
     )
-    with pytest.raises(ValueError):
+    with pytest.raises(ValidationError, match="differs from its inventory"):
         SourceImageBuildResult.model_validate(data)

@@ -237,6 +237,16 @@ async def test_hub_manifest_downloads_exact_task_digests(tmp_path, monkeypatch):
     assert (tmp_path / "tasks/acme/add/task.toml").is_file()
 
 
+async def test_allow_empty_does_not_accept_an_empty_explicit_dataset(tmp_path):
+    repository = tmp_path / "repo"
+    repository.mkdir()
+    (repository / "dataset.toml").write_text('[dataset]\nname = "acme/data"\n')
+    with pytest.raises(ValueError, match="uniquely named tasks"):
+        await materialize_source_tasks(
+            repository, "dataset.toml", tmp_path / "tasks", allow_empty=True
+        )
+
+
 def test_task_source_normalizes_full_sha_case():
     assert TaskSource(SOURCE.repository, SOURCE.path, "aB" * 20).revision == "ab" * 20
 

@@ -22,7 +22,7 @@ def task_id(value: str) -> str:
 
 
 class SourceImageRecord(BaseModel):
-    model_config: ClassVar[ConfigDict] = ConfigDict(extra="allow")
+    model_config: ClassVar[ConfigDict] = ConfigDict(extra="allow", frozen=True)
     key: str = Field(min_length=1)
     image: str
 
