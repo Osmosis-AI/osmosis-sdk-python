@@ -12,7 +12,9 @@ from typing import NoReturn
 
 FORBIDDEN_PACKAGE_PATHS = (
     "osmosis_ai/cli/commands/dev/",
+    "osmosis_ai/cli/commands/images.py",
     "osmosis_ai/platform/cli/dev_server.py",
+    "osmosis_ai/platform/cli/images.py",
 )
 FORBIDDEN_SYMBOLS = (
     b"DevServerBackend",
@@ -26,6 +28,11 @@ FORBIDDEN_SYMBOLS = (
     b"stream_dev_rollout_server_logs",
     b"list_dev_rollout_servers",
     b"/api/cli/dev-rollout-server",
+    b"submit_image_build",
+    b"get_image_build",
+    b"get_image_build_artifacts",
+    b"get_image_pull_credentials",
+    b"/api/cli/image-builds",
 )
 
 

@@ -93,7 +93,7 @@ class RegistryResolver:
             )
         if response.status_code != 200:
             raise RuntimeError(
-                f"Source image is unavailable (GAR HTTP {response.status_code}); run 'osmosis images build' for this source first"
+                f"Source image is unavailable (GAR HTTP {response.status_code}); ask the source gateway operator to build and publish images for this source revision"
             )
         digest = "sha256:" + hashlib.sha256(response.content).hexdigest()
         if response.headers.get("docker-content-digest") != digest:

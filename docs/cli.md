@@ -7,7 +7,7 @@
 The console scripts `osmosis`, `osmosis-ai`, and `osmosis_ai` all map to `osmosis_ai.cli.main:main`. [../osmosis_ai/cli/main.py](../osmosis_ai/cli/main.py):
 
 - `main()` calls `_register_commands()` once, then delegates to `run_cli(app, argv, prog_name=...)`. The program name is the invoked executable for the `osmosis-ai` and `osmosis_ai` aliases (so help and completion keep the alias) and `osmosis` otherwise. `run_cli` runs the command tree with `standalone_mode=False` so it can map exceptions to exit codes itself.
-- Public commands are registered in `_add_commands()`, which both the module-level `app` (via `_register_commands()`) and `create_app()` use; add new public commands there, named from [../osmosis_ai/cli/command_registry.py](../osmosis_ai/cli/command_registry.py). It imports each command group **lazily inside the function**. Groups attach via `add_typer(...)`; the standalone `quickstart` / `doctor` / `upgrade` commands attach via `command(...)`. Two `rich_help_panel`s split the help: `Workflow Commands` (`quickstart`, `dataset`, `train`, `images`, `model`, `eval`, `benchmark`, `rollout`, `template`, `doctor`) and `Platform Commands` (`auth`, `secret`, `upgrade`).
+- Public commands are registered in `_add_commands()`, which both the module-level `app` (via `_register_commands()`) and `create_app()` use; add new public commands there, named from [../osmosis_ai/cli/command_registry.py](../osmosis_ai/cli/command_registry.py). It imports each command group **lazily inside the function**. Groups attach via `add_typer(...)`; the standalone `quickstart` / `doctor` / `upgrade` commands attach via `command(...)`. Two `rich_help_panel`s split the help: `Workflow Commands` (`quickstart`, `dataset`, `train`, `model`, `eval`, `benchmark`, `rollout`, `template`, `doctor`) and `Platform Commands` (`auth`, `secret`, `upgrade`).
 - The root `_callback` resolves `--json` / `--plain`, builds an `OutputContext`, installs it on the Typer context, and registers `verify_output_emitted` on close. The CLI loads an explicit `--env-file` / `OSMOSIS_ENV_FILE`, or otherwise discovers the nearest `.env` from the working directory upward. Non-empty process variables take precedence, overlapping dotenv auth values must agree, and `--platform` overrides `OSMOSIS_PLATFORM_URL` for one invocation. Non-HTTPS non-loopback platform URLs are refused unless `OSMOSIS_ALLOW_INSECURE_PLATFORM_URL=1`. `hoist_format_selectors` lets the format flags appear anywhere on the line.
 
 ## Composing another CLI
@@ -22,9 +22,11 @@ Workspace-scoped platform commands normally derive `X-Osmosis-Git` from the curr
 
 Train and eval submit remain source-backed. With `--workspace`, their config argument must be absolute; the CLI locates the containing Osmosis Git workspace, checks the selected workspace's connected repository against that Git identity, and submits with only `X-Osmosis-Workspace`. The local Git identity is retained in structured output because it is real source context, not inferred platform state. Without `--workspace`, their existing current-directory behavior is unchanged.
 
-`images build --repo URL` selects a connected job repository explicitly and
-does not require a local checkout. See [image-builds.md](./image-builds.md) for
-its source and artifact contract.
+## Migrating internal image-build tooling
+
+Managed image-build submission is internal tooling owned by the private [Osmo CLI](https://github.com/Osmosis-AI/osmo). Internal users must install an Osmo release containing `images` before upgrading away from the SDK commands, then replace `osmosis images build|info` with `osmo images build|info`. Arguments and the default `.osmosis/images` state directory stay the same; keep the original output directory and source arguments to resume an existing request. See [Osmo image-build documentation](https://github.com/Osmosis-AI/osmo/blob/main/docs/image-builds.md) for private installation and build workflows.
+
+Python callers move `submit_image_build`, `get_image_build`, `get_image_build_artifacts`, and `get_image_pull_credentials` from `OsmosisClient` to `OsmoClient` imported from `osmo.platform.api.client`. These methods and the dedicated `osmosis_ai.cli.commands.images` and `osmosis_ai.platform.cli.images` modules are removed from the public SDK without compatibility aliases. The shared `osmosis_ai.harbor_images` identity and task utilities, Harbor source backend, and gateway configuration remain in the SDK for builders and runtimes to share.
 
 ## Authentication storage and environments
 

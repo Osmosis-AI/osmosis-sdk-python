@@ -388,6 +388,33 @@ def test_cli_main_from_package_remains_a_module() -> None:
     assert isinstance(main, ModuleType)
 
 
+def test_internal_image_build_api_is_not_shipped() -> None:
+    result = _run_python(
+        """
+        import importlib.util
+        from osmosis_ai.platform.api.client import OsmosisClient
+        from osmosis_ai.harbor_images import TaskSource
+
+        for module in (
+            "osmosis_ai.cli.commands.images",
+            "osmosis_ai.platform.cli.images",
+        ):
+            assert importlib.util.find_spec(module) is None, module
+        for method in (
+            "submit_image_build",
+            "get_image_build",
+            "get_image_build_artifacts",
+            "get_image_pull_credentials",
+        ):
+            assert not hasattr(OsmosisClient, method), method
+
+        source = TaskSource("https://github.com/Acme/Tasks.git", "tasks", "a" * 40)
+        assert source.repository == "https://github.com/acme/tasks"
+        """
+    )
+    assert result.returncode == 0, result.stderr
+
+
 def test_agent_integration_classes_use_canonical_module_paths() -> None:
     from osmosis_ai.rollout.integrations.agents.openai_agents import OsmosisAgent
     from osmosis_ai.rollout.integrations.agents.strands import OsmosisStrandsAgent

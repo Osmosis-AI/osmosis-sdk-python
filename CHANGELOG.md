@@ -2,6 +2,12 @@
 
 This file records changes to `osmosis-ai`. For earlier versions, see [GitHub Releases](https://github.com/Osmosis-AI/osmosis-sdk-python/releases).
 
+## Unreleased
+
+### Breaking Changes
+
+- Internal managed image builds move to the private Osmo CLI: replace `osmosis images build|info` with `osmo images build|info` and move the four image-build methods from `OsmosisClient` to `osmo.platform.api.client.OsmoClient`. Install an Osmo release containing `images` before upgrading the SDK; existing `.osmosis/images` requests and artifacts remain reusable. The dedicated command/helper modules are removed, while shared Harbor image identity and source runtime APIs remain available; see [migration guidance](docs/cli.md#migrating-internal-image-build-tooling).
+
 ## 0.3.5rc1 - 2026-09-24
 
 ### Breaking Changes

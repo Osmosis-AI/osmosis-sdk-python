@@ -365,7 +365,6 @@ def _add_commands(
     from osmosis_ai.cli.commands.benchmark import app as benchmark_app
     from osmosis_ai.cli.commands.dataset import app as dataset_app
     from osmosis_ai.cli.commands.eval import app as eval_app
-    from osmosis_ai.cli.commands.images import app as images_app
     from osmosis_ai.cli.commands.model import app as model_app
     from osmosis_ai.cli.commands.rollout import app as rollout_app
     from osmosis_ai.cli.commands.secret import app as secret_app
@@ -384,7 +383,6 @@ def _add_commands(
 
     target.add_typer(dataset_app, name=cmdreg.GROUP_DATASET, rich_help_panel=_WORKFLOW)
     target.add_typer(train_app, name=cmdreg.GROUP_TRAIN, rich_help_panel=_WORKFLOW)
-    target.add_typer(images_app, name=cmdreg.GROUP_IMAGES, rich_help_panel=_WORKFLOW)
     target.add_typer(model_app, name=cmdreg.GROUP_MODEL, rich_help_panel=_WORKFLOW)
     target.add_typer(eval_app, name=cmdreg.GROUP_EVAL, rich_help_panel=_WORKFLOW)
     target.add_typer(

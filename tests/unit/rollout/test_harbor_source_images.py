@@ -83,8 +83,12 @@ def test_registry_resolves_verifies_and_caches_manifest(tmp_path, monkeypatch, c
     )
     assert client.get.call_count == 1
     client.get.return_value = httpx.Response(404)
-    with pytest.raises(RuntimeError, match="images build"):
+    with pytest.raises(
+        RuntimeError, match="ask the source gateway operator to build and publish"
+    ) as missing:
         resolver.resolve("missing")
+    assert "GAR HTTP 404" in str(missing.value)
+    assert "osmosis images" not in str(missing.value)
     for status in (401, 403):
         client.get.return_value = httpx.Response(status)
         with pytest.raises(RuntimeError, match="Registry authentication failed"):

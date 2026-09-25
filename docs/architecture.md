@@ -32,6 +32,7 @@ osmosis_ai/
 │   ├── local/         # local runner and localhost LiteLLM bridge (`[eval]`)
 │   └── rubric/        # evaluate_rubric() LLM-as-judge engine
 ├── templates/         # `osmosis template` recipe catalog + source resolution
+├── harbor_images.py   # Shared Harbor source identity and task materialization
 ├── packaging.py       # Build an installable wheel bundle from a rollout project
 ├── __init__.py        # Top-level exports (lazy __getattr__)
 ├── _imports.py        # Lazy-export + missing-extra helpers shared by every facade
@@ -44,6 +45,7 @@ osmosis_ai/
 - `platform/` — anything that calls the Osmosis Platform API. Business-logic helpers (no Typer registration) live in [../osmosis_ai/platform/cli/](../osmosis_ai/platform/cli/).
 - `rollout/` — the remote rollout protocol SDK: the `AgentWorkflow` + `Grader` abstraction and the framework-neutral execution core (`LocalBackend`, contexts, trajectory persistence, the in-container runner). The generic FastAPI server and the framework/back-end adapters are explicit optional modules gated behind extras; see [rollout-sdk.md](./rollout-sdk.md).
 - `eval/` — `rubric/` powers `osmosis eval rubric`; see [eval.md](./eval.md). The workflow/grader loader that cloud `eval submit` / `train submit` preflight uses lives in [../osmosis_ai/platform/cli/rollout_entrypoint.py](../osmosis_ai/platform/cli/rollout_entrypoint.py).
+- [../osmosis_ai/harbor_images.py](../osmosis_ai/harbor_images.py) owns source identity, environment hashing, and task materialization shared by builders and the [Harbor source runtime](../osmosis_ai/rollout/backend/harbor/source.py). Internal managed image-build commands and platform API methods belong to the private Osmo package; see [CLI migration guidance](./cli.md#migrating-internal-image-build-tooling).
 
 ## Key import paths
 
