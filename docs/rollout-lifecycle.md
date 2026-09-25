@@ -70,10 +70,23 @@ remain portable. Other backends keep their existing rollout ID contract.
 The artifact root uses the existing
 `_OSMOSIS_ROLLOUT_ARTIFACT_ROOT` setting. The copy contains `result.json`, selected
 native logs under `logs/`, and `manifest.json`. Configuration and task source
-files are excluded. Existing `artifacts/`, `logs/` and `trajectory.json` keep
-their established locations and behavior.
-Cancelled or interrupted submissions may skip Harbor's own scrubbing; those
-paths export only the sanitized native surface, without retaining raw logs.
+files are excluded. This is an execution-evidence projection, not a backup of
+application databases, snapshots, configuration or caches. Existing `artifacts/`,
+`logs/` and `trajectory.json` keep their established locations.
+
+The `harbor-native-logs-v1` selection policy excludes only these recognized
+OpenCode application-state entries beneath a root or step-local `agent/` or
+`user-agent/` directory:
+
+- `opencode/xdg-data/opencode/opencode.db`, `opencode.db-wal` and `opencode.db-shm`.
+- `opencode/xdg-data/opencode/snapshot/` (the Git snapshot store).
+
+Sibling text logs, session exports, canonical trajectories, stdout/stderr and
+verifier records remain selected. Other binary files do not become exclusions
+merely because they are beneath an XDG directory. The manifest's
+`selection_policy` names this policy; `excluded` counts recognized database files
+and snapshot directories using fixed category names, without recording dynamic
+source paths.
 
 The manifest uses `schema_version: "harbor-evidence-v1"` and includes
 `rollout_id`, `process_id`, `complete`, `errors`, and `files`. Each file entry contains its
@@ -84,11 +97,21 @@ inventory before transferring it and publish the manifest after all files.
 Credential fields, the supplied model key, bearer tokens, recognizable secret
 assignments and URL user credentials are redacted. Only UTF-8 files up to 64 MiB
 per file can be sanitized; links, special files, unreadable files, invalid native
-results and larger/binary files produce an explicitly incomplete manifest.
-Incomplete successful-trial evidence prevents deleting its original trial
-working copy. Cancelled trial working copies are removed after the retention
-attempt; their manifest records any incompleteness. Retention never changes a
-rollout's reward.
+results and larger/binary **selected** files produce an explicitly incomplete
+manifest. Completeness covers every selected native record; it does not claim
+to contain the excluded application state.
+
+The existing private `logs/` copy retains application state outside the managed
+native export after ordinary completion and upstream credential scrubbing.
+Incomplete retention prevents deleting that original trial working copy.
+Cancelled or interrupted submissions may skip the upstream scrub, so they export
+only the sanitized native surface and do not create private raw-log copies.
+Cancelled working copies, including application state, are removed after the
+retention attempt; their manifest records any selected-evidence incompleteness.
+Interrupted submissions keep their scrubbed working copy. Credential-bearing
+staging is always removed, and failed cancellation cleanup is surfaced.
+Private logs and working copies have their existing server-storage lifetime;
+they are not a durable application-state backup. Retention never changes reward.
 
 Use the portable integrity helpers without importing Harbor:
 

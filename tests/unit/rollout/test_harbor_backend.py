@@ -1678,6 +1678,9 @@ class TestArtifactLifecycle:
         async def run(queue, config):
             directory = config.trials_dir / config.trial_name
             (directory / "agent").mkdir(parents=True)
+            state = directory / "agent/opencode/xdg-data/opencode"
+            state.mkdir(parents=True)
+            (state / "opencode.db").write_bytes(b"\xffOTHER_TOKEN=private-state-secret")
             (directory / "artifacts").mkdir()
             (directory / "result.json").write_text('{"token": "result-secret"}')
             (directory / "agent/log.txt").write_text("OTHER_TOKEN=other-secret")
@@ -1707,12 +1710,39 @@ class TestArtifactLifecycle:
                 await backend.execute(request)
         retained = backend.artifact_root / "r1"
         assert {path.name for path in retained.iterdir()} == {"harbor"}
-        assert verify_trial_evidence(retained / "harbor", "r1")["complete"]
+        manifest = verify_trial_evidence(retained / "harbor", "r1")
+        assert manifest["complete"]
+        assert manifest["excluded"] == {"opencode_database": 1}
         assert "secret" not in "".join(
             path.read_text() for path in retained.rglob("*") if path.is_file()
         )
         assert not (backend.rollouts_dir / "r1").exists()
         assert (backend.trials_dir / "trial-r1").exists() == (ending == "exception")
+
+    async def test_completed_trial_preserves_private_state_before_source_cleanup(
+        self, template_task, tmp_path
+    ):
+        from osmosis_ai.rollout.utils.evidence import verify_trial_evidence
+
+        backend = self.backend_for(template_task, tmp_path, FakeQueue())
+        directory = backend.trials_dir / "trial-r1"
+        state = directory / "agent/opencode/xdg-data/opencode"
+        state.mkdir(parents=True)
+        (directory / "result.json").write_text('{"reward": 1.0}')
+        (state / "opencode.db").write_bytes(b"\xffcontroller-secret")
+        pending = PendingTrial()
+        pending.api_key = "controller-secret"
+        backend.archive_trial("r1", trial_result(), pending)
+
+        assert not directory.exists()
+        private = (
+            backend.artifact_root
+            / "r1/logs/agent/opencode/xdg-data/opencode/opencode.db"
+        )
+        assert private.read_bytes() == b"\xff[REDACTED]"
+        manifest = verify_trial_evidence(backend.artifact_root / "r1/harbor", "r1")
+        assert manifest["complete"]
+        assert manifest["excluded"] == {"opencode_database": 1}
 
     async def test_artifacts_relocate_only_after_harbor_scrub(
         self, template_task, tmp_path

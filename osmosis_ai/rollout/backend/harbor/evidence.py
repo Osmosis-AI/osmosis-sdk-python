@@ -31,6 +31,27 @@ _ASSIGNMENT = re.compile(
 _AUTH_TOKEN = re.compile(r"(?i)\b(Bearer|Basic)\s+[^\s\"',;]+")
 _URL_USERINFO = re.compile(r"([a-z][a-z0-9+.-]*://)[^\s/@]+:[^\s/@]+@", re.IGNORECASE)
 MAX_NATIVE_FILE_BYTES = MAX_EVIDENCE_FILE_BYTES
+NATIVE_SELECTION_POLICY = "harbor-native-logs-v1"
+
+
+def _application_state(name: str) -> str | None:
+    """Recognize application storage, without excluding its sibling text logs."""
+    parts = name.split("/")
+    if parts[:1] != ["logs"]:
+        return None
+    if len(parts) > 2 and parts[1] in {"agent", "user-agent"}:
+        relative = parts[2:]
+    elif len(parts) > 4 and parts[1] == "steps" and parts[3] in {"agent", "user-agent"}:
+        relative = parts[4:]
+    else:
+        return None
+    if relative[:3] != ["opencode", "xdg-data", "opencode"] or len(relative) != 4:
+        return None
+    if relative[3] in {"opencode.db", "opencode.db-wal", "opencode.db-shm"}:
+        return "opencode_database"
+    if relative[3] == "snapshot":
+        return "opencode_snapshot"
+    return None
 
 
 def sanitized_text(data: bytes, api_key: str | None) -> bytes:
@@ -81,11 +102,12 @@ def retain_trial_evidence(
     trial_result: Any = None,
     process_id: str | None = None,
 ) -> bool:
-    """Publish a manifest last; skipped or unreadable evidence stays incomplete.
+    """Publish a manifest last; unreadable selected evidence stays incomplete.
 
-    Only native result/log records are selected. Configuration and task sources
-    never enter the export. Every byte is sanitized again even after upstream
-    credential scrubbing. Existing diagnostic logs remain a separate surface.
+    Only native result/log records are selected. Configuration, task sources and
+    recognized application storage never enter the export. Every selected byte
+    is sanitized again even after upstream credential scrubbing. Existing private
+    diagnostic retention remains a separate surface.
     """
     ensure_single_path_segment(rollout_id, label="rollout_id")
     evidence_path(rollout_id)
@@ -101,6 +123,7 @@ def retain_trial_evidence(
         raise ValueError("Linked native evidence destination")
     errors: list[str] = []
     files: list[dict[str, Any]] = []
+    excluded: dict[str, int] = {}
     with tempfile.TemporaryDirectory(prefix=".harbor-", dir=rollout_root) as temporary:
         staged = Path(temporary) / "evidence"
         staged.mkdir(mode=0o700)
@@ -128,6 +151,22 @@ def retain_trial_evidence(
                     raise ValueError("credential in filename")
                 if path.is_symlink():
                     raise ValueError("linked source")
+                if kind := _application_state(name):
+                    descriptor = _open_directory(trial_dir)
+                    relative = path.relative_to(trial_dir)
+                    try:
+                        if kind == "opencode_snapshot":
+                            child = _open_directory(relative, dir_fd=descriptor)
+                            os.close(child)
+                        else:
+                            with _open_regular(descriptor, relative.as_posix()):
+                                pass
+                    finally:
+                        os.close(descriptor)
+                    # Fixed categories and counts avoid exposing dynamic step or
+                    # source names. Private trial-log retention is separate.
+                    excluded[kind] = excluded.get(kind, 0) + 1
+                    return
                 if path.is_dir():
                     if name == "result.json":
                         raise ValueError("native result must be a regular file")
@@ -204,6 +243,8 @@ def retain_trial_evidence(
             "schema_version": EVIDENCE_SCHEMA,
             "rollout_id": rollout_id,
             "process_id": process_id,
+            "selection_policy": NATIVE_SELECTION_POLICY,
+            "excluded": dict(sorted(excluded.items())),
             "complete": not errors,
             "files": sorted(files, key=lambda item: item["path"]),
             "errors": errors,
