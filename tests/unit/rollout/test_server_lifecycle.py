@@ -110,6 +110,22 @@ async def test_drain_waits_through_trajectory_finalization(monkeypatch):
     await app.state.rollout_futures.close()
 
 
+async def test_non_harbor_backends_keep_existing_colon_ids():
+    app = create_rollout_server(backend=Backend())
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app), base_url="http://test"
+    ) as http:
+        client = RolloutClient(url="http://test", http_client=http)
+        result = await client.run_rollout(
+            initial_messages=[],
+            chat_completions_url="https://model.example/v1",
+            rollout_id="run:1",
+        )
+        assert result.status == RolloutStatus.SUCCESS
+        assert (await client.drain(timeout_sec=1)).rollout_ids == ["run:1"]
+    await app.state.rollout_futures.close()
+
+
 async def test_admission_in_progress_cannot_escape_drain(monkeypatch):
     app = create_rollout_server(backend=Backend())
     entered, release = asyncio.Event(), asyncio.Event()

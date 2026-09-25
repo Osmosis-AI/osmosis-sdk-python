@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import unicodedata
 from pathlib import Path, PurePosixPath
 from typing import Any
 
@@ -19,7 +20,7 @@ def evidence_path(value: str) -> str:
         or not value
         or "\\" in value
         or ":" in value
-        or any(ord(char) < 32 or ord(char) == 127 for char in value)
+        or any(unicodedata.category(char) == "Cc" for char in value)
         or any(part in {"", ".", ".."} for part in value.split("/"))
         or PurePosixPath(value).is_absolute()
     ):
@@ -32,6 +33,7 @@ def verify_trial_evidence(
 ) -> dict[str, Any]:
     """Verify an exact inventory; a partial copy is never finalized evidence."""
     ensure_single_path_segment(rollout_id, label="rollout_id")
+    evidence_path(rollout_id)
     if directory.is_symlink() or not directory.is_dir():
         raise ValueError("Evidence directory is missing or linked")
     manifest_path = directory / "manifest.json"
@@ -92,6 +94,7 @@ def trial_evidence_inventory(
     records, missing = {}, []
     for rollout_id in sorted(set(rollout_ids)):
         ensure_single_path_segment(rollout_id, label="rollout_id")
+        evidence_path(rollout_id)
         try:
             if (root / rollout_id).is_symlink():
                 raise ValueError("Linked rollout directory")

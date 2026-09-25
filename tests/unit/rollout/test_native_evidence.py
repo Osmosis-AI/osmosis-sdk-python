@@ -167,6 +167,18 @@ def test_previous_process_evidence_cannot_satisfy_new_drain(tmp_path):
     assert not inventory["complete"] and inventory["missing_rollout_ids"] == ["one"]
 
 
+@pytest.mark.parametrize("rollout_id", ["run:1", "run\n1", "run\x7f1", "run\x851"])
+def test_native_identity_validation_matches_harbor_admission(tmp_path, rollout_id):
+    trial, root = source(tmp_path), tmp_path / "out"
+    with pytest.raises(ValueError, match="safe relative path"):
+        retain_trial_evidence(trial, root, rollout_id)
+    with pytest.raises(ValueError, match="safe relative path"):
+        verify_trial_evidence(root, rollout_id)
+    with pytest.raises(ValueError, match="safe relative path"):
+        trial_evidence_inventory(root, [rollout_id])
+    assert not root.exists()
+
+
 def test_sanitization_limit_is_explicit_incompleteness(tmp_path, monkeypatch):
     from osmosis_ai.rollout.backend.harbor import evidence
 

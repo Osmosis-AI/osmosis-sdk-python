@@ -71,6 +71,7 @@ def retain_trial_evidence(
     credential scrubbing. Existing diagnostic logs remain a separate surface.
     """
     ensure_single_path_segment(rollout_id, label="rollout_id")
+    evidence_path(rollout_id)
     artifact_root.mkdir(parents=True, exist_ok=True)
     rollout_root = artifact_root / rollout_id
     if rollout_root.is_symlink():

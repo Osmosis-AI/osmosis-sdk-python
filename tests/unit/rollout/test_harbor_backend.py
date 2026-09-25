@@ -100,6 +100,23 @@ class TestPublicSurface:
         assert backend.health()["backend"] == "harbor"
         assert backend.health()["chat_endpoint"]["environment"] == "docker"
 
+    @pytest.mark.parametrize("rollout_id", ["run:1", "run\n1", "run\x7f1", "run\x851"])
+    async def test_unsafe_evidence_ids_fail_before_harbor_work(
+        self, template_task, rollout_id, monkeypatch
+    ):
+        from unittest.mock import AsyncMock
+
+        queue = TrialQueue(n_concurrent=1)
+        submit = AsyncMock()
+        monkeypatch.setattr(queue, "submit", submit)
+        backend = HarborBackend(
+            orchestrator=queue, tasks_dir=template_task, agent="terminus-2"
+        )
+        with pytest.raises(ValueError, match="safe relative path"):
+            await backend.execute(ExecutionRequest(id=rollout_id, prompt=[]))
+        submit.assert_not_awaited()
+        assert not backend.pending
+
     @pytest.mark.parametrize(
         ("environment_type", "host_system", "requires_public_url"),
         [

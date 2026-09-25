@@ -106,6 +106,7 @@ from osmosis_ai.rollout.types import (
     RolloutStatus,
 )
 from osmosis_ai.rollout.utils.errors import categorize_error_type, categorize_exception
+from osmosis_ai.rollout.utils.evidence import evidence_path
 from osmosis_ai.rollout.utils.file_artifacts import default_artifact_root
 from osmosis_ai.rollout.utils.imports import ensure_import_path, resolve_object
 from osmosis_ai.rollout.utils.rewards import validate_sample_has_reward
@@ -501,6 +502,9 @@ class HarborBackend(ExecutionBackend):
         self,
         request: ExecutionRequest,
     ) -> ExecutionOutcome:
+        # Harbor IDs become native evidence directory names. Fail before queuing
+        # work whose identity could not be retained and exported portably.
+        evidence_path(request.id)
         pending = PendingTrial()
         pending.label = request.label
         pending.grade = request.grade
