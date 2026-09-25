@@ -213,6 +213,7 @@ def create_rollout_server(
                 backend,
                 request,
                 progress=progress,
+                process_id=process_id,
             )
         except asyncio.CancelledError:
             response = RolloutResultResponse(
@@ -325,6 +326,7 @@ async def _handle_rollout(
     backend: ExecutionBackend,
     request: RolloutInitRequest,
     progress: RolloutProgress | None = None,
+    process_id: str | None = None,
 ) -> RolloutResultResponse:
     rollout_id = request.rollout_id
     rollout_ctx = RolloutContext(
@@ -332,6 +334,7 @@ async def _handle_rollout(
         api_key=request.llm_api_key,
         rollout_id=rollout_id,
         progress=progress,
+        process_id=process_id,
     )
     outcome: ExecutionOutcome | None = None
     try:

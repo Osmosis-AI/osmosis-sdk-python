@@ -1627,6 +1627,7 @@ class TestArtifactLifecycle:
             await queue.fire("end", event)
             # Harbor's scrub runs here: after hooks, before submit() returns.
             (artifacts / "out.txt").write_text("[REDACTED]")
+            (artifacts.parent / "result.json").write_text('{"reward": 1.0}')
             return result
 
         queue = FakeQueue(run)
@@ -1648,6 +1649,7 @@ class TestArtifactLifecycle:
         artifacts = config.trials_dir / config.trial_name / "artifacts"
         artifacts.mkdir(parents=True)
         (artifacts / "out.txt").write_text("evidence")
+        (artifacts.parent / "result.json").write_text('{"reward": 1.0}')
         result = trial_result(verifier_result=SimpleNamespace(rewards={"reward": 1.0}))
         await queue.fire("end", SimpleNamespace(config=config, result=result))
         return result

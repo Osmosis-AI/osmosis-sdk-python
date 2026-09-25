@@ -90,6 +90,7 @@ class RolloutContext:
     rollout_id: str = ""
     sample_source: SampleSource | None = None
     progress: RolloutProgress | None = None
+    process_id: str | None = None
 
     def __post_init__(self) -> None:
         if not self.chat_completions_url:
