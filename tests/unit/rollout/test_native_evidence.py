@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import os
+import sqlite3
+import zlib
 from pathlib import Path
 
 import pytest
@@ -94,6 +96,125 @@ def test_native_json_keys_and_credential_spellings_are_sanitized(tmp_path):
     assert "controller-secret" not in serialized
     assert "sensitive" not in serialized
     assert value["total_completion_tokens"] == 123
+
+
+@pytest.mark.parametrize(
+    "agent_dir", ["agent", "user-agent", "steps/0/agent", "steps/step-1/user-agent"]
+)
+def test_opencode_state_is_declared_but_execution_logs_remain_selected(
+    tmp_path, agent_dir
+):
+    trial, root = source(tmp_path), tmp_path / "out"
+    agent = trial / agent_dir
+    state = agent / "opencode/xdg-data/opencode"
+    state.mkdir(parents=True)
+    database = state / "opencode.db"
+    with sqlite3.connect(database) as connection:
+        connection.execute("CREATE TABLE sessions (value BLOB)")
+        connection.execute(
+            "INSERT INTO sessions VALUES (?)", (b"\xffcontroller-secret",)
+        )
+    (state / "opencode.db-wal").write_bytes(b"\x37\x7f\x06\x82controller-secret")
+    (state / "opencode.db-shm").write_bytes(b"\x18\xe2\x2d\x00controller-secret")
+    snapshot = state / "snapshot/project"
+    (snapshot / "objects/ab").mkdir(parents=True)
+    (snapshot / "objects/ab/object").write_bytes(
+        zlib.compress(b"blob 17\0controller-secret")
+    )
+    (snapshot / "index").write_bytes(b"DIRC\x00\xffcontroller-secret")
+    (snapshot / "config").write_text("private snapshot config: controller-secret")
+    logs = {
+        "opencode/xdg-data/opencode/log/run.log": "Authorization: Bearer log-secret",
+        "opencode/xdg-data/opencode/storage/session/session.json": '{"message": "session export", "api_key": "controller-secret"}',
+        "opencode.txt": "execution stdout",
+        "trajectory.json": '{"steps": [{"tool_calls": [{"function_name": "bash"}]}]}',
+        "command_stdout.txt": "stdout",
+        "command_stderr.txt": "stderr",
+    }
+    for name, text in logs.items():
+        path = agent / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text)
+    before = {path: path.read_bytes() for path in state.rglob("*") if path.is_file()}
+
+    assert retain_trial_evidence(
+        trial, root, "one", api_key="controller-secret", process_id="process-one"
+    )
+    destination = root / "one/harbor"
+    manifest = verify_trial_evidence(destination, "one", process_id="process-one")
+    assert manifest["selection_policy"] == "harbor-native-logs-v1"
+    assert manifest["excluded"] == {"opencode_database": 3, "opencode_snapshot": 1}
+    selected = {entry["path"] for entry in manifest["files"]}
+    assert {f"logs/{agent_dir}/{name}" for name in logs} <= selected
+    assert "result.json" in selected and "logs/verifier/reward.txt" in selected
+    assert not any(
+        "/snapshot/" in name or name.endswith((".db", ".db-wal", ".db-shm"))
+        for name in selected
+    )
+    retained = b"".join(
+        path.read_bytes() for path in destination.rglob("*") if path.is_file()
+    )
+    assert b"controller-secret" not in retained and b"log-secret" not in retained
+    assert all(path.read_bytes() == value for path, value in before.items())
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "agent/opencode/xdg-data/opencode/log/run.log",
+        "agent/opencode/xdg-data/opencode/storage/session/session.json",
+        "agent/opencode/xdg-data/opencode/opencode.db.bak",
+        "agent/opencode/xdg-data/opencode/snapshot-other/object",
+        "agent/other/opencode.db",
+        "verifier/opencode/xdg-data/opencode/opencode.db",
+    ],
+)
+def test_unrecognized_binary_state_is_still_incomplete_evidence(tmp_path, name):
+    trial, root = source(tmp_path), tmp_path / "out"
+    path = trial / name
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b"\xffprivate-binary")
+    assert not retain_trial_evidence(trial, root, "one")
+    manifest = json.loads((root / "one/harbor/manifest.json").read_text())
+    assert manifest["excluded"] == {}
+    assert manifest["errors"] == ["unreadable_or_unsafe_native_file"]
+
+
+@pytest.mark.parametrize(
+    "kind",
+    ["database_directory", "snapshot_file", "linked_database", "linked_snapshot"],
+)
+def test_application_state_exclusion_does_not_accept_wrong_types_or_links(
+    tmp_path, kind
+):
+    trial, root = source(tmp_path), tmp_path / "out"
+    state = trial / "agent/opencode/xdg-data/opencode"
+    state.mkdir(parents=True)
+    if kind == "database_directory":
+        (state / "opencode.db").mkdir()
+    elif kind == "snapshot_file":
+        (state / "snapshot").write_text("not a snapshot directory")
+    else:
+        private = tmp_path / "private"
+        private.mkdir()
+        (private / "secret").write_text("outside-private-data")
+        name = "snapshot" if kind == "linked_snapshot" else "opencode.db"
+        (state / name).symlink_to(private, target_is_directory=True)
+    assert not retain_trial_evidence(trial, root, "one")
+    manifest = json.loads((root / "one/harbor/manifest.json").read_text())
+    assert manifest["excluded"] == {}
+    assert manifest["errors"] == ["unreadable_or_unsafe_native_file"]
+
+
+def test_exclusion_metadata_does_not_disclose_dynamic_step_names(tmp_path):
+    trial, root = source(tmp_path), tmp_path / "out"
+    state = trial / "steps/private-step-name/agent/opencode/xdg-data/opencode"
+    state.mkdir(parents=True)
+    (state / "opencode.db").write_bytes(b"\xff")
+    assert retain_trial_evidence(trial, root, "one")
+    manifest_text = (root / "one/harbor/manifest.json").read_text()
+    assert "private-step-name" not in manifest_text
+    assert json.loads(manifest_text)["excluded"] == {"opencode_database": 1}
 
 
 @pytest.mark.parametrize(
