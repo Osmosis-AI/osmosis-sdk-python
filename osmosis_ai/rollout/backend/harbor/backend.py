@@ -114,6 +114,28 @@ from osmosis_ai.rollout.utils.ttl_cache import TtlCache
 
 logger: logging.Logger = logging.getLogger(__name__)
 
+
+async def _finish_archive(future: asyncio.Future[None]) -> None:
+    # Execute must remain in flight until finalization settles, even if a
+    # shutdown cancels its task repeatedly. A drain can time out while waiting,
+    # but must never report idle while this executor still writes evidence.
+    cancelled = False
+    while not future.done():
+        try:
+            await asyncio.shield(future)
+        except asyncio.CancelledError:
+            cancelled = True
+        except Exception:
+            if not cancelled:
+                raise
+            logger.exception("Trial archive failed after cancellation")
+    if cancelled:
+        if not future.cancelled():
+            future.exception()
+        raise asyncio.CancelledError
+    future.result()
+
+
 HARNESS_AGENT_IMPORT_PATH = (
     "osmosis_ai.rollout.backend.harbor.harness_agent:OsmosisHarnessInstalledAgent"
 )
@@ -541,7 +563,7 @@ class HarborBackend(ExecutionBackend):
         except asyncio.CancelledError:
             self.pending.pop(request.id, None)
             self.record_outcome(request.id, RolloutStatus.CANCELLED)
-            await asyncio.shield(
+            await _finish_archive(
                 asyncio.get_running_loop().run_in_executor(
                     self.archive_executor,
                     self.archive_cancelled_trial,
@@ -561,7 +583,7 @@ class HarborBackend(ExecutionBackend):
         except Exception as e:
             self.pending.pop(request.id, None)
             try:
-                await asyncio.shield(
+                await _finish_archive(
                     asyncio.get_running_loop().run_in_executor(
                         self.archive_executor,
                         self.archive_interrupted_trial,
@@ -597,7 +619,7 @@ class HarborBackend(ExecutionBackend):
         else:
             # Completion includes the durable copy, including cancelled trials.
             # A forced shutdown cannot drop an archive queued in the executor.
-            await asyncio.shield(
+            await _finish_archive(
                 asyncio.get_running_loop().run_in_executor(
                     self.archive_executor,
                     self.archive_trial,

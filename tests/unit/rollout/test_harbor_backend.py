@@ -1770,9 +1770,8 @@ class TestArtifactLifecycle:
     async def test_cancel_during_archive_propagates_and_archive_completes(
         self, template_task, tmp_path, monkeypatch, queued
     ):
-        # Only a forced shutdown cancel can interrupt the archive await. It must
-        # propagate without dropping the archive, whether a worker is running it
-        # or it still waits in a saturated pool's queue.
+        # Forced shutdown cancellation propagates only once evidence finalizes,
+        # whether the archive is running or queued behind a saturated pool.
         from osmosis_ai.rollout.context import RolloutContext
 
         entered = threading.Event()
@@ -1807,10 +1806,14 @@ class TestArtifactLifecycle:
         task = asyncio.create_task(execute())
         assert await asyncio.to_thread(entered.wait, 5)
         task.cancel()
+        await asyncio.sleep(0.01)
+        assert not task.done()
+        task.cancel()
+        await asyncio.sleep(0.01)
+        assert not task.done()
+        release.set()
         with pytest.raises(asyncio.CancelledError):
             await task
-
-        release.set()
         await asyncio.to_thread(backend.archive_executor.shutdown)
         assert (tmp_path / "durable" / "r1" / "artifacts" / "out.txt").exists()
         assert not (tmp_path / "trials" / "trial-r1").exists()
