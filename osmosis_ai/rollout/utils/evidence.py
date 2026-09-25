@@ -14,6 +14,7 @@ from typing import Any, BinaryIO
 from osmosis_ai.rollout.utils.identifiers import ensure_single_path_segment
 
 EVIDENCE_SCHEMA = "harbor-evidence-v1"
+MAX_EVIDENCE_FILE_BYTES = 64 * 1024 * 1024
 
 
 def _open_directory(path: Path, *, dir_fd: int | None = None) -> int:
@@ -99,7 +100,12 @@ def _verify_trial_evidence(
     directory_fd: int, rollout_id: str, process_id: str | None
 ) -> dict[str, Any]:
     with _open_regular(directory_fd, "manifest.json") as stream:
-        manifest = json.load(stream)
+        if os.fstat(stream.fileno()).st_size > MAX_EVIDENCE_FILE_BYTES:
+            raise ValueError("Evidence manifest exceeds the size limit")
+        data = stream.read(MAX_EVIDENCE_FILE_BYTES + 1)
+        if len(data) > MAX_EVIDENCE_FILE_BYTES:
+            raise ValueError("Evidence manifest exceeds the size limit")
+        manifest = json.loads(data)
     if (
         not isinstance(manifest, dict)
         or manifest.get("schema_version") != EVIDENCE_SCHEMA
@@ -116,7 +122,7 @@ def _verify_trial_evidence(
             not isinstance(entry, dict)
             or not isinstance(entry.get("path"), str)
             or type(entry.get("size_bytes")) is not int
-            or entry["size_bytes"] < 0
+            or not 0 <= entry["size_bytes"] <= MAX_EVIDENCE_FILE_BYTES
             or not isinstance(entry.get("sha256"), str)
             or not re.fullmatch(r"[a-f0-9]{64}", entry["sha256"])
         ):
@@ -126,8 +132,14 @@ def _verify_trial_evidence(
             raise ValueError("Evidence inventory has duplicate or reserved paths")
         declared.add(name)
         with _open_regular(directory_fd, name) as stream:
+            if os.fstat(stream.fileno()).st_size != entry["size_bytes"]:
+                raise ValueError("Evidence file size mismatch")
             digest = hashlib.sha256()
-            while chunk := stream.read(1024 * 1024):
+            remaining = entry["size_bytes"]
+            while chunk := stream.read(min(1024 * 1024, remaining + 1)):
+                remaining -= len(chunk)
+                if remaining < 0:
+                    raise ValueError("Evidence file grew during verification")
                 digest.update(chunk)
             size = os.fstat(stream.fileno()).st_size
         if size != entry["size_bytes"] or digest.hexdigest() != entry["sha256"]:

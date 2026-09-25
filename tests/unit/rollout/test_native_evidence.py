@@ -181,7 +181,8 @@ def test_fifo_manifest_is_rejected_without_blocking(tmp_path):
 
 
 @pytest.mark.parametrize(
-    "kind", ["link", "binary", "missing_result", "invalid_result", "fifo"]
+    "kind",
+    ["link", "binary", "missing_result", "invalid_result", "result_directory", "fifo"],
 )
 def test_skipped_files_publish_explicit_incomplete_manifest(tmp_path, kind):
     import os
@@ -197,6 +198,10 @@ def test_skipped_files_publish_explicit_incomplete_manifest(tmp_path, kind):
         (trial / "result.json").unlink()
     elif kind == "invalid_result":
         (trial / "result.json").write_text("not json")
+    elif kind == "result_directory":
+        (trial / "result.json").unlink()
+        (trial / "result.json").mkdir()
+        (trial / "result.json/data.json").write_text("{}")
     else:
         os.mkfifo(trial / "agent/pipe")
     assert not retain_trial_evidence(trial, root, "one")
@@ -260,6 +265,51 @@ def test_destination_links_and_rollout_traversal_cannot_write_elsewhere(tmp_path
     with pytest.raises(ValueError):
         retain_trial_evidence(trial, root, "../escaped")
     assert not list(target.iterdir())
+
+
+@pytest.mark.parametrize("linked_parent", [False, True])
+def test_linked_artifact_root_cannot_write_elsewhere(tmp_path, linked_parent):
+    trial = source(tmp_path)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    link = tmp_path / "linked"
+    link.symlink_to(outside, target_is_directory=True)
+    root = link / "artifacts" if linked_parent else link
+    with pytest.raises(ValueError, match="Linked artifact root"):
+        retain_trial_evidence(trial, root, "one")
+    assert not list(outside.iterdir())
+
+
+def test_wrong_file_size_is_rejected_before_hashing(tmp_path, monkeypatch):
+    from osmosis_ai.rollout.utils import evidence
+
+    trial, root = source(tmp_path), tmp_path / "out"
+    assert retain_trial_evidence(trial, root, "one")
+    destination = root / "one/harbor"
+    manifest = verify_trial_evidence(destination, "one")
+    first = destination / manifest["files"][0]["path"]
+    with first.open("ab") as stream:
+        stream.truncate(1024**4)  # Sparse hostile file: do not stream a terabyte.
+
+    def unexpected_hash():
+        pytest.fail("file size must be checked before hashing")
+
+    monkeypatch.setattr(evidence.hashlib, "sha256", unexpected_hash)
+    with pytest.raises(ValueError, match="file size mismatch"):
+        verify_trial_evidence(destination, "one")
+
+
+def test_declared_file_size_cannot_exceed_export_limit(tmp_path):
+    from osmosis_ai.rollout.utils.evidence import MAX_EVIDENCE_FILE_BYTES
+
+    trial, root = source(tmp_path), tmp_path / "out"
+    assert retain_trial_evidence(trial, root, "one")
+    destination = root / "one/harbor"
+    manifest = verify_trial_evidence(destination, "one")
+    manifest["files"][0]["size_bytes"] = MAX_EVIDENCE_FILE_BYTES + 1
+    (destination / "manifest.json").write_text(json.dumps(manifest))
+    with pytest.raises(ValueError, match="file record is invalid"):
+        verify_trial_evidence(destination, "one")
 
 
 def test_previous_process_evidence_cannot_satisfy_new_drain(tmp_path):

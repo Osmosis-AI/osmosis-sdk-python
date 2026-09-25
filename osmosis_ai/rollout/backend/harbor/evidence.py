@@ -17,6 +17,7 @@ from osmosis_ai.rollout.backend.harbor.diagnostics import (
 )
 from osmosis_ai.rollout.utils.evidence import (
     EVIDENCE_SCHEMA,
+    MAX_EVIDENCE_FILE_BYTES,
     _open_directory,
     _open_regular,
     evidence_path,
@@ -29,7 +30,7 @@ _ASSIGNMENT = re.compile(
 )
 _AUTH_TOKEN = re.compile(r"(?i)\b(Bearer|Basic)\s+[^\s\"',;]+")
 _URL_USERINFO = re.compile(r"([a-z][a-z0-9+.-]*://)[^\s/@]+:[^\s/@]+@", re.IGNORECASE)
-MAX_NATIVE_FILE_BYTES = 64 * 1024 * 1024
+MAX_NATIVE_FILE_BYTES = MAX_EVIDENCE_FILE_BYTES
 
 
 def sanitized_text(data: bytes, api_key: str | None) -> bytes:
@@ -88,6 +89,8 @@ def retain_trial_evidence(
     """
     ensure_single_path_segment(rollout_id, label="rollout_id")
     evidence_path(rollout_id)
+    if any(path.is_symlink() for path in (artifact_root, *artifact_root.parents)):
+        raise ValueError("Linked artifact root")
     artifact_root.mkdir(parents=True, exist_ok=True)
     rollout_root = artifact_root / rollout_id
     if rollout_root.is_symlink():
@@ -104,6 +107,8 @@ def retain_trial_evidence(
 
         def write(name: str, data: bytes) -> None:
             evidence_path(name)
+            if len(data) > MAX_EVIDENCE_FILE_BYTES:
+                raise ValueError("Sanitized native file exceeds the size limit")
             target = staged / name
             target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
             target.write_bytes(data)
@@ -124,6 +129,8 @@ def retain_trial_evidence(
                 if path.is_symlink():
                     raise ValueError("linked source")
                 if path.is_dir():
+                    if name == "result.json":
+                        raise ValueError("native result must be a regular file")
                     for child in sorted(path.iterdir()):
                         copy(child, name + "/" + child.name)
                 else:
