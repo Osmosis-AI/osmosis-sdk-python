@@ -3,13 +3,15 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import secrets
 import traceback
 from collections.abc import AsyncIterator
-from contextlib import AsyncExitStack, asynccontextmanager
+from contextlib import AsyncExitStack, asynccontextmanager, suppress
 from functools import partial
 from typing import Any
+from uuid import uuid4
 
-from fastapi import FastAPI, Header, HTTPException
+from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from osmosis_ai.rollout.backend.base import ExecutionBackend
@@ -26,6 +28,8 @@ from osmosis_ai.rollout.types import (
     POLLING_LEASE_HEADER,
     CancelRolloutsRequest,
     CancelRolloutsResponse,
+    DrainRolloutsRequest,
+    DrainRolloutsResponse,
     ExecutionOutcome,
     ExecutionRequest,
     ExecutionResult,
@@ -63,6 +67,7 @@ def create_rollout_server(
     result_wait_timeout_sec: float = DEFAULT_RESULT_WAIT_TIMEOUT_SEC,
     polling_lease_timeout_sec: float = DEFAULT_POLLING_LEASE_TIMEOUT_SEC,
     result_retention_sec: float = DEFAULT_RESULT_RETENTION_SEC,
+    api_key: str | None = None,
 ) -> FastAPI:
     """Build the FastAPI app a rollout entrypoint serves.
 
@@ -74,6 +79,13 @@ def create_rollout_server(
         _configure_default_logging()
 
     scheduled_tasks: set[asyncio.Task[None]] = set()
+    admission_lock = asyncio.Lock()
+    accepting_rollouts = True
+    admitted_ids: set[str] = set()
+    idle = asyncio.Event()
+    idle.set()
+    if api_key == "":
+        raise ValueError("api_key must be non-empty when provided")
     observability = RolloutObservability()
 
     def _cancel_rollout(rollout_id: str) -> str | None:
@@ -118,6 +130,7 @@ def create_rollout_server(
 
     @asynccontextmanager
     async def _lifespan_with_drain(app: FastAPI) -> AsyncIterator[None]:
+        nonlocal accepting_rollouts
         async with AsyncExitStack() as stack:
             if lifespan is not None:
                 await stack.enter_async_context(lifespan(app))
@@ -125,23 +138,66 @@ def create_rollout_server(
             try:
                 yield
             finally:
+                async with admission_lock:
+                    accepting_rollouts = False
                 await _drain_scheduled_tasks()
                 await registry.close()
                 await asyncio.to_thread(observability.close)
 
     app = FastAPI(lifespan=_lifespan_with_drain)
     app.state.rollout_futures = registry
-    instance_id = os.environ.get("_OSMOSIS_ROLLOUT_INSTANCE_ID")
+    process_id = str(uuid4())
+    instance_id = os.environ.get("_OSMOSIS_ROLLOUT_INSTANCE_ID") or process_id
+
+    if api_key is not None:
+        expected_authorization = "Bearer " + api_key
+
+        @app.middleware("http")
+        async def authenticate(request: Request, call_next: Any) -> Any:
+            if not secrets.compare_digest(
+                request.headers.get("authorization", "").encode(),
+                expected_authorization.encode(),
+            ):
+                return JSONResponse({"detail": "unauthorized"}, status_code=401)
+            return await call_next(request)
+
+    def lifecycle() -> dict[str, Any]:
+        return {
+            "accepting_rollouts": accepting_rollouts,
+            "active_rollouts": sum(not task.done() for task in scheduled_tasks),
+        }
 
     @app.get("/health")
     async def health() -> dict[str, Any]:
         payload = dict(backend.health())
-        if instance_id:
-            payload["instance_id"] = instance_id
+        payload["instance_id"] = instance_id
+        payload["process_id"] = process_id
+        payload["lifecycle"] = lifecycle()
         return payload
+
+    @app.post("/drain")
+    async def drain(request: DrainRolloutsRequest) -> DrainRolloutsResponse:
+        nonlocal accepting_rollouts
+        # Registration and task binding use the same lock: no admitted work can
+        # fall between the admission fence and the idle snapshot.
+        async with admission_lock:
+            accepting_rollouts = False
+        if not idle.is_set() and request.timeout_sec:
+            with suppress(TimeoutError):
+                await asyncio.wait_for(idle.wait(), timeout=request.timeout_sec)
+        state = lifecycle()
+        return DrainRolloutsResponse(
+            **state,
+            instance_id=instance_id,
+            process_id=process_id,
+            drained=state["active_rollouts"] == 0,
+            rollout_ids=sorted(admitted_ids),
+        )
 
     def _finish_rollout_task(rollout_id: str, task: asyncio.Task[None]) -> None:
         scheduled_tasks.discard(task)
+        if not scheduled_tasks:
+            idle.set()
         exc = None if task.cancelled() else task.exception()
         if exc is not None:
             logger.error("Rollout task for %s crashed", rollout_id, exc_info=exc)
@@ -167,6 +223,14 @@ def create_rollout_server(
 
     @app.post("/rollout", status_code=202)
     async def rollout(request: RolloutInitRequest) -> RolloutInitResponse:
+        async with admission_lock:
+            if not accepting_rollouts:
+                raise HTTPException(
+                    status_code=503, detail="rollout admissions are drained"
+                )
+            return await admit(request)
+
+    async def admit(request: RolloutInitRequest) -> RolloutInitResponse:
         if not backend.has_capacity():
             raise HTTPException(
                 status_code=429,
@@ -187,15 +251,20 @@ def create_rollout_server(
         entry.result.add_done_callback(
             lambda result: observability.record(fields, result.result().status)
         )
+        task: asyncio.Task[None] | None = None
         try:
             task = asyncio.create_task(_run_rollout(request))
+            scheduled_tasks.add(task)
+            idle.clear()
+            task.add_done_callback(partial(_finish_rollout_task, request.rollout_id))
             await registry.bind_task(request.rollout_id, task)
         except Exception:
+            if task is not None:
+                task.cancel()
             await registry.discard(request.rollout_id)
             raise
         observability.record(fields, RolloutStatus.QUEUED)
-        scheduled_tasks.add(task)
-        task.add_done_callback(partial(_finish_rollout_task, request.rollout_id))
+        admitted_ids.add(request.rollout_id)
         return RolloutInitResponse(
             rollout_id=request.rollout_id,
             status=RolloutStatus.QUEUED,
