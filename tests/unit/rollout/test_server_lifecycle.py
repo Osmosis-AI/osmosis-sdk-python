@@ -24,6 +24,20 @@ BODY = {
 }
 
 
+@pytest.mark.parametrize("api_key", ["", " ", "\t", "\n", " \t\r\n "])
+def test_whitespace_credentials_are_rejected_before_creating_client(
+    api_key, monkeypatch
+):
+    def unexpected_client():
+        pytest.fail("invalid credentials must not allocate an HTTP client")
+
+    monkeypatch.setattr(httpx, "AsyncClient", unexpected_client)
+    with pytest.raises(ValueError, match="api_key must be non-empty"):
+        RolloutClient(url="http://test", api_key=api_key)
+    with pytest.raises(ValueError, match="api_key must be non-empty"):
+        create_rollout_server(backend=Backend(), api_key=api_key)
+
+
 @pytest.fixture(autouse=True)
 def no_archive(monkeypatch):
     async def skip(**kwargs):
@@ -119,6 +133,30 @@ async def test_admission_in_progress_cannot_escape_drain(monkeypatch):
         assert (
             await http.post("/rollout", json={**BODY, "rollout_id": "two"})
         ).status_code == 503
+    await registry.close()
+
+
+async def test_cancellation_during_binding_cannot_hide_scheduled_work(monkeypatch):
+    app = create_rollout_server(backend=Backend())
+    entered = asyncio.Event()
+    registry = app.state.rollout_futures
+
+    async def blocked(*args):
+        entered.set()
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(registry, "bind_task", blocked)
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app), base_url="http://test"
+    ) as http:
+        admission = asyncio.create_task(http.post("/rollout", json=BODY))
+        await entered.wait()
+        admission.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await admission
+        result = (await http.post("/drain", json={"timeout_sec": 1})).json()
+        assert result["drained"] and result["rollout_ids"] == ["one"]
+        assert registry.entries == {}
     await registry.close()
 
 

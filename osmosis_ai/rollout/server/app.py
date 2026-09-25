@@ -81,10 +81,13 @@ def create_rollout_server(
     scheduled_tasks: set[asyncio.Task[None]] = set()
     admission_lock = asyncio.Lock()
     accepting_rollouts = True
+    # Keep the complete process inventory after result retention expires. A
+    # bounded result cache cannot prove that every admitted rollout was exported.
+    # Memory use is proportional to the number of IDs admitted by this process.
     admitted_ids: set[str] = set()
     idle = asyncio.Event()
     idle.set()
-    if api_key == "":
+    if api_key is not None and not api_key.strip():
         raise ValueError("api_key must be non-empty when provided")
     observability = RolloutObservability()
 
@@ -255,16 +258,17 @@ def create_rollout_server(
         try:
             task = asyncio.create_task(_run_rollout(request))
             scheduled_tasks.add(task)
+            admitted_ids.add(request.rollout_id)
             idle.clear()
             task.add_done_callback(partial(_finish_rollout_task, request.rollout_id))
             await registry.bind_task(request.rollout_id, task)
-        except Exception:
+        except (Exception, asyncio.CancelledError):
             if task is not None:
                 task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
             await registry.discard(request.rollout_id)
             raise
         observability.record(fields, RolloutStatus.QUEUED)
-        admitted_ids.add(request.rollout_id)
         return RolloutInitResponse(
             rollout_id=request.rollout_id,
             status=RolloutStatus.QUEUED,

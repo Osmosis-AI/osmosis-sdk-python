@@ -218,12 +218,12 @@ class RolloutClient:
             raise ValueError(
                 "admission_timeout_sec must be finite; omit it to wait unbounded"
             )
+        if api_key is not None and not api_key.strip():
+            raise ValueError("api_key must be non-empty when provided")
         self.url: str = url.rstrip("/")
         self.owns_http_client: bool = http_client is None
         self.http_client: httpx.AsyncClient = http_client or httpx.AsyncClient()
         self.admission_timeout_sec: float | None = admission_timeout_sec
-        if api_key == "":
-            raise ValueError("api_key must be non-empty when provided")
         self._auth_headers = {"Authorization": "Bearer " + api_key} if api_key else {}
 
     async def health(self) -> dict[str, Any]:
