@@ -309,3 +309,17 @@ def test_source_fetch_rejects_unsafe_archives(tmp_path, monkeypatch, kind):
         fetch_source(SOURCE, "installation-token", tmp_path / "source")
     assert not (tmp_path / "source").exists()
     assert not (tmp_path / "escape").exists()
+
+
+async def test_empty_task_discovery_requires_explicit_opt_in(tmp_path):
+    repository = tmp_path / "runtime"
+    repository.mkdir()
+    (repository / "Dockerfile").write_text("FROM scratch\n")
+    with pytest.raises(ValueError, match="no Harbor tasks"):
+        await materialize_source_tasks(repository, ".", tmp_path / "default")
+    assert (
+        await materialize_source_tasks(
+            repository, ".", tmp_path / "allowed", allow_empty=True
+        )
+        == []
+    )
