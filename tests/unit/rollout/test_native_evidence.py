@@ -182,7 +182,15 @@ def test_fifo_manifest_is_rejected_without_blocking(tmp_path):
 
 @pytest.mark.parametrize(
     "kind",
-    ["link", "binary", "missing_result", "invalid_result", "result_directory", "fifo"],
+    [
+        "link",
+        "binary",
+        "missing_result",
+        "invalid_result",
+        "result_directory",
+        "nested_result",
+        "fifo",
+    ],
 )
 def test_skipped_files_publish_explicit_incomplete_manifest(tmp_path, kind):
     import os
@@ -202,6 +210,10 @@ def test_skipped_files_publish_explicit_incomplete_manifest(tmp_path, kind):
         (trial / "result.json").unlink()
         (trial / "result.json").mkdir()
         (trial / "result.json/data.json").write_text("{}")
+    elif kind == "nested_result":
+        (trial / "result.json").write_text(
+            '{"x":' + "[" * 2000 + "0" + "]" * 2000 + "}"
+        )
     else:
         os.mkfifo(trial / "agent/pipe")
     assert not retain_trial_evidence(trial, root, "one")
@@ -310,6 +322,13 @@ def test_declared_file_size_cannot_exceed_export_limit(tmp_path):
     (destination / "manifest.json").write_text(json.dumps(manifest))
     with pytest.raises(ValueError, match="file record is invalid"):
         verify_trial_evidence(destination, "one")
+
+
+def test_excessively_nested_manifest_is_incomplete_evidence(tmp_path):
+    destination = tmp_path / "one/harbor"
+    destination.mkdir(parents=True)
+    (destination / "manifest.json").write_text("[" * 2000 + "0" + "]" * 2000)
+    assert trial_evidence_inventory(tmp_path, ["one"])["missing_rollout_ids"] == ["one"]
 
 
 def test_previous_process_evidence_cannot_satisfy_new_drain(tmp_path):

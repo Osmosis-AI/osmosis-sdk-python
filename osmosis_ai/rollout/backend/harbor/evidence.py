@@ -150,7 +150,7 @@ def retain_trial_evidence(
                         ):
                             raise ValueError("invalid native result")
                         write(name, sanitized_text(data, api_key))
-            except (OSError, ValueError):
+            except (OSError, ValueError, RecursionError):
                 # Do not expose an untrusted filename or exception containing a credential.
                 errors.append("unreadable_or_unsafe_native_file")
 
@@ -169,7 +169,7 @@ def retain_trial_evidence(
                             api_key,
                         ),
                     )
-                except (TypeError, ValueError):
+                except (TypeError, ValueError, RecursionError):
                     errors.append("native_result_invalid")
             else:
                 errors.append("native_result_missing")

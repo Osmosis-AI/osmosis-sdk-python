@@ -92,7 +92,7 @@ def verify_trial_evidence(
             return _verify_trial_evidence(directory_fd, rollout_id, process_id)
         finally:
             os.close(directory_fd)
-    except OSError as exc:
+    except (OSError, RecursionError) as exc:
         raise ValueError("Evidence directory or file is missing or unsafe") from exc
 
 
