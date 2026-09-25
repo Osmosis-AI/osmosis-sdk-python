@@ -217,6 +217,48 @@ def test_exclusion_metadata_does_not_disclose_dynamic_step_names(tmp_path):
     assert json.loads(manifest_text)["excluded"] == {"opencode_database": 1}
 
 
+@pytest.mark.parametrize("kind", ["database", "snapshot", "parent"])
+def test_application_state_link_swap_is_rejected_before_exclusion(
+    tmp_path, monkeypatch, kind
+):
+    trial, root = source(tmp_path), tmp_path / "out"
+    state = trial / "agent/opencode/xdg-data/opencode"
+    state.mkdir(parents=True)
+    if kind == "snapshot":
+        (state / "snapshot").mkdir()
+        target = state / "snapshot"
+    else:
+        (state / "opencode.db").write_bytes(b"\xff")
+        target = state / "opencode.db" if kind == "database" else state.parent
+    outside = tmp_path / "outside"
+    if kind == "database":
+        outside.write_bytes(b"outside-private-data")
+    else:
+        outside.mkdir()
+        (outside / "private").write_text("outside-private-data")
+    original = os.open
+    swapped = False
+
+    def swap(path, flags, mode=0o777, *, dir_fd=None):
+        nonlocal swapped
+        if path == target.name and dir_fd is not None and not swapped:
+            assert flags & os.O_NOFOLLOW
+            target.rename(target.with_name("saved-original"))
+            target.symlink_to(outside, target_is_directory=kind != "database")
+            swapped = True
+        return original(path, flags, mode, dir_fd=dir_fd)
+
+    monkeypatch.setattr(os, "open", swap)
+    assert not retain_trial_evidence(trial, root, "one")
+    assert swapped
+    manifest = json.loads((root / "one/harbor/manifest.json").read_text())
+    assert manifest["excluded"] == {}
+    assert manifest["errors"] == ["unreadable_or_unsafe_native_file"]
+    assert b"outside-private-data" not in b"".join(
+        path.read_bytes() for path in (root / "one/harbor").rglob("*") if path.is_file()
+    )
+
+
 @pytest.mark.parametrize(
     "scheme", ["https", "postgresql", "redis", "ssh", "custom+tls"]
 )

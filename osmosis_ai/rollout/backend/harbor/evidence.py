@@ -152,11 +152,17 @@ def retain_trial_evidence(
                 if path.is_symlink():
                     raise ValueError("linked source")
                 if kind := _application_state(name):
-                    valid_type = (
-                        path.is_dir() if kind == "opencode_snapshot" else path.is_file()
-                    )
-                    if not valid_type:
-                        raise ValueError("invalid application state entry")
+                    descriptor = _open_directory(trial_dir)
+                    relative = path.relative_to(trial_dir)
+                    try:
+                        if kind == "opencode_snapshot":
+                            child = _open_directory(relative, dir_fd=descriptor)
+                            os.close(child)
+                        else:
+                            with _open_regular(descriptor, relative.as_posix()):
+                                pass
+                    finally:
+                        os.close(descriptor)
                     # Fixed categories and counts avoid exposing dynamic step or
                     # source names. Private trial-log retention is separate.
                     excluded[kind] = excluded.get(kind, 0) + 1
