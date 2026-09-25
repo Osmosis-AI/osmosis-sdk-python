@@ -4,14 +4,25 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
+import stat
 import unicodedata
 from pathlib import Path, PurePosixPath
-from typing import Any
+from typing import Any, BinaryIO
 
 from osmosis_ai.rollout.utils.identifiers import ensure_single_path_segment
 
 EVIDENCE_SCHEMA = "harbor-evidence-v1"
+
+
+def _open_regular(path: Path) -> BinaryIO:
+    descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    stream = os.fdopen(descriptor, "rb")
+    if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
+        stream.close()
+        raise ValueError("Evidence must contain regular files")
+    return stream
 
 
 def evidence_path(value: str) -> str:
@@ -39,7 +50,8 @@ def verify_trial_evidence(
     manifest_path = directory / "manifest.json"
     if manifest_path.is_symlink():
         raise ValueError("Evidence manifest must be a regular file")
-    manifest = json.loads(manifest_path.read_text())
+    with _open_regular(manifest_path) as stream:
+        manifest = json.load(stream)
     if (
         not isinstance(manifest, dict)
         or manifest.get("schema_version") != EVIDENCE_SCHEMA
@@ -72,9 +84,12 @@ def verify_trial_evidence(
                 raise ValueError("Evidence contains a link")
         if not current.is_file():
             raise ValueError("Evidence file is missing")
-        with current.open("rb") as stream:
-            digest = hashlib.file_digest(stream, "sha256").hexdigest()
-        if current.stat().st_size != entry["size_bytes"] or digest != entry["sha256"]:
+        with _open_regular(current) as stream:
+            digest = hashlib.sha256()
+            while chunk := stream.read(1024 * 1024):
+                digest.update(chunk)
+            size = os.fstat(stream.fileno()).st_size
+        if size != entry["size_bytes"] or digest.hexdigest() != entry["sha256"]:
             raise ValueError("Evidence checksum mismatch")
     actual = set()
     for path in directory.rglob("*"):

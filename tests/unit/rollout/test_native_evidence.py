@@ -74,6 +74,37 @@ def test_native_evidence_is_sanitized_complete_and_verifiable(tmp_path):
     assert not trial_evidence_inventory(root, ["one", "missing"])["complete"]
 
 
+def test_native_json_keys_and_credential_spellings_are_sanitized(tmp_path):
+    trial, root = source(tmp_path), tmp_path / "out"
+    values = {
+        "controller-secret": "ordinary",
+        "accessToken": "access-sensitive",
+        "clientSecret": "client-sensitive",
+        "aws_secret_access_key": "aws-sensitive",
+        "privateKey": "private-sensitive",
+        "total_completion_tokens": 123,
+        "message": "Authorization: Basic basic-sensitive",
+    }
+    (trial / "agent/trajectory.json").write_text(json.dumps(values))
+    assert retain_trial_evidence(trial, root, "one", api_key="controller-secret")
+    value = json.loads((root / "one/harbor/logs/agent/trajectory.json").read_text())
+    serialized = json.dumps(value)
+    assert "controller-secret" not in serialized
+    assert "sensitive" not in serialized
+    assert value["total_completion_tokens"] == 123
+
+
+def test_fifo_manifest_is_rejected_without_blocking(tmp_path):
+    import os
+
+    directory = tmp_path / "one/harbor"
+    directory.mkdir(parents=True)
+    os.mkfifo(directory / "manifest.json")
+    with pytest.raises(ValueError, match="regular files"):
+        verify_trial_evidence(directory, "one")
+    assert not trial_evidence_inventory(tmp_path, ["one"])["complete"]
+
+
 @pytest.mark.parametrize(
     "kind", ["link", "binary", "missing_result", "invalid_result", "fifo"]
 )

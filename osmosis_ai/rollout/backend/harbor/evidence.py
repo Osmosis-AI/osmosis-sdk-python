@@ -11,7 +11,11 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from osmosis_ai.rollout.backend.harbor.diagnostics import REDACTED, redact_secrets
+from osmosis_ai.rollout.backend.harbor.diagnostics import (
+    REDACTED,
+    redact_secrets,
+    sensitive_key,
+)
 from osmosis_ai.rollout.utils.evidence import EVIDENCE_SCHEMA, evidence_path
 from osmosis_ai.rollout.utils.identifiers import ensure_single_path_segment
 
@@ -19,7 +23,7 @@ from osmosis_ai.rollout.utils.identifiers import ensure_single_path_segment
 _ASSIGNMENT = re.compile(
     r"""(?ix)([\w-]*(?:api[_-]?key|authorization|password|credential|secret|token)[\w-]*\s*[=:]\s*)("[^"\n]*"|'[^'\n]*'|[^\s,;\]}]+)"""
 )
-_BEARER = re.compile(r"(?i)\bBearer\s+[^\s\"',;]+")
+_AUTH_TOKEN = re.compile(r"(?i)\b(Bearer|Basic)\s+[^\s\"',;]+")
 _URL_USERINFO = re.compile(r"(https?://)[^\s/@]+:[^\s/@]+@", re.IGNORECASE)
 MAX_NATIVE_FILE_BYTES = 64 * 1024 * 1024
 
@@ -30,13 +34,21 @@ def sanitized_text(data: bytes, api_key: str | None) -> bytes:
     def clean(value: str) -> str:
         if api_key:
             value = value.replace(api_key, REDACTED)
-        value = _BEARER.sub("Bearer " + REDACTED, value)
+        value = _AUTH_TOKEN.sub(lambda match: match[1] + " " + REDACTED, value)
         value = _ASSIGNMENT.sub(lambda match: match[1] + REDACTED, value)
         return _URL_USERINFO.sub(r"\1[REDACTED]@", value)
 
     def strings(value: Any) -> Any:
         if isinstance(value, dict):
-            return {key: strings(child) for key, child in value.items()}
+            result = {}
+            for key, child in value.items():
+                normalized = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", key).lower()
+                normalized = normalized.replace("-", "_")
+                credential = sensitive_key(normalized) or normalized.endswith(
+                    ("access_key", "access_key_id", "private_key")
+                )
+                result[clean(key)] = REDACTED if credential else strings(child)
+            return result
         if isinstance(value, list):
             return [strings(child) for child in value]
         return clean(value) if isinstance(value, str) else value
