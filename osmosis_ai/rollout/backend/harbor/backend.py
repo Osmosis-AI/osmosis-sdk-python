@@ -773,9 +773,16 @@ class HarborBackend(ExecutionBackend):
         # Cancellation may bypass upstream credential scrubbing. Retain only
         # the sanitized native surface, then remove the untrusted working tree.
         try:
-            self._retain_native_evidence(rollout_id, trial_result, pending)
+            try:
+                self.scrub_trial_credentials(rollout_id, pending.api_key)
+            finally:
+                self._retain_native_evidence(rollout_id, trial_result, pending)
         finally:
             self.cleanup_rollout_residue(rollout_id, include_trial=True)
+            if (self.rollouts_dir / rollout_id).exists() or (
+                self.trials_dir / f"{TRIAL_NAME_PREFIX}{rollout_id}"
+            ).exists():
+                raise CredentialScrubError("Cancelled trial cleanup did not complete")
 
     def archive_interrupted_trial(
         self, rollout_id: str, trial_result: Any, pending: PendingTrial

@@ -1625,6 +1625,47 @@ class TestArtifactLifecycle:
         backend.artifact_root = tmp_path / "durable"
         return backend
 
+    async def test_cancelled_trial_cleanup_fails_closed_when_deletion_is_denied(
+        self, template_task, tmp_path, monkeypatch
+    ):
+        import shutil
+
+        backend = self.backend_for(template_task, tmp_path, FakeQueue())
+        directory = backend.trials_dir / "trial-r1"
+        directory.mkdir(parents=True)
+        secret = "controller-key-that-must-not-survive"
+        protected = directory / "trial.log"
+        protected.write_text(secret)
+        (directory / "result.json").write_text('{"api_key": "' + secret + '"}')
+        (backend.rollouts_dir / "r1").mkdir()
+        original_read = Path.read_bytes
+        original_remove = shutil.rmtree
+
+        def denied_read(path):
+            if path == protected:
+                raise PermissionError("denied")
+            return original_read(path)
+
+        def denied_remove(path, *args, **kwargs):
+            if Path(path) != directory:
+                return original_remove(path, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "read_bytes", denied_read)
+        monkeypatch.setattr(shutil, "rmtree", denied_remove)
+        monkeypatch.setattr(backend, "_delete_unscrubbable", lambda path: False)
+        pending = PendingTrial()
+        pending.api_key = secret
+        with pytest.raises(CredentialScrubError, match="cleanup did not complete"):
+            backend.archive_cancelled_trial("r1", None, pending)
+        assert directory.exists()
+        assert not (backend.rollouts_dir / "r1").exists()
+        assert secret not in (directory / "result.json").read_text()
+        assert secret not in "".join(
+            path.read_text()
+            for path in backend.artifact_root.rglob("*")
+            if path.is_file()
+        )
+
     @pytest.mark.parametrize(
         "ending", ["cancelled_error", "cancelled_result", "exception"]
     )
