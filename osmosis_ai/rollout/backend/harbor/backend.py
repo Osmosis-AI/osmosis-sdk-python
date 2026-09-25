@@ -543,7 +543,11 @@ class HarborBackend(ExecutionBackend):
             self.record_outcome(request.id, RolloutStatus.CANCELLED)
             await asyncio.shield(
                 asyncio.get_running_loop().run_in_executor(
-                    self.archive_executor, self.archive_trial, request.id, None, pending
+                    self.archive_executor,
+                    self.archive_cancelled_trial,
+                    request.id,
+                    None,
+                    pending,
                 )
             )
             self.cleanup_rollout_residue(request.id, include_trial=True)
@@ -560,7 +564,7 @@ class HarborBackend(ExecutionBackend):
                 await asyncio.shield(
                     asyncio.get_running_loop().run_in_executor(
                         self.archive_executor,
-                        self.archive_trial,
+                        self.archive_interrupted_trial,
                         request.id,
                         None,
                         pending,
@@ -686,6 +690,9 @@ class HarborBackend(ExecutionBackend):
         secrets before ``submit()`` returns, so any earlier relocation (e.g.
         from a trial hook) copies unredacted content into durable storage.
         """
+        if trial_cancelled(getattr(trial_result, "exception_info", None)):
+            self.archive_cancelled_trial(rollout_id, trial_result, pending)
+            return
         # Scrub before anything is merged, relocated, or preserved, so no
         # durable copy is made from an unredacted trial tree. A failed scrub
         # aborts archiving entirely — but the staging dir, which always holds
@@ -699,22 +706,9 @@ class HarborBackend(ExecutionBackend):
         # Retained before the trial directory can be removed below; a failed
         # retention keeps it, since the trial dir is then the only copy.
         retained = retain_trial_logs(self.trials_dir, self.artifact_root, rollout_id)
-        try:
-            evidence_retained = retain_trial_evidence(
-                self.trials_dir / f"{TRIAL_NAME_PREFIX}{rollout_id}",
-                self.artifact_root,
-                rollout_id,
-                api_key=pending.api_key,
-                trial_result=trial_result,
-                process_id=pending.rollout_context.process_id
-                if pending.rollout_context
-                else None,
-            )
-        except (OSError, ValueError):
-            logger.warning(
-                "Could not finalize native evidence for rollout %s", rollout_id
-            )
-            evidence_retained = False
+        evidence_retained = self._retain_native_evidence(
+            rollout_id, trial_result, pending
+        )
         delete_trial = bool(
             self.cleanup_successful_trials
             and retained
@@ -730,6 +724,46 @@ class HarborBackend(ExecutionBackend):
             self.cleanup_rollout_residue(
                 rollout_id, include_trial=delete_trial and relocated
             )
+
+    def _retain_native_evidence(
+        self, rollout_id: str, trial_result: Any, pending: PendingTrial
+    ) -> bool:
+        try:
+            return retain_trial_evidence(
+                self.trials_dir / f"{TRIAL_NAME_PREFIX}{rollout_id}",
+                self.artifact_root,
+                rollout_id,
+                api_key=pending.api_key,
+                trial_result=trial_result,
+                process_id=pending.rollout_context.process_id
+                if pending.rollout_context
+                else None,
+            )
+        except (OSError, ValueError):
+            logger.warning(
+                "Could not finalize native evidence for rollout %s", rollout_id
+            )
+            return False
+
+    def archive_cancelled_trial(
+        self, rollout_id: str, trial_result: Any, pending: PendingTrial
+    ) -> None:
+        # Cancellation may bypass upstream credential scrubbing. Retain only
+        # the sanitized native surface, then remove the untrusted working tree.
+        try:
+            self._retain_native_evidence(rollout_id, trial_result, pending)
+        finally:
+            self.cleanup_rollout_residue(rollout_id, include_trial=True)
+
+    def archive_interrupted_trial(
+        self, rollout_id: str, trial_result: Any, pending: PendingTrial
+    ) -> None:
+        # An exception from submit() also has no upstream scrubbing guarantee.
+        try:
+            self.scrub_trial_credentials(rollout_id, pending.api_key)
+            self._retain_native_evidence(rollout_id, trial_result, pending)
+        finally:
+            self.cleanup_rollout_residue(rollout_id, include_trial=False)
 
     def cleanup_rollout_residue(self, rollout_id: str, *, include_trial: bool) -> None:
         """Remove per-rollout staging (and optionally the trial directory).

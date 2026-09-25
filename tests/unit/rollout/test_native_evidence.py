@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+from pathlib import Path
 
 import pytest
 
@@ -94,6 +96,79 @@ def test_native_json_keys_and_credential_spellings_are_sanitized(tmp_path):
     assert value["total_completion_tokens"] == 123
 
 
+@pytest.mark.parametrize(
+    "scheme", ["https", "postgresql", "redis", "ssh", "custom+tls"]
+)
+def test_url_userinfo_is_sanitized_in_native_results_and_logs(tmp_path, scheme):
+    trial, root = source(tmp_path), tmp_path / "out"
+    url = f"{scheme}://username:connection-secret@host/path"
+    (trial / "result.json").write_text(json.dumps({"connection": url}))
+    (trial / "trial.log").write_text(url)
+    assert retain_trial_evidence(trial, root, "one")
+    for name in ("result.json", "logs/trial.log"):
+        retained = (root / "one/harbor" / name).read_text()
+        assert "connection-secret" not in retained
+        assert f"{scheme}://[REDACTED]@host/path" in retained
+
+
+def test_explicit_short_credentials_are_still_secret(tmp_path):
+    trial, root = source(tmp_path), tmp_path / "out"
+    (trial / "trial.log").write_text("secret value: abc")
+    assert retain_trial_evidence(trial, root, "one", api_key="abc")
+    assert "abc" not in (root / "one/harbor/logs/trial.log").read_text()
+
+
+def test_unreadable_steps_publish_an_explicit_partial_manifest(tmp_path, monkeypatch):
+    trial, root = source(tmp_path), tmp_path / "out"
+    steps = trial / "steps"
+    steps.mkdir()
+    original = Path.iterdir
+
+    def denied(path):
+        if path == steps:
+            raise PermissionError("private message must not be retained")
+        return original(path)
+
+    monkeypatch.setattr(Path, "iterdir", denied)
+    assert not retain_trial_evidence(trial, root, "one")
+    manifest = json.loads((root / "one/harbor/manifest.json").read_text())
+    assert manifest["errors"] == ["unreadable_native_steps"]
+    assert not manifest["complete"]
+
+
+@pytest.mark.parametrize("operation", ["verify", "retain"])
+def test_parent_link_swap_cannot_escape_evidence_root(tmp_path, monkeypatch, operation):
+    trial, root = source(tmp_path), tmp_path / "out"
+    assert retain_trial_evidence(trial, root, "one")
+    destination = root / "one/harbor"
+    assert verify_trial_evidence(destination, "one")["complete"]
+    directory = destination / "logs/agent" if operation == "verify" else trial / "agent"
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "trajectory.json").write_text("outside-private-data")
+    opened = os.open
+    swapped = False
+
+    def swap(path, flags, mode=0o777, *, dir_fd=None):
+        nonlocal swapped
+        if path == "agent" and dir_fd is not None and not swapped:
+            directory.rename(directory.with_name("old-agent"))
+            directory.symlink_to(outside, target_is_directory=True)
+            swapped = True
+        return opened(path, flags, mode, dir_fd=dir_fd)
+
+    monkeypatch.setattr(os, "open", swap)
+    if operation == "verify":
+        with pytest.raises(ValueError, match="unsafe"):
+            verify_trial_evidence(destination, "one")
+    else:
+        assert not retain_trial_evidence(trial, root, "one")
+        assert "outside-private-data" not in "".join(
+            path.read_text() for path in destination.rglob("*") if path.is_file()
+        )
+    assert swapped
+
+
 def test_fifo_manifest_is_rejected_without_blocking(tmp_path):
     import os
 
@@ -136,8 +211,9 @@ def test_skipped_files_publish_explicit_incomplete_manifest(tmp_path, kind):
 )
 def test_download_verification_rejects_incomplete_or_unsafe_inventory(tmp_path, change):
     trial, root = source(tmp_path), tmp_path / "out"
-    retain_trial_evidence(trial, root, "one")
+    assert retain_trial_evidence(trial, root, "one")
     destination = root / "one/harbor"
+    assert verify_trial_evidence(destination, "one")["complete"]
     result = destination / "result.json"
     manifest_path = destination / "manifest.json"
     manifest = json.loads(manifest_path.read_text())

@@ -16,13 +16,53 @@ from osmosis_ai.rollout.utils.identifiers import ensure_single_path_segment
 EVIDENCE_SCHEMA = "harbor-evidence-v1"
 
 
-def _open_regular(path: Path) -> BinaryIO:
-    descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+def _open_directory(path: Path, *, dir_fd: int | None = None) -> int:
+    """Walk beneath an open directory without following any component's links."""
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    current = os.open(path.anchor or ".", flags, dir_fd=dir_fd)
+    try:
+        for part in path.parts[1:] if path.anchor else path.parts:
+            child = os.open(part, flags, dir_fd=current)
+            os.close(current)
+            current = child
+    except BaseException:
+        os.close(current)
+        raise
+    return current
+
+
+def _open_regular(directory_fd: int, name: str) -> BinaryIO:
+    path = Path(evidence_path(name))
+    parent = _open_directory(path.parent, dir_fd=directory_fd)
+    try:
+        descriptor = os.open(
+            path.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent
+        )
+    finally:
+        os.close(parent)
     stream = os.fdopen(descriptor, "rb")
     if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
         stream.close()
         raise ValueError("Evidence must contain regular files")
     return stream
+
+
+def _regular_files(directory_fd: int, prefix: str = "") -> set[str]:
+    names = set()
+    for name in os.listdir(directory_fd):
+        relative = evidence_path(prefix + name)
+        mode = os.stat(name, dir_fd=directory_fd, follow_symlinks=False).st_mode
+        if stat.S_ISDIR(mode):
+            child = _open_directory(Path(name), dir_fd=directory_fd)
+            try:
+                names.update(_regular_files(child, relative + "/"))
+            finally:
+                os.close(child)
+        elif stat.S_ISREG(mode):
+            names.add(relative)
+        else:
+            raise ValueError("Evidence contains a link or special file")
+    return names
 
 
 def evidence_path(value: str) -> str:
@@ -45,12 +85,20 @@ def verify_trial_evidence(
     """Verify an exact inventory; a partial copy is never finalized evidence."""
     ensure_single_path_segment(rollout_id, label="rollout_id")
     evidence_path(rollout_id)
-    if directory.is_symlink() or not directory.is_dir():
-        raise ValueError("Evidence directory is missing or linked")
-    manifest_path = directory / "manifest.json"
-    if manifest_path.is_symlink():
-        raise ValueError("Evidence manifest must be a regular file")
-    with _open_regular(manifest_path) as stream:
+    try:
+        directory_fd = _open_directory(directory)
+        try:
+            return _verify_trial_evidence(directory_fd, rollout_id, process_id)
+        finally:
+            os.close(directory_fd)
+    except OSError as exc:
+        raise ValueError("Evidence directory or file is missing or unsafe") from exc
+
+
+def _verify_trial_evidence(
+    directory_fd: int, rollout_id: str, process_id: str | None
+) -> dict[str, Any]:
+    with _open_regular(directory_fd, "manifest.json") as stream:
         manifest = json.load(stream)
     if (
         not isinstance(manifest, dict)
@@ -77,26 +125,14 @@ def verify_trial_evidence(
         if name in declared or name == "manifest.json":
             raise ValueError("Evidence inventory has duplicate or reserved paths")
         declared.add(name)
-        current = directory
-        for part in PurePosixPath(name).parts:
-            current /= part
-            if current.is_symlink():
-                raise ValueError("Evidence contains a link")
-        if not current.is_file():
-            raise ValueError("Evidence file is missing")
-        with _open_regular(current) as stream:
+        with _open_regular(directory_fd, name) as stream:
             digest = hashlib.sha256()
             while chunk := stream.read(1024 * 1024):
                 digest.update(chunk)
             size = os.fstat(stream.fileno()).st_size
         if size != entry["size_bytes"] or digest.hexdigest() != entry["sha256"]:
             raise ValueError("Evidence checksum mismatch")
-    actual = set()
-    for path in directory.rglob("*"):
-        if path.is_symlink() or not (path.is_file() or path.is_dir()):
-            raise ValueError("Evidence contains a link or special file")
-        if path.is_file() and path != manifest_path:
-            actual.add(path.relative_to(directory).as_posix())
+    actual = _regular_files(directory_fd) - {"manifest.json"}
     if declared != actual or "result.json" not in declared:
         raise ValueError("Evidence inventory does not exactly cover its files")
     return manifest

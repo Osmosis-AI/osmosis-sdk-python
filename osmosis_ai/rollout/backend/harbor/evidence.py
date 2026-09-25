@@ -6,7 +6,6 @@ import hashlib
 import json
 import os
 import re
-import stat
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -16,7 +15,12 @@ from osmosis_ai.rollout.backend.harbor.diagnostics import (
     redact_secrets,
     sensitive_key,
 )
-from osmosis_ai.rollout.utils.evidence import EVIDENCE_SCHEMA, evidence_path
+from osmosis_ai.rollout.utils.evidence import (
+    EVIDENCE_SCHEMA,
+    _open_directory,
+    _open_regular,
+    evidence_path,
+)
 from osmosis_ai.rollout.utils.identifiers import ensure_single_path_segment
 
 # Credentials in structured records, shell assignments, HTTP headers and URLs.
@@ -24,7 +28,7 @@ _ASSIGNMENT = re.compile(
     r"""(?ix)([\w-]*(?:api[_-]?key|authorization|password|credential|secret|token)[\w-]*\s*[=:]\s*)("[^"\n]*"|'[^'\n]*'|[^\s,;\]}]+)"""
 )
 _AUTH_TOKEN = re.compile(r"(?i)\b(Bearer|Basic)\s+[^\s\"',;]+")
-_URL_USERINFO = re.compile(r"(https?://)[^\s/@]+:[^\s/@]+@", re.IGNORECASE)
+_URL_USERINFO = re.compile(r"([a-z][a-z0-9+.-]*://)[^\s/@]+:[^\s/@]+@", re.IGNORECASE)
 MAX_NATIVE_FILE_BYTES = 64 * 1024 * 1024
 
 
@@ -123,12 +127,14 @@ def retain_trial_evidence(
                     for child in sorted(path.iterdir()):
                         copy(child, name + "/" + child.name)
                 else:
-                    descriptor = os.open(
-                        path, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW
-                    )
-                    with os.fdopen(descriptor, "rb") as stream:
-                        if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
-                            raise ValueError("special source")
+                    descriptor = _open_directory(trial_dir)
+                    try:
+                        stream = _open_regular(
+                            descriptor, path.relative_to(trial_dir).as_posix()
+                        )
+                    finally:
+                        os.close(descriptor)
+                    with stream:
                         data = stream.read(MAX_NATIVE_FILE_BYTES + 1)
                         if len(data) > MAX_NATIVE_FILE_BYTES:
                             raise ValueError("native file exceeds sanitization limit")
@@ -174,7 +180,12 @@ def retain_trial_evidence(
             if steps.is_symlink():
                 errors.append("unsafe_native_steps")
             elif steps.is_dir():
-                for step in sorted(steps.iterdir()):
+                try:
+                    step_directories = sorted(steps.iterdir())
+                except OSError:
+                    errors.append("unreadable_native_steps")
+                    step_directories = []
+                for step in step_directories:
                     if step.is_symlink() or not step.is_dir():
                         errors.append("unsafe_native_step")
                         continue
