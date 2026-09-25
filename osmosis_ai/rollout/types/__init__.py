@@ -9,8 +9,11 @@ from .protocol import (
     POLLING_LEASE_HEADER,
     CancelRolloutsRequest,
     CancelRolloutsResponse,
+    DrainRolloutsRequest,
+    DrainRolloutsResponse,
     RolloutInitRequest,
     RolloutInitResponse,
+    RolloutLifecycle,
     RolloutResultResponse,
 )
 from .sample import (
@@ -31,6 +34,8 @@ __all__ = [
     "CancelRolloutsRequest",
     "CancelRolloutsResponse",
     "ConcurrencyConfig",
+    "DrainRolloutsRequest",
+    "DrainRolloutsResponse",
     "ExecutionOutcome",
     "ExecutionRequest",
     "ExecutionResult",
@@ -40,6 +45,7 @@ __all__ = [
     "RolloutErrorCategory",
     "RolloutInitRequest",
     "RolloutInitResponse",
+    "RolloutLifecycle",
     "RolloutResultResponse",
     "RolloutSample",
     "RolloutStatus",

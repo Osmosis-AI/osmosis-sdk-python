@@ -13,9 +13,12 @@ from osmosis_ai.rollout.types import (
     POLLING_LEASE_HEADER,
     CancelRolloutsRequest,
     CancelRolloutsResponse,
+    DrainRolloutsRequest,
+    DrainRolloutsResponse,
     MessageDict,
     RolloutInitRequest,
     RolloutInitResponse,
+    RolloutLifecycle,
     RolloutResultResponse,
     RolloutStatus,
 )
@@ -207,6 +210,7 @@ class RolloutClient:
         url: str,
         http_client: httpx.AsyncClient | None = None,
         admission_timeout_sec: float | None = None,
+        api_key: str | None = None,
     ) -> None:
         if admission_timeout_sec is not None and not math.isfinite(
             admission_timeout_sec
@@ -214,10 +218,107 @@ class RolloutClient:
             raise ValueError(
                 "admission_timeout_sec must be finite; omit it to wait unbounded"
             )
+        if api_key is not None and not api_key.strip():
+            raise ValueError("api_key must be non-empty when provided")
         self.url: str = url.rstrip("/")
         self.owns_http_client: bool = http_client is None
         self.http_client: httpx.AsyncClient = http_client or httpx.AsyncClient()
         self.admission_timeout_sec: float | None = admission_timeout_sec
+        self._auth_headers = {"Authorization": "Bearer " + api_key} if api_key else {}
+
+    async def health(self) -> dict[str, Any]:
+        """Read health without assuming any backend-specific counters."""
+        response = await self.http_client.get(
+            f"{self.url}/health", headers=self._auth_headers, follow_redirects=False
+        )
+        if response.status_code != 200:
+            raise RolloutProtocolError(
+                "GET /health failed", status_code=response.status_code
+            )
+        try:
+            value = response.json()
+            if not isinstance(value, dict):
+                raise ValueError("expected object")
+            return value
+        except ValueError as exc:
+            raise RolloutProtocolError(
+                "GET /health returned invalid JSON", status_code=200
+            ) from exc
+
+    async def wait_idle(
+        self,
+        *,
+        timeout_sec: float = 120,
+        poll_interval_sec: float = 1,
+        process_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Wait for finalization; this observation does not fence admissions.
+
+        Older servers without lifecycle metadata are rejected rather than
+        inferring idle from backend-specific counters. A changed process also
+        invalidates the observation.
+        """
+        for value in (timeout_sec, poll_interval_sec):
+            if not math.isfinite(value) or value <= 0:
+                raise ValueError("wait timeouts must be positive and finite")
+        async with asyncio.timeout(timeout_sec):
+            while True:
+                try:
+                    health = await self.health()
+                except RolloutProtocolError as error:
+                    if error.status_code not in {408, 429, 500, 502, 503, 504}:
+                        raise
+                    await asyncio.sleep(poll_interval_sec)
+                    continue
+                except httpx.TransportError:
+                    await asyncio.sleep(poll_interval_sec)
+                    continue
+                current_instance = health.get("process_id")
+                if not isinstance(current_instance, str) or not current_instance:
+                    raise RolloutProtocolError(
+                        "Server has no lifecycle identity", status_code=200
+                    )
+                if process_id is not None and current_instance != process_id:
+                    raise RolloutProtocolError(
+                        "Server restarted while waiting", status_code=200
+                    )
+                process_id = current_instance
+                try:
+                    state = RolloutLifecycle.model_validate(health.get("lifecycle"))
+                except ValueError as exc:
+                    raise RolloutProtocolError(
+                        "Server has no valid lifecycle state", status_code=200
+                    ) from exc
+                if state.active_rollouts == 0:
+                    return health
+                await asyncio.sleep(poll_interval_sec)
+
+    async def drain(self, *, timeout_sec: float = 30) -> DrainRolloutsResponse:
+        """Fence admissions and wait boundedly; a timeout leaves the fence set."""
+        request = DrainRolloutsRequest(timeout_sec=timeout_sec)
+        async with asyncio.timeout(timeout_sec + 5):
+            response = await self.http_client.post(
+                f"{self.url}/drain",
+                json=request.model_dump(),
+                headers=self._auth_headers,
+                timeout=timeout_sec + 5,
+                follow_redirects=False,
+            )
+        if response.status_code != 200:
+            raise RolloutProtocolError(
+                "POST /drain failed", status_code=response.status_code
+            )
+        try:
+            result = DrainRolloutsResponse.model_validate(response.json())
+        except ValueError as exc:
+            raise RolloutProtocolError(
+                "POST /drain returned invalid JSON", status_code=200
+            ) from exc
+        if result.accepting_rollouts or result.drained != (result.active_rollouts == 0):
+            raise RolloutProtocolError(
+                "POST /drain returned inconsistent state", status_code=200
+            )
+        return result
 
     async def aclose(self) -> None:
         if self.owns_http_client:
@@ -285,6 +386,8 @@ class RolloutClient:
                     response = await self.http_client.post(
                         f"{self.url}/rollout",
                         json=request.model_dump(mode="json"),
+                        headers=self._auth_headers,
+                        follow_redirects=False,
                     )
                     response_pending = False
                     if response.status_code != 429:
@@ -332,8 +435,12 @@ class RolloutClient:
                     request_started = monotonic()
                     response = await self.http_client.get(
                         f"{self.url}/rollout/{admission.rollout_id}/result",
-                        headers={POLLING_LEASE_HEADER: admission.polling_lease_token},
+                        headers={
+                            **self._auth_headers,
+                            POLLING_LEASE_HEADER: admission.polling_lease_token,
+                        },
                         timeout=timeout,
+                        follow_redirects=False,
                     )
             except TimeoutError as exc:
                 if retry_deadline.expired() and last_error is not None:
@@ -371,6 +478,8 @@ class RolloutClient:
             response = await self.http_client.post(
                 f"{self.url}/rollout/cancel",
                 json=request.model_dump(mode="json"),
+                headers=self._auth_headers,
+                follow_redirects=False,
                 timeout=_CANCEL_REQUEST_TIMEOUT_SEC,
             )
         return _cancelled(response)
