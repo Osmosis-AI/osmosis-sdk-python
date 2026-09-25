@@ -41,6 +41,11 @@ backend's queue counters. `await client.wait_idle(timeout_sec=120)` observes thi
 counter without changing admissions. Older servers without lifecycle metadata
 are rejected. Pass `process_id=` to bind the wait to a known process.
 
+Backend outcome status and cancellation dispositions describe execution, so a
+terminal backend outcome or `not_found` cancellation can precede archive
+completion. Use the server's lifecycle counters and drain response to establish
+that retained evidence has finished writing.
+
 `POST /drain` accepts `{"timeout_sec": 30}` with a finite timeout from 0 to 300
 seconds. It fences new admissions before taking the active-work snapshot. It
 returns HTTP 200 with `accepting_rollouts: false`, `active_rollouts`, `drained`,
@@ -58,7 +63,7 @@ bounded drain and cancellation cleanup.
 
 ## Native Harbor evidence
 
-After Harbor finishes and scrubs its files, the backend retains a sanitized copy
+The backend retains a sanitized copy of Harbor's native evidence
 at `<artifact_root>/<rollout_id>/harbor/`. Harbor rejects rollout IDs containing
 colons or control characters before starting trial work so their evidence paths
 remain portable. Other backends keep their existing rollout ID contract.
@@ -67,6 +72,8 @@ The artifact root uses the existing
 native logs under `logs/`, and `manifest.json`. Configuration and task source
 files are excluded. Existing `artifacts/`, `logs/` and `trajectory.json` keep
 their established locations and behavior.
+Cancelled or interrupted submissions may skip Harbor's own scrubbing; those
+paths export only the sanitized native surface, without retaining raw logs.
 
 The manifest uses `schema_version: "harbor-evidence-v1"` and includes
 `rollout_id`, `process_id`, `complete`, `errors`, and `files`. Each file entry contains its
