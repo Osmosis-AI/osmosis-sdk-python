@@ -94,7 +94,7 @@ class TestOpenAIAgentsIntegration:
         agent = OsmosisAgent(name="main", model=OsmosisRolloutModel())
 
         assert isinstance(agent.model, OsmosisLitellmModel)
-        assert agent.model.model == "openai/osmosis-rollout"
+        assert agent.model.model == "litellm_proxy/osmosis-rollout"
         assert agent.model.base_url == "http://controller:9"
         assert agent.model.api_key == "test-key"
 

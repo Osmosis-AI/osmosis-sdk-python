@@ -11,6 +11,8 @@ import json
 import time
 from typing import Any
 
+from osmosis_ai.eval.request_policy import BridgeRequestError, inference_parameters
+
 
 def _field(obj: Any, name: str, default: Any = None) -> Any:
     if isinstance(obj, dict):
@@ -136,9 +138,9 @@ def _convert_messages(messages: Any) -> list[Any]:
     return items
 
 
-def _convert_tools(tools: Any) -> list[Any] | None:
+def _convert_tools(tools: Any) -> Any:
     if not isinstance(tools, list):
-        return None
+        return tools
 
     converted: list[Any] = []
     for tool in tools:
@@ -169,25 +171,67 @@ def _convert_tool_choice(tool_choice: Any) -> Any:
 def build_responses_kwargs(
     body: dict[str, Any], *, model: str, api_key: str | None
 ) -> dict[str, Any]:
-    """Build a LiteLLM Responses request from a Chat Completions body."""
+    """Translate Chat parameters, preserving other inference fields in the body."""
+    parameters = inference_parameters(body)
     kwargs: dict[str, Any] = {
         "model": model,
         "input": _convert_messages(body.get("messages", [])),
     }
     if api_key:
         kwargs["api_key"] = api_key
-    if "max_completion_tokens" in body:
-        kwargs["max_output_tokens"] = body["max_completion_tokens"]
-    elif "max_tokens" in body:
-        kwargs["max_output_tokens"] = body["max_tokens"]
+    # Prefer the native Responses name, then the modern Chat token limit.
+    for key in ("max_tokens", "max_completion_tokens", "max_output_tokens"):
+        if key in parameters:
+            kwargs["max_output_tokens"] = parameters.pop(key)
+
+    if "reasoning_effort" in parameters:
+        effort = parameters.pop("reasoning_effort")
+        reasoning = parameters.get("reasoning", {})
+        mapped = effort if isinstance(effort, dict) else {"effort": effort}
+        if not isinstance(reasoning, dict) or any(
+            key in reasoning and reasoning[key] != value
+            for key, value in mapped.items()
+        ):
+            raise BridgeRequestError(
+                "reasoning and reasoning_effort contain conflicting settings"
+            )
+        parameters["reasoning"] = {**mapped, **reasoning}
+
+    if "response_format" in parameters:
+        response_format = parameters.pop("response_format")
+        if (
+            isinstance(response_format, dict)
+            and response_format.get("type") == "json_schema"
+            and isinstance(response_format.get("json_schema"), dict)
+        ):
+            response_format = {
+                **{
+                    key: value
+                    for key, value in response_format.items()
+                    if key != "json_schema"
+                },
+                **response_format["json_schema"],
+            }
+        text = parameters.get("text", {})
+        if not isinstance(text, dict) or (
+            "format" in text and text["format"] != response_format
+        ):
+            raise BridgeRequestError(
+                "text.format and response_format contain conflicting settings"
+            )
+        parameters["text"] = {**text, "format": response_format}
+
+    if "tool_choice" in parameters:
+        kwargs["tool_choice"] = _convert_tool_choice(parameters.pop("tool_choice"))
+    if "tools" in parameters:
+        kwargs["tools"] = _convert_tools(parameters.pop("tools"))
     for key in ("temperature", "top_p", "parallel_tool_calls"):
-        if key in body:
-            kwargs[key] = body[key]
-    if "tool_choice" in body:
-        kwargs["tool_choice"] = _convert_tool_choice(body["tool_choice"])
-    tools = _convert_tools(body.get("tools"))
-    if tools is not None:
-        kwargs["tools"] = tools
+        if key in parameters:
+            kwargs[key] = parameters.pop(key)
+    if parameters:
+        # LiteLLM ignores unknown aresponses kwargs. extra_body is merged into
+        # the final HTTP JSON, including provider fields added after our release.
+        kwargs["extra_body"] = parameters
     return kwargs
 
 

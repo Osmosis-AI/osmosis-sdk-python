@@ -197,7 +197,8 @@ class OsmosisLitellmModel(LitellmModel):
                 "backend has set up the context."
             )
         super().__init__(
-            model="openai/osmosis-rollout",
+            # The gateway resolves the actual provider and its supported params.
+            model="litellm_proxy/osmosis-rollout",
             base_url=ctx.chat_completions_url,
             api_key=ctx.api_key,
             **litellm_kwargs,
