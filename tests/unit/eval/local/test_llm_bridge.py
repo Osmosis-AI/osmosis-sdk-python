@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import sys
 from typing import Any
 
 import httpx
@@ -315,6 +316,47 @@ async def test_non_stream_error_returns_502(
     assert bridge.collect_tokens(ROLLOUT_ID) is None
 
 
+@pytest.mark.parametrize("stream", [False, True])
+async def test_missing_litellm_returns_optional_dependency_install_hint(
+    monkeypatch: pytest.MonkeyPatch, stream: bool
+) -> None:
+    # Exercise _get_litellm and the HTTP error handler without uninstalling extras.
+    monkeypatch.setitem(sys.modules, "litellm", None)
+    monkeypatch.setitem(
+        sys.modules, "litellm.litellm_core_utils.secret_redaction", None
+    )
+    async with _client(LiteLLMBridge(model="anthropic/claude-test")) as client:
+        response = await client.post(_url(), json=_body(stream=stream), headers=_auth())
+    assert response.status_code == (200 if stream else 502)
+    if stream:
+        payload = next(
+            json.loads(line[6:])
+            for line in response.text.splitlines()
+            if line.startswith("data: {")
+        )
+        assert response.text.rstrip().endswith("data: [DONE]")
+    else:
+        payload = response.json()
+    assert 'pip install "osmosis-ai[eval]"' in payload["error"]["message"]
+    assert payload["error"]["code"] == 502
+
+
+def test_error_redacts_known_secrets_when_litellm_redactor_is_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setitem(
+        sys.modules, "litellm.litellm_core_utils.secret_redaction", None
+    )
+    monkeypatch.setenv("OPENAI_API_KEY", "ambient-provider-test-secret")
+    _, payload = llm_bridge._bridge_error(
+        RuntimeError(
+            "Provider failed: configured-secret, ambient-provider-test-secret"
+        ),
+        secret_values=("configured-secret",),
+    )
+    assert payload["error"]["message"] == "Provider failed: [REDACTED], [REDACTED]"
+
+
 async def test_empty_choices_fail_loudly(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -353,12 +395,13 @@ async def test_request_fields_are_forwarded_and_credentials_injected(
         api_base="http://127.0.0.1:9/v1",
     )
     async with _client(bridge) as client:
-        await client.post(
+        response = await client.post(
             _url(),
             json=_body(
                 model="whatever-the-client-said",
                 temperature=0.5,
                 max_tokens=32,
+                stream=True,
                 stream_options={"include_usage": True},
                 unknown_field="forwarded",
                 reasoning={"effort": "low"},
@@ -366,6 +409,8 @@ async def test_request_fields_are_forwarded_and_credentials_injected(
             ),
             headers=_auth(),
         )
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
     (kwargs,) = fake.completion_kwargs
     assert kwargs["model"] == "anthropic/claude-test"
     assert kwargs["api_key"] == "provider-key"
@@ -377,7 +422,7 @@ async def test_request_fields_are_forwarded_and_credentials_injected(
     assert kwargs["unknown_field"] == "forwarded"
     assert kwargs["reasoning"] == {"effort": "low"}
     assert kwargs["provider"] == {"order": ["test-provider"]}
-    assert kwargs.get("stream") is not True
+    assert "stream" not in kwargs
 
 
 async def test_tool_calls_survive_both_shapes(

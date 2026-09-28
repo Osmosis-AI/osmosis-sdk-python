@@ -24,8 +24,23 @@ async def upstream(
     requests: list[httpx.Request] = []
 
     def respond(request: httpx.Request) -> httpx.Response:
+        assert request.method == "POST" and str(request.url) in {
+            "https://anthropic.example/v1/messages",
+            "https://router.example/v1/chat/completions",
+        }, f"Unexpected upstream request: {request.method} {request.url}"
         requests.append(request)
         body = json.loads(request.content)
+        has_tool_result = any(
+            message.get("role") == "tool"
+            or (
+                isinstance(message.get("content"), list)
+                and any(
+                    isinstance(block, dict) and block.get("type") == "tool_result"
+                    for block in message["content"]
+                )
+            )
+            for message in body["messages"]
+        )
         if body.get("reject_custom"):
             return httpx.Response(
                 400,
@@ -42,7 +57,7 @@ async def upstream(
                     {"type": "thinking", "thinking": "Use lookup.", "signature": "sig"},
                     {"type": "tool_use", "id": "call_1", "name": "lookup", "input": {}},
                 ]
-                if len(requests) == 1
+                if not has_tool_result
                 else [{"type": "text", "text": "done"}]
             )
             return httpx.Response(
@@ -53,7 +68,7 @@ async def upstream(
                     "role": "assistant",
                     "model": "claude-sonnet-4-6",
                     "content": content,
-                    "stop_reason": "tool_use" if len(requests) == 1 else "end_turn",
+                    "stop_reason": "tool_use" if not has_tool_result else "end_turn",
                     "stop_sequence": None,
                     "usage": {"input_tokens": 2, "output_tokens": 3},
                 },
@@ -68,10 +83,12 @@ async def upstream(
                 "choices": [
                     {
                         "index": 0,
-                        "finish_reason": "stop",
+                        "finish_reason": "tool_calls"
+                        if body.get("tools") and not has_tool_result
+                        else "stop",
                         "message": {
                             "role": "assistant",
-                            "content": "hello",
+                            "content": "done" if has_tool_result else "hello",
                             "reasoning_content": "A short thought.",
                             "reasoning_details": [
                                 {"type": "reasoning.encrypted", "data": "opaque"}
@@ -89,7 +106,7 @@ async def upstream(
                                         }
                                     ]
                                 }
-                                if body.get("tools")
+                                if body.get("tools") and not has_tool_result
                                 else {}
                             ),
                         },
@@ -105,16 +122,18 @@ async def upstream(
 
     client = httpx.AsyncClient(transport=httpx.MockTransport(respond))
     monkeypatch.setattr(AsyncHTTPHandler, "create_client", lambda self, **kw: client)
+    # The handler owns the client; keep it alive across every tool-loop request.
+    handler = AsyncHTTPHandler()
     original = litellm.acompletion
 
     async def complete(**kwargs: Any) -> Any:
-        return await original(**kwargs, client=AsyncHTTPHandler())
+        return await original(**kwargs, client=handler)
 
     monkeypatch.setattr(litellm, "acompletion", complete)
     try:
         yield requests
     finally:
-        await client.aclose()
+        await handler.close()
 
 
 async def test_custom_parameters_reach_openrouter_wire(
@@ -187,7 +206,7 @@ async def test_native_anthropic_tool_loop_preserves_signed_thinking(
     response = await bridge.complete(body, rollout_id="test")
     message = response.choices[0].message
     # Simulate a framework dropping extension fields but retaining tool calls.
-    await bridge.complete(
+    final_response = await bridge.complete(
         {
             **body,
             "messages": [
@@ -202,6 +221,8 @@ async def test_native_anthropic_tool_loop_preserves_signed_thinking(
         },
         rollout_id="test",
     )
+    assert final_response.choices[0].finish_reason == "stop"
+    assert final_response.choices[0].message.content == "done"
     first, second = (json.loads(request.content) for request in upstream)
     assert first["thinking"] == body["thinking"]
     assert first["context_management"] == body["context_management"]
@@ -235,7 +256,7 @@ async def test_openrouter_tool_loop_replays_provider_reasoning_details(
     }
     response = await bridge.complete(body, rollout_id="test")
     message = response.choices[0].message
-    await bridge.complete(
+    final_response = await bridge.complete(
         {
             **body,
             "messages": [
@@ -250,6 +271,9 @@ async def test_openrouter_tool_loop_replays_provider_reasoning_details(
         },
         rollout_id="test",
     )
+    assert final_response.choices[0].finish_reason == "stop"
+    assert final_response.choices[0].message.content == "done"
+    assert len(upstream) == 2
     assistant = json.loads(upstream[1].content)["messages"][1]
     assert assistant["reasoning_content"] == "A short thought."
     assert assistant["reasoning_details"] == [

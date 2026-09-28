@@ -136,6 +136,7 @@ def test_official_openai_preserves_translation_and_sends_metadata_as_body_data()
     kwargs = build_chat_kwargs(
         {"max_tokens": 64, "metadata": {"experiment": "test"}},
         model="openai/gpt-5-mini",
+        api_base="https://api.openai.com/v1",
     )
     assert kwargs["max_tokens"] == 64
     assert kwargs["extra_body"] == {"metadata": {"experiment": "test"}}

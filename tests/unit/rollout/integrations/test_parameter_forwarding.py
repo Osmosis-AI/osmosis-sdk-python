@@ -112,9 +112,9 @@ def assert_forwarded_parameters(body):
     assert body["tools"][0]["function"]["parameters"]["additionalProperties"] is False
 
 
-@pytest.mark.parametrize("stream", [False, True])
-async def test_agents_forward_parameters_to_gateway(
-    rollout_context, captured_requests, stream
+@pytest.mark.parametrize("response_method", ["get_response", "stream_response"])
+async def test_agents_response_methods_forward_parameters_over_streaming_transport(
+    rollout_context, captured_requests, response_method
 ):
     OsmosisMemorySession()
     model = OsmosisLitellmModel()
@@ -144,7 +144,7 @@ async def test_agents_forward_parameters_to_gateway(
         "tracing": ModelTracing.DISABLED,
     }
 
-    if stream:
+    if response_method == "stream_response":
         events = [event async for event in model.stream_response(**kwargs)]
         response = next(
             event.response for event in events if event.type == "response.completed"
@@ -156,7 +156,8 @@ async def test_agents_forward_parameters_to_gateway(
     assert len(captured_requests) == 1
     body = captured_requests[0]
     assert_forwarded_parameters(body)
-    assert body["stream"] is True  # get_response aggregates the streaming transport.
+    # Both model APIs use SSE; get_response aggregates it for the caller.
+    assert body["stream"] is True
     assert body["tools"][0]["function"]["strict"] is True
 
 

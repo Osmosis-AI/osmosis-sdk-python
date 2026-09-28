@@ -100,8 +100,6 @@ def _bridge_error(
     exc: Exception, *, secret_values: tuple[str | None, ...] = ()
 ) -> tuple[int, dict[str, Any]]:
     """Preserve actionable provider errors without echoing host credentials."""
-    from litellm.litellm_core_utils.secret_redaction import redact_string
-
     status = (
         400
         if isinstance(exc, BridgeRequestError)
@@ -127,7 +125,14 @@ def _bridge_error(
     values.update(value for value in secret_values if value)
     for secret in sorted(values, key=len, reverse=True):
         message = message.replace(secret, "[REDACTED]")
-    message = " ".join(redact_string(message).split())[:1000]
+    try:
+        from litellm.litellm_core_utils.secret_redaction import redact_string
+    except ImportError:
+        # Missing optional dependencies must retain their original install hint.
+        pass
+    else:
+        message = redact_string(message)
+    message = " ".join(message.split())[:1000]
     agent_status = status if isinstance(status, int) and 400 <= status < 500 else 502
     return agent_status, {
         "error": {
