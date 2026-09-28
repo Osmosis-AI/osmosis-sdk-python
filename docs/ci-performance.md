@@ -2,7 +2,81 @@
 
 Tracking: [OSM-1950 — Reduce SDK PR CI latency without weakening validation](https://linear.app/osmosis-ai/issue/OSM-1950/reduce-sdk-pr-ci-latency-without-weakening-validation).
 
-The measured bottleneck is pytest, especially Python 3.12 coverage. Use four pytest-xdist workers to target that path; use ty as the primary source checker for faster type feedback while retaining Pyright's public API completeness gate. No GitHub runner performance improvement has been measured for this patch yet. The working tree was clean before `git pull --ff-only origin main`; the base is `2ec76ec3f2df1071f1a778a068000f032fe52566`.
+The measured bottleneck is pytest, especially Python 3.12 coverage. Use four pytest-xdist workers to target that path; use ty as the primary source checker for faster type feedback while retaining Pyright's public API completeness gate. Repeated GitHub runner measurements now validate the worker-count improvement; see the published results below for the separate type-checker comparison and external-check latency. The working tree was clean before `git pull --ff-only origin main`; the base is `2ec76ec3f2df1071f1a778a068000f032fe52566`.
+
+## Published GitHub runner results
+
+[PR #402](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/402) was published with user authorization. All measurements in this section use candidate `8c8d210cd441c7ff436708ed6806aeb1e3a3e0fb`; subsequent reporting and PR-template edits do not change the tested source, tests, dependency lock or workflows. The remaining sections record the earlier investigation, including local-only experiments; their temporary evidence paths are not durable artifact storage.
+
+### Repeated worker comparison
+
+Nine sequential dispatches used `0,2,4; 4,0,2; 2,4,0`, three runs per configuration, with type benchmarking disabled. All succeeded. The observed Tests workflow median was **219s serial, 138s with two workers, and 122s with four workers**: four workers reduced the median by 44.3% versus serial and 11.6% versus two workers. This measures the worker-count change on the candidate, not the isolated effect of test deletion, ty migration or the Auto approve fix.
+
+Workflow wall is `max(job.completed_at) - run.created_at`, not `updated_at`. Times are seconds; the CPU column describes the Python 3.12 coverage job.
+
+| Order | Run | Workers | Workflow wall | Pytest 3.12 | CPU |
+|---:|---|---:|---:|---:|---|
+| 1 | [36438234924](https://github.com/Osmosis-AI/osmosis-sdk-python/actions/runs/36438234924) | 0 | 215 | 191 | EPYC 7763 |
+| 2 | [36438713702](https://github.com/Osmosis-AI/osmosis-sdk-python/actions/runs/36438713702) | 2 | 133 | 115 | EPYC 7763 |
+| 3 | [36439012055](https://github.com/Osmosis-AI/osmosis-sdk-python/actions/runs/36439012055) | 4 | 122 | 97 | EPYC 7763 |
+| 4 | [36439306803](https://github.com/Osmosis-AI/osmosis-sdk-python/actions/runs/36439306803) | 4 | 123 | 99 | EPYC 7763 |
+| 5 | [36439609257](https://github.com/Osmosis-AI/osmosis-sdk-python/actions/runs/36439609257) | 0 | 219 | 194 | EPYC 7763 |
+| 6 | [36440092583](https://github.com/Osmosis-AI/osmosis-sdk-python/actions/runs/36440092583) | 2 | 138 | 120 | EPYC 9V74 |
+| 7 | [36440450422](https://github.com/Osmosis-AI/osmosis-sdk-python/actions/runs/36440450422) | 2 | 138 | 114 | EPYC 7763 |
+| 8 | [36440796249](https://github.com/Osmosis-AI/osmosis-sdk-python/actions/runs/36440796249) | 4 | 94 | 67 | EPYC 9V45 |
+| 9 | [36441058882](https://github.com/Osmosis-AI/osmosis-sdk-python/actions/runs/36441058882) | 0 | 247 | 196 | EPYC 7763 |
+
+Each cell below is P50 / P90 / range. With only three samples per configuration, P90 is preliminary and uses linear interpolation.
+
+| Workers | Tests workflow | Pytest 3.12 + coverage | Pytest 3.13 | Pytest 3.14 |
+|---:|---|---|---|---|
+| 0 | 219 / 241.4 / 215–247 | 194 / 195.6 / 191–196 | 130 / 133.2 / 126–134 | 141 / 142.6 / 138–143 |
+| 2 | 138 / 138 / 133–138 | 115 / 119 / 114–120 | 81 / 82.6 / 79–83 | 81 / 81 / 78–81 |
+| 4 | 122 / 122.8 / 94–123 | 97 / 98.6 / 67–99 | 73 / 79.4 / 58–81 | 61 / 61 / 58–61 |
+
+Python 3.12 median phase times separate workflow dispatch, runner queue, startup, installation and cleanup. Post-test includes upload steps and remaining cleanup; do not sum its upload columns again. Medians of individual phases need not add up to the median workflow wall.
+
+| Workers | Dispatch | Runner queue | Startup | setup-uv | Install | Test | Post-test | Codecov upload | Evidence upload |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 0 | 2 | 2 | 1 | 2 | 3 | 194 | 8 | 4 | 1 |
+| 2 | 2 | 2 | 1 | 2 | 3 | 115 | 6 | 3 | 1 |
+| 4 | 2 | 3 | 1 | 3 | 3 | 97 | 8 | 4 | 1 |
+
+All 27 pytest jobs used the same clean candidate checkout, configuration/lock hashes, and dependency inventory and testcase multiset within each Python version. Each job passed 3,569 tests with the same optional-NumPy skip. uv was 0.12.19, the image was `ubuntu24/20260920.314.1`, and each runner exposed four CPUs. Python 3.12 was 3.12.3; exact interpreter and package versions are retained in each `pytest-*` artifact. All nine source/public-API type jobs, nine builds and 81 independent wheel-smoke jobs passed. These gates remain intact.
+
+CPU models varied despite the same runner label/image: Python 3.12 used EPYC 7763 in seven runs, 9V74 in one two-worker run and 9V45 in the 94-second four-worker run. Python 3.13/3.14 also mixed EPYC and Xeon models. The fastest four-worker run finished on Python 3.13; the other eight finished on Python 3.12. Do not attribute the 94-second extreme solely to worker count. Restricting to Python 3.12 jobs on EPYC 7763 gives workflow medians 219/135.5/122.5s and test medians 194/114.5/98s for 0/2/4 workers (n=3/2/2). This small subset supports the direction of the improvement, without making hardware strictly controlled.
+
+The first serial run had a cache miss; later Python 3.12 runs reported cache hits. The last serial run nevertheless spent 33s installing dependencies versus 3s in the other eight: uv reported 32.80s preparing packages, with pyarrow and nodejs-wheel-binaries downloads finishing late, and only 361ms installing them. The network/service cause is unknown. A cache hit does not mean a restored complete environment. Retain this outlier: the cache-hit-only serial workflow median rises to 233s, so that subset must not be presented as stronger causal evidence for parallelism. Its test median is 195s, consistent with the full serial sample.
+
+Four-worker Python 3.12 test-step speedup is 2.00×, with 50% parallel efficiency defined as `(T0/T4)/4`. This is not CPU utilization: step wall includes startup, collection, scheduling and coverage/report generation. The remaining slow cases are real SIGINT/SIGKILL recovery (four-worker call medians 9.4s/8.3s) and two orphan-process cleanup cases (about 5s each). These measurements do not justify reducing their behavior guarantees or timing windows.
+
+Coverage was 91.35486–91.37749%, above the unchanged 70% gate, with the same 10,146 lines and 3,110 branches in scope. One run did not execute `osmosis_ai/eval/local/runner.py:1250–1251`, including one branch from line 1250: the previously documented watchdog early-return race after cancellation/halt. Test outcomes, coverage exclusions and denominators did not change.
+
+### ty versus Pyright on the same GitHub runner
+
+[The separate type comparison](https://github.com/Osmosis-AI/osmosis-sdk-python/actions/runs/36441647461) used the same clean candidate, Python 3.12.3 environment, installed dependencies, Linux platform and `osmosis_ai/` scope for both tools. Each received one warmup followed by five alternating measured launches; every launch passed and source/config hashes remained unchanged. These are five paired process launches in one runner job, not five independent workflow samples. This benchmark-enabled workflow is excluded from the worker wall-time distributions above.
+
+| Checker | Version | Median (s) | Range (s) |
+|---|---|---:|---:|
+| ty | 0.0.84 | 0.754 | 0.680–0.762 |
+| Pyright | 1.1.411 | 9.146 | 9.102–9.681 |
+
+The source-check median fell by 8.392s (91.8%, approximately 12.1× faster). Pyright public API verification still passed the existing narrow Harbor-baseline filter. Both source checkers finish before the pytest critical path, so this is faster type feedback, not an additional 8.392s reduction in overall Tests completion. The `typecheck-benchmark` artifact includes commands, dependencies, hashes, every timing and checker diagnostics.
+
+### Actual PR completion and external tail
+
+[The normal PR Tests run](https://github.com/Osmosis-AI/osmosis-sdk-python/actions/runs/36437966174) completed in 120s, including a 99s Python 3.12 test step, 3s dependency installation and 7s from test completion to job completion. All six required status contexts had succeeded by that point. This is one PR sample; comparison with the historical 225s median is observational, not a controlled measurement of the entire patch.
+
+| Original PR check instance | Completion UTC | Seconds after Tests |
+|---|---|---:|
+| Tests and six required contexts | 14:44:15 | 0 |
+| Codecov | 14:45:51 | 96 |
+| Devin status | 14:49:49 | 334 |
+| cubic | 14:49:52 | 337 |
+
+The last tracked external instance completed 457s after the original trigger at 14:42:15 UTC. Devin's review text was posted at 14:44:39, 310s before its success status. Codecov's first success preceded the next dispatch upload, supporting attribution to the original PR upload; the check API itself exposes no originating workflow ID. cubic was followed by its check ID captured before dispatch. The original label run was cancelled and replaced by a successful same-head label run. Because manual comparison jobs later shared the head, 457s is the tracked original-check completion time, not a claimed global PR UI first-all-green time. Faster pytest does not remove this external-review tail, and the Auto approve change cannot be validated until it reaches the default branch through normal review and merge.
+
+Raw logs, environment/JUnit/coverage artifacts and step timestamps are attached to the linked runs. Local copies and derived CSV/JSON are under `/tmp/osmosis-ci-investigation/runner-acceptance-20260928/`; the original-PR check snapshots are under `/tmp/osmosis-ci-investigation/pr402-tail/`. These local paths are ephemeral. The eighth dispatch was uniquely recovered through the unfiltered run collection after a stale filtered-list response; no extra run or cancellation was introduced, and its timing still uses the retained GitHub timestamps.
 
 ## Candidate and preserved checks
 
@@ -217,7 +291,7 @@ The continuation preserves the incoming uncommitted patch, with a byte-for-byte 
 
 Reanalyzing the five retained Python 3.12.14 runs on the same Mac and dependency environment gives the following ranges of summed JUnit testcase durations. These sums overlap under xdist and are neither workflow wall time nor CPU time; they identify inspection targets only.
 
-| Test module | Sum of testcase durations per run (s) | Behavior to preserve |
+| Test module (relative to `tests/unit/`) | Sum of testcase durations per run (s) | Behavior to preserve |
 |---|---:|---|
 | `eval/local/test_runner_e2e.py` | 43.129–44.734 | Real child processes, HTTP calls, journaling and server shutdown |
 | `eval/local/test_runner_crash_resume.py` | 12.318–16.805 | Durable journal, SIGKILL/SIGINT and recovery with unfinished work |
@@ -309,20 +383,22 @@ A second audit removes another 22 redundant testcase entries across 12 files, wi
 
 | Area | Cases removed | Protection retained |
 |---|---:|---|
-| CLI registration, help and rendering | 7 | Actual root/quickstart help, reserved JSON-key protection, exact plain output and running/finished checkpoint rendering already check the same behavior |
+| CLI registration, help and rendering | 7 | Actual root/quickstart help, reserved JSON-key protection, exact plain output and running/finished checkpoint rendering remain; the internal quickstart help string may gain additional explanatory text |
 | CommandResult value construction | 5 | Actual JSON/plain/rich renderers and command consumers check the fields; positional exit-code compatibility and overflow typing tests remain |
 | Platform labels and model parsing | 6 | Mixed/sorted secret scopes, personal-only labeling, status formatting and the real deploy client retain the same output/parser assertions |
 | Rollout contexts and sample/packaging checks | 4 | Backend-to-workflow/grader metadata transfer and SDK sanitization remain; a test of Python's own JSON behavior is removed |
 
 Review caught one distinct boundary inside the misleading Harbor `test_bundle_requirements_skips_extras`: its fixture has no extras, but `requirements == []` is still a useful empty-dependency assertion. That exact assertion now runs after the existing `inspect_bundle(bundle)` in `test_grader_wheel_ships_in_tests_dir`, using the same module-scoped wheel without an additional build or testcase. The real extras-filtering test in `test_packaging.py` remains. No default-value, authentication, secret-redaction, recovery, resource-cleanup or positional-API compatibility test was removed merely for being small.
 
+The quickstart help assertions are intentionally not identical: the retained CLI test still requires the complete expected sentence in actual help output, while removing the private `.help` exact-equality assertion permits additional explanatory text. Backend tests still construct both workflow and grader contexts with populated metadata and compare the full value. These tests exercise the real transfer path instead of repeating dataclass-constructor round trips.
+
 The previous temporary environment was no longer available, so validation used a fresh isolated source copy with Python 3.12.11 and `uv sync --locked --all-extras --group dev`. The affected modules plus their retained protection tests passed 587 tests with one optional-NumPy skip. The complete four-worker branch-coverage suite passed 3,569 tests with that same skip, covering 9,486/10,146 lines and 2,632/3,110 branches (91.42%). The final relocated empty-dependency assertion passed its targeted test after the full run. Ruff lint/format and `git diff --check` pass. No timing comparison is made against the earlier Python 3.12.14 environment.
 
-Exact deletion-to-retained-test mappings, original files, source hashes, JUnit and logs are under `/tmp/osmosis-ci-investigation/test-simplification/`. The existing uncommitted changes remain in place; no commit, push or remote run was performed.
+Exact deletion-to-retained-test mappings, original files, source hashes, JUnit and logs are under `/tmp/osmosis-ci-investigation/test-simplification/`. At the end of this pre-publication phase, the changes were still uncommitted and no push or remote run had been performed.
 
 ## GitHub runner acceptance procedure
 
-No commit, push, workflow dispatch, merge or repository-rule change was performed during this investigation. Publishing the branch requires the user's authorization. Runner results are still required before stating a CI performance gain.
+This procedure was prepared before publication. The user subsequently authorized PR creation and runner measurement; the completed experiment is recorded above. No merge or repository-rule change was made.
 
 1. Publish the reviewed patch after authorization and pin one candidate commit for the experiment. Verify the manual dispatch is available for that ref; GitHub documents [default-branch requirements for manual workflows](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/manually-run-a-workflow). Do not merge the optimization merely to enable an experiment if GitHub rejects dispatch before registration.
 2. Run Tests with `pytest-workers=0`, `pytest-workers=2` and `pytest-workers=4`, keeping `benchmark-types=false` for overall workflow measurements. Compare zero versus four for the total parallelism change, and two versus four for the follow-up change. Run each to completion before starting the next because the existing concurrency group cancels overlapping runs on the same ref. Use at least three samples per worker count in counterbalanced order, for example `0,2,4; 4,0,2; 2,4,0`. Verify the same actual checkout HEAD, lockfile, installed dependencies, uv/Python versions, runner image and comparable cache conditions from logs and artifacts. PR checkout normally uses a merge commit, while dispatch checks out the chosen ref; identical PR head SHA alone is insufficient. More samples may be required if startup variance dominates. Do not compare a cold baseline only with a warm candidate.
