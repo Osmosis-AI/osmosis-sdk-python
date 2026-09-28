@@ -14,7 +14,7 @@ import pytest
 from harbor.trial.queue import TrialQueue
 from pydantic import ValidationError
 
-from osmosis_ai.packaging import build_bundle, inspect_bundle
+from osmosis_ai.packaging import build_bundle
 from osmosis_ai.rollout.backend.harbor.backend import (
     CredentialScrubError,
     HarborBackend,
@@ -450,9 +450,6 @@ class TestPatchDockerfileWithSdk:
             "uv venv" not in (template_task / "environment" / "Dockerfile").read_text()
         )
 
-    def test_bundle_requirements_skips_extras(self, bundle):
-        assert inspect_bundle(bundle).requirements == []
-
     def test_backend_flag_requires_bundle(self, template_task):
         with pytest.raises(ValueError, match="requires a bundle"):
             HarborBackend(
@@ -844,6 +841,7 @@ class TestNativeAgents:
         from osmosis_ai.packaging import inspect_bundle
 
         info = inspect_bundle(bundle)
+        assert info.requirements == []
         prompt = [{"role": "user", "content": "x"}]
         task_dir = HarborTask(template_task).materialize(
             tmp_path / "r1",

@@ -7,7 +7,8 @@ import warnings
 from collections.abc import Callable
 from functools import wraps
 from pathlib import Path
-from typing import Any
+from types import FunctionType
+from typing import Any, cast
 
 import typer
 import typer.core
@@ -448,7 +449,7 @@ def _validate_command_names(target: typer.Typer, path: str = "") -> set[str]:
     for command in target.registered_commands:
         name = command.name
         if not name and command.callback is not None:
-            name = get_command_name(command.callback.__name__)
+            name = get_command_name(cast(FunctionType, command.callback).__name__)
         if name is not None:
             if name in names:
                 raise CLIError(f"Duplicate CLI command: {path}{name}", code="INTERNAL")

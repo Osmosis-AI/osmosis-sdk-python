@@ -199,7 +199,7 @@ def command_path_for_error(
         return _tree_command_path(
             root_command, argv if argv is not None else sys.argv[1:]
         )
-    return (ctx and _click_subcommand_path(ctx)) or "<root>"
+    return (_click_subcommand_path(ctx) if ctx is not None else None) or "<root>"
 
 
 def emit_structured_error_to_stderr(

@@ -29,7 +29,7 @@ Examples:
 - [ ] PR title follows `[module] type: description` format
       (labels are derived from it automatically — no need to add them by hand)
 - [ ] `ruff check .` and `ruff format --check .` pass
-- [ ] `pyright osmosis_ai/` passes
+- [ ] `ty check --error-on-warning osmosis_ai/` passes; `uv run --no-editable pyright --verifytypes osmosis_ai --ignoreexternal` has no unexpected errors (see `CONTRIBUTING.md` for the Harbor baseline)
 - [ ] `pytest` passes (new tests added if applicable)
 - [ ] Public API changes are documented
 - [ ] No secrets or credentials included

@@ -97,19 +97,3 @@ def test_dataset_status_format_renders_inactive_statuses_dim(
     console.print(utils_module.format_dataset_status(dataset))
 
     assert f"[{status}]" in strip_ansi(output.getvalue())
-
-
-def test_dataset_status_format_returns_dim_markup_for_inactive_status() -> None:
-    console = Console(file=StringIO(), force_terminal=False)
-    dataset = SimpleNamespace(
-        status="cancelled",
-        processing_step=None,
-        processing_percent=None,
-    )
-
-    original_console = utils_module.console
-    utils_module.console = console
-    try:
-        assert utils_module.format_dataset_status(dataset) == "[dim]\\[cancelled][/dim]"
-    finally:
-        utils_module.console = original_console

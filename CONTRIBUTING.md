@@ -34,16 +34,20 @@ The table below lists all development commands. If you installed with **pip**, d
 | Run a single file | `uv run pytest tests/unit/rollout/test_validator.py` |
 | Run tests by name | `uv run pytest -k "test_name"` |
 | Run with coverage | `uv run pytest --cov=osmosis_ai --cov-report=term-missing` |
+| Run tests with CI parallelism | `uv run pytest -n 4 --dist worksteal` |
 | Lint | `uv run ruff check .` |
 | Lint + autofix | `uv run ruff check --fix .` |
 | Format | `uv run ruff format .` |
 | Check formatting | `uv run ruff format --check .` |
-| Type check (pyright) | `uv run pyright osmosis_ai/` |
+| Type check (ty) | `uv run ty check --error-on-warning osmosis_ai/` |
+| Compare with Pyright | `uv run pyright osmosis_ai/` |
 | Verify public API types | `uv run --no-editable pyright --verifytypes osmosis_ai --ignoreexternal` |
 
 ## Testing
 
 Coverage configuration is in `pyproject.toml` under `[tool.coverage.*]`. CI enforces a minimum coverage threshold of 70%.
+
+Coverage is a regression signal, not a reason to add repetitive tests to reach 90% or higher. Test distinct behavior and failure modes; when expensive integration tests use identical inputs and setup, consolidate their assertions into one real execution. Preserve independent installation checks, subprocess lifecycle, recovery and security contracts.
 
 When changing remote run commands, preserve the naming convention: bare
 verbs act on a group's primary noun. `train` and `eval` manage runs with
@@ -63,14 +67,12 @@ Ruff is pinned to one version across `pyproject.toml`, `.pre-commit-config.yaml`
 
 ## Type Checking
 
-[Pyright](https://microsoft.github.io/pyright/) is the type checker, included in
-the `dev` dependency group.
+[ty](https://docs.astral.sh/ty/) is the primary type checker. [Pyright](https://microsoft.github.io/pyright/) remains responsible for public API type completeness; both are pinned in the `dev` dependency group.
 
-- **Pyright** — must pass. All errors must be resolved before merging. It is
-  installed from the `dev` dependency group.
+- **ty** — must pass without errors or warnings across `osmosis_ai/`.
 - **Pyright `--verifytypes`** — must pass. Ensures all public API symbols have complete type annotations.
 
-Configuration lives in `pyproject.toml` under `[tool.pyright]`.
+Configuration lives in `pyproject.toml` under `[tool.ty]` and `[tool.pyright]`. CI retains the required check name `typecheck-pyright`; that job runs ty followed by Pyright's public API verification. The existing exception for Harbor's untyped `BaseInstalledAgent` remains limited to `harbor.harness_agent` symbols in the workflow.
 
 > **Note:** `--verifytypes` requires a non-editable install. The `--no-editable` flag in `uv run` handles this automatically — it temporarily installs the package from a built wheel for the duration of the command.
 
@@ -82,7 +84,9 @@ Configuration lives in `pyproject.toml` under `[tool.pyright]`.
 pre-commit install
 ```
 
-> **Tip:** Run `uv run pyright osmosis_ai/` before pushing to catch type errors early. For full CI parity, also run `uv run --no-editable pyright --verifytypes osmosis_ai --ignoreexternal`. CI will block PRs with pyright failures.
+> **Tip:** Run `uv run ty check --error-on-warning osmosis_ai/` before pushing to catch type errors early. Also run `uv run --no-editable pyright --verifytypes osmosis_ai --ignoreexternal` and inspect any errors against the narrow Harbor exception above.
+
+CI runs all tests with four pytest-xdist workers using `worksteal` scheduling, including coverage on Python 3.12 and the complete suites on Python 3.13 and 3.14. Local `uv run pytest` remains serial for debugging.
 
 ## Pull Requests
 
@@ -160,4 +164,4 @@ If the title does not match the convention, the labeling job fails rather than r
 3. Run `uv run pytest` and `uv run ruff check .`
 4. Submit a pull request with a properly formatted title; title-derived labels are added automatically
 
-CI will run linting, type checking (pyright), tests on supported Python versions (see `requires-python` in `pyproject.toml`), PR title validation, and a build validation on every PR.
+CI will run linting, type checking (ty and Pyright public API verification), tests on supported Python versions (see `requires-python` in `pyproject.toml`), PR title validation, and a build validation on every PR.

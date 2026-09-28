@@ -9,7 +9,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextvars import copy_context
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from osmosis_ai.cli.console import console
 from osmosis_ai.cli.errors import CLIError
@@ -473,7 +473,7 @@ def run_download(
                         for item, url in ready
                     ]
                     for future in as_completed(futures):
-                        result = future.result()
+                        result = cast(_TransferResult, future.result())
                         processed_bytes += result.file.manifest.size
                         progress_cb(
                             min(processed_bytes, progress_total), progress_total

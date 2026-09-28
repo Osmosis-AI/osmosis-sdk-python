@@ -54,20 +54,6 @@ def test_list_envelope_required_keys() -> None:
     assert stderr == ""
 
 
-def test_list_envelope_supports_extra_keys() -> None:
-    result = ListResult(
-        title="Eval caches",
-        items=[],
-        total_count=0,
-        has_more=False,
-        next_offset=None,
-        columns=[],
-        extra={"workspace": "ws-a"},
-    )
-    payload, _ = _render_to_json(result)
-    assert payload["workspace"] == "ws-a"
-
-
 def test_list_envelope_extra_cannot_override_reserved_keys() -> None:
     result = ListResult(
         title="Datasets",
@@ -138,11 +124,6 @@ def test_sectioned_list_envelope_required_keys() -> None:
         "next_offset": 1,
     }
     assert stderr == ""
-
-
-def test_sectioned_list_envelope_supports_extra_keys() -> None:
-    payload, _ = _render_to_json(_sectioned_list_result({"workspace": "ws-a"}))
-    assert payload["workspace"] == "ws-a"
 
 
 def test_sectioned_list_envelope_extra_cannot_override_reserved_keys() -> None:

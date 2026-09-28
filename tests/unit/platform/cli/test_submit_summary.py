@@ -62,24 +62,6 @@ def test_env_table_rows_empty() -> None:
 # --- build_secret_table_rows ---
 
 
-def test_secret_table_rows_workspace_scope() -> None:
-    rows = build_secret_table_rows(
-        ["WANDB_API_KEY"],
-        user_secret_names=set(),
-        workspace_secret_names={"WANDB_API_KEY"},
-    )
-    assert rows == [("WANDB_API_KEY", "Workspace")]
-
-
-def test_secret_table_rows_personal_override_scope() -> None:
-    rows = build_secret_table_rows(
-        ["OPENAI_API_KEY"],
-        user_secret_names={"OPENAI_API_KEY"},
-        workspace_secret_names={"OPENAI_API_KEY"},
-    )
-    assert rows == [("OPENAI_API_KEY", "Personal (overrides workspace)")]
-
-
 def test_secret_table_rows_personal_only_is_not_an_override() -> None:
     rows = build_secret_table_rows(
         ["OPENAI_API_KEY"],

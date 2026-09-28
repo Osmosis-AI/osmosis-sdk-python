@@ -6,7 +6,6 @@ grader that never ran.
 """
 
 import json
-import math
 import numbers
 
 import pytest
@@ -133,14 +132,6 @@ class TestJsonSafeCopy:
             "n": None,
             "i": 3,
         }
-
-    def test_json_dumps_would_otherwise_emit_invalid_json(self):
-        # Why this exists at all: the stdlib happily writes a literal no strict
-        # parser accepts, and HTTPX's encoder raises outright.
-        assert json.dumps({"x": float("nan")}) == '{"x": NaN}'
-        with pytest.raises(ValueError):
-            json.dumps({"x": float("nan")}, allow_nan=False)
-        assert not math.isfinite(float("nan"))
 
     def test_foreign_numeric_scalars_normalize_to_builtins(self):
         # np.float32/np.int64 pass an isinstance(value, float) gate untouched

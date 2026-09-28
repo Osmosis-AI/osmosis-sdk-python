@@ -157,9 +157,14 @@ def test_result_returns_404_for_unknown_rollout() -> None:
 
 def test_duplicate_rollout_id_is_rejected() -> None:
     with TestClient(create_rollout_server(backend=BlockingBackend())) as client:
-        assert client.post("/rollout", json=init_body()).status_code == 202
+        admission = client.post("/rollout", json=init_body())
+        assert admission.status_code == 202
         duplicate = client.post("/rollout", json=init_body())
-    assert duplicate.status_code == 409
+        assert duplicate.status_code == 409
+        # Finish the blocked rollout instead of waiting for shutdown's grace period.
+        assert client.post("/rollout/cancel", json={"ids": ["r1"]}).status_code == 200
+        result = client.get("/rollout/r1/result", headers=lease_headers(admission))
+        assert result.json()["status"] == "cancelled"
 
 
 async def test_result_wait_uses_server_configuration() -> None:

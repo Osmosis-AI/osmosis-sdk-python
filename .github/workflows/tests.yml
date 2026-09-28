@@ -31,6 +31,7 @@ jobs:
           args: "format --check"
 
   typecheck-pyright:
+    # Keep the required check name; Pyright still verifies public API types.
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -41,8 +42,8 @@ jobs:
           enable-cache: true
       - name: Install dependencies
         run: uv sync --locked --all-extras --group dev
-      - name: Run pyright
-        run: uv run pyright osmosis_ai/
+      - name: Run ty
+        run: uv run --no-sync ty check --error-on-warning osmosis_ai/
       - name: Verify public API types
         run: |
           output=$(uv run --no-editable pyright --verifytypes osmosis_ai --ignoreexternal 2>&1) || true
@@ -88,7 +89,7 @@ jobs:
 
       - name: Run tests with coverage
         if: matrix.python-version == '3.12'
-        run: uv run pytest --cov=osmosis_ai --cov-branch --cov-report=term-missing --cov-report=xml
+        run: uv run --no-sync pytest -n 4 --dist worksteal --durations=30 --cov=osmosis_ai --cov-branch --cov-report=term-missing --cov-report=xml
 
       - name: Upload coverage to Codecov
         if: matrix.python-version == '3.12' && !github.event.pull_request.head.repo.fork
@@ -99,7 +100,7 @@ jobs:
 
       - name: Run tests
         if: matrix.python-version != '3.12'
-        run: uv run pytest
+        run: uv run --no-sync pytest -n 4 --dist worksteal --durations=30
 
   build:
     runs-on: ubuntu-latest

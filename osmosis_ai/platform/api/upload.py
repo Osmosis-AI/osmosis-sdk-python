@@ -48,6 +48,7 @@ def _require_https(url: str, context: str = "Upload URL") -> None:
 
 
 if TYPE_CHECKING:
+    from types import TracebackType
     from typing import IO
 
     from .models import UploadInfo
@@ -90,7 +91,12 @@ class SliceFileObj(RawIOBase):
         self._bytes_read = 0
         return self
 
-    def __exit__(self, *_: object) -> None:
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None:
         pass
 
     # -- file-like interface ----------------------------------------------
@@ -490,16 +496,17 @@ def make_progress_bar(
             BarColumn,
             DownloadColumn,
             Progress,
+            Task,
             TransferSpeedColumn,
         )
         from rich.text import Text
 
         class _SpeedCol(TransferSpeedColumn):
-            def render(self, task: object) -> Text:
-                speed = task.finished_speed or task.speed  # type: ignore[union-attr]
+            def render(self, task: Task) -> Text:
+                speed = task.finished_speed or task.speed
                 if speed is None:
                     return Text("-", style="progress.data.speed")
-                return super().render(task)  # type: ignore[arg-type]
+                return super().render(task)
 
         progress = Progress(
             "[progress.percentage]{task.percentage:>3.0f}%",
