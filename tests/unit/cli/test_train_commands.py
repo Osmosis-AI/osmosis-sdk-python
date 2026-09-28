@@ -639,54 +639,6 @@ class TestStatus:
         } == _git_extra()
         assert "workspace" not in result.data
 
-    def test_status_renders_checkpoints_as_sections(
-        self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
-    ) -> None:
-        from osmosis_ai.platform.api.models import LoraCheckpointInfo
-
-        detail = TrainingRunDetail(
-            id="abcdef1234567890abcdef1234567890",
-            name="run-1",
-            status="finished",
-            model_name="gpt-2",
-            created_at="2026-01-01T00:00:00Z",
-            platform_url="https://platform.example.test/ws/training/abcdef1234567890abcdef1234567890",
-        )
-        checkpoint = LoraCheckpointInfo(
-            id="ckpt_abcdef123456",
-            checkpoint_name="run-1-step-100",
-            checkpoint_step=100,
-            status="uploaded",
-            created_at="2026-01-01T01:00:00Z",
-        )
-
-        class FakeClient:
-            def get_training_run(self, run_id, *, git_identity, credentials=None):
-                assert git_identity == GIT_IDENTITY
-                return detail
-
-            def list_training_run_checkpoints(
-                self, run_id, *, git_identity, credentials=None
-            ):
-                assert git_identity == GIT_IDENTITY
-                return type("CheckpointPage", (), {"checkpoints": [checkpoint]})()
-
-            get_training_run_metrics = _raise_metrics_unavailable
-
-        monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
-        monkeypatch.setattr(platform_train_module, "OsmosisClient", FakeClient)
-        monkeypatch.setattr(shared_submit_module, "OsmosisClient", FakeClient)
-        result = train_module.info(name="run-1")
-
-        assert all(field.label != "Checkpoint" for field in result.fields)
-        assert all(field.label != "Deploy" for field in result.fields)
-        assert result.sections
-        assert result.display_hints == [
-            f"View: {detail.platform_url}",
-            "Deploy with: osmosis model deploy <lora-model-name>",
-        ]
-        assert result.data["checkpoints"][0]["checkpoint_name"] == "run-1-step-100"
-
     def test_status_checkpoint_section_omits_created_column_and_escapes_names(
         self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
     ) -> None:

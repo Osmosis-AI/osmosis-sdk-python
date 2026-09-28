@@ -8,6 +8,7 @@ teardown — without any network or the binary itself.
 from __future__ import annotations
 
 import asyncio
+import os
 import shutil
 import socket
 import time
@@ -51,19 +52,31 @@ async def test_start_parses_url_and_stop_kills_child(
 ) -> None:
     script = _fake_cloudflared(
         tmp_path,
-        f"echo 'INF |  {FAKE_URL}  |' >&2\n"
+        f"echo \"ARGS:$@\" >&2\necho 'INF |  {FAKE_URL}  |' >&2\n"
         "echo 'INF Registered tunnel connection' >&2\n"
         "exec sleep 60",
     )
     monkeypatch.setattr(shutil, "which", lambda name: str(script))
     monkeypatch.setattr(CloudflaredTunnel, "_probe_ready", _no_probe)
-    tunnel = CloudflaredTunnel(local_url="http://127.0.0.1:1")
-    url = await tunnel.start()
-    assert url == FAKE_URL
-    assert tunnel.public_url == FAKE_URL
-    process = tunnel._process
-    assert process is not None and process.returncode is None
-    await tunnel.stop()
+    lines: list[str] = []
+    spawned: list[asyncio.subprocess.Process] = []
+    tunnel = CloudflaredTunnel(
+        local_url="http://127.0.0.1:1",
+        on_log=lines.append,
+        on_spawn=spawned.append,
+    )
+    try:
+        assert await tunnel.start() == FAKE_URL
+        assert tunnel.public_url == FAKE_URL
+        process = tunnel._process
+        assert process is not None and process.returncode is None
+        assert spawned == [process]
+        assert any(FAKE_URL in line for line in lines)
+        # Quick tunnels must ignore any default ~/.cloudflared config.
+        args_line = next(line for line in lines if line.startswith("ARGS:"))
+        assert f"--config {os.devnull}" in args_line
+    finally:
+        await tunnel.stop()
     assert process.returncode is not None
     # Stopped: there is no child left to wait on.
     assert await tunnel.wait() is None
@@ -87,11 +100,17 @@ async def test_registered_connection_skips_host_probe(
         raise AssertionError("registered tunnels must not wait on the host probe")
 
     monkeypatch.setattr(CloudflaredTunnel, "_probe_ready", unexpected_host_probe)
-    tunnel = CloudflaredTunnel(local_url="http://127.0.0.1:1")
-    assert await asyncio.wait_for(tunnel.start(), timeout=1.0) == FAKE_URL
-    assert tunnel.verified is True
-    assert tunnel.unverified_reason is None
-    await tunnel.stop()
+    lines: list[str] = []
+    tunnel = CloudflaredTunnel(local_url="http://127.0.0.1:1", on_log=lines.append)
+    try:
+        # Assert readiness behavior without timing OS subprocess scheduling.
+        assert await tunnel.start() == FAKE_URL
+        assert any(FAKE_URL in line for line in lines)
+        assert any("Registered tunnel connection" in line for line in lines)
+        assert tunnel.verified is True
+        assert tunnel.unverified_reason is None
+    finally:
+        await tunnel.stop()
 
 
 async def test_registered_child_that_exits_immediately_is_fatal(
@@ -105,9 +124,16 @@ async def test_registered_child_that_exits_immediately_is_fatal(
     )
     monkeypatch.setattr(shutil, "which", lambda name: str(script))
     spawned: list[asyncio.subprocess.Process] = []
-    tunnel = CloudflaredTunnel(local_url="http://127.0.0.1:1", on_spawn=spawned.append)
-    with pytest.raises(TunnelError, match="exited with code 7"):
-        await asyncio.wait_for(tunnel.start(), timeout=1.0)
+    lines: list[str] = []
+    tunnel = CloudflaredTunnel(
+        local_url="http://127.0.0.1:1", on_spawn=spawned.append, on_log=lines.append
+    )
+    with pytest.raises(
+        TunnelError, match="exited with code 7 before tunnel startup completed"
+    ):
+        await tunnel.start()
+    assert any(FAKE_URL in line for line in lines)
+    assert any("Registered tunnel connection" in line for line in lines)
     assert spawned[0].returncode == 7
     assert tunnel._process is None
 
@@ -308,47 +334,6 @@ def test_probe_failure_reason_identifies_dns() -> None:
         assert tunnel_module._probe_failure_reason(exc) == "DNS lookup failed"
 
 
-async def test_drain_forwards_cloudflared_log_lines(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    script = _fake_cloudflared(
-        tmp_path,
-        f"echo 'INF |  {FAKE_URL}  |' >&2\n"
-        "echo 'INF Registered tunnel connection' >&2\n"
-        "exec sleep 60",
-    )
-    monkeypatch.setattr(shutil, "which", lambda name: str(script))
-    monkeypatch.setattr(CloudflaredTunnel, "_probe_ready", _no_probe)
-    lines: list[str] = []
-    tunnel = CloudflaredTunnel(local_url="http://127.0.0.1:1", on_log=lines.append)
-    await tunnel.start()
-    await tunnel.stop()
-    assert any(FAKE_URL in line for line in lines)
-
-
-async def test_on_spawn_receives_the_child_process(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    script = _fake_cloudflared(
-        tmp_path,
-        f"echo 'INF |  {FAKE_URL}  |' >&2\n"
-        "echo 'INF Registered tunnel connection' >&2\n"
-        "exec sleep 60",
-    )
-    monkeypatch.setattr(shutil, "which", lambda name: str(script))
-    monkeypatch.setattr(CloudflaredTunnel, "_probe_ready", _no_probe)
-    seen: list[int] = []
-    tunnel = CloudflaredTunnel(
-        local_url="http://127.0.0.1:1",
-        on_spawn=lambda process: seen.append(process.pid),
-    )
-    await tunnel.start()
-    process = tunnel._process
-    assert process is not None
-    assert seen == [process.pid]
-    await tunnel.stop()
-
-
 async def test_on_spawn_failure_stops_child_and_fails_start(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -409,29 +394,6 @@ async def test_spawn_failure_raises_tunnel_error(
     monkeypatch.setattr(shutil, "which", lambda name: str(missing))
     with pytest.raises(TunnelError, match="could not start cloudflared"):
         await CloudflaredTunnel(local_url="http://127.0.0.1:1").start()
-
-
-async def test_spawn_pins_an_empty_config_file(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    # Quick tunnels are unsupported when a default ~/.cloudflared config
-    # exists, so the argv must pin an explicitly empty one.
-    import os
-
-    script = _fake_cloudflared(
-        tmp_path,
-        f"echo \"ARGS:$@\" >&2\necho 'INF |  {FAKE_URL}  |' >&2\n"
-        "echo 'INF Registered tunnel connection' >&2\n"
-        "exec sleep 60",
-    )
-    monkeypatch.setattr(shutil, "which", lambda name: str(script))
-    monkeypatch.setattr(CloudflaredTunnel, "_probe_ready", _no_probe)
-    lines: list[str] = []
-    tunnel = CloudflaredTunnel(local_url="http://127.0.0.1:1", on_log=lines.append)
-    await tunnel.start()
-    await tunnel.stop()
-    args_line = next(line for line in lines if line.startswith("ARGS:"))
-    assert f"--config {os.devnull}" in args_line
 
 
 async def test_rate_limited_creation_names_the_cause_and_the_docs(

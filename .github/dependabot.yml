@@ -11,6 +11,7 @@ updates:
           - "ruff"
           - "pytest*"
           - "pyright*"
+          - "ty"
           - "pre-commit"
     commit-message:
       prefix: "[misc] chore:"

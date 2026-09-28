@@ -27,6 +27,7 @@ The single `osmosis-ai` distribution always includes the CLI and framework-neutr
 
 ## Pages
 
+- [ci-performance.md](./ci-performance.md) — multi-run Actions latency evidence, type-checker comparison, preserved CI gates, and runner acceptance procedure.
 - [architecture.md](./architecture.md) — package layout, domain boundaries, import paths, lazy-loading rules, and the remote rollout protocol (client <-> rollout server). Start here.
 - [rollout-sdk.md](./rollout-sdk.md) — the library API you implement against: `AgentWorkflow`, `Grader`, contexts, configs, server/backends, and framework integrations.
 - [rollout-lifecycle.md](./rollout-lifecycle.md) — authenticated health, admission drain, native evidence inventories, and source image types.

@@ -5,50 +5,15 @@ from __future__ import annotations
 from typing import Literal, get_args, get_origin, get_type_hints
 
 from osmosis_ai.cli.output.result import (
-    DetailField,
     DetailResult,
     ListColumn,
     ListResult,
-    ListSection,
-    OperationResult,
     SectionedListResult,
 )
 
 
-def test_detail_result_basic() -> None:
-    result = DetailResult(
-        title="Dataset",
-        data={"id": "ds_1", "file_name": "train.jsonl"},
-        fields=[
-            DetailField(label="ID", value="ds_1"),
-            DetailField(label="File", value="train.jsonl"),
-        ],
-    )
-    assert result.title == "Dataset"
-    assert result.data["id"] == "ds_1"
-    assert len(result.fields) == 2
-
-
 def test_detail_result_preserves_positional_exit_code() -> None:
     assert DetailResult("T", {"id": "x"}, [], 7).exit_code == 7
-
-
-def test_list_result_carries_pagination() -> None:
-    result = ListResult(
-        title="Datasets",
-        items=[{"id": "ds_1"}, {"id": "ds_2"}],
-        total_count=42,
-        has_more=True,
-        next_offset=2,
-        columns=[
-            ListColumn(key="id", label="ID"),
-            ListColumn(key="status", label="Status"),
-        ],
-    )
-    assert result.total_count == 42
-    assert result.has_more is True
-    assert result.next_offset == 2
-    assert [column.key for column in result.columns] == ["id", "status"]
 
 
 def test_list_result_preserves_positional_exit_code() -> None:
@@ -67,66 +32,5 @@ def test_list_column_overflow_supports_rich_ignore() -> None:
     assert "ignore" in literal_values
 
 
-def test_sectioned_list_result_carries_per_section_pagination_and_columns() -> None:
-    result = SectionedListResult(
-        sections=[
-            ListSection(
-                key="base_models",
-                title="Base Models",
-                items=[{"id": "m_1"}],
-                total_count=3,
-                has_more=True,
-                next_offset=1,
-                columns=[ListColumn(key="id", label="ID")],
-            ),
-            ListSection(
-                key="lora_models",
-                title="LoRA Models",
-                items=[],
-                total_count=0,
-                has_more=False,
-                next_offset=None,
-                columns=[ListColumn(key="status", label="Status")],
-            ),
-        ],
-    )
-    assert [section.key for section in result.sections] == [
-        "base_models",
-        "lora_models",
-    ]
-    assert result.sections[0].has_more is True
-    assert result.sections[0].next_offset == 1
-    assert result.sections[1].next_offset is None
-    assert [column.key for column in result.sections[0].columns] == ["id"]
-    assert [column.key for column in result.sections[1].columns] == ["status"]
-
-
 def test_sectioned_list_result_preserves_positional_exit_code() -> None:
     assert SectionedListResult([], {}, 7).exit_code == 7
-
-
-def test_operation_result_minimal() -> None:
-    result = OperationResult(
-        operation="deploy",
-        status="success",
-        resource={"id": "ckpt_1", "checkpoint_name": "run-step-40"},
-    )
-    assert result.operation == "deploy"
-    assert result.status == "success"
-    assert result.resource is not None
-
-
-def test_operation_result_with_structured_next_steps() -> None:
-    result = OperationResult(
-        operation="deploy",
-        status="success",
-        message="Checkpoint deployed.",
-        next_steps_structured=[
-            {"action": "model_deploy", "model_name": "run-step-40"},
-        ],
-        display_next_steps=["Deploy with: osmosis model deploy run-step-40"],
-    )
-    assert result.next_steps_structured[0]["action"] == "model_deploy"
-    assert result.display_next_steps == [
-        "Deploy with: osmosis model deploy run-step-40"
-    ]

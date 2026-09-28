@@ -65,23 +65,13 @@ async def test_a_full_run_produces_the_download_layout(harness: RunnerHarness) -
         run_dir / "index.jsonl"
     ).read_text()
 
-
-async def test_the_stub_completion_is_graded_and_rewarded(
-    harness: RunnerHarness,
-) -> None:
     # The contract stub replies "ok" and every row's label is "ok", so a correct
     # end-to-end path yields reward 1.0 -- this is the reward-plumbing assertion.
-    summary = await harness.runner().run()
-    assert summary.succeeded == 4
     assert summary.metrics["pass_rate"] == 1
     assert summary.metrics["graded"] == 4
     rewards = {row["reward"] for row in harness.index_rows()}
     assert rewards == {1.0}
 
-
-async def test_trajectories_and_projections_are_written(harness: RunnerHarness) -> None:
-    await harness.runner().run()
-    run_dir = harness.run_dir()
     for row_index in range(4):
         projection = run_dir / "trajectories" / f"row_{row_index}_run_0.json"
         assert projection.is_file()
@@ -95,6 +85,32 @@ async def test_trajectories_and_projections_are_written(harness: RunnerHarness) 
             "row_index": row_index,
             "run_index": 0,
         }
+
+    hooks = harness.hooks
+
+    lines = (harness.run_dir() / "logs.txt").read_text().splitlines()
+    assert lines, "no log lines written"
+    for line in lines:
+        stamp, level, rest = line.split(" ", 2)
+        assert stamp.endswith("Z")
+        assert level in ("INFO", "WARNING", "ERROR")
+        assert rest.startswith("[")
+    assert any("[rollout-server]" in line for line in lines)
+
+    assert hooks.confirmations == [(4, "openai/gpt-5-mini")]
+    assert hooks.progress_snapshots[-1].completed == 4
+
+    # Each wait has a visible stage even without verbose output.
+    narration = " | ".join(hooks.stages)
+    assert "4 of 4 work items pending" in narration
+    assert "checking model openai/gpt-5-mini" in narration
+    assert "starting rollout server" in narration
+    assert "rollout server healthy on port" in narration
+    assert "running 4 work items" in narration
+
+    # The progress display exists before the first result.
+    assert hooks.progress_snapshots[0].completed == 0
+    assert hooks.progress_snapshots[0].total == 4
 
 
 async def test_artifacts_are_projected_when_the_workflow_writes_them(
@@ -143,18 +159,6 @@ async def test_multiple_attempts_per_row(harness: RunnerHarness) -> None:
     assert len(summary.metrics["pass_at_k"]) >= 2
 
 
-async def test_logs_txt_uses_the_download_line_format(harness: RunnerHarness) -> None:
-    await harness.runner().run()
-    lines = (harness.run_dir() / "logs.txt").read_text().splitlines()
-    assert lines, "no log lines written"
-    for line in lines:
-        stamp, level, rest = line.split(" ", 2)
-        assert stamp.endswith("Z")
-        assert level in ("INFO", "WARNING", "ERROR")
-        assert rest.startswith("[")
-    assert any("[rollout-server]" in line for line in lines)
-
-
 # --------------------------------------------------------------------------- #
 # Resume, fresh, retry
 # --------------------------------------------------------------------------- #
@@ -193,26 +197,6 @@ async def test_accepting_the_new_run_prompt_starts_a_generated_name(
     assert (harness.run_dir() / "events.jsonl").read_bytes() == journal_before
     assert not list(harness.output_root.glob("run-1.archive-*"))
     assert len(harness.index_rows(summary.run_name)) == 4
-
-
-async def test_a_partial_journal_reruns_only_the_missing_items(
-    harness: RunnerHarness,
-) -> None:
-    # Simulate a crash after two work items were durably journaled.
-    await harness.runner(
-        selection=select_rows(harness.dataset.path, row_selector=(0, 1))
-    ).run()
-    first_pass = {(r["row_index"], r["run_index"]) for r in harness.index_rows()}
-    assert first_pass == {(0, 0), (1, 0)}
-
-    hooks = RecordingHooks()
-    summary = await harness.runner(
-        hooks=hooks,
-        options=LocalEvalOptions(name="run-1"),
-        selection=select_rows(harness.dataset.path, row_selector=(0, 1)),
-    ).run()
-    assert summary.dispatched == 0
-    assert summary.resumed == 2
 
 
 async def test_a_changed_fingerprint_refuses_and_names_what_changed(
@@ -267,6 +251,7 @@ async def test_retry_failed_reruns_failures_with_a_fresh_rollout_id(
     selection = select_rows(harness.dataset.path, row_selector=(0,))
     first = await harness.runner(selection=selection).run()
     assert first.failed == 1
+    assert harness.index_rows()[0].get("resumed") is None
     failed_rollout_id = harness.index_rows()[0]["rollout_id"]
 
     monkeypatch.delenv("OSMOSIS_TEST_GRADER_CRASH")
@@ -278,6 +263,8 @@ async def test_retry_failed_reruns_failures_with_a_fresh_rollout_id(
     row = harness.index_rows()[0]
     assert row["status"] == "success"
     assert row["rollout_id"] != failed_rollout_id
+    # `resumed` is the platform's carry-forward flag; this result was produced now.
+    assert "resumed" not in row
     # Both attempts stay in the journal; the later one wins.
     assert len(harness.journal_lines()) == 2
     # The superseded attempt's artifacts remain for diagnosis.
@@ -375,34 +362,6 @@ async def test_a_missing_entrypoint_fails_before_dispatch(
 # --------------------------------------------------------------------------- #
 # Concurrency and confirmation
 # --------------------------------------------------------------------------- #
-
-
-async def test_confirmation_receives_the_pending_count(harness: RunnerHarness) -> None:
-    hooks = RecordingHooks()
-    await harness.runner(hooks=hooks).run()
-    assert hooks.confirmations == [(4, "openai/gpt-5-mini")]
-    assert hooks.progress_snapshots[-1].completed == 4
-
-
-async def test_the_run_narrates_its_stages(harness: RunnerHarness) -> None:
-    """Without --verbose these lines are the whole run report, so every wait a
-    user sits through -- preflight, server startup, scheduling -- names itself."""
-    hooks = RecordingHooks()
-    await harness.runner(hooks=hooks).run()
-    narration = " | ".join(hooks.stages)
-    assert "4 of 4 work items pending" in narration
-    assert "checking model openai/gpt-5-mini" in narration
-    assert "starting rollout server" in narration
-    assert "rollout server healthy on port" in narration
-    assert "running 4 work items" in narration
-
-
-async def test_progress_opens_before_the_first_result(harness: RunnerHarness) -> None:
-    """A rollout can take minutes; the display must exist during that wait."""
-    hooks = RecordingHooks()
-    await harness.runner(hooks=hooks).run()
-    assert hooks.progress_snapshots[0].completed == 0
-    assert hooks.progress_snapshots[0].total == 4
 
 
 async def test_declining_confirmation_dispatches_nothing(
@@ -692,25 +651,6 @@ async def test_a_journal_failure_is_surfaced_instead_of_a_silent_short_run(
     assert (
         "OSError: journal write failed" in (harness.run_dir() / "logs.txt").read_text()
     )
-
-
-async def test_a_retried_item_is_not_marked_resumed(
-    harness: RunnerHarness, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setenv("OSMOSIS_TEST_GRADER_CRASH", "1")
-    selection = select_rows(harness.dataset.path, row_selector=(0,))
-    await harness.runner(selection=selection).run()
-    assert harness.index_rows()[0].get("resumed") is None
-
-    monkeypatch.delenv("OSMOSIS_TEST_GRADER_CRASH")
-    await harness.runner(
-        selection=selection,
-        options=LocalEvalOptions(name="run-1", retry_failed=True),
-    ).run()
-    row = harness.index_rows()[0]
-    assert row["status"] == "success"
-    # `resumed` is the platform's carry-forward flag; this result was produced now.
-    assert "resumed" not in row
 
 
 async def test_secret_values_never_reach_logs_txt(

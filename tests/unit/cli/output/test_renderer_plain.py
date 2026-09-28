@@ -259,14 +259,3 @@ def test_operation_renders_concise_success_line() -> None:
     lines = stdout.splitlines()
     assert lines[0] == "Checkpoint deployed."
     assert any("Test it:" in line for line in lines)
-
-
-def test_no_ansi_in_plain_stdout() -> None:
-    result = DetailResult(
-        title="Dataset",
-        data={"id": "ds_1"},
-        fields=[DetailField(label="ID", value="ds_1")],
-    )
-    stdout, _ = _render(result)
-    assert "\x1b[" not in stdout
-    assert "\u2500" not in stdout

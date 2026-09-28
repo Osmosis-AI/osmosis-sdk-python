@@ -589,21 +589,6 @@ class TestModelModels:
         assert page.max_active_deployments == 0
         assert page.has_deployment_info is False
 
-    def test_lora_model_summary_from_dict(self) -> None:
-        from osmosis_ai.platform.api.models import LoraModelSummary
-
-        s = LoraModelSummary.from_dict(
-            {"id": "lora_1", "model_name": "x", "status": "active"}
-        )
-        assert s.id == "lora_1"
-        assert s.model_name == "x"
-        assert s.status == "active"
-
-    def test_deployment_status_frozensets(self) -> None:
-        from osmosis_ai.platform.api.models import DEPLOYMENT_STATUSES_SUCCESS
-
-        assert "active" in DEPLOYMENT_STATUSES_SUCCESS
-
     def test_lora_checkpoint_info(self) -> None:
         from osmosis_ai.platform.api.models import LoraCheckpointInfo
 

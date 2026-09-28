@@ -119,6 +119,7 @@ def test_framework_neutral_core_imports_without_optional_dependencies() -> None:
         """
         import builtins
         import importlib
+        import sys
 
         blocked = {
             "agents",
@@ -145,6 +146,10 @@ def test_framework_neutral_core_imports_without_optional_dependencies() -> None:
             return real_import(name, globals, locals, fromlist, level)
 
         builtins.__import__ = guarded_import
+        from osmosis_ai.rollout.client import RolloutClient, RolloutHandle
+
+        assert RolloutClient is not None
+        assert RolloutHandle is not None
         for module_name in (
             "osmosis_ai.rollout",
             "osmosis_ai.rollout.container.files",
@@ -160,6 +165,8 @@ def test_framework_neutral_core_imports_without_optional_dependencies() -> None:
             "osmosis_ai.rollout.client",
         ):
             importlib.import_module(module_name)
+        loaded_roots = {name.partition(".")[0] for name in sys.modules}
+        assert not (blocked & loaded_roots)
         """
     )
     assert result.returncode == 0, result.stderr
@@ -430,33 +437,6 @@ def test_local_eval_runner_imports_without_harbor_extra() -> None:
         loaded_roots = {name.partition(".")[0] for name in sys.modules}
         assert not (blocked & loaded_roots)
         assert "osmosis_ai.packaging" not in sys.modules
-        """
-    )
-    assert result.returncode == 0, result.stderr
-
-
-def test_rollout_client_imports_without_eval_run_extra() -> None:
-    result = _run_python(
-        """
-        import builtins
-        import sys
-
-        real_import = builtins.__import__
-        blocked = {"fastapi", "uvicorn"}
-
-        def guarded_import(name, globals=None, locals=None, fromlist=(), level=0):
-            root = name.partition(".")[0]
-            if root in blocked:
-                raise ModuleNotFoundError("No module named " + repr(root), name=root)
-            return real_import(name, globals, locals, fromlist, level)
-
-        builtins.__import__ = guarded_import
-        from osmosis_ai.rollout.client import RolloutClient, RolloutHandle
-
-        assert RolloutClient is not None
-        assert RolloutHandle is not None
-        loaded_roots = {name.partition(".")[0] for name in sys.modules}
-        assert not (blocked & loaded_roots)
         """
     )
     assert result.returncode == 0, result.stderr

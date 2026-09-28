@@ -181,21 +181,12 @@ include = ["my_harness*"]
     assert not any("pytest" in r for r in requirements)
 
 
-def test_grader_optional(project, tmp_path):
-    wheel = build_bundle(
-        project,
-        workflow="my_harness.solver:MyWorkflow",
-        bundles_dir=tmp_path / "bundles",
-    )
-    info = inspect_bundle(wheel)
-    assert info.grader_script is None
-
-
 def test_cache_hits_until_source_changes(project, tmp_path):
     bundles_dir = tmp_path / "bundles"
     kwargs = dict(workflow="my_harness.solver:MyWorkflow", bundles_dir=bundles_dir)
 
     first = build_bundle(project, **kwargs)
+    assert inspect_bundle(first).grader_script is None
     first_mtime = first.stat().st_mtime_ns
     cached = build_bundle(project, **kwargs)
     assert cached == first
@@ -423,7 +414,7 @@ def src_project(tmp_path):
     return code_dir
 
 
-def test_bundles_dir_inside_project_does_not_recurse(project, tmp_path):
+def test_bundles_dir_inside_project_keeps_cache_and_staging_correct(project):
     # The staging tree lives under bundles_dir; if that sits inside the project
     # then copytree's destination is a descendant of its own source, and the
     # published wheels feed back into the cache key.
@@ -442,12 +433,6 @@ def test_bundles_dir_inside_project_does_not_recurse(project, tmp_path):
     # since content_hash() would otherwise digest the wheel it just published.
     assert build_bundle(project, **kwargs) == first
 
-
-def test_bundles_dir_inside_project_still_tracks_source_changes(project, tmp_path):
-    bundles_dir = project / "bundles"
-    kwargs = dict(workflow="my_harness.solver:MyWorkflow", bundles_dir=bundles_dir)
-
-    first = build_bundle(project, **kwargs)
     (project / "my_harness" / "solver.py").write_text(
         "class MyWorkflow:\n    changed = True\n"
     )

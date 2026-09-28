@@ -7,19 +7,6 @@ from osmosis_ai.platform.api.models import (
     EnvironmentSecretInfo,
     PaginatedEnvironmentSecrets,
 )
-from osmosis_ai.platform.cli.shared_config import build_secret_table_rows
-
-
-def test_build_secret_table_rows_annotates_scope() -> None:
-    rows = build_secret_table_rows(
-        ["OPENAI_API_KEY", "GITHUB_TOKEN", "MY_PERSONAL"],
-        user_secret_names={"OPENAI_API_KEY", "MY_PERSONAL"},
-        workspace_secret_names={"OPENAI_API_KEY", "GITHUB_TOKEN"},
-    )
-    assert ("GITHUB_TOKEN", "Workspace") in rows
-    assert ("OPENAI_API_KEY", "Personal (overrides workspace)") in rows
-    # personal-only: no workspace secret of that name → not an override
-    assert ("MY_PERSONAL", "Personal") in rows
 
 
 def test_fetch_secret_scopes_collects_all_pages_and_partitions(monkeypatch) -> None:

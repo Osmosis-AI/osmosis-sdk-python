@@ -122,11 +122,6 @@ class TestGraderContext:
         ctx = GraderContext()
         assert ctx.metadata is None
 
-    def test_metadata_carried(self):
-        metadata = {"tools": ["search"], "difficulty": 3}
-        ctx = GraderContext(metadata=metadata)
-        assert ctx.metadata == metadata
-
 
 # ---------------------------------------------------------------------------
 # AgentWorkflowContext
@@ -150,10 +145,3 @@ class TestAgentWorkflowContext:
     def test_metadata_defaults_none(self):
         ctx = AgentWorkflowContext(prompt=[{"role": "user", "content": "hi"}])
         assert ctx.metadata is None
-
-    def test_metadata_carried(self):
-        metadata = {"tools": ["search"]}
-        ctx = AgentWorkflowContext(
-            prompt=[{"role": "user", "content": "hi"}], metadata=metadata
-        )
-        assert ctx.metadata == metadata

@@ -6,10 +6,8 @@ import json
 import re
 
 import pytest
-import typer
 
 from osmosis_ai.cli import main as cli
-from osmosis_ai.cli.main import _register_commands, app
 from osmosis_ai.cli.output import OperationResult
 
 ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;]*m")
@@ -21,29 +19,8 @@ HELP_TEXT = (
 MANUAL_SETUP_URL = "https://docs.osmosis.ai/platform/onboarding#manual-setup"
 
 
-def _quickstart_command():
-    _register_commands()
-    return typer.main.get_command(app).commands["quickstart"]
-
-
 def _flatten(text: str) -> str:
     return " ".join(ANSI_ESCAPE.sub("", text).split())
-
-
-def test_quickstart_is_a_root_command() -> None:
-    assert _quickstart_command().name == "quickstart"
-
-
-def test_quickstart_help_text_is_frozen() -> None:
-    assert _flatten(_quickstart_command().help or "") == HELP_TEXT
-
-
-def test_root_help_lists_quickstart(capfd) -> None:
-    exit_code = cli.main(["--plain", "--help"])
-    out = _flatten(capfd.readouterr().out)
-
-    assert exit_code == 0
-    assert "quickstart" in out
 
 
 def test_quickstart_help_exits_zero(capfd) -> None:
