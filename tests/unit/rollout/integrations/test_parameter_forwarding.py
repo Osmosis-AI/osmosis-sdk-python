@@ -58,6 +58,7 @@ def captured_requests(monkeypatch):
             chunk = {
                 **response,
                 "object": "chat.completion.chunk",
+                "usage": None,
                 "choices": [
                     {
                         "index": 0,
@@ -67,6 +68,13 @@ def captured_requests(monkeypatch):
                 ],
             }
             chunks.append(f"data: {json.dumps(chunk)}\n\n")
+        if body.get("stream_options", {}).get("include_usage"):
+            usage_chunk = {
+                **response,
+                "object": "chat.completion.chunk",
+                "choices": [],
+            }
+            chunks.append(f"data: {json.dumps(usage_chunk)}\n\n")
         chunks.append("data: [DONE]\n\n")
         return httpx.Response(
             200,
@@ -154,6 +162,12 @@ async def test_agents_response_methods_forward_parameters_over_streaming_transpo
         response = await model.get_response(**kwargs)
 
     assert response.output[0].content[0].text == "hello"
+    assert response.usage is not None
+    assert response.usage.input_tokens == 3
+    assert response.usage.output_tokens == 1
+    assert response.usage.total_tokens == 4
+    if response_method == "get_response":
+        assert response.usage.requests == 1
     assert len(captured_requests) == 1
     body = captured_requests[0]
     assert_forwarded_parameters(body)
