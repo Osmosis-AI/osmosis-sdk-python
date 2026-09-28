@@ -136,8 +136,10 @@ async def upstream(
         await handler.close()
 
 
+@pytest.mark.parametrize("stream", [False, True])
 async def test_custom_parameters_reach_openrouter_wire(
     upstream: list[httpx.Request],
+    stream: bool,
 ) -> None:
     bridge = LiteLLMBridge(
         model="openrouter/openai/gpt-4.1",
@@ -154,6 +156,7 @@ async def test_custom_parameters_reach_openrouter_wire(
             headers={"Authorization": "Bearer test-bearer"},
             json={
                 "model": "client-alias",
+                "stream": stream,
                 "messages": [{"role": "user", "content": "hello"}],
                 "temperature": 0.4,
                 "custom_option": {"enabled": True, "top_only": 1},
@@ -174,7 +177,19 @@ async def test_custom_parameters_reach_openrouter_wire(
     assert body["reasoning"] == {"effort": "low"}
     assert body["provider"] == {"order": ["test-provider"]}
     assert "drop_params" not in body
-    message = response.json()["choices"][0]["message"]
+    assert not body.get("stream", False)
+    if stream:
+        assert response.headers["content-type"].startswith("text/event-stream")
+        assert response.text.rstrip().endswith("data: [DONE]")
+        chunk = next(
+            json.loads(line[6:])
+            for line in response.text.splitlines()
+            if line.startswith("data: {")
+        )
+        assert chunk["object"] == "chat.completion.chunk"
+        message = chunk["choices"][0]["delta"]
+    else:
+        message = response.json()["choices"][0]["message"]
     assert message["reasoning_content"] == "A short thought."
     assert message["reasoning_details"] == [
         {"type": "reasoning.encrypted", "data": "opaque"}
@@ -281,9 +296,11 @@ async def test_openrouter_tool_loop_replays_provider_reasoning_details(
     ]
 
 
-async def test_provider_rejection_returns_400_without_retry_or_credentials(
+@pytest.mark.parametrize("stream", [False, True])
+async def test_provider_rejection_surfaces_without_retry_or_credentials(
     upstream: list[httpx.Request],
     caplog: pytest.LogCaptureFixture,
+    stream: bool,
 ) -> None:
     bridge = LiteLLMBridge(
         model="openrouter/openai/gpt-4.1",
@@ -300,11 +317,25 @@ async def test_provider_rejection_returns_400_without_retry_or_credentials(
             headers={"Authorization": "Bearer test-bearer"},
             json={
                 "messages": [{"role": "user", "content": "hi"}],
+                "stream": stream,
                 "reject_custom": True,
             },
         )
-    assert response.status_code == 400
+    if stream:
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith("text/event-stream")
+        assert "event: error\n" in response.text
+        assert response.text.rstrip().endswith("data: [DONE]")
+        payload = next(
+            json.loads(line[6:])
+            for line in response.text.splitlines()
+            if line.startswith("data: {")
+        )
+    else:
+        assert response.status_code == 400
+        payload = response.json()
     assert len(upstream) == 1
-    assert "reject_custom is unsupported" in response.json()["error"]["message"]
+    assert payload["error"]["code"] == 400
+    assert "reject_custom is unsupported" in payload["error"]["message"]
     assert "wire-test-secret" not in response.text
     assert "wire-test-secret" not in caplog.text

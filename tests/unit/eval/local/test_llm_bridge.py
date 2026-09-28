@@ -1184,12 +1184,20 @@ async def test_reasoning_replay_preserves_explicit_client_values(
     fake = _FakeLiteLLM()
     _install(monkeypatch, fake)
     bridge = LiteLLMBridge(model="anthropic/claude-test")
-    bridge._reasoning[ROLLOUT_ID] = {"call_1": {"reasoning_content": "stored"}}
+    bridge._reasoning[ROLLOUT_ID] = {
+        "call_1": {
+            "reasoning_content": "stored",
+            "thinking_blocks": [{"type": "thinking", "signature": "stored"}],
+            "reasoning_details": [{"type": "reasoning.encrypted", "data": "stored"}],
+        }
+    }
     assistant = {
         "role": "assistant",
         "content": "",
         "tool_calls": [{"id": "call_1"}],
         "reasoning_content": "supplied",
+        "thinking_blocks": [{"type": "thinking", "signature": "supplied"}],
+        "reasoning_details": [{"type": "reasoning.encrypted", "data": "supplied"}],
     }
     await bridge.complete(_body(messages=[assistant]), rollout_id=ROLLOUT_ID)
     assert fake.completion_kwargs[-1]["messages"][0] == assistant
@@ -1259,3 +1267,93 @@ async def test_invalid_bridge_controls_are_client_errors(
     assert response.status_code == 400
     assert "api_key" in response.json()["error"]["message"]
     assert fake.completion_kwargs == []
+
+
+@pytest.mark.parametrize(
+    ("field", "empty", "cached"),
+    [
+        ("thinking_blocks", None, [{"type": "thinking", "signature": "signed"}]),
+        ("thinking_blocks", [], [{"type": "thinking", "signature": "signed"}]),
+        (
+            "reasoning_details",
+            None,
+            [{"type": "reasoning.encrypted", "data": "opaque"}],
+        ),
+        ("reasoning_details", [], [{"type": "reasoning.encrypted", "data": "opaque"}]),
+        ("reasoning_content", None, "Use the tool."),
+        ("reasoning_content", "", "Use the tool."),
+    ],
+)
+async def test_reasoning_replay_restores_empty_client_fields(
+    monkeypatch: pytest.MonkeyPatch, field: str, empty: Any, cached: Any
+) -> None:
+    fake = _FakeLiteLLM()
+    _install(monkeypatch, fake)
+    bridge = LiteLLMBridge(model="anthropic/claude-test")
+    bridge._reasoning[ROLLOUT_ID] = {"call_1": {field: cached}}
+    assistant = {
+        "role": "assistant",
+        "content": "",
+        "tool_calls": [{"id": "call_1"}],
+        field: empty,
+    }
+    await bridge.complete(_body(messages=[assistant]), rollout_id=ROLLOUT_ID)
+    assert fake.completion_kwargs[-1]["messages"][0][field] == cached
+    assert assistant[field] == empty
+
+
+@pytest.mark.parametrize("mode", ["json", "stream", "keepalive"])
+@pytest.mark.parametrize(
+    "api_base",
+    [
+        "https://endpoint-secret@provider.example/v1",
+        "https://provider.example/v1?token=endpoint-secret",
+    ],
+)
+async def test_provider_error_redacts_credential_bearing_base_url(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    mode: str,
+    api_base: str,
+) -> None:
+    monkeypatch.setattr(llm_bridge, "_NON_STREAM_GRACE_SEC", 0.01)
+    _install(
+        monkeypatch,
+        _SlowLiteLLM(
+            delay=0.05 if mode == "keepalive" else 0,
+            completion_error=InternalServerError(f"Connection failed: {api_base}"),
+        ),
+    )
+    bridge = LiteLLMBridge(model="anthropic/claude-test", api_base=api_base)
+    async with _client(bridge, non_stream_keepalive=mode == "keepalive") as client:
+        response = await client.post(
+            _url(), json=_body(stream=mode == "stream"), headers=_auth()
+        )
+    assert response.status_code == (502 if mode == "json" else 200)
+    assert "Connection failed" in response.text
+    assert "endpoint-secret" not in response.text
+    assert "endpoint-secret" not in caplog.text
+
+
+@pytest.mark.parametrize("during_provider_lookup", [False, True])
+async def test_preflight_redacts_credential_bearing_base_url(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    during_provider_lookup: bool,
+) -> None:
+    api_base = "https://endpoint-secret@provider.example/v1"
+    error = InternalServerError(f"Connection failed: {api_base}")
+    fake = _FakeLiteLLM(
+        provider_error=error if during_provider_lookup else None,
+        completion_error=None if during_provider_lookup else error,
+    )
+    _install(monkeypatch, fake)
+    bridge = LiteLLMBridge(model="anthropic/claude-test", api_base=api_base)
+    if during_provider_lookup:
+        with pytest.raises(RuntimeError, match="Invalid LiteLLM model format") as exc:
+            await bridge.preflight_check()
+        assert "endpoint-secret" not in str(exc.value)
+    else:
+        await bridge.preflight_check()
+        assert "Connection failed" in caplog.text
+    assert "endpoint-secret" not in caplog.text

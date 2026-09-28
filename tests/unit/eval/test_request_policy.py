@@ -97,7 +97,17 @@ def test_more_than_one_completion_is_explicitly_rejected() -> None:
         inference_parameters({"n": 3})
 
 
-def test_native_provider_keeps_litellm_translation_and_custom_kwargs() -> None:
+@pytest.mark.parametrize(
+    "model",
+    [
+        "anthropic/claude-sonnet-4-5",
+        "azure_ai/claude-sonnet-4-5",
+        "vertex_ai/claude-sonnet-4-5",
+    ],
+)
+def test_native_provider_keeps_litellm_translation_and_custom_kwargs(
+    model: str,
+) -> None:
     kwargs = build_chat_kwargs(
         {
             "messages": [{"role": "user", "content": "hello"}],
@@ -105,13 +115,15 @@ def test_native_provider_keeps_litellm_translation_and_custom_kwargs() -> None:
             "reasoning_effort": "low",
             "context_management": {"edits": []},
             "custom_parameter": {"enabled": True},
+            "metadata": {"user_id": "test-user"},
         },
-        model="anthropic/claude-sonnet-4-5",
+        model=model,
     )
     assert kwargs["max_completion_tokens"] == 64
     assert kwargs["reasoning_effort"] == "low"
     assert kwargs["context_management"] == {"edits": []}
     assert kwargs["custom_parameter"] == {"enabled": True}
+    assert kwargs["metadata"] == {"user_id": "test-user"}
     assert kwargs["drop_params"] is False
     assert "extra_body" not in kwargs
 

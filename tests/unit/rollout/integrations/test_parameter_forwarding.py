@@ -122,6 +122,7 @@ async def test_agents_response_methods_forward_parameters_over_streaming_transpo
         "system_instructions": None,
         "input": "hello",
         "model_settings": ModelSettings(
+            include_usage=True,
             temperature=0.9,
             top_logprobs=2,
             reasoning=Reasoning(effort="low"),
@@ -158,6 +159,7 @@ async def test_agents_response_methods_forward_parameters_over_streaming_transpo
     assert_forwarded_parameters(body)
     # Both model APIs use SSE; get_response aggregates it for the caller.
     assert body["stream"] is True
+    assert body["stream_options"]["include_usage"] is True
     assert body["tools"][0]["function"]["strict"] is True
 
 
@@ -216,3 +218,5 @@ async def test_strands_forward_parameters_to_gateway(
     body = captured_requests[0]
     assert_forwarded_parameters(body)
     assert body.get("stream", False) is stream
+    if stream:
+        assert body["stream_options"]["include_usage"] is True

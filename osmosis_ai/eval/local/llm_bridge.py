@@ -325,7 +325,14 @@ class LiteLLMBridge:
                 for call in message.get("tool_calls") or []:
                     fields = stored.get(_getattr_or_key(call, "id") or "")
                     if fields:
-                        message = {**fields, **message}
+                        message = {
+                            **message,
+                            **{
+                                name: value
+                                for name, value in fields.items()
+                                if message.get(name) in (None, [], "")
+                            },
+                        }
                         break
             replayed.append(message)
         return {**body, "messages": replayed}
@@ -348,7 +355,7 @@ class LiteLLMBridge:
         try:
             litellm.get_llm_provider(model=self.model, api_base=self._api_base)
         except Exception as exc:
-            _, error = _bridge_error(exc, secret_values=(self._api_key,))
+            _, error = _bridge_error(exc, secret_values=(self._api_key, self._api_base))
             raise RuntimeError(
                 "Invalid LiteLLM model format. Use 'provider/model' "
                 "(e.g. openai/gpt-5-mini, anthropic/claude-sonnet-4-6). "
@@ -368,7 +375,7 @@ class LiteLLMBridge:
                 return
             if ename in _PREFLIGHT_FATAL_EXCEPTIONS:
                 raise
-            _, error = _bridge_error(exc, secret_values=(self._api_key,))
+            _, error = _bridge_error(exc, secret_values=(self._api_key, self._api_base))
             logger.warning("Preflight non-fatal error: %s", error["detail"])
 
     async def complete(self, body: dict[str, Any], *, rollout_id: str) -> Any:
@@ -462,7 +469,7 @@ def create_bridge_router(
         raise ValueError("bridge auth_token must be a non-empty string")
 
     router = APIRouter()
-    secret_values = (bridge._api_key, auth_token)
+    secret_values = (bridge._api_key, bridge._api_base, auth_token)
 
     async def require_auth(request: Request) -> None:
         header = request.headers.get("Authorization")
