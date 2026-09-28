@@ -15,14 +15,16 @@ accumulated for the run index and read once with
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import os
+import re
 import secrets
 import time
 from collections.abc import AsyncIterator
 from contextlib import suppress
 from typing import Any
+
+import httpx
 
 from osmosis_ai._imports import raise_optional_dependency_error
 from osmosis_ai.eval.local.openai_responses import (
@@ -32,6 +34,11 @@ from osmosis_ai.eval.local.openai_responses import (
 )
 from osmosis_ai.eval.local.openai_responses import (
     _field as _getattr_or_key,
+)
+from osmosis_ai.eval.request_policy import (
+    BridgeRequestError,
+    build_chat_kwargs,
+    is_official_openai_endpoint,
 )
 
 try:
@@ -48,14 +55,6 @@ except ModuleNotFoundError as _exc:
 from osmosis_ai.rollout.utils.identifiers import is_single_path_segment
 
 logger: logging.Logger = logging.getLogger(__name__)
-
-# Request fields forwarded to litellm; everything else the client sends is
-# dropped. LiteLLM handles known provider incompatibilities, while the Responses
-# path below learns from a provider rejection when its model metadata is stale.
-_LITELLM_CONSUMED_FIELDS = frozenset(
-    {"messages", "temperature", "top_p", "max_tokens", "tools"}
-)
-_OPENAI_SAMPLING_FIELDS = frozenset({"temperature", "top_p"})
 
 _PREFLIGHT_FATAL_EXCEPTIONS = frozenset(
     {
@@ -97,44 +96,52 @@ def _get_litellm() -> Any:
     return litellm
 
 
-def _unsupported_openai_sampling_param(exc: Exception, *, litellm: Any) -> str | None:
-    """Return a rejected sampling parameter from a structured OpenAI 400."""
-    bad_request_error = getattr(litellm, "BadRequestError", None)
-    if not isinstance(bad_request_error, type) or not isinstance(
-        exc, bad_request_error
-    ):
-        return None
-    if (
-        getattr(exc, "status_code", None) != 400
-        or getattr(exc, "llm_provider", None) != "openai"
-    ):
-        return None
-
-    body = getattr(exc, "body", None)
-    error = _getattr_or_key(body, "error", body)
-    if not isinstance(error, dict):
-        # LiteLLM's async Responses wrapper can remap the provider exception and
-        # retain the structured OpenAI error only as JSON after this marker.
-        raw_message = getattr(exc, "message", str(exc))
-        _, marker, encoded_error = raw_message.partition("OpenAIException - ")
-        if marker:
-            try:
-                decoded_error = json.loads(encoded_error)
-            except json.JSONDecodeError:
-                pass
-            else:
-                error = _getattr_or_key(decoded_error, "error", decoded_error)
-    message = _getattr_or_key(error, "message", "")
-    error_type = getattr(exc, "type", None) or _getattr_or_key(error, "type")
-    param = getattr(exc, "param", None) or _getattr_or_key(error, "param")
-    if (
-        not isinstance(message, str)
-        or "unsupported parameter" not in message.lower()
-        or error_type != "invalid_request_error"
-        or param not in _OPENAI_SAMPLING_FIELDS
-    ):
-        return None
-    return param
+def _bridge_error(
+    exc: Exception, *, secret_values: tuple[str | None, ...] = ()
+) -> tuple[int, dict[str, Any]]:
+    """Preserve actionable provider errors without echoing host credentials."""
+    status = (
+        400
+        if isinstance(exc, BridgeRequestError)
+        else getattr(exc, "status_code", None)
+    )
+    message = str(getattr(exc, "message", None) or exc)
+    link: BaseException | None = exc
+    seen: set[int] = set()
+    while link is not None and id(link) not in seen:
+        seen.add(id(link))
+        if isinstance(link, httpx.HTTPStatusError):
+            # LiteLLM can remap a provider 4xx to a different exception/status.
+            status = link.response.status_code
+            with suppress(httpx.ResponseNotRead):
+                message = link.response.text or message
+            break
+        link = link.__cause__ or link.__context__
+    values = {
+        value
+        for name, value in os.environ.items()
+        if re.search(r"KEY|TOKEN|SECRET|PASSWORD", name) and len(value) >= 8
+    }
+    values.update(value for value in secret_values if value)
+    for secret in sorted(values, key=len, reverse=True):
+        message = message.replace(secret, "[REDACTED]")
+    try:
+        from litellm.litellm_core_utils.secret_redaction import redact_string
+    except ImportError:
+        # Missing optional dependencies must retain their original install hint.
+        pass
+    else:
+        message = redact_string(message)
+    message = " ".join(message.split())[:1000]
+    agent_status = status if isinstance(status, int) and 400 <= status < 500 else 502
+    return agent_status, {
+        "error": {
+            "message": message,
+            "type": "invalid_request_error" if agent_status == 400 else "bridge_error",
+            "code": agent_status,
+        },
+        "detail": message,
+    }
 
 
 def _usage_payload(response: Any) -> dict[str, int] | None:
@@ -191,14 +198,28 @@ def _message_fields(choice: Any) -> tuple[str, Any, Any]:
     )
 
 
+def _reasoning_fields(choice: Any) -> dict[str, Any]:
+    message = _getattr_or_key(choice, "message") or _getattr_or_key(choice, "delta")
+    provider_fields = _getattr_or_key(message, "provider_specific_fields")
+    fields: dict[str, Any] = {}
+    for name in ("reasoning_content", "thinking_blocks", "reasoning_details"):
+        value = _getattr_or_key(message, name)
+        if value is None:
+            value = _getattr_or_key(provider_fields, name)
+        if value is not None:
+            fields[name] = _plain_data(value)
+    return fields
+
+
 def _stream_tool_calls_payload(tool_calls: Any) -> list[Any]:
     plain = _plain_data(tool_calls)
     if not isinstance(plain, list):
         plain = [plain]
     normalized: list[Any] = []
     for index, item in enumerate(plain):
-        if isinstance(item, dict) and "index" not in item:
-            normalized.append({"index": index, **item})
+        if isinstance(item, dict):
+            # Anthropic's content-block index includes earlier thinking blocks.
+            normalized.append({**item, "index": index})
         else:
             normalized.append(item)
     return normalized
@@ -213,7 +234,7 @@ def _model_response_to_payload(
         finish_reason = _getattr_or_key(choice, "finish_reason", "stop")
         choice_index = int(_getattr_or_key(choice, "index", index) or index)
         if stream:
-            delta: dict[str, Any] = {"content": content}
+            delta: dict[str, Any] = {"content": content, **_reasoning_fields(choice)}
             if tool_calls:
                 delta["tool_calls"] = _stream_tool_calls_payload(tool_calls)
             if refusal is not None:
@@ -226,7 +247,11 @@ def _model_response_to_payload(
                 }
             )
         else:
-            message: dict[str, Any] = {"role": "assistant", "content": content}
+            message: dict[str, Any] = {
+                "role": "assistant",
+                "content": content,
+                **_reasoning_fields(choice),
+            }
             if tool_calls:
                 message["tool_calls"] = _plain_data(tool_calls)
             if refusal is not None:
@@ -264,82 +289,65 @@ class LiteLLMBridge:
         self._api_key = api_key
         self._api_base = api_base
         self._tokens: dict[str, int] = {}
-        self._rejected_openai_sampling_params: set[str] = set()
+        self._reasoning: dict[str, dict[str, dict[str, Any]]] = {}
 
     def _build_kwargs(self, body: dict[str, Any]) -> dict[str, Any]:
-        kwargs: dict[str, Any] = {
-            "model": self.model,
-            "messages": body.get("messages", []),
-            "drop_params": True,
-        }
-        if self._api_key:
-            kwargs["api_key"] = self._api_key
-        if self._api_base:
-            kwargs["base_url"] = self._api_base
-        for key in _LITELLM_CONSUMED_FIELDS - {"messages"}:
-            if key in body:
-                kwargs[key] = body[key]
-        return kwargs
+        return build_chat_kwargs(
+            body, model=self.model, api_key=self._api_key, api_base=self._api_base
+        )
 
-    def _uses_responses_api(self, litellm: Any) -> bool:
-        if not self.model.startswith("openai/"):
-            return False
-        return not (
+    def _uses_responses_api(self) -> bool:
+        return self.model.startswith("openai/") and is_official_openai_endpoint(
             self._api_base
-            or os.environ.get("OPENAI_BASE_URL")
-            or os.environ.get("OPENAI_API_BASE")
-            or getattr(litellm, "api_base", None)
         )
-
-    def _filter_responses_sampling_params(
-        self, body: dict[str, Any], *, litellm: Any
-    ) -> dict[str, Any]:
-        requested = {key: body[key] for key in _OPENAI_SAMPLING_FIELDS if key in body}
-        if not requested:
-            return body
-
-        supported = litellm.get_optional_params(
-            model=self.model,
-            custom_llm_provider="openai",
-            drop_params=True,
-            **requested,
-        )
-        unsupported = (requested.keys() - supported.keys()) | (
-            requested.keys() & self._rejected_openai_sampling_params
-        )
-        if not unsupported:
-            return body
-
-        filtered = dict(body)
-        for key in unsupported:
-            filtered.pop(key, None)
-        return filtered
 
     async def _provider_complete(self, body: dict[str, Any], *, litellm: Any) -> Any:
-        if self._uses_responses_api(litellm):
+        if self._uses_responses_api():
             kwargs = build_responses_kwargs(
-                self._filter_responses_sampling_params(body, litellm=litellm),
+                body,
                 model=self.model,
                 api_key=self._api_key,
             )
-            # Each retry removes one of the two whitelisted sampling fields.
-            # Repeated or unrelated bad requests are re-raised immediately.
-            while True:
-                try:
-                    response = await litellm.aresponses(**kwargs)
-                    return to_chat_response(response)
-                except Exception as exc:
-                    param = _unsupported_openai_sampling_param(exc, litellm=litellm)
-                    if param is None or param not in kwargs:
-                        raise
-                    self._rejected_openai_sampling_params.add(param)
-                    kwargs.pop(param)
-                    logger.info(
-                        "Retrying model %s without unsupported parameter %s",
-                        self.model,
-                        param,
-                    )
+            if self._api_base:
+                kwargs["api_base"] = self._api_base
+            response = await litellm.aresponses(**kwargs)
+            return to_chat_response(response)
         return await litellm.acompletion(**self._build_kwargs(body))
+
+    def _with_reasoning(self, body: dict[str, Any], rollout_id: str) -> dict[str, Any]:
+        stored = self._reasoning.get(rollout_id)
+        messages = body.get("messages")
+        if not stored or not isinstance(messages, list):
+            return body
+        replayed = []
+        for message in messages:
+            if isinstance(message, dict) and message.get("role") == "assistant":
+                for call in message.get("tool_calls") or []:
+                    fields = stored.get(_getattr_or_key(call, "id") or "")
+                    if fields:
+                        message = {
+                            **message,
+                            **{
+                                name: value
+                                for name, value in fields.items()
+                                if message.get(name) in (None, [], "")
+                            },
+                        }
+                        break
+            replayed.append(message)
+        return {**body, "messages": replayed}
+
+    def _remember_reasoning(self, response: Any, rollout_id: str) -> None:
+        for choice in _getattr_or_key(response, "choices", []) or []:
+            fields = _reasoning_fields(choice)
+            _, tool_calls, _ = _message_fields(choice)
+            if not fields or not tool_calls:
+                continue
+            stored = self._reasoning.setdefault(rollout_id, {})
+            for call in tool_calls:
+                call_id = _getattr_or_key(call, "id")
+                if call_id:
+                    stored[call_id] = fields
 
     async def preflight_check(self) -> None:
         """One-shot completion probe; raises on persistent config problems."""
@@ -347,11 +355,11 @@ class LiteLLMBridge:
         try:
             litellm.get_llm_provider(model=self.model, api_base=self._api_base)
         except Exception as exc:
-            msg = getattr(exc, "message", str(exc))
+            _, error = _bridge_error(exc, secret_values=(self._api_key, self._api_base))
             raise RuntimeError(
                 "Invalid LiteLLM model format. Use 'provider/model' "
                 "(e.g. openai/gpt-5-mini, anthropic/claude-sonnet-4-6). "
-                f"Received: {self.model!r}. Details: {msg}"
+                f"Received: {self.model!r}. Details: {error['detail']}"
             ) from exc
         try:
             await self._provider_complete(
@@ -367,11 +375,15 @@ class LiteLLMBridge:
                 return
             if ename in _PREFLIGHT_FATAL_EXCEPTIONS:
                 raise
-            logger.warning("Preflight non-fatal error: %s", exc)
+            _, error = _bridge_error(exc, secret_values=(self._api_key, self._api_base))
+            logger.warning("Preflight non-fatal error: %s", error["detail"])
 
     async def complete(self, body: dict[str, Any], *, rollout_id: str) -> Any:
         litellm = _get_litellm()
-        response = await self._provider_complete(body, litellm=litellm)
+        response = await self._provider_complete(
+            self._with_reasoning(body, rollout_id), litellm=litellm
+        )
+        self._remember_reasoning(response, rollout_id)
         usage = _usage_payload(response)
         if usage:
             self._tokens[rollout_id] = (
@@ -381,14 +393,19 @@ class LiteLLMBridge:
 
     def collect_tokens(self, rollout_id: str) -> int | None:
         """Pop the rollout's token total; None if the bridge never served it."""
+        self._reasoning.pop(rollout_id, None)
         return self._tokens.pop(rollout_id, None)
 
     def discard(self, rollout_id: str) -> None:
         self._tokens.pop(rollout_id, None)
+        self._reasoning.pop(rollout_id, None)
 
 
 async def _trickle_json_response(
-    task: asyncio.Task[Any], *, request_model: str
+    task: asyncio.Task[Any],
+    *,
+    request_model: str,
+    secret_values: tuple[str | None, ...] = (),
 ) -> AsyncIterator[str]:
     """Body of an already-committed 200 while the provider is still in flight.
 
@@ -417,15 +434,9 @@ async def _trickle_json_response(
             try:
                 response = task.result()
             except Exception as exc:
-                logger.warning("LLM bridge error: %s", exc)
-                yield _compact_json(
-                    {
-                        "error": {
-                            "message": f"{type(exc).__name__}: {exc}",
-                            "type": "bridge_error",
-                        }
-                    }
-                )
+                _, error = _bridge_error(exc, secret_values=secret_values)
+                logger.warning("LLM bridge error: %s", error["detail"])
+                yield _compact_json(error)
                 return
             yield _compact_json(
                 _model_response_to_payload(
@@ -458,6 +469,7 @@ def create_bridge_router(
         raise ValueError("bridge auth_token must be a non-empty string")
 
     router = APIRouter()
+    secret_values = (bridge._api_key, bridge._api_base, auth_token)
 
     async def require_auth(request: Request) -> None:
         header = request.headers.get("Authorization")
@@ -513,7 +525,9 @@ def create_bridge_router(
             if not done:
                 # Still in flight: commit 200 now and keep the connection warm.
                 return StreamingResponse(
-                    _trickle_json_response(task, request_model=request_model),
+                    _trickle_json_response(
+                        task, request_model=request_model, secret_values=secret_values
+                    ),
                     media_type="application/json",
                     background=BackgroundTask(_cancel_task, task),
                 )
@@ -521,8 +535,9 @@ def create_bridge_router(
                 response = task.result()
             except Exception as exc:
                 # No byte committed yet, so errors keep their clean status code.
-                logger.warning("LLM bridge error: %s", exc)
-                return JSONResponse({"detail": str(exc)}, status_code=502)
+                status, error = _bridge_error(exc, secret_values=secret_values)
+                logger.warning("LLM bridge error: %s", error["detail"])
+                return JSONResponse(error, status_code=status)
             return JSONResponse(
                 _model_response_to_payload(
                     response, request_model=request_model, stream=False
@@ -546,10 +561,9 @@ def create_bridge_router(
                 try:
                     response = await task
                 except Exception as exc:
-                    logger.warning("LLM bridge error: %s", exc)
-                    yield (
-                        f"event: error\ndata: {_compact_json({'error': str(exc)})}\n\n"
-                    )
+                    _, error = _bridge_error(exc, secret_values=secret_values)
+                    logger.warning("LLM bridge error: %s", error["detail"])
+                    yield f"event: error\ndata: {_compact_json(error)}\n\n"
                     yield "data: [DONE]\n\n"
                     return
                 payload = _model_response_to_payload(

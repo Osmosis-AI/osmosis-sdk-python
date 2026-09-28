@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import sys
 from typing import Any
 
 import httpx
@@ -315,6 +316,47 @@ async def test_non_stream_error_returns_502(
     assert bridge.collect_tokens(ROLLOUT_ID) is None
 
 
+@pytest.mark.parametrize("stream", [False, True])
+async def test_missing_litellm_returns_optional_dependency_install_hint(
+    monkeypatch: pytest.MonkeyPatch, stream: bool
+) -> None:
+    # Exercise _get_litellm and the HTTP error handler without uninstalling extras.
+    monkeypatch.setitem(sys.modules, "litellm", None)
+    monkeypatch.setitem(
+        sys.modules, "litellm.litellm_core_utils.secret_redaction", None
+    )
+    async with _client(LiteLLMBridge(model="anthropic/claude-test")) as client:
+        response = await client.post(_url(), json=_body(stream=stream), headers=_auth())
+    assert response.status_code == (200 if stream else 502)
+    if stream:
+        payload = next(
+            json.loads(line[6:])
+            for line in response.text.splitlines()
+            if line.startswith("data: {")
+        )
+        assert response.text.rstrip().endswith("data: [DONE]")
+    else:
+        payload = response.json()
+    assert 'pip install "osmosis-ai[eval]"' in payload["error"]["message"]
+    assert payload["error"]["code"] == 502
+
+
+def test_error_redacts_known_secrets_when_litellm_redactor_is_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setitem(
+        sys.modules, "litellm.litellm_core_utils.secret_redaction", None
+    )
+    monkeypatch.setenv("OPENAI_API_KEY", "ambient-provider-test-secret")
+    _, payload = llm_bridge._bridge_error(
+        RuntimeError(
+            "Provider failed: configured-secret, ambient-provider-test-secret"
+        ),
+        secret_values=("configured-secret",),
+    )
+    assert payload["error"]["message"] == "Provider failed: [REDACTED], [REDACTED]"
+
+
 async def test_empty_choices_fail_loudly(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -342,7 +384,7 @@ async def test_invalid_rollout_id_and_body_are_rejected(
         assert bad_body.status_code == 400
 
 
-async def test_request_fields_are_filtered_and_credentials_injected(
+async def test_request_fields_are_forwarded_and_credentials_injected(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     fake = _FakeLiteLLM()
@@ -353,26 +395,33 @@ async def test_request_fields_are_filtered_and_credentials_injected(
         api_base="http://127.0.0.1:9/v1",
     )
     async with _client(bridge) as client:
-        await client.post(
+        response = await client.post(
             _url(),
             json=_body(
                 model="whatever-the-client-said",
                 temperature=0.5,
                 max_tokens=32,
+                stream=True,
                 stream_options={"include_usage": True},
-                unknown_field="dropped",
+                unknown_field="forwarded",
+                reasoning={"effort": "low"},
+                extra_body={"provider": {"order": ["test-provider"]}},
             ),
             headers=_auth(),
         )
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
     (kwargs,) = fake.completion_kwargs
     assert kwargs["model"] == "anthropic/claude-test"
     assert kwargs["api_key"] == "provider-key"
     assert kwargs["base_url"] == "http://127.0.0.1:9/v1"
     assert kwargs["temperature"] == 0.5
     assert kwargs["max_tokens"] == 32
-    assert kwargs["drop_params"] is True
+    assert kwargs["drop_params"] is False
     assert "stream_options" not in kwargs
-    assert "unknown_field" not in kwargs
+    assert kwargs["unknown_field"] == "forwarded"
+    assert kwargs["reasoning"] == {"effort": "low"}
+    assert kwargs["provider"] == {"order": ["test-provider"]}
     assert "stream" not in kwargs
 
 
@@ -393,7 +442,12 @@ async def test_tool_calls_survive_both_shapes(
         streamed = await client.post(_url(), json=_body(stream=True), headers=_auth())
     assert plain.json()["choices"][0]["message"]["tool_calls"] == tool_calls
     # The stream delta shape adds the per-item index OpenAI clients expect.
-    assert '"tool_calls":[{"index":0,' in streamed.text
+    chunk = next(
+        json.loads(line[6:])
+        for line in streamed.text.splitlines()
+        if line.startswith("data: {")
+    )
+    assert chunk["choices"][0]["delta"]["tool_calls"] == [{**tool_calls[0], "index": 0}]
 
 
 async def test_official_openai_uses_responses_api_with_tools(
@@ -500,7 +554,7 @@ async def test_official_openai_uses_responses_api_with_tools(
     assert bridge.collect_tokens(ROLLOUT_ID) == 5
 
 
-async def test_official_openai_drops_unsupported_sampling_params(
+async def test_official_openai_does_not_filter_sampling_params(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
@@ -517,21 +571,13 @@ async def test_official_openai_drops_unsupported_sampling_params(
         )
 
     assert resp.status_code == 200
-    assert fake.optional_param_calls == [
-        {
-            "model": "openai/gpt-5-mini",
-            "custom_llm_provider": "openai",
-            "drop_params": True,
-            "temperature": 1.0,
-            "top_p": 0.9,
-        }
-    ]
+    assert fake.optional_param_calls == []
     (kwargs,) = fake.responses_kwargs
     assert kwargs["temperature"] == 1.0
-    assert "top_p" not in kwargs
+    assert kwargs["top_p"] == 0.9
 
 
-async def test_official_openai_recovers_from_stale_sampling_metadata(
+async def test_official_openai_preserves_rejected_sampling_params_on_later_calls(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
@@ -551,24 +597,24 @@ async def test_official_openai_recovers_from_stale_sampling_metadata(
     bridge = LiteLLMBridge(model="openai/gpt-5.6-luna")
 
     async with _client(bridge) as client:
-        recovered = await client.post(
+        rejected = await client.post(
             _url(),
             json=_body(temperature=1.0, top_p=0.9),
             headers=_auth(),
         )
-        cached = await client.post(
+        later = await client.post(
             _url(),
             json=_body(temperature=1.0, top_p=0.9),
             headers=_auth(),
         )
 
-    assert recovered.status_code == 200
-    assert cached.status_code == 200
-    first, retry, later = fake.responses_kwargs
+    assert rejected.status_code == 400
+    assert "top_p" in rejected.json()["error"]["message"]
+    assert later.status_code == 200
+    first, second = fake.responses_kwargs
     assert first["top_p"] == 0.9
-    assert "top_p" not in retry
-    assert "top_p" not in later
-    assert retry["temperature"] == later["temperature"] == 1.0
+    assert second["top_p"] == 0.9
+    assert first["temperature"] == second["temperature"] == 1.0
 
 
 async def test_official_openai_does_not_retry_other_bad_requests(
@@ -591,7 +637,7 @@ async def test_official_openai_does_not_retry_other_bad_requests(
             headers=_auth(),
         )
 
-    assert response.status_code == 502
+    assert response.status_code == 400
     assert len(fake.responses_kwargs) == 1
 
 
@@ -1075,3 +1121,239 @@ async def test_bridge_router_requires_non_empty_token() -> None:
         create_bridge_router(
             LiteLLMBridge(model="anthropic/claude-test"), auth_token="  "
         )
+
+
+@pytest.mark.parametrize("stream", [False, True])
+async def test_reasoning_is_returned_and_replayed_without_mutating_input(
+    monkeypatch: pytest.MonkeyPatch, stream: bool
+) -> None:
+    tool_call = {
+        "id": "call_reasoning",
+        "type": "function",
+        "index": 3,
+        "function": {"name": "lookup", "arguments": "{}"},
+    }
+    reasoning = {
+        "reasoning_content": "Use the lookup tool.",
+        "thinking_blocks": [
+            {"type": "thinking", "thinking": "Use the lookup tool.", "signature": "sig"}
+        ],
+        "reasoning_details": [{"type": "reasoning.encrypted", "data": "opaque"}],
+    }
+    response = _response(tool_calls=[tool_call])
+    response["choices"][0]["message"].update(reasoning)
+    fake = _FakeLiteLLM(response=response)
+    _install(monkeypatch, fake)
+    bridge = LiteLLMBridge(model="anthropic/claude-test")
+    async with _client(bridge) as client:
+        reply = await client.post(_url(), json=_body(stream=stream), headers=_auth())
+    if stream:
+        chunk = next(
+            json.loads(line[6:])
+            for line in reply.text.splitlines()
+            if line.startswith("data: {")
+        )
+        message = chunk["choices"][0]["delta"]
+        assert message["tool_calls"][0]["index"] == 0
+    else:
+        message = reply.json()["choices"][0]["message"]
+    for key, value in reasoning.items():
+        assert message[key] == value
+
+    # Frameworks may retain tool calls while omitting provider extension fields.
+    assistant = {"role": "assistant", "content": "", "tool_calls": [tool_call]}
+    body = _body(messages=[assistant])
+    await bridge.complete(body, rollout_id=ROLLOUT_ID)
+    assert fake.completion_kwargs[-1]["messages"][0] == {**assistant, **reasoning}
+    assert body["messages"] == [assistant]
+    assert "thinking_blocks" not in assistant
+
+    # Neither another rollout nor a finished rollout can receive cached context.
+    await bridge.complete(body, rollout_id="b" * 32)
+    assert fake.completion_kwargs[-1]["messages"][0] == assistant
+    bridge.collect_tokens(ROLLOUT_ID)
+    await bridge.complete(body, rollout_id=ROLLOUT_ID)
+    assert fake.completion_kwargs[-1]["messages"][0] == assistant
+    bridge.discard(ROLLOUT_ID)
+    assert ROLLOUT_ID not in bridge._reasoning
+
+
+async def test_reasoning_replay_preserves_explicit_client_values(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = _FakeLiteLLM()
+    _install(monkeypatch, fake)
+    bridge = LiteLLMBridge(model="anthropic/claude-test")
+    bridge._reasoning[ROLLOUT_ID] = {
+        "call_1": {
+            "reasoning_content": "stored",
+            "thinking_blocks": [{"type": "thinking", "signature": "stored"}],
+            "reasoning_details": [{"type": "reasoning.encrypted", "data": "stored"}],
+        }
+    }
+    assistant = {
+        "role": "assistant",
+        "content": "",
+        "tool_calls": [{"id": "call_1"}],
+        "reasoning_content": "supplied",
+        "thinking_blocks": [{"type": "thinking", "signature": "supplied"}],
+        "reasoning_details": [{"type": "reasoning.encrypted", "data": "supplied"}],
+    }
+    await bridge.complete(_body(messages=[assistant]), rollout_id=ROLLOUT_ID)
+    assert fake.completion_kwargs[-1]["messages"][0] == assistant
+
+
+@pytest.mark.parametrize("mode", ["json", "stream", "keepalive"])
+async def test_provider_errors_preserve_4xx_and_redact_all_response_modes(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, mode: str
+) -> None:
+    provider_key = "local-provider-test-secret"
+    ambient_key = "ambient-provider-test-secret"
+    monkeypatch.setenv("OPENROUTER_API_KEY", ambient_key)
+    monkeypatch.setattr(llm_bridge, "_NON_STREAM_GRACE_SEC", 0.01)
+    upstream = httpx.Response(
+        422,
+        request=httpx.Request("POST", "https://provider.example/v1/chat/completions"),
+        json={
+            "error": {
+                "message": (
+                    f"custom_option is invalid: {provider_key}, {ambient_key}, "
+                    f"{BRIDGE_TOKEN}"
+                )
+            }
+        },
+    )
+    failure = InternalServerError("LiteLLM rewrote the provider status")
+    failure.__cause__ = httpx.HTTPStatusError(
+        "unprocessable", request=upstream.request, response=upstream
+    )
+    _install(
+        monkeypatch,
+        _SlowLiteLLM(
+            delay=0.05 if mode == "keepalive" else 0,
+            completion_error=failure,
+        ),
+    )
+    bridge = LiteLLMBridge(model="anthropic/claude-test", api_key=provider_key)
+    async with _client(bridge, non_stream_keepalive=mode == "keepalive") as client:
+        response = await client.post(
+            _url(), json=_body(stream=mode == "stream"), headers=_auth()
+        )
+    assert response.status_code == (422 if mode == "json" else 200)
+    if mode == "stream":
+        payload = next(
+            json.loads(line[6:])
+            for line in response.text.splitlines()
+            if line.startswith("data: {")
+        )
+    else:
+        payload = response.json()
+    assert payload["error"]["code"] == 422
+    assert "custom_option is invalid" in payload["error"]["message"]
+    for secret in (provider_key, ambient_key, BRIDGE_TOKEN):
+        assert secret not in response.text
+        assert secret not in caplog.text
+
+
+async def test_invalid_bridge_controls_are_client_errors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = _FakeLiteLLM()
+    _install(monkeypatch, fake)
+    async with _client(LiteLLMBridge(model="anthropic/claude-test")) as client:
+        response = await client.post(
+            _url(), json=_body(extra_body={"api_key": "untrusted"}), headers=_auth()
+        )
+    assert response.status_code == 400
+    assert "api_key" in response.json()["error"]["message"]
+    assert fake.completion_kwargs == []
+
+
+@pytest.mark.parametrize(
+    ("field", "empty", "cached"),
+    [
+        ("thinking_blocks", None, [{"type": "thinking", "signature": "signed"}]),
+        ("thinking_blocks", [], [{"type": "thinking", "signature": "signed"}]),
+        (
+            "reasoning_details",
+            None,
+            [{"type": "reasoning.encrypted", "data": "opaque"}],
+        ),
+        ("reasoning_details", [], [{"type": "reasoning.encrypted", "data": "opaque"}]),
+        ("reasoning_content", None, "Use the tool."),
+        ("reasoning_content", "", "Use the tool."),
+    ],
+)
+async def test_reasoning_replay_restores_empty_client_fields(
+    monkeypatch: pytest.MonkeyPatch, field: str, empty: Any, cached: Any
+) -> None:
+    fake = _FakeLiteLLM()
+    _install(monkeypatch, fake)
+    bridge = LiteLLMBridge(model="anthropic/claude-test")
+    bridge._reasoning[ROLLOUT_ID] = {"call_1": {field: cached}}
+    assistant = {
+        "role": "assistant",
+        "content": "",
+        "tool_calls": [{"id": "call_1"}],
+        field: empty,
+    }
+    await bridge.complete(_body(messages=[assistant]), rollout_id=ROLLOUT_ID)
+    assert fake.completion_kwargs[-1]["messages"][0][field] == cached
+    assert assistant[field] == empty
+
+
+@pytest.mark.parametrize("mode", ["json", "stream", "keepalive"])
+@pytest.mark.parametrize(
+    "api_base",
+    [
+        "https://endpoint-secret@provider.example/v1",
+        "https://provider.example/v1?token=endpoint-secret",
+    ],
+)
+async def test_provider_error_redacts_credential_bearing_base_url(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    mode: str,
+    api_base: str,
+) -> None:
+    monkeypatch.setattr(llm_bridge, "_NON_STREAM_GRACE_SEC", 0.01)
+    _install(
+        monkeypatch,
+        _SlowLiteLLM(
+            delay=0.05 if mode == "keepalive" else 0,
+            completion_error=InternalServerError(f"Connection failed: {api_base}"),
+        ),
+    )
+    bridge = LiteLLMBridge(model="anthropic/claude-test", api_base=api_base)
+    async with _client(bridge, non_stream_keepalive=mode == "keepalive") as client:
+        response = await client.post(
+            _url(), json=_body(stream=mode == "stream"), headers=_auth()
+        )
+    assert response.status_code == (502 if mode == "json" else 200)
+    assert "Connection failed" in response.text
+    assert "endpoint-secret" not in response.text
+    assert "endpoint-secret" not in caplog.text
+
+
+@pytest.mark.parametrize("during_provider_lookup", [False, True])
+async def test_preflight_redacts_credential_bearing_base_url(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    during_provider_lookup: bool,
+) -> None:
+    api_base = "https://endpoint-secret@provider.example/v1"
+    error = InternalServerError(f"Connection failed: {api_base}")
+    fake = _FakeLiteLLM(
+        provider_error=error if during_provider_lookup else None,
+        completion_error=None if during_provider_lookup else error,
+    )
+    _install(monkeypatch, fake)
+    bridge = LiteLLMBridge(model="anthropic/claude-test", api_base=api_base)
+    if during_provider_lookup:
+        with pytest.raises(RuntimeError, match="Invalid LiteLLM model format") as exc:
+            await bridge.preflight_check()
+        assert "endpoint-secret" not in str(exc.value)
+    else:
+        await bridge.preflight_check()
+        assert "Connection failed" in caplog.text
+    assert "endpoint-secret" not in caplog.text

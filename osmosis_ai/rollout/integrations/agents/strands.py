@@ -129,7 +129,8 @@ class OsmosisStrandsAgent(StrandsAgent):
                     "api_base": rollout_ctx.chat_completions_url,
                     "api_key": rollout_ctx.api_key,
                 },
-                model_id="openai/osmosis-rollout",
+                # The gateway resolves the actual provider and its supported params.
+                model_id="litellm_proxy/osmosis-rollout",
                 **model.litellm_kwargs,
             )
             rollout_ctx.set_sample_source(StrandsAgentSampleSource(self))
