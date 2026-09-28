@@ -86,7 +86,7 @@ pre-commit install
 
 > **Tip:** Run `uv run ty check --error-on-warning osmosis_ai/` before pushing to catch type errors early. Also run `uv run --no-editable pyright --verifytypes osmosis_ai --ignoreexternal` and inspect any errors against the narrow Harbor exception above.
 
-CI runs all tests with four pytest-xdist workers using `worksteal` scheduling, including coverage on Python 3.12 and the complete suites on Python 3.13 and 3.14. Local `uv run pytest` remains serial for debugging. The Tests workflow's manual inputs support a same-commit comparison with zero, two or four workers and an optional ty/Pyright benchmark; see [CI performance investigation](docs/ci-performance.md) for the evidence and runner validation procedure.
+CI runs all tests with four pytest-xdist workers using `worksteal` scheduling, including coverage on Python 3.12 and the complete suites on Python 3.13 and 3.14. Local `uv run pytest` remains serial for debugging.
 
 ## Pull Requests
 

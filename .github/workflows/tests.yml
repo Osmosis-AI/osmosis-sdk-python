@@ -5,17 +5,6 @@ on:
     branches:
       - main
   pull_request:
-  workflow_dispatch:
-    inputs:
-      pytest-workers:
-        description: "Test workers (0 is the serial baseline for runner comparisons)"
-        type: choice
-        options: ["4", "2", "0"]
-        default: "4"
-      benchmark-types:
-        description: "Compare ty and Pyright on this checkout and environment"
-        type: boolean
-        default: false
   workflow_call:
     secrets:
       CODECOV_TOKEN:
@@ -55,15 +44,6 @@ jobs:
         run: uv sync --locked --all-extras --group dev
       - name: Run ty
         run: uv run --no-sync ty check --error-on-warning osmosis_ai/
-      - name: Compare type checkers
-        if: github.event_name == 'workflow_dispatch' && inputs.benchmark-types
-        run: uv run --no-sync python .github/scripts/benchmark-typecheck.py
-      - name: Upload type checker comparison
-        if: always() && github.event_name == 'workflow_dispatch' && inputs.benchmark-types
-        uses: actions/upload-artifact@v7
-        with:
-          name: typecheck-benchmark
-          path: typecheck-benchmark/
       - name: Verify public API types
         run: |
           output=$(uv run --no-editable pyright --verifytypes osmosis_ai --ignoreexternal 2>&1) || true
@@ -96,8 +76,6 @@ jobs:
       fail-fast: false
       matrix:
         python-version: ["3.12", "3.13", "3.14"]
-    env:
-      PYTEST_WORKERS: ${{ inputs.pytest-workers || '4' }}
     steps:
       - uses: actions/checkout@v7
 
@@ -109,25 +87,9 @@ jobs:
       - name: Install dependencies
         run: uv sync --locked --all-extras --group dev
 
-      - name: Record pytest comparison environment
-        if: github.event_name == 'workflow_dispatch'
-        run: |
-          {
-            git rev-parse HEAD
-            git status --short -- . ':(exclude)pytest-environment.txt'
-            sha256sum uv.lock pyproject.toml pytest.ini
-            uv --version
-            uv run --no-sync python -VV
-            printf 'workers=%s\nimage=%s/%s\nrun=%s/attempt-%s\n' "$PYTEST_WORKERS" "$ImageOS" "$ImageVersion" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT"
-            printf 'event=%s\nref=%s\nsha=%s\n' "$GITHUB_EVENT_NAME" "$GITHUB_REF" "$GITHUB_SHA"
-            nproc
-            lscpu
-            uv pip freeze
-          } > pytest-environment.txt
-
       - name: Run tests with coverage
         if: matrix.python-version == '3.12'
-        run: uv run --no-sync pytest -n "$PYTEST_WORKERS" --dist worksteal --durations=30 --junitxml=pytest-results.xml --cov=osmosis_ai --cov-branch --cov-report=term-missing --cov-report=xml
+        run: uv run --no-sync pytest -n 4 --dist worksteal --durations=30 --cov=osmosis_ai --cov-branch --cov-report=term-missing --cov-report=xml
 
       - name: Upload coverage to Codecov
         if: matrix.python-version == '3.12' && !github.event.pull_request.head.repo.fork
@@ -138,17 +100,7 @@ jobs:
 
       - name: Run tests
         if: matrix.python-version != '3.12'
-        run: uv run --no-sync pytest -n "$PYTEST_WORKERS" --dist worksteal --durations=30 --junitxml=pytest-results.xml
-
-      - name: Upload pytest comparison
-        if: always() && github.event_name == 'workflow_dispatch'
-        uses: actions/upload-artifact@v7
-        with:
-          name: pytest-${{ matrix.python-version }}-${{ inputs.pytest-workers }}-attempt-${{ github.run_attempt }}
-          path: |
-            pytest-results.xml
-            pytest-environment.txt
-            coverage.xml
+        run: uv run --no-sync pytest -n 4 --dist worksteal --durations=30
 
   build:
     runs-on: ubuntu-latest
