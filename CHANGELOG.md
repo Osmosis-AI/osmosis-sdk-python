@@ -2,24 +2,35 @@
 
 This file records changes to `osmosis-ai`. For earlier versions, see [GitHub Releases](https://github.com/Osmosis-AI/osmosis-sdk-python/releases).
 
-## 0.3.5rc1 - 2026-09-24
+## 0.3.5 - 2026-09-28
 
 ### Breaking Changes
 
 - The internal `osmosis dev server up|down|list|logs` commands are removed from the public SDK; internal users run the same commands from the private `osmo` CLI as `osmo dev server ...` ([#389](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/389)).
 - The dedicated dev-server Python API is removed: the `OsmosisClient` methods `provision_dev_rollout_server`, `teardown_dev_rollout_server`, `get_dev_rollout_server_logs`, `stream_dev_rollout_server_logs`, and `list_dev_rollout_servers`, the `DevRolloutServerInfo` and `PaginatedDevRolloutServers` models, the `DevServerSandboxEnvironment` and `DevServerBackend` enums, and `serialize_dev_rollout_server` ([#389](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/389)).
+- `osmosis images` and the `OsmosisClient` methods `submit_image_build`, `get_image_build`, `get_image_build_artifacts`, and `get_image_pull_credentials` are removed; internal users migrate managed image builds to `osmo images` ([#394](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/394)).
+- Harbor rollout IDs must no longer contain colons or control characters; use portable IDs for retained evidence paths ([#396](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/396)).
 
 ### Added
 
-- `osmosis images build --url URL --path PATH --ref REF` builds Harbor task images from a pinned GitHub task directory or Harbor Hub `dataset.toml` without downloading a task bundle, and `--output` writes the verified task-to-image JSON mapping ([#387](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/387), [#390](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/390)).
-- `HarborGatewayConfig` in `osmosis_ai.rollout.types.harbor` validates the native Harbor agent, concurrency, environment, and healthcheck settings used by managed source gateways ([#390](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/390)).
+- Harbor source gateways run pinned GitHub tasks with immutable images and validated `HarborGatewayConfig` settings; `SourceImageManifest` and `SourceImageBuildResult` validate image bindings and task selections ([#387](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/387), [#390](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/390), [#397](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/397)).
 - `osmosis_ai.cli.main.create_app()` and `run_cli()` let downstream CLIs reuse the public command tree, root options, and output handling while adding their own commands, version reporting, and upgrade command ([#389](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/389)).
+- Rollout servers support optional bearer authentication, and `RolloutClient.health()`, `wait_idle()`, and `drain()` expose process identity and wait for admitted work to finish before shutdown ([#395](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/395)).
+- Harbor retains sanitized native results and logs with checksum inventories and process-bound verification, excluding OpenCode databases and snapshots from native-log exports ([#396](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/396), [#399](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/399)).
 
 ### Changed
 
 - JSON error envelopes resolve `command` from the invoked command tree: unknown subcommands are kept (for example `dataset lst`), `--workspace` values are no longer reported as the command, and `osmosis_ai.cli.output.command_path_for_error()` without `root_command` no longer reads `sys.argv` ([#389](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/389)).
 
-[Full changelog](https://github.com/Osmosis-AI/osmosis-sdk-python/compare/v0.3.4...v0.3.5rc1)
+### Fixed
+
+- Local eval and the OpenAI Agents and Strands integrations preserve custom inference parameters, including OpenRouter `reasoning` and `provider` fields, while rejecting bridge-control overrides; upgrade each relevant SDK environment, and cloud eval also requires its controller integration ([#400](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/400)).
+
+[Full changelog](https://github.com/Osmosis-AI/osmosis-sdk-python/compare/v0.3.4...v0.3.5)
+
+## 0.3.5rc1 - 2026-09-24
+
+See the [0.3.5rc1 release notes](https://github.com/Osmosis-AI/osmosis-sdk-python/releases/tag/v0.3.5rc1).
 
 ## 0.3.4 - 2026-09-23
 
