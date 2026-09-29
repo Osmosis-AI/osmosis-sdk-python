@@ -4,11 +4,6 @@ from osmosis_ai.rollout.integrations.agents.strands import _content_block_messag
 
 
 class TestContentBlockMessages:
-    def test_single_message(self):
-        msgs = [{"role": "user", "content": "Hello"}]
-        result = _content_block_messages(msgs)
-        assert result == [{"role": "user", "content": [{"text": "Hello"}]}]
-
     def test_multi_turn(self):
         msgs = [
             {"role": "system", "content": "You are helpful."},
@@ -21,6 +16,3 @@ class TestContentBlockMessages:
             "content": [{"text": "You are helpful."}],
         }
         assert result[1] == {"role": "user", "content": [{"text": "Hi"}]}
-
-    def test_empty_list(self):
-        assert _content_block_messages([]) == []

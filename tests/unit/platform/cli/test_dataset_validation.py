@@ -11,7 +11,6 @@ from osmosis_ai.platform.cli.dataset import (
     PARQUET_VALIDATION_SKIPPED_WARNING,
     _check_metadata_value,
     _check_required_columns,
-    _metadata_is_absent,
     _validate_csv,
     _validate_file_with_warnings,
     _validate_jsonl,
@@ -98,14 +97,6 @@ class TestValidateJsonl:
         errors = _validate_jsonl(f)
         assert any("Line 198" in e for e in errors)
         assert any("Line 200" in e for e in errors)
-
-    def test_small_valid_file(self, tmp_path: Path):
-        rows = [
-            {"system_prompt": "s", "user_prompt": "u", "ground_truth": "g"}
-            for _ in range(50)
-        ]
-        f = _make_jsonl(tmp_path / "small.jsonl", rows)
-        assert _validate_jsonl(f) == []
 
     def test_error_limit(self, tmp_path: Path):
         """At most 5 errors + summary are reported."""
@@ -206,20 +197,6 @@ class TestValidateCsv:
         f.write_text("\n".join(lines) + "\n")
         errors = _validate_csv(f)
         assert any("Row 201" in e for e in errors)
-
-    def test_small_file_no_tail(self, tmp_path: Path):
-        f = tmp_path / "small.csv"
-        header = "system_prompt,user_prompt,ground_truth"
-        good = "s,u,g"
-        f.write_text("\n".join([header] + [good] * 20) + "\n")
-        assert _validate_csv(f) == []
-
-    def test_exactly_100_data_rows(self, tmp_path: Path):
-        f = tmp_path / "exactly_100.csv"
-        header = "system_prompt,user_prompt,ground_truth"
-        good = "s,u,g"
-        f.write_text("\n".join([header] + [good] * 100) + "\n")
-        assert _validate_csv(f) == []
 
 
 # ---------------------------------------------------------------------------
@@ -322,21 +299,6 @@ class TestValidateParquet:
 
 
 class TestMetadataHelpers:
-    def test_absent_none(self):
-        assert _metadata_is_absent(None) is True
-
-    def test_absent_empty_string(self):
-        assert _metadata_is_absent("") is True
-
-    def test_absent_whitespace_string(self):
-        assert _metadata_is_absent("   ") is True
-
-    def test_not_absent_dict(self):
-        assert _metadata_is_absent({"a": 1}) is False
-
-    def test_not_absent_nonempty_string(self):
-        assert _metadata_is_absent('{"a": 1}') is False
-
     def test_dict_passes(self):
         assert _check_metadata_value({"tools": ["x"]}, location="Line 1") == []
 

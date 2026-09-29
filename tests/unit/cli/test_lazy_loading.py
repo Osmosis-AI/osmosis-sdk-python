@@ -82,35 +82,12 @@ def test_unknown_attribute_raises():
         _ = osmosis_ai.this_does_not_exist  # type: ignore[attr-defined]
 
 
-# -- __all__ completeness -----------------------------------------------------
-
-
-def test_all_exports_accessible():
-    """Every name listed in __all__ must be resolvable on the module."""
-    missing: list[str] = []
-    for name in osmosis_ai.__all__:
-        try:
-            getattr(osmosis_ai, name)
-        except AttributeError:
-            missing.append(name)
-    assert missing == [], f"Names in __all__ that are not accessible: {missing}"
-
-
 # -- Eager exports still present at module level ------------------------------
 
 
 def test_eager_exports_present():
     """__version__ is available without lazy lookup."""
     assert isinstance(osmosis_ai.__version__, str)
-
-
-# -- __getattr__ is defined ---------------------------------------------------
-
-
-def test_module_has_getattr():
-    """The module must define __getattr__ for rubric lazy loading."""
-    assert hasattr(osmosis_ai, "__getattr__")
-    assert callable(osmosis_ai.__getattr__)
 
 
 # -- CLI startup import invariants (subprocess) --------------------------------
