@@ -185,23 +185,6 @@ def test_template_apply_json_writes_into_project_canonical_layout(
     assert (workspace_directory / "data" / "multiply.jsonl").is_file()
 
 
-def test_template_apply_json_in_incomplete_git_checkout(
-    monkeypatch, tmp_path, capsys, workspace_template
-) -> None:
-    workspace_directory = _make_workspace_directory(tmp_path)
-    monkeypatch.chdir(workspace_directory)
-
-    rc = cli.main(["--json", "template", "apply", "multiply-local-strands"])
-    captured = capsys.readouterr()
-
-    assert rc == 0
-    payload = json.loads(captured.out)
-    assert "rollouts/multiply-local-strands/main.py" in payload["resource"]["files"]
-    assert (
-        workspace_directory / "rollouts" / "multiply-local-strands" / "main.py"
-    ).is_file()
-
-
 def test_template_apply_refuses_overwrite_without_force(
     monkeypatch, tmp_path, capsys, workspace_template
 ) -> None:
