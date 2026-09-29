@@ -100,7 +100,7 @@ openai-agents = [
 # lines so rollout behavior cannot cross a compatibility boundary without an
 # SDK release.
 harbor = [
-    "harbor[daytona]>=0.20.0,<0.23",
+    "harbor[daytona]>=0.20.0,<0.24",
     # osmosis_ai.packaging builds the bundle wheel that Harbor installs in the
     # task container: toml rewrites the rollout project's pyproject.toml and
     # platformdirs locates the bundle cache, and uv performs the isolated wheel
