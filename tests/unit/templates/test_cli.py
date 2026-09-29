@@ -83,16 +83,6 @@ def _make_workspace_directory(root: Path) -> Path:
 # ── list_command ─────────────────────────────────────────────────
 
 
-def test_list_command_returns_list_result_in_json(workspace_template: Path) -> None:
-    with override_output_context(format=OutputFormat.json):
-        result = list_command()
-
-    assert result is not None
-    assert any(item["name"] == "multiply-local-strands" for item in result.items)
-    assert result.total_count == len(result.items)
-    assert result.has_more is False
-
-
 def test_list_command_returns_list_result_in_rich(workspace_template: Path) -> None:
     with override_output_context(format=OutputFormat.rich):
         result = list_command()

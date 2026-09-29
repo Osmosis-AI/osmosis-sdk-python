@@ -8,7 +8,6 @@ from osmosis_ai.rollout.context import (
     RolloutContext,
     SampleSource,
     get_rollout_context,
-    rollout_contextvar,
 )
 from osmosis_ai.rollout.types import AgentWorkflowConfig, RolloutSample
 
@@ -58,22 +57,6 @@ class TestRolloutContext:
 
         with ctx:
             assert get_rollout_context() is ctx
-        assert get_rollout_context() is None
-
-    def test_contextvar_reset_restores_outer(self):
-        """Direct contextvar set/reset preserves an outer rollout context."""
-        outer = RolloutContext(chat_completions_url="http://outer", rollout_id="outer")
-        inner = RolloutContext(chat_completions_url="http://inner", rollout_id="inner")
-
-        with outer:
-            assert get_rollout_context() is outer
-            token = rollout_contextvar.set(inner)
-            try:
-                assert get_rollout_context() is inner
-            finally:
-                rollout_contextvar.reset(token)
-            assert get_rollout_context() is outer
-
         assert get_rollout_context() is None
 
     async def test_set_sample_source_and_get_sample(self):

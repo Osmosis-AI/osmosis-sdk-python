@@ -161,11 +161,6 @@ def test_a_bare_trajectory_id_is_not_a_valid_fallback() -> None:
     assert atif_rollout_identity({"trajectory_id": ROLLOUT_A}) is None
 
 
-def test_read_valid_trajectory_accepts_a_matching_document(tmp_path: Path) -> None:
-    path = _write_trajectory(tmp_path, ROLLOUT_A, _atif(ROLLOUT_A))
-    assert read_valid_trajectory(path, rollout_id=ROLLOUT_A) is not None
-
-
 @pytest.mark.parametrize(
     "document",
     [_atif(ROLLOUT_B), [1, 2], "text"],

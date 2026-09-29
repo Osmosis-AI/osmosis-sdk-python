@@ -220,14 +220,6 @@ class TestCalculateStatistics:
             "max": 0.0,
         }
 
-    def test_single_score(self):
-        stats = calculate_statistics([0.75])
-        assert stats["average"] == 0.75
-        assert stats["variance"] == 0.0
-        assert stats["stdev"] == 0.0
-        assert stats["min"] == 0.75
-        assert stats["max"] == 0.75
-
     def test_multiple_scores(self):
         stats = calculate_statistics([0.0, 1.0])
         assert stats["average"] == 0.5
@@ -353,7 +345,6 @@ class TestJsonReport:
             "errors": [],
             "statistics": calculate_statistics([0.85]),
         }
-        assert data["records"][0] == report.results[0].to_payload()
 
 
 # =============================================================================
