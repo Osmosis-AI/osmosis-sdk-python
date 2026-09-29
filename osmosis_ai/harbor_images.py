@@ -1,7 +1,8 @@
 """Versioned image identities shared by Harbor builders and rollout gateways.
 
-The v1 policy is Linux/amd64, Git file modes, and Harbor's container-context
-hash. A full SHA-256 disambiguates Harbor's short hash. Publication is an
+The SDK owns the v1 byte encoding: Linux/amd64, Git file modes, and the
+original Harbor 0.22 container-context hash, disambiguated by a full SHA-256.
+Harbor upgrades do not change existing image identities. Publication is an
 immutable snapshot: networked Docker builds need not be reproducible.
 """
 
@@ -19,7 +20,6 @@ import tomllib
 from collections.abc import Iterator, Mapping
 from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
-from importlib.metadata import version
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
@@ -212,11 +212,6 @@ def environment_identity(
     build_args: Mapping[str, str] | None = None,
 ) -> EnvironmentIdentity:
     """Hash a normalized context (use normalized_context before calling)."""
-    from harbor.utils.container_cache import docker_build_context_hash
-
-    if version("harbor") != "0.22.0":
-        raise ValueError("harbor-v1 source images require harbor==0.22.0")
-
     args = dict(build_args or {})
     if source_image:
         if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_./:@-]+", source_image):
@@ -231,26 +226,35 @@ def environment_identity(
     if not (context / "Dockerfile").is_file():
         raise ValueError("Harbor environment needs a Dockerfile or docker_image")
     entries = []
+    context_hash = hashlib.blake2b(digest_size=8)
     for root, dirs, files in context.walk(follow_symlinks=False):
         dirs.sort()
         for name in sorted(files):
             path = root / name
-            mode = path.lstat().st_mode
+            metadata = path.lstat()
+            mode = metadata.st_mode
+            relative = path.relative_to(context)
             content = (
                 os.readlink(path).encode() if stat.S_ISLNK(mode) else path.read_bytes()
             )
+            # Preserve the published harbor-v1 encoding, independently of
+            # Harbor runtime cache keys or future hashing changes.
+            context_hash.update(str(relative).encode())
+            context_hash.update(mode.to_bytes(4, "little"))
+            context_hash.update(metadata.st_size.to_bytes(8, "little"))
+            context_hash.update(content)
             entries.append(
-                [
-                    path.relative_to(context).as_posix(),
-                    mode,
-                    hashlib.sha256(content).hexdigest(),
-                ]
+                [relative.as_posix(), mode, hashlib.sha256(content).hexdigest()]
             )
+    context_hash.update(b"platform\0" + PLATFORM.encode() + b"\0")
+    context_hash.update(b"build_args\0")
+    for key, value in sorted(args.items()):
+        context_hash.update(key.encode() + b"=" + value.encode() + b"\0")
     payload = json.dumps(
         [POLICY, PLATFORM, args, entries], sort_keys=True, separators=(",", ":")
     )
     return EnvironmentIdentity(
-        docker_build_context_hash(context=context, build_args=args, platform=PLATFORM),
+        context_hash.hexdigest(),
         hashlib.sha256(payload.encode()).hexdigest(),
     )
 

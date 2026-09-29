@@ -144,11 +144,6 @@ a server context have `process_id: null`.
 
 ## Source image values
 
-`osmosis_ai.source_images.SourceImageManifest` validates a published `source-v1`
-manifest whose task bindings reference image keys. Its `.resolved()` method
-returns `SourceImageBuildResult`, whose bindings contain complete image records.
-Both validate the existing `TaskSource`, pinned digests and inventory consistency.
-The resolved result's `.select_task_ids()` validates a requested subset and
-returns sorted unique IDs. These types contain no authentication, transport or
-workspace lookup behavior. Native gateway options use the existing
-`osmosis_ai.rollout.types.harbor.HarborGatewayConfig`.
+`osmosis_ai.source_images.SourceImageManifest` validates a published `source-v1` manifest whose task bindings reference image keys. Its `.resolved()` method returns `SourceImageBuildResult`, whose bindings contain complete image records. Both validate the existing `TaskSource`, pinned digests and inventory consistency. The resolved result's `.select_task_ids()` validates a requested subset and returns sorted unique IDs. These types contain no authentication, transport or workspace lookup behavior. Native gateway options use the existing `osmosis_ai.rollout.types.harbor.HarborGatewayConfig`.
+
+The SDK owns the `harbor-v1` image identity policy in `osmosis_ai.harbor_images`: normalized Git file modes, Linux/amd64, file paths and contents, symlink targets, and build arguments. Its byte encoding preserves the identities originally produced with Harbor 0.22.0 and does not depend on the installed Harbor release or Harbor's internal runtime cache keys. Builders and gateways must use the same SDK identity policy so published tags resolve to the same pinned image digests; upgrading Harbor alone does not require rebuilding existing source images. Any future change to this encoding requires a new policy version rather than changing existing `harbor-v1` tags.

@@ -102,6 +102,41 @@ jobs:
         if: matrix.python-version != '3.12'
         run: uv run --no-sync pytest -n 4 --dist worksteal --durations=30
 
+  harbor-compatibility:
+    name: Harbor compatibility (${{ matrix.name }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # The ordinary suite exercises the newer PyPI version in uv.lock.
+          - name: minimum
+            requirement: "harbor[daytona]==0.20.0"
+          - name: osmosis-fork
+            requirement: "harbor[daytona] @ git+https://github.com/Osmosis-AI/harbor@e8257a65a90dde2d6b353d16acffcd70c6b54c5d"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.12"
+          enable-cache: true
+      - name: Install the selected Harbor implementation
+        env:
+          HARBOR_REQUIREMENT: ${{ matrix.requirement }}
+        run: |
+          uv sync --locked --all-extras --group dev
+          uv pip install "$HARBOR_REQUIREMENT"
+          uv pip check
+          uv run --no-sync python -c 'from importlib.metadata import distribution; d = distribution("harbor"); print(d.version); print(d.read_text("direct_url.json"))'
+      - name: Verify Harbor contracts
+        run: >-
+          uv run --no-sync pytest
+          tests/unit/test_harbor_images.py
+          tests/unit/rollout/test_harbor*.py
+          tests/unit/rollout/test_native_evidence.py
+          tests/unit/rollout/test_trajectory_atif.py
+
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 15
