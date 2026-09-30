@@ -54,3 +54,36 @@ def test_rollout_init_request_accepts_safe_id(rollout_id: str) -> None:
     assert RolloutInitRequest(**_init_payload(rollout_id=rollout_id)).rollout_id == (
         rollout_id
     )
+
+
+@pytest.mark.parametrize("timeout", [-10.0, -1.0, -0.001, 0.0, 0])
+def test_rollout_init_request_rejects_non_positive_agent_timeout(
+    timeout: float,
+) -> None:
+    with pytest.raises(ValidationError, match="timeout must be positive"):
+        RolloutInitRequest(**_init_payload(agent_timeout_sec=timeout))
+
+
+@pytest.mark.parametrize("timeout", [-10.0, -1.0, -0.001, 0.0, 0])
+def test_rollout_init_request_rejects_non_positive_grader_timeout(
+    timeout: float,
+) -> None:
+    with pytest.raises(ValidationError, match="timeout must be positive"):
+        RolloutInitRequest(**_init_payload(grader_timeout_sec=timeout))
+
+
+@pytest.mark.parametrize("timeout", [float("nan"), float("inf"), float("-inf")])
+def test_rollout_init_request_rejects_non_finite_timeouts(timeout: float) -> None:
+    with pytest.raises(ValidationError, match="timeout must be finite"):
+        RolloutInitRequest(**_init_payload(agent_timeout_sec=timeout))
+    with pytest.raises(ValidationError, match="timeout must be finite"):
+        RolloutInitRequest(**_init_payload(grader_timeout_sec=timeout))
+
+
+@pytest.mark.parametrize("timeout", [0.05, 1.0, 30.0, 100, None])
+def test_rollout_init_request_accepts_valid_timeouts(timeout: float | None) -> None:
+    req = RolloutInitRequest(
+        **_init_payload(agent_timeout_sec=timeout, grader_timeout_sec=timeout)
+    )
+    assert req.agent_timeout_sec == timeout
+    assert req.grader_timeout_sec == timeout

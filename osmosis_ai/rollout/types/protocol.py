@@ -47,8 +47,11 @@ class RolloutInitRequest(BaseModel):
     @field_validator("agent_timeout_sec", "grader_timeout_sec")
     @classmethod
     def _validate_timeout(cls, value: float | None) -> float | None:
-        if value is not None and not math.isfinite(value):
-            raise ValueError("timeout must be finite; omit it to run unbounded")
+        if value is not None:
+            if not math.isfinite(value):
+                raise ValueError("timeout must be finite; omit it to run unbounded")
+            if value <= 0:
+                raise ValueError("timeout must be positive; omit it to run unbounded")
         return value
 
 
