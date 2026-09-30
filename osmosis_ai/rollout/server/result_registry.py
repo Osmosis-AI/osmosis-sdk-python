@@ -95,11 +95,27 @@ class RolloutFutureRegistry:
                         ),
                     )
 
-        def complete_cancelled(done: asyncio.Task[None]) -> None:
+        async def publish_failure(exc: BaseException) -> None:
+            async with self.lock:
+                if self.entries.get(rollout_id) is entry and not entry.result.done():
+                    self.finish(
+                        entry,
+                        RolloutResultResponse(
+                            rollout_id=rollout_id,
+                            status=RolloutStatus.FAILURE,
+                            err_message=f"Rollout task crashed: {exc}"
+                            if str(exc)
+                            else "Rollout task crashed",
+                        ),
+                    )
+
+        def complete_task(done: asyncio.Task[None]) -> None:
             if done.cancelled():
                 entry.cancel_result_task = asyncio.create_task(publish_cancelled())
+            elif (exc := done.exception()) is not None:
+                entry.cancel_result_task = asyncio.create_task(publish_failure(exc))
 
-        task.add_done_callback(complete_cancelled)
+        task.add_done_callback(complete_task)
 
     async def discard(self, rollout_id: str) -> None:
         async with self.lock:
