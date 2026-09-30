@@ -25,11 +25,19 @@ from osmosis_ai.rollout.utils.evidence import (
 from osmosis_ai.rollout.utils.identifiers import ensure_single_path_segment
 
 # Credentials in structured records, shell assignments, HTTP headers and URLs.
+# Each identifier is tried once from its first character; the lookahead finds the
+# keyword without rescanning the identifier from every later offset, so long
+# identifier-like runs stay linear instead of backtracking quadratically.
 _ASSIGNMENT = re.compile(
-    r"""(?ix)([\w-]*(?:api[_-]?key|authorization|password|credential|secret|token)[\w-]*\s*[=:]\s*)("[^"\n]*"|'[^'\n]*'|[^\s,;\]}]+)"""
+    r"""(?ix)(?<![\w-])((?=[\w-]*(?:api[_-]?key|authorization|password|credential|secret|token))[\w-]+\s*[=:]\s*)("[^"\n]*"|'[^'\n]*'|[^\s,;\]}]+)"""
 )
 _AUTH_TOKEN = re.compile(r"(?i)\b(Bearer|Basic)\s+[^\s\"',;]+")
-_URL_USERINFO = re.compile(r"([a-z][a-z0-9+.-]*://)[^\s/@]+:[^\s/@]+@", re.IGNORECASE)
+# Start a scheme only where its run starts; leading digits and punctuation stay
+# in the retained group, so "1http://u:p@h" still becomes "1http://[REDACTED]@h".
+_URL_USERINFO = re.compile(
+    r"(?<![a-z0-9+.-])([0-9+.-]*[a-z][a-z0-9+.-]*://)(?=[^\s/@]+:[^\s/@])[^\s/@]+@",
+    re.IGNORECASE,
+)
 MAX_NATIVE_FILE_BYTES = MAX_EVIDENCE_FILE_BYTES
 NATIVE_SELECTION_POLICY = "harbor-native-logs-v1"
 
