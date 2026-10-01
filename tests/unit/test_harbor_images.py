@@ -1,15 +1,14 @@
 import asyncio
 import io
+import os
 import tarfile
 import tomllib
 from types import SimpleNamespace
 
 import httpx
 import pytest
-from harbor.utils.container_cache import docker_build_context_hash
 
 from osmosis_ai.harbor_images import (
-    PLATFORM,
     TaskSource,
     bind_task_images,
     environment_identity,
@@ -27,15 +26,75 @@ IMAGE = "us-west1-docker.pkg.dev/project/repo/environment@sha256:" + "d" * 64
 from tests.unit.harbor_helpers import make_task
 
 
-def test_git_archive_modes_and_harbor_hash_agree(tmp_path):
+# Captured from the original SDK policy with Harbor 0.22.0, before making
+# harbor-v1 independent of the installed Harbor release.
+@pytest.mark.parametrize(
+    ("source_image", "build_args", "expected"),
+    [
+        (
+            None,
+            {},
+            "harbor-v1-02ac682e847d97d1-"
+            "e8be0bf2e9d6b60595a5fcc45233619d0dd8e029c28e26fef714db9bcf4ae2c8",
+        ),
+        (
+            None,
+            {"Z_MODE": "safe", "A_VERSION": "1"},
+            "harbor-v1-fe4f1f60d148fb92-"
+            "7784384e938e091f9f36b5f9c26d3f9fee809a170a1a88248204fa08b522ad37",
+        ),
+        (
+            "registry.example/team/image@sha256:" + "a" * 64,
+            {},
+            "harbor-v1-11caf8aa2e45f2cb-"
+            "2cf869b7cd19860694c381268bce98f04338058859ab94c44cb07a54d5ddc8af",
+        ),
+        (
+            "registry.example/team/image@sha256:" + "a" * 64,
+            {"Z_MODE": "safe", "A_VERSION": "1"},
+            "harbor-v1-a3774c851855bcd5-"
+            "5de71d2bb83945393b4a637815ac21d9f13558084151ea43f615138a9724e059",
+        ),
+    ],
+)
+def test_published_image_identity_is_stable(
+    tmp_path, source_image, build_args, expected
+):
+    (tmp_path / "Dockerfile").write_bytes(b"FROM python:3.12-slim\nCOPY . /app\n")
+    (tmp_path / "data.txt").write_bytes(b"hello\n")
+    (tmp_path / "scripts").mkdir()
+    script = tmp_path / "scripts/run.sh"
+    script.write_bytes(b"#!/bin/sh\necho ready\n")
+    script.chmod(0o755)
+    (tmp_path / "nested").mkdir()
+    (tmp_path / "nested/config.json").write_bytes(b'{"enabled":true}\n')
+    link = tmp_path / "config-link"
+    link.symlink_to("nested/config.json")
+    # Linux symlinks are always 0777; macOS permits different permissions.
+    if os.chmod in os.supports_follow_symlinks:
+        link.chmod(0o777, follow_symlinks=False)
+
+    with normalized_context(tmp_path) as context:
+        identity = environment_identity(
+            context, source_image=source_image, build_args=build_args
+        )
+        assert identity.tag == expected
+        assert (
+            environment_identity(
+                context,
+                source_image=source_image,
+                build_args=dict(reversed(build_args.items())),
+            )
+            == identity
+        )
+
+
+def test_git_archive_modes_preserve_identity(tmp_path):
     task = make_task(tmp_path / "task")
     context = task / "environment"
     (context / "data").chmod(0o600)
     with normalized_context(context) as normalized:
         first = environment_identity(normalized)
-        assert first.environment_hash == docker_build_context_hash(
-            context=normalized, platform=PLATFORM, build_args={}
-        )
         assert (normalized / "data").stat().st_mode & 0o777 == 0o644
     assert (context / "data").stat().st_mode & 0o777 == 0o600
     (context / "data").chmod(0o644)
