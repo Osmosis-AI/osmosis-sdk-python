@@ -119,6 +119,7 @@ class OsmosisHarnessInstalledAgent(BaseInstalledAgent):
             return
         with tempfile.TemporaryDirectory(prefix="osmosis-preview-") as directory:
             staging_path = Path(directory) / "snapshot.json"
+            written: bytes | None = None
             while not stopped.is_set():
                 try:
                     raw = await read_remote_snapshot(
@@ -126,7 +127,7 @@ class OsmosisHarnessInstalledAgent(BaseInstalledAgent):
                     )
                     if stopped.is_set():
                         return
-                    if raw is not None:
+                    if raw is not None and raw != written:
                         document = json.loads(raw)
                         if (
                             isinstance(document, dict)
@@ -134,6 +135,7 @@ class OsmosisHarnessInstalledAgent(BaseInstalledAgent):
                             and document["steps"]
                         ):
                             write_snapshot(self.preview_path, document)
+                            written = raw
                 except Exception:
                     pass
                 await asyncio.sleep(PREVIEW_INTERVAL_SEC)

@@ -3,12 +3,17 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import os
 import re
 import tempfile
+import threading
+from collections.abc import Callable
+from contextlib import suppress
 from datetime import UTC, datetime
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -60,14 +65,19 @@ def _atomic_write(path: Path, data: bytes) -> None:
             temporary.unlink(missing_ok=True)
 
 
-def write_snapshot(path: Path, document: dict[str, Any]) -> None:
+def write_snapshot(
+    path: Path, document: dict[str, Any], previous: bytes | None = None
+) -> bytes:
+    """Replace the snapshot unless it already holds ``previous``; returns its bytes."""
     data = _json_bytes(document)
     if len(data) > MAX_SOURCE_BYTES:
         raise ValueError("Preview source exceeds size limit")
-    _atomic_write(path, data)
+    if data != previous:
+        _atomic_write(path, data)
+    return data
 
 
-def read_snapshot(path: Path) -> dict[str, Any] | None:
+def _snapshot_data(path: Path) -> bytes | None:
     try:
         directory = _open_directory(path.parent)
         try:
@@ -75,18 +85,28 @@ def read_snapshot(path: Path) -> dict[str, Any] | None:
                 data = stream.read(MAX_SOURCE_BYTES + 1)
         finally:
             os.close(directory)
-        if len(data) > MAX_SOURCE_BYTES:
-            return None
+    except (OSError, ValueError):
+        return None
+    return data if len(data) <= MAX_SOURCE_BYTES else None
+
+
+def _snapshot_document(data: bytes) -> dict[str, Any] | None:
+    try:
         document = json.loads(data)
-        if (
-            isinstance(document, dict)
-            and isinstance(document.get("steps"), list)
-            and document["steps"]
-        ):
-            return document
-    except (OSError, ValueError, RecursionError):
-        pass
+    except (ValueError, RecursionError):
+        return None
+    if (
+        isinstance(document, dict)
+        and isinstance(document.get("steps"), list)
+        and document["steps"]
+    ):
+        return document
     return None
+
+
+def read_snapshot(path: Path) -> dict[str, Any] | None:
+    data = _snapshot_data(path)
+    return None if data is None else _snapshot_document(data)
 
 
 def _clip(
@@ -120,38 +140,80 @@ def _clip(
 
 
 def _source_bytes(
-    sample: RolloutSample, rollout_id: str, api_key: str | None
-) -> bytes | None:
+    sample: RolloutSample, rollout_id: str, api_key: str | None, digest: bytes | None
+) -> tuple[bytes | None, bytes | None]:
+    """Return the input digest and snapshot bytes, or no bytes when unchanged."""
+    # Sources that do not report a complete history publish window positions,
+    # not source IDs, and a full window may have dropped older messages.
+    reported = sample.extra_fields.get("_preview_truncated")
+    metadata = {
+        "truncated": bool(reported)
+        if reported is not None
+        else len(sample.messages) >= MAX_PREVIEW_MESSAGES,
+        "turn": sample.extra_fields.get("_preview_turn"),
+        "step_ids_known": reported is False,
+    }
+    # The snapshot depends only on the metadata and message encodings, so an
+    # unchanged history skips the sanitizing conversion and the rewrite.
+    fingerprint = hashlib.sha256(_json_bytes(metadata))
     size = 0
     for chunk in json.JSONEncoder(ensure_ascii=True, allow_nan=False).iterencode(
         sample.trajectory_messages
     ):
         size += len(chunk)
         if size > MAX_SOURCE_BYTES:
-            return None
-    truncated = [bool(sample.extra_fields.get("_preview_truncated"))]
+            return digest, None
+        fingerprint.update(chunk.encode())
+    current = fingerprint.digest()
+    if current == digest:
+        return digest, None
+    truncated = [metadata["truncated"]]
     document = convert_sample_to_trajectory(
         sample, rollout_id=rollout_id
     ).to_json_dict()
+    # Sample metadata is replaced below and must not affect the snapshot.
+    document.pop("extra", None)
     document = _clip(document, truncated, api_key=api_key)
-    document["extra"] = {
-        "osmosis": {
-            "truncated": truncated[0],
-            "turn": sample.extra_fields.get("_preview_turn"),
-            "step_ids_known": not sample.extra_fields.get("_preview_truncated", False),
-        }
-    }
+    document["extra"] = {"osmosis": {**metadata, "truncated": truncated[0]}}
     data = _json_bytes(document)
-    return data if len(data) <= MAX_SOURCE_BYTES else None
+    return current, (data if len(data) <= MAX_SOURCE_BYTES else None)
 
 
-async def capture_source(context: RolloutContext) -> None:
+async def _daemon_call[T](function: Callable[[], T]) -> T:
+    """Run a conversion that neither loop teardown nor interpreter exit joins.
+
+    An in-flight preview must not delay the workflow result, which the
+    in-container runner writes only after ``asyncio.run`` returns.
+    """
+    loop = asyncio.get_running_loop()
+    future: asyncio.Future[T] = loop.create_future()
+
+    def settle(outcome: Callable[[], None]) -> None:
+        if not future.done():
+            outcome()
+
+    def run() -> None:
+        try:
+            outcome = partial(future.set_result, function())
+        except BaseException as exc:  # Forwarded like asyncio.to_thread.
+            outcome = partial(future.set_exception, exc)
+        with suppress(RuntimeError):  # The loop may already be closed.
+            loop.call_soon_threadsafe(settle, outcome)
+
+    threading.Thread(target=run, name="osmosis-preview", daemon=True).start()
+    return await future
+
+
+async def capture_source(
+    context: RolloutContext, digest: bytes | None = None
+) -> bytes | None:
+    """Commit a changed sample-source snapshot; returns the committed input digest."""
     if (
         not context.preview_enabled
         or context.preview_path is None
         or context.sample_source is None
     ):
-        return
+        return digest
     try:
         async with asyncio.timeout(1):
             sample = await context.sample_source.get_preview(MAX_PREVIEW_MESSAGES)
@@ -160,20 +222,23 @@ async def capture_source(context: RolloutContext) -> None:
             or sample is None
             or not sample.trajectory_messages
         ):
-            return
-        data = await asyncio.to_thread(
-            _source_bytes, sample, context.rollout_id, context.api_key
+            return digest
+        current, data = await _daemon_call(
+            partial(_source_bytes, sample, context.rollout_id, context.api_key, digest)
         )
         # Only the collector commits; a cancelled conversion cannot publish late.
         if context.preview_enabled and data is not None:
             _atomic_write(context.preview_path, data)
+        return current
     except Exception:
         logger.debug("Rollout preview snapshot unavailable")
+        return digest
 
 
 async def collect_source(context: RolloutContext) -> None:
+    digest: bytes | None = None
     while context.preview_enabled:
-        await capture_source(context)
+        digest = await capture_source(context, digest)
         await asyncio.sleep(PREVIEW_INTERVAL_SEC)
 
 
@@ -279,7 +344,10 @@ def _preview_document(
             or source_metadata.get("step_ids_known", True),
         ),
     }
-    clean = json.loads(sanitized_text(_json_bytes(clean), api_key))
+    # Lone surrogates from native JSON escapes would make consumers fail to
+    # re-encode the document as UTF-8.
+    text = json.dumps(clean, ensure_ascii=False, allow_nan=False)
+    clean = json.loads(sanitized_text(text.encode("utf-8", "replace"), api_key))
     clean = Trajectory.model_validate(clean).to_json_dict()
     clean["extra"] = {
         "osmosis": {
@@ -290,21 +358,51 @@ def _preview_document(
         }
     }
     # Reserve enough room for the version, timestamp and status added below.
-    while len(_json_bytes(clean)) > MAX_PREVIEW_BYTES - 256:
+    limit = MAX_PREVIEW_BYTES - 256
+    if len(_json_bytes(clean)) > limit:
         clean["extra"]["osmosis"]["truncated"] = True
-        if len(clean["steps"]) == 1:
-            clean["steps"] = [
-                {
-                    "step_id": 1,
-                    "source": "agent",
-                    "message": "This turn exceeds the live preview size limit.",
-                }
-            ]
-            break
-        clean["steps"].pop(0)
+        steps, clean["steps"] = clean["steps"], []
+        # Keep the newest steps that fit. Renumbering from one never lengthens
+        # a step, so the summed sizes bound the final document.
+        size, kept = len(_json_bytes(clean)) - 1, 0
+        for step in reversed(steps):
+            size += len(_json_bytes(step)) + 1
+            if size > limit:
+                break
+            kept += 1
+        clean["steps"] = steps[len(steps) - kept :] or [
+            {
+                "step_id": 1,
+                "source": "agent",
+                "message": "This turn exceeds the live preview size limit.",
+            }
+        ]
         for index, step in enumerate(clean["steps"], 1):
             step["step_id"] = index
     return Trajectory.model_validate(clean).to_json_dict()
+
+
+def _convert_changed(
+    source: Path, digest: bytes | None, rollout_id: str, api_key: str | None
+) -> tuple[bytes | None, dict[str, Any] | None]:
+    """Convert the snapshot only when its bytes differ from ``digest``."""
+    data = _snapshot_data(source)
+    if data is None:
+        return digest, None
+    current = hashlib.sha256(data).digest()
+    if current == digest:
+        return digest, None
+    document = _snapshot_document(data)
+    try:
+        return current, (
+            None
+            if document is None
+            else _preview_document(document, rollout_id, api_key)
+        )
+    except Exception:
+        # The same bytes would fail again; wait for the next snapshot.
+        logger.debug("Rollout preview conversion unavailable")
+        return current, None
 
 
 async def publish_previews(
@@ -320,6 +418,7 @@ async def publish_previews(
     previous = b""
     version = 0
     latest: dict[str, Any] | None = None
+    digest: bytes | None = None
     destination = root / rollout_id / "preview.json"
     while True:
         terminal = result.done() and not result.cancelled()
@@ -329,11 +428,12 @@ async def publish_previews(
             else (RolloutStatus.UNKNOWN if execution.done() else progress.status)
         )
         try:
-            document = await asyncio.to_thread(read_snapshot, source)
+            # Unchanged input keeps the last conversion; only status can change.
+            digest, document = await asyncio.to_thread(
+                _convert_changed, source, digest, rollout_id, api_key
+            )
             if document is not None:
-                latest = await asyncio.to_thread(
-                    _preview_document, document, rollout_id, api_key
-                )
+                latest = document
         except Exception:
             logger.debug("Rollout preview conversion unavailable")
         try:

@@ -2,6 +2,8 @@
 
 import asyncio
 import json
+import threading
+import time
 from typing import Any
 
 import pytest
@@ -176,6 +178,60 @@ class TestLivePreviewBoundary:
             release.set()
             await asyncio.wait_for(completed.wait(), timeout=1)
 
+        assert not preview_path.exists()
+
+    def test_agent_main_writes_result_without_joining_preview_conversion(
+        self, monkeypatch, tmp_path
+    ):
+        from osmosis_ai.rollout.trajectory import preview
+
+        monkeypatch.setattr(runner, "AGENT_LOGS_DIR", tmp_path)
+        preview_path = tmp_path / "private-preview" / "snapshot.json"
+        ContainerInput(rollout_id="r1", preview_path=str(preview_path)).write(
+            tmp_path / INPUT_FILENAME
+        )
+        entered, release = threading.Event(), threading.Event()
+        convert = preview.convert_sample_to_trajectory
+
+        def slow_conversion(*args, **kwargs):
+            entered.set()
+            release.wait(timeout=5)
+            return convert(*args, **kwargs)
+
+        monkeypatch.setattr(preview, "convert_sample_to_trajectory", slow_conversion)
+        messages = [{"role": "assistant", "content": "done"}]
+
+        class Source(RecordedSource):
+            async def get_preview(self, max_messages):
+                return self.sample
+
+        class Workflow:
+            def __init__(self, config):
+                pass
+
+            async def run(self, ctx):
+                context = get_rollout_context()
+                assert context is not None
+                context.set_sample_source(Source(RolloutSample(messages=messages)))
+                while not entered.is_set():
+                    await asyncio.sleep(0.01)
+                return messages
+
+        # Without the fix, interpreter-joined work ends only when this fires.
+        timer = threading.Timer(3, release.set)
+        timer.start()
+        try:
+            started = time.monotonic()
+            runner.agent_main(Workflow)
+            elapsed = time.monotonic() - started
+            assert not release.is_set()
+        finally:
+            release.set()
+            timer.cancel()
+
+        assert elapsed < 2
+        result = ContainerResult.read(tmp_path / RESULT_FILENAME)
+        assert result.status == RolloutStatus.SUCCESS
         assert not preview_path.exists()
 
     async def test_preview_is_written_before_workflow_finishes(

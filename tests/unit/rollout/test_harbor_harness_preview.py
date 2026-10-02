@@ -79,6 +79,43 @@ async def test_harness_keeps_last_snapshot_and_does_not_wait_for_remote_read(
     assert not (agent.logs_dir / "trajectory.json").exists()
 
 
+async def test_harness_does_not_rewrite_an_unchanged_snapshot(monkeypatch, tmp_path):
+    agent = make_agent(tmp_path)
+    monkeypatch.setattr(harness_module, "PREVIEW_INTERVAL_SEC", 0)
+    raw = json.dumps({"steps": [{"step_id": 1, "source": "agent", "message": "a"}]})
+    writes = []
+    write = harness_module.write_snapshot
+
+    def counted(*args):
+        writes.append(args[1])
+        return write(*args)
+
+    monkeypatch.setattr(harness_module, "write_snapshot", counted)
+    polled = asyncio.Event()
+
+    class Environment:
+        capabilities = SimpleNamespace(mounted=True)
+        downloads = 0
+
+        async def exec(self, command, timeout_sec):
+            return SimpleNamespace(return_code=0)
+
+        async def download_file(self, source, target):
+            self.downloads += 1
+            if self.downloads > 3:
+                polled.set()
+            Path(target).write_text(raw)
+
+    async def run_agent(environment, command):
+        await polled.wait()
+
+    monkeypatch.setattr(agent, "exec_as_agent", run_agent)
+    await asyncio.wait_for(agent.run("task", Environment(), None), timeout=2)
+
+    assert len(writes) == 1
+    assert json.loads(agent.preview_path.read_text()) == json.loads(raw)
+
+
 @pytest.mark.parametrize("enabled", [False, True])
 async def test_missing_preview_does_not_change_agent_completion(
     monkeypatch, tmp_path, enabled

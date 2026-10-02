@@ -91,6 +91,9 @@ class RolloutContext:
 
     For local backends, pass URL/key directly.
     For container runners, leave empty and they'll be read from env vars.
+    Setting ``preview_enabled = False`` before a sample source is registered
+    and before the workflow's first ``await`` keeps the rollout out of live
+    previews; a later change only stops further snapshots.
     """
 
     chat_completions_url: str = ""

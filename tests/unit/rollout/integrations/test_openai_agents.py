@@ -67,7 +67,7 @@ class TestOpenAIAgentsIntegration:
             "live update" if limit > 0 else "third"
         )
 
-    async def test_responses_tool_history_does_not_claim_a_tail_local_turn(
+    async def test_responses_tool_history_counts_full_session_model_turns(
         self, rollout_context
     ):
         from osmosis_ai.rollout.integrations.agents.openai_agents import (
@@ -75,9 +75,11 @@ class TestOpenAIAgentsIntegration:
         )
 
         session = OsmosisMemorySession()
+        await session.add_items([{"role": "user", "content": "solve"}])
         for index in range(110):
             await session.add_items(
                 [
+                    {"type": "reasoning", "id": f"r{index}", "summary": []},
                     {
                         "type": "function_call",
                         "call_id": str(index),
@@ -91,9 +93,26 @@ class TestOpenAIAgentsIntegration:
                     },
                 ]
             )
+        await session.add_items(
+            [
+                {
+                    "id": "final",
+                    "type": "message",
+                    "role": "assistant",
+                    "status": "completed",
+                    "content": [
+                        {"type": "output_text", "text": "done", "annotations": []}
+                    ],
+                }
+            ]
+        )
         sample = await rollout_context.sample_source.get_preview(100)
         assert sample.trajectory_messages
         assert sample.extra_fields["_preview_truncated"] is True
+        assert sample.extra_fields["_preview_turn"] == 111
+
+        await session.add_items([{"type": "item_reference", "id": "r0"}])
+        sample = await rollout_context.sample_source.get_preview(100)
         assert sample.extra_fields["_preview_turn"] is None
 
     async def test_memory_session_registers_sample_source(self, rollout_context):

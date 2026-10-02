@@ -117,6 +117,14 @@ async def test_publisher_keeps_last_snapshot_and_canonical_status(
     tmp_path, monkeypatch, terminal
 ):
     monkeypatch.setattr(preview, "PREVIEW_INTERVAL_SEC", 0.01)
+    conversions = []
+    convert = preview._preview_document
+
+    def counted(*args):
+        conversions.append(args[0])
+        return convert(*args)
+
+    monkeypatch.setattr(preview, "_preview_document", counted)
     source = tmp_path / "private" / "snapshot.json"
     destination = tmp_path / "live" / "r1" / "preview.json"
     progress = RolloutProgress(status=RolloutStatus.RUNNING)
@@ -142,11 +150,14 @@ async def test_publisher_keeps_last_snapshot_and_canonical_status(
         assert first["extra"]["osmosis"]["preview_version"] == 1
         await asyncio.sleep(0.04)
         assert json.loads(destination.read_text()) == first
+        # Unchanged bytes are not converted again on later polls.
+        assert len(conversions) == 1
         source.write_text("{incomplete")
         await progress.set_status(RolloutStatus.GRADING)
         grading = await wait_preview(destination, "grading")
         assert grading["steps"] == first["steps"]
         assert grading["extra"]["osmosis"]["preview_version"] == 2
+        assert len(conversions) == 1
         stop.set()
         await execution
         unknown = await wait_preview(destination, "unknown")
@@ -185,6 +196,16 @@ def test_snapshot_rejects_symlinks_oversize_and_invalid_root(tmp_path, monkeypat
     assert preview.preview_root("run:1") == tmp_path
     monkeypatch.setenv("_OSMOSIS_ROLLOUT_PREVIEW_ROOT", "relative")
     assert preview.preview_root("r1") is None
+
+
+def test_unchanged_snapshot_is_not_rewritten(tmp_path):
+    path = tmp_path / "snapshot.json"
+    data = preview.write_snapshot(path, document())
+    inode = path.stat().st_ino
+    assert preview.write_snapshot(path, document(), data) == data
+    assert path.stat().st_ino == inode
+    preview.write_snapshot(path, {**document(), "steps": []}, data)
+    assert path.stat().st_ino != inode
 
 
 async def test_redaction_precedes_clipping_in_native_and_sample_sources(tmp_path):
@@ -244,6 +265,106 @@ async def test_redaction_precedes_clipping_in_native_and_sample_sources(tmp_path
     assert clean["steps"][0]["extra"]["osmosis"]["original_step_id"] is None
 
 
+async def test_repeated_sanitization_keeps_redactions_exact(tmp_path):
+    message = "export PASSWORD=hunter2; curl -H x-api-key: abc"
+    expected = "export PASSWORD=[REDACTED]; curl -H x-api-key: [REDACTED]"
+    source = document()
+    source["steps"][0]["message"] = message
+    assert (
+        preview._preview_document(source, "r1", None)["steps"][0]["message"] == expected
+    )
+
+    class Source(PreviewSource):
+        async def get_preview(self, max_messages):
+            return RolloutSample(messages=[{"role": "assistant", "content": message}])
+
+    path = tmp_path / "snapshot.json"
+    await preview.capture_source(
+        RolloutContext(rollout_id="r1", preview_path=path, sample_source=Source())
+    )
+    snapshot = preview.read_snapshot(path)
+    assert snapshot is not None
+    clean = preview._preview_document(snapshot, "r1", None)
+    assert clean["steps"][0]["message"] == expected
+
+
+def test_lone_surrogates_do_not_reach_published_previews():
+    source = document()
+    source["steps"][0]["message"] = "tool output \ud83d"
+    source["steps"][0]["tool_calls"] = [
+        {
+            "tool_call_id": "call",
+            "function_name": "run",
+            "arguments": {"\udc00key": "value \udfff"},
+        }
+    ]
+    clean = preview._preview_document(source, "r1", None)
+    published = json.loads(preview._json_bytes(clean))
+    # Consumers re-encode previews as UTF-8 without ASCII escapes.
+    encoded = json.dumps(published, ensure_ascii=False).encode()
+    assert "tool output ?" in encoded.decode()
+    assert published["steps"][0]["tool_calls"][0]["arguments"] == {"?key": "value ?"}
+
+
+async def test_custom_window_without_flags_does_not_claim_source_ids(tmp_path):
+    class Window(PreviewSource):
+        def __init__(self, size):
+            self.size = size
+
+        async def get_preview(self, max_messages):
+            history = [
+                {"role": "assistant", "content": f"m{index}"} for index in range(1, 501)
+            ]
+            return RolloutSample(messages=history[-min(self.size, max_messages) :])
+
+    for size, truncated in ((500, True), (3, False)):
+        path = tmp_path / f"snapshot-{size}.json"
+        await preview.capture_source(
+            RolloutContext(
+                rollout_id="r1", preview_path=path, sample_source=Window(size)
+            )
+        )
+        snapshot = preview.read_snapshot(path)
+        assert snapshot is not None
+        clean = preview._preview_document(snapshot, "r1", None)
+        assert clean["steps"][0]["message"] == f"m{501 - min(size, 100)}"
+        assert clean["extra"]["osmosis"]["truncated"] is truncated
+        assert clean["extra"]["osmosis"]["turn"] is None
+        assert all(
+            step["extra"]["osmosis"]["original_step_id"] is None
+            for step in clean["steps"]
+        )
+
+
+def test_size_fit_serializes_each_step_once(monkeypatch):
+    source = document()
+    source["steps"] = [
+        {"step_id": index, "source": "agent", "message": "x" * 16_000}
+        for index in range(1, 101)
+    ]
+    serialized = []
+    encode = preview._json_bytes
+
+    def counted(value):
+        data = encode(value)
+        serialized.append(len(data))
+        return data
+
+    monkeypatch.setattr(preview, "_json_bytes", counted)
+    clean = preview._preview_document(source, "r1", None)
+    monkeypatch.undo()
+
+    kept = clean["steps"]
+    assert clean["extra"]["osmosis"]["truncated"] is True
+    assert [step["step_id"] for step in kept] == list(range(1, len(kept) + 1))
+    assert kept[-1]["extra"]["osmosis"]["original_step_id"] == 100
+    assert len(preview._json_bytes(clean)) <= preview.MAX_PREVIEW_BYTES - 256
+    with_next = {**clean, "steps": [source["steps"][-len(kept) - 1], *kept]}
+    assert len(preview._json_bytes(with_next)) > preview.MAX_PREVIEW_BYTES - 256
+    # Popping one step per whole-document pass serializes tens of megabytes.
+    assert sum(serialized) < 4 * len(json.dumps(source))
+
+
 async def test_oversized_source_keeps_last_snapshot_without_conversion(
     tmp_path, monkeypatch
 ):
@@ -267,6 +388,48 @@ async def test_oversized_source_keeps_last_snapshot_without_conversion(
         RolloutContext(rollout_id="r1", preview_path=path, sample_source=Source())
     )
     assert path.read_bytes() == before
+
+
+async def test_unchanged_source_history_is_not_reconverted_or_rewritten(
+    tmp_path, monkeypatch
+):
+    # Each poll returns (messages, turn); the loop stops after the last one.
+    polls = [(["first"], 1)] * 3 + [(["first"], 2)] + [(["first", "next"], 2)] * 2
+    conversions, writes = [], []
+    convert, write = preview.convert_sample_to_trajectory, preview._atomic_write
+
+    def counted_convert(*args, **kwargs):
+        conversions.append(args[0])
+        return convert(*args, **kwargs)
+
+    def counted_write(*args):
+        writes.append(args[1])
+        write(*args)
+
+    class Source(PreviewSource):
+        async def get_preview(self, max_messages):
+            if not polls:
+                context.preview_enabled = False
+                return None
+            contents, turn = polls.pop(0)
+            return RolloutSample(
+                messages=[{"role": "assistant", "content": c} for c in contents],
+                extra_fields={"_preview_truncated": False, "_preview_turn": turn},
+            )
+
+    monkeypatch.setattr(preview, "PREVIEW_INTERVAL_SEC", 0)
+    monkeypatch.setattr(preview, "convert_sample_to_trajectory", counted_convert)
+    monkeypatch.setattr(preview, "_atomic_write", counted_write)
+    path = tmp_path / "snapshot.json"
+    context = RolloutContext(rollout_id="r1", preview_path=path, sample_source=Source())
+    await asyncio.wait_for(preview.collect_source(context), 5)
+
+    # Only the first poll and the turn and history changes are converted.
+    assert len(conversions) == len(writes) == 3
+    snapshot = preview.read_snapshot(path)
+    assert snapshot is not None
+    assert snapshot["steps"][-1]["message"] == "next"
+    assert snapshot["extra"]["osmosis"]["turn"] == 2
 
 
 @pytest.mark.parametrize("completion", ["publish", "disable", "cancel"])
@@ -389,20 +552,32 @@ async def test_server_publishes_live_then_registry_terminal(
     assert not (archive / "r1" / "preview.json").exists()
 
 
-async def test_server_without_opt_in_does_not_read_sources(tmp_path, monkeypatch):
-    monkeypatch.delenv("_OSMOSIS_ROLLOUT_PREVIEW_ROOT", raising=False)
+@pytest.mark.parametrize("opt_out", [False, True])
+async def test_server_without_opt_in_does_not_read_sources(
+    tmp_path, monkeypatch, opt_out
+):
+    if opt_out:
+        monkeypatch.setenv("_OSMOSIS_ROLLOUT_PREVIEW_ROOT", str(tmp_path / "live"))
+    else:
+        monkeypatch.delenv("_OSMOSIS_ROLLOUT_PREVIEW_ROOT", raising=False)
     monkeypatch.setattr(
         "osmosis_ai.rollout.trajectory.save.default_artifact_root", lambda: tmp_path
     )
 
+    reads = []
+
     class Source(PreviewSource):
         async def get_preview(self, max_messages):
-            pytest.fail("preview must be completely off")
+            reads.append(max_messages)
+            return await super().get_preview(max_messages)
 
     class Backend(ExecutionBackend):
         async def execute(self, request):
             context = get_rollout_context()
-            assert context.preview_path is None
+            if opt_out:
+                context.preview_enabled = False
+            else:
+                assert context.preview_path is None
             context.set_sample_source(Source())
             await asyncio.sleep(0.03)
             return ExecutionOutcome(
@@ -427,4 +602,5 @@ async def test_server_without_opt_in_does_not_read_sources(tmp_path, monkeypatch
             assert (await http.post("/drain", json={"timeout_sec": 1})).json()[
                 "drained"
             ]
+    assert reads == []
     assert not list(tmp_path.rglob("preview.json"))

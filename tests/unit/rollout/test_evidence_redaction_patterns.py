@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import random
 import re
 import signal
@@ -141,3 +142,17 @@ def test_patterns_stay_linear_on_long_runs():
     finally:
         signal.alarm(0)
         signal.signal(signal.SIGALRM, previous)
+
+
+def test_sanitizing_redacted_text_again_changes_nothing():
+    text = (
+        'export PASSWORD=hunter2 x-api-key: abc token="q" Bearer zzz '
+        "http://u:p@h key-123"
+    )
+    for data in (text.encode(), json.dumps({"log": text, "token": "x"}).encode()):
+        once = evidence.sanitized_text(data, "key-123")
+        assert evidence.sanitized_text(once, "key-123") == once
+    assert evidence.sanitized_text(text.encode(), "key-123").decode() == (
+        "export PASSWORD=[REDACTED] x-api-key: [REDACTED] token=[REDACTED] "
+        "Bearer [REDACTED] http://[REDACTED]@h [REDACTED]"
+    )

@@ -31,8 +31,11 @@ async def test_remote_snapshot_bounds_the_download(
         link.symlink_to(source)
         source = link
 
+    remote_paths = set()
+
     class Environment:
         async def exec(self, command, **kwargs):
+            remote_paths.add(Path(command.rsplit(" > ", 1)[1]))
             process = await asyncio.create_subprocess_exec(
                 "/bin/sh",
                 "-c",
@@ -45,17 +48,94 @@ async def test_remote_snapshot_bounds_the_download(
         async def download_file(self, remote, target):
             shutil.copyfile(remote, target)
 
-    target = tmp_path / "snapshot"
-    raw = await preview_agents.read_remote_snapshot(Environment(), str(source), target)
+    try:
+        raw = await preview_agents.read_remote_snapshot(
+            Environment(), str(source), tmp_path / "snapshot"
+        )
 
-    assert raw == (b"x" * 16 if source_kind == "regular" else None)
-    if target.exists():
-        assert target.stat().st_size <= 17
+        assert raw == (b"x" * 16 if source_kind == "regular" else None)
+        staged = [path for path in remote_paths if path.exists()]
+        assert all(path.stat().st_size <= 17 for path in staged)
+        assert len(staged) == int(source_kind != "symlink")
+        assert not list(tmp_path.glob("tmp*"))
+    finally:
+        for path in remote_paths:
+            path.unlink(missing_ok=True)
 
 
-@pytest.mark.parametrize("cleanup_fails", [False, True])
+async def test_downloaded_links_are_never_followed_or_written_through(
+    tmp_path, preview_agents
+):
+    source = tmp_path / "native.json"
+    source.write_bytes(b"transcript")
+    outside = tmp_path / "host-only"
+    outside.write_bytes(b"host secret")
+    private = tmp_path / "private"
+    private.mkdir()
+    downloads = 0
+
+    class Environment:
+        async def exec(self, command, **kwargs):
+            return SimpleNamespace(return_code=0)
+
+        async def download_file(self, remote, target):
+            nonlocal downloads
+            downloads += 1
+            if downloads == 1:
+                # Docker copies a link the sandbox swapped in as a link.
+                Path(target).symlink_to(outside)
+            else:
+                # A later copy follows an existing destination link.
+                Path(target).write_bytes(b"sandbox bytes")
+
+    target = private / "snapshot"
+    first = await preview_agents.read_remote_snapshot(
+        Environment(), str(source), target
+    )
+    second = await preview_agents.read_remote_snapshot(
+        Environment(), str(source), target
+    )
+
+    assert first is None
+    assert second == b"sandbox bytes"
+    assert outside.read_bytes() == b"host secret"
+    assert not list(private.iterdir())
+
+
+@pytest.mark.parametrize("source_exists", [False, True])
+async def test_remote_read_costs_one_exec(tmp_path, preview_agents, source_exists):
+    source = tmp_path / "native.json"
+    if source_exists:
+        source.write_bytes(b"transcript")
+    commands = []
+    downloads = []
+
+    class Environment:
+        async def exec(self, command, **kwargs):
+            commands.append(command)
+            process = await asyncio.create_subprocess_exec("/bin/sh", "-c", command)
+            return SimpleNamespace(return_code=await process.wait())
+
+        async def download_file(self, remote, target):
+            downloads.append(remote)
+            shutil.copyfile(remote, target)
+
+    try:
+        for _ in range(2):
+            raw = await preview_agents.read_remote_snapshot(
+                Environment(), str(source), tmp_path / "snapshot"
+            )
+            assert raw == (b"transcript" if source_exists else None)
+        # Some sandboxes keep a session per exec; the next poll replaces staging.
+        assert len(commands) == 2
+        assert len(downloads) == (2 if source_exists else 0)
+    finally:
+        if commands:
+            Path(commands[0].rsplit(" > ", 1)[1]).unlink(missing_ok=True)
+
+
 async def test_remote_read_timeouts_keep_staging_bounded(
-    tmp_path, monkeypatch, cleanup_fails, preview_agents
+    tmp_path, monkeypatch, preview_agents
 ):
     source = tmp_path / "native.json"
     source.write_bytes(b"transcript")
@@ -72,10 +152,7 @@ async def test_remote_read_timeouts_keep_staging_bounded(
 
     class Environment:
         async def exec(self, command, **kwargs):
-            if command.startswith("umask"):
-                remote_paths.add(Path(command.rsplit(" > ", 1)[1]))
-            elif cleanup_fails:
-                raise TimeoutError
+            remote_paths.add(Path(command.rsplit(" > ", 1)[1]))
             process = await asyncio.create_subprocess_exec("/bin/sh", "-c", command)
             return SimpleNamespace(return_code=await process.wait())
 
@@ -91,10 +168,10 @@ async def test_remote_read_timeouts_keep_staging_bounded(
                 )
                 is None
             )
-        retained = [path for path in remote_paths if path.exists()]
-        assert len(retained) == int(cleanup_fails)
-        if retained:
-            assert retained[0].read_bytes() == b"transcript"
+        # Every timed-out poll reuses the same bounded staging file.
+        assert len(remote_paths) == 1
+        assert next(iter(remote_paths)).read_bytes() == b"transcript"
+        assert not list(tmp_path.glob("tmp*"))
     finally:
         for path in remote_paths:
             path.unlink(missing_ok=True)
@@ -183,9 +260,10 @@ async def test_native_preview_updates_during_run_and_keeps_complete_snapshot(
 
     original_write = preview_agents.write_snapshot
 
-    def publish(path, document):
-        original_write(path, document)
+    def publish(*args):
+        written = original_write(*args)
         published.set()
+        return written
 
     monkeypatch.setattr(preview_agents, "read_remote_snapshot", remote_snapshot)
     monkeypatch.setattr(preview_agents, "write_snapshot", publish)

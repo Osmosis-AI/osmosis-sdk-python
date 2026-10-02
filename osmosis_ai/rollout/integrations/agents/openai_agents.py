@@ -94,6 +94,31 @@ class OsmosisMemorySession(SessionABC):
         self.items.clear()
 
 
+def _model_turns(items: Sequence[Any]) -> int | None:
+    """Count model responses: runs of output items separated by input items.
+
+    Unrecognized items make the count unknown. A reasoning-only response
+    directly followed by another response is counted once.
+    """
+    turns, previous_output = 0, False
+    for item in items:
+        if not isinstance(item, Mapping):
+            return None
+        kind = item.get("type")
+        if kind in {None, "message"}:
+            output = item.get("role") == "assistant"
+        elif isinstance(kind, str) and kind.endswith("_call_output"):
+            output = False
+        elif kind == "reasoning" or (isinstance(kind, str) and kind.endswith("_call")):
+            output = True
+        else:
+            return None
+        if output and not previous_output:
+            turns += 1
+        previous_output = output
+    return turns
+
+
 class SessionSampleSource(SampleSource):
     """Produces the rollout's sample from any OpenAI Agents SDK ``Session``.
 
@@ -144,11 +169,8 @@ class SessionSampleSource(SampleSource):
         recent_items = await self.session.get_items(limit=max_messages + 1)
         items = copy.deepcopy(recent_items[-max_messages:])
         turn = (
-            sum(item.get("role") == "assistant" for item in self.session.items)
+            _model_turns(self.session.items)
             if isinstance(self.session, OsmosisMemorySession)
-            and all(
-                item.get("type") in {None, "message"} for item in self.session.items
-            )
             else None
         )
         return RolloutSample(

@@ -27,9 +27,10 @@ from osmosis_ai.rollout.utils.evidence import (
 # Credentials in structured records, shell assignments, HTTP headers and URLs.
 # Each identifier is tried once from its first character; the lookahead finds the
 # keyword without rescanning the identifier from every later offset, so long
-# identifier-like runs stay linear instead of backtracking quadratically.
+# identifier-like runs stay linear instead of backtracking quadratically. An
+# existing redaction is matched whole, so sanitizing again changes nothing.
 _ASSIGNMENT = re.compile(
-    r"""(?ix)(?<![\w-])((?=[\w-]*(?:api[_-]?key|authorization|password|credential|secret|token))[\w-]+\s*[=:]\s*)("[^"\n]*"|'[^'\n]*'|[^\s,;\]}]+)"""
+    r"""(?ix)(?<![\w-])((?=[\w-]*(?:api[_-]?key|authorization|password|credential|secret|token))[\w-]+\s*[=:]\s*)(\[REDACTED\]|"[^"\n]*"|'[^'\n]*'|[^\s,;\]}]+)"""
 )
 _AUTH_TOKEN = re.compile(r"(?i)\b(Bearer|Basic)\s+[^\s\"',;]+")
 # Start a scheme only where its run starts; leading digits and punctuation stay

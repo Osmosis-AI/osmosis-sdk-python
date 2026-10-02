@@ -80,6 +80,132 @@ async def test_preview_does_not_claim_a_complete_history_after_strands_trims():
     }
 
 
+async def test_preview_formats_reasoning_and_media_without_warnings(caplog):
+    from osmosis_ai.rollout.integrations.agents.strands import (
+        StrandsAgentSampleSource,
+    )
+
+    image = {"image": {"format": "png", "source": {"bytes": b"\x89PNG" * 4096}}}
+    messages = [
+        {"role": "user", "content": [{"text": "look"}, image]},
+        {
+            "role": "assistant",
+            "content": [
+                {"reasoningContent": {"reasoningText": {"text": "hmm"}}},
+                {"toolUse": {"toolUseId": "t1", "name": "shot", "input": {}}},
+            ],
+        },
+        {
+            "role": "user",
+            "content": [
+                {
+                    "toolResult": {
+                        "toolUseId": "t1",
+                        "status": "success",
+                        "content": [{"text": "captured"}, image],
+                    }
+                }
+            ],
+        },
+    ]
+    source = StrandsAgentSampleSource(
+        SimpleNamespace(
+            messages=messages,
+            conversation_manager=SimpleNamespace(removed_message_count=0),
+        )
+    )
+
+    caplog.set_level("WARNING")
+    preview = await source.get_preview(10)
+
+    assert not caplog.records
+    assert preview is not None
+    assert preview.messages == messages
+    encoded = repr(preview.trajectory_messages)
+    assert "[image omitted from preview]" in encoded
+    assert "base64" not in encoded and "hmm" not in encoded
+    assert preview.trajectory_messages[-2:] == [
+        {
+            "role": "tool",
+            "tool_call_id": "t1",
+            "content": "captured\n[image omitted from preview]",
+        },
+        {
+            "role": "user",
+            "content": [{"type": "text", "text": "[image omitted from preview]"}],
+        },
+    ]
+
+
+async def test_preview_step_ids_match_the_final_trajectory_with_media(tmp_path):
+    from osmosis_ai.rollout.context import RolloutContext
+    from osmosis_ai.rollout.integrations.agents.strands import (
+        StrandsAgentSampleSource,
+    )
+    from osmosis_ai.rollout.trajectory import preview
+    from osmosis_ai.rollout.trajectory.converter import convert_sample_to_trajectory
+
+    image = {"image": {"format": "png", "source": {"bytes": b"\x89PNG"}}}
+    remote = {
+        "image": {
+            "format": "png",
+            "source": {"location": {"type": "s3", "uri": "s3://bucket/a.png"}},
+        }
+    }
+    messages = [
+        {"role": "user", "content": [{"text": "go"}]},
+        {"role": "user", "content": [remote]},
+    ]
+    for index in range(2):
+        messages += [
+            {
+                "role": "assistant",
+                "content": [
+                    {"reasoningContent": {"reasoningText": {"text": "hmm"}}},
+                    {
+                        "toolUse": {
+                            "toolUseId": f"t{index}",
+                            "name": "shot",
+                            "input": {},
+                        }
+                    },
+                ],
+            },
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "toolResult": {
+                            "toolUseId": f"t{index}",
+                            "status": "success",
+                            "content": [{"text": f"captured {index}"}, image],
+                        }
+                    }
+                ],
+            },
+        ]
+    messages.append({"role": "assistant", "content": [{"text": "done"}]})
+    source = StrandsAgentSampleSource(
+        SimpleNamespace(
+            messages=messages,
+            conversation_manager=SimpleNamespace(removed_message_count=0),
+        )
+    )
+    path = tmp_path / "preview.json"
+
+    await preview.capture_source(
+        RolloutContext(rollout_id="r1", preview_path=path, sample_source=source)
+    )
+
+    snapshot = preview.read_snapshot(path)
+    assert snapshot is not None
+    steps = preview._preview_document(snapshot, "r1", None)["steps"]
+    final = convert_sample_to_trajectory(await source.get_sample(), rollout_id="r1")
+    assert [
+        (step["extra"]["osmosis"]["original_step_id"], step["source"]) for step in steps
+    ] == [(step.step_id, step.source) for step in final.steps]
+
+
 async def test_sample_source_preserves_native_and_converts_messages() -> None:
     from osmosis_ai.rollout.integrations.agents.strands import (
         StrandsAgentSampleSource,
