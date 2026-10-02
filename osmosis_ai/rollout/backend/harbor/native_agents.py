@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Literal
 
 from harbor.models.trial.config import AgentConfig as HarborAgentConfig
@@ -42,11 +43,13 @@ def native_prewarm_agent_config(
     extra_kwargs: dict[str, Any] | None = None,
 ) -> HarborAgentConfig:
     """Setup-only config: installs the agent with no endpoint or credentials."""
+    kwargs = copy.deepcopy({**binding.kwargs, **(extra_kwargs or {})})
+    kwargs.pop("_osmosis_preview_path", None)
     return HarborAgentConfig(
         name=name,
         model_name=model_name,
         env=dict(binding.env),
-        kwargs=copy.deepcopy({**binding.kwargs, **(extra_kwargs or {})}),
+        kwargs=kwargs,
     )
 
 
@@ -69,12 +72,26 @@ def native_agent_config(
     url: str,
     api_key: str,
     extra_kwargs: dict[str, Any] | None = None,
+    *,
+    preview_path: Path | None = None,
 ) -> HarborAgentConfig:
     kwargs = copy.deepcopy({**binding.kwargs, **(extra_kwargs or {})})
+    kwargs.pop("_osmosis_preview_path", None)
     if binding.wiring == "none":
         return HarborAgentConfig(
             name=name, model_name=model_name, env=dict(binding.env), kwargs=kwargs
         )
+    config_name: str | None = name
+    import_path = None
+    if preview_path is not None:
+        wrapper = {
+            "terminus-2": "_PreviewTerminus2",
+            "mini-swe-agent": "_PreviewMiniSweAgent",
+            "opencode": "_PreviewOpenCode",
+        }[name]
+        config_name = None
+        import_path = f"osmosis_ai.rollout.backend.harbor.preview_agents:{wrapper}"
+        kwargs["_osmosis_preview_path"] = str(preview_path)
     if binding.wiring == "opencode":
         if not isinstance(model_name, str):
             raise ValueError("OpenCode model_name must have the form provider/model")
@@ -101,7 +118,8 @@ def native_agent_config(
         # Compaction rewrites history and breaks the training token trajectory.
         config.setdefault("compaction", {}).update({"auto": False, "prune": False})
         return HarborAgentConfig(
-            name=name,
+            name=config_name,
+            import_path=import_path,
             model_name=f"{session_provider}/{model_id}",
             env={
                 **binding.env,
@@ -121,14 +139,19 @@ def native_agent_config(
             "OPENAI_API_KEY": api_key,
         }
         return HarborAgentConfig(
-            name=name, model_name=model_name, env=env, kwargs=kwargs
+            name=config_name,
+            import_path=import_path,
+            model_name=model_name,
+            env=env,
+            kwargs=kwargs,
         )
     # Kwargs-wired agents (terminus-2) silently drop a top-level api_key, so
     # the rollout key rides inside llm_kwargs. Endpoint wiring wins over user
     # kwargs: the rollout URL is not optional.
     llm_kwargs = {**kwargs.pop("llm_kwargs", {}), "api_key": api_key}
     return HarborAgentConfig(
-        name=name,
+        name=config_name,
+        import_path=import_path,
         model_name=model_name,
         kwargs={**kwargs, "api_base": url, "llm_kwargs": llm_kwargs},
     )

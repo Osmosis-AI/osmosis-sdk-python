@@ -63,7 +63,9 @@ class TestRolloutContext:
         ctx = RolloutContext(chat_completions_url="http://llm", rollout_id="r1")
         messages = [{"role": "user", "content": "hi"}]
 
-        ctx.set_sample_source(StaticSampleSource(messages))
+        source = StaticSampleSource(messages)
+        ctx.set_sample_source(source)
+        assert await source.get_preview(2) is None
         sample = await ctx.get_sample()
         assert isinstance(sample, RolloutSample)
         assert sample.messages == messages
