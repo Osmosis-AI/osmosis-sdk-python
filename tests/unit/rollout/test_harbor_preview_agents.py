@@ -245,38 +245,68 @@ async def test_native_preview_updates_during_run_and_keeps_complete_snapshot(
         await run
 
 
+@pytest.mark.parametrize("agent_kind", ["native", "harness"])
+@pytest.mark.parametrize("reuse", [False, True])
 async def test_finishing_agent_does_not_wait_for_unresponsive_preview(
-    tmp_path, monkeypatch, preview_agents
+    tmp_path, monkeypatch, preview_agents, agent_kind, reuse
 ):
     entered = asyncio.Event()
     cancelled = asyncio.Event()
     release = asyncio.Event()
     finished = asyncio.Event()
-    sampler = None
+    started = asyncio.Event()
+    returned = asyncio.Event()
+    samplers = []
 
     async def remote_snapshot(*args):
-        nonlocal sampler
-        sampler = asyncio.current_task()
+        samplers.append(asyncio.current_task())
+        if len(samplers) > 1:
+            await asyncio.Future()
         entered.set()
         try:
             await asyncio.Future()
         except asyncio.CancelledError:
             cancelled.set()
             await release.wait()
+        returned.set()
         return json.dumps(
-            {"messages": [{"role": "assistant", "content": "late"}]}
+            {
+                "messages": [{"role": "assistant", "content": "late"}],
+                "steps": [{"step_id": 1, "source": "agent", "message": "late"}],
+            }
         ).encode()
 
     async def native_run(*args):
+        started.set()
         await finished.wait()
 
     monkeypatch.setattr(preview_agents, "read_remote_snapshot", remote_snapshot)
-    monkeypatch.setattr(preview_agents.MiniSweAgent, "run", native_run)
     destination = tmp_path / "private" / "snapshot.json"
-    agent = preview_agents._PreviewMiniSweAgent(
-        logs_dir=tmp_path / "logs", _osmosis_preview_path=str(destination)
-    )
-    run = asyncio.create_task(agent.run("task", SimpleNamespace(), SimpleNamespace()))
+    if agent_kind == "native":
+        monkeypatch.setattr(preview_agents.MiniSweAgent, "run", native_run)
+        agent = preview_agents._PreviewMiniSweAgent(
+            logs_dir=tmp_path / "logs", _osmosis_preview_path=str(destination)
+        )
+    else:
+        from osmosis_ai.rollout.backend.harbor.harness_agent import (
+            OsmosisHarnessInstalledAgent,
+        )
+        from osmosis_ai.rollout.container.files import ContainerInput
+
+        input_path = tmp_path / "input.json"
+        ContainerInput(rollout_id="r1").write(input_path)
+        (tmp_path / "logs").mkdir()
+        agent = OsmosisHarnessInstalledAgent(
+            logs_dir=tmp_path / "logs",
+            bundle_path=str(tmp_path / "bundle.whl"),
+            agent_script="test-agent",
+            input_path=str(input_path),
+            _osmosis_preview_path=str(destination),
+        )
+        monkeypatch.setattr(agent, "exec_as_agent", native_run)
+    environment = SimpleNamespace(capabilities=SimpleNamespace(mounted=True))
+    run = asyncio.create_task(agent.run("task", environment, SimpleNamespace()))
+    next_run = None
     try:
         async with asyncio.timeout(2):
             await entered.wait()
@@ -284,12 +314,25 @@ async def test_finishing_agent_does_not_wait_for_unresponsive_preview(
             await run
             await cancelled.wait()
         assert not destination.exists()
+        if reuse:
+            finished.clear()
+            started.clear()
+            next_run = asyncio.create_task(
+                agent.run("next phase", environment, SimpleNamespace())
+            )
+            async with asyncio.timeout(2):
+                await started.wait()
         release.set()
         async with asyncio.timeout(2):
-            await sampler
+            await returned.wait()
+        assert not destination.exists()
+        assert samplers[0].done()
     finally:
         release.set()
-        if sampler is not None:
+        finished.set()
+        if next_run is not None:
+            await next_run
+        for sampler in samplers:
             sampler.cancel()
             with suppress(asyncio.CancelledError):
                 await sampler

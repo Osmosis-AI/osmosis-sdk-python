@@ -50,7 +50,6 @@ class OsmosisHarnessInstalledAgent(BaseInstalledAgent):
         self.preview_path: Path | None = (
             Path(_osmosis_preview_path) if _osmosis_preview_path else None
         )
-        self._preview_active = False
 
     @staticmethod
     def name() -> str:
@@ -86,10 +85,12 @@ class OsmosisHarnessInstalledAgent(BaseInstalledAgent):
                 host_input, (agent_dir / INPUT_FILENAME).as_posix()
             )
 
-        self._preview_active = container_input.preview_path is not None
+        stopped = asyncio.Event()
         preview_task = (
             asyncio.create_task(
-                self._collect_preview(environment, container_input.preview_path)
+                self._collect_preview(
+                    environment, container_input.preview_path, stopped
+                )
             )
             if container_input.preview_path is not None
             else None
@@ -104,10 +105,12 @@ class OsmosisHarnessInstalledAgent(BaseInstalledAgent):
             )
         finally:
             if preview_task is not None:
-                self._preview_active = False
+                stopped.set()
                 preview_task.cancel()
 
-    async def _collect_preview(self, environment: Any, remote_path: str) -> None:
+    async def _collect_preview(
+        self, environment: Any, remote_path: str, stopped: asyncio.Event
+    ) -> None:
         from osmosis_ai.rollout.backend.harbor.preview_agents import (
             read_remote_snapshot,
         )
@@ -116,12 +119,14 @@ class OsmosisHarnessInstalledAgent(BaseInstalledAgent):
             return
         with tempfile.TemporaryDirectory(prefix="osmosis-preview-") as directory:
             staging_path = Path(directory) / "snapshot.json"
-            while self._preview_active:
+            while not stopped.is_set():
                 try:
                     raw = await read_remote_snapshot(
                         environment, remote_path, staging_path
                     )
-                    if self._preview_active and raw is not None:
+                    if stopped.is_set():
+                        return
+                    if raw is not None:
                         document = json.loads(raw)
                         if (
                             isinstance(document, dict)

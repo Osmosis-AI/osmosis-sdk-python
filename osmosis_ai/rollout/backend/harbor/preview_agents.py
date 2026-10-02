@@ -71,32 +71,33 @@ async def read_remote_snapshot(
 class _PreviewRunMixin(BaseAgent):
     def __init__(self, *args: Any, _osmosis_preview_path: str, **kwargs: Any) -> None:
         self._preview_path = Path(_osmosis_preview_path)
-        self._preview_active = False
         self._preview_session_id = str(uuid.uuid4())
         super().__init__(*args, **kwargs)
 
     async def run(
         self, instruction: str, environment: BaseEnvironment, context: AgentContext
     ) -> None:
-        self._preview_active = True
-        collector = asyncio.create_task(self._collect_previews(environment))
+        stopped = asyncio.Event()
+        collector = asyncio.create_task(self._collect_previews(environment, stopped))
         collector.add_done_callback(
             lambda task: task.exception() if not task.cancelled() else None
         )
         try:
             await super().run(instruction, environment, context)
         finally:
-            self._preview_active = False
+            stopped.set()
             # A blocked remote read must not extend Harbor's agent timeout.
             collector.cancel()
 
-    async def _collect_previews(self, environment: BaseEnvironment) -> None:
+    async def _collect_previews(
+        self, environment: BaseEnvironment, stopped: asyncio.Event
+    ) -> None:
         with tempfile.TemporaryDirectory(prefix="osmosis-native-preview-") as temp:
             target = Path(temp).resolve() / "snapshot"
-            while self._preview_active:
+            while not stopped.is_set():
                 try:
                     document = await self._capture_preview(environment, target)
-                    if not self._preview_active:
+                    if stopped.is_set():
                         return
                     if document and document.get("steps"):
                         write_snapshot(self._preview_path, document)
