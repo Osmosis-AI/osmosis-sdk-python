@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import copy
 import json
+import threading
 from pathlib import Path
 
 import httpx
@@ -266,6 +267,49 @@ async def test_oversized_source_keeps_last_snapshot_without_conversion(
         RolloutContext(rollout_id="r1", preview_path=path, sample_source=Source())
     )
     assert path.read_bytes() == before
+
+
+@pytest.mark.parametrize("completion", ["publish", "disable", "cancel"])
+async def test_slow_conversion_keeps_loop_responsive_and_cannot_publish_after_stop(
+    tmp_path, monkeypatch, completion
+):
+    loop = asyncio.get_running_loop()
+    entered, converted = asyncio.Event(), asyncio.Event()
+    release = threading.Event()
+    original = preview.convert_sample_to_trajectory
+
+    def paused_conversion(*args, **kwargs):
+        loop.call_soon_threadsafe(entered.set)
+        try:
+            assert release.wait(timeout=5)
+            return original(*args, **kwargs)
+        finally:
+            loop.call_soon_threadsafe(converted.set)
+
+    monkeypatch.setattr(preview, "convert_sample_to_trajectory", paused_conversion)
+    path = tmp_path / "snapshot.json"
+    context = RolloutContext(
+        rollout_id="r1", preview_path=path, sample_source=PreviewSource()
+    )
+    capture = asyncio.create_task(preview.capture_source(context))
+    try:
+        await entered.wait()
+        assert not capture.done()
+        assert not path.exists()
+        if completion == "cancel":
+            capture.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await capture
+        elif completion == "disable":
+            context.preview_enabled = False
+        release.set()
+        await converted.wait()
+        await asyncio.gather(capture, return_exceptions=True)
+        await loop.shutdown_default_executor()
+        assert path.exists() is (completion == "publish")
+    finally:
+        release.set()
+        await asyncio.gather(capture, return_exceptions=True)
 
 
 class PreviewSource(SampleSource):

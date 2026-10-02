@@ -1736,13 +1736,22 @@ class TestArtifactLifecycle:
         )
 
     @pytest.mark.parametrize(
-        "ending", ["cancelled_error", "cancelled_result", "exception"]
+        "ending,rollout_id",
+        [
+            ("cancelled_error", "r1"),
+            ("cancelled_result", "r1"),
+            ("exception", "r1"),
+            ("exception", "training-run::session-123"),
+        ],
     )
     async def test_interrupted_trials_retain_only_sanitized_native_evidence(
-        self, template_task, tmp_path, ending
+        self, template_task, tmp_path, ending, rollout_id
     ):
         from osmosis_ai.rollout.context import RolloutContext
-        from osmosis_ai.rollout.utils.evidence import verify_trial_evidence
+        from osmosis_ai.rollout.utils.evidence import (
+            trial_evidence_inventory,
+            verify_trial_evidence,
+        )
 
         async def run(queue, config):
             directory = config.trials_dir / config.trial_name
@@ -1770,23 +1779,29 @@ class TestArtifactLifecycle:
             return result
 
         backend = self.backend_for(template_task, tmp_path, FakeQueue(run))
-        request = ExecutionRequest(id="r1", prompt=[{"role": "user", "content": "go"}])
-        with RolloutContext(chat_completions_url="http://t/v1", rollout_id="r1"):
+        request = ExecutionRequest(
+            id=rollout_id, prompt=[{"role": "user", "content": "go"}]
+        )
+        with RolloutContext(chat_completions_url="http://t/v1", rollout_id=rollout_id):
             if ending == "cancelled_error":
                 with pytest.raises(asyncio.CancelledError):
                     await backend.execute(request)
             else:
                 await backend.execute(request)
-        retained = backend.artifact_root / "r1"
+        retained = backend.artifact_root / rollout_id
         assert {path.name for path in retained.iterdir()} == {"harbor"}
-        manifest = verify_trial_evidence(retained / "harbor", "r1")
+        manifest = verify_trial_evidence(retained / "harbor", rollout_id)
         assert manifest["complete"]
+        assert manifest["rollout_id"] == rollout_id
+        assert trial_evidence_inventory(backend.artifact_root, [rollout_id])["complete"]
         assert manifest["excluded"] == {"opencode_database": 1}
         assert "secret" not in "".join(
             path.read_text() for path in retained.rglob("*") if path.is_file()
         )
-        assert not (backend.rollouts_dir / "r1").exists()
-        assert (backend.trials_dir / "trial-r1").exists() == (ending == "exception")
+        assert not (backend.rollouts_dir / rollout_id).exists()
+        assert (backend.trials_dir / f"trial-{rollout_id}").exists() == (
+            ending == "exception"
+        )
 
     async def test_completed_trial_preserves_private_state_before_source_cleanup(
         self, template_task, tmp_path

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import hashlib
 import json
 import logging
 import shlex
@@ -34,35 +35,37 @@ from osmosis_ai.rollout.trajectory.preview import (
 async def read_remote_snapshot(
     environment: Any, source: str, target: Path
 ) -> bytes | None:
-    remote = f"/tmp/osmosis-preview-{uuid.uuid4().hex}"
+    # Reuse one bounded staging file if cancellation prevents remote cleanup.
+    staging_id = hashlib.sha256(str(target).encode()).hexdigest()[:32]
+    remote = f"/tmp/osmosis-preview-{staging_id}"
     quoted_source = shlex.quote(source)
+    cancelled = False
     try:
         async with asyncio.timeout(3):
-            cancelled = False
-            try:
-                result = await environment.exec(
-                    f"umask 077; test -f {quoted_source} && test ! -L {quoted_source} && "
-                    f"head -c {MAX_SOURCE_BYTES + 1} -- {quoted_source} > {remote}",
-                    timeout_sec=3,
-                )
-                if result.return_code != 0:
-                    return None
-                await environment.download_file(remote, target)
-                with target.open("rb") as snapshot:
-                    raw = snapshot.read(MAX_SOURCE_BYTES + 1)
-                return raw if len(raw) <= MAX_SOURCE_BYTES else None
-            except asyncio.CancelledError:
-                cancelled = True
-                raise
-            finally:
-                if not cancelled:
-                    try:
-                        async with asyncio.timeout(1):
-                            await environment.exec(f"rm -f -- {remote}", timeout_sec=1)
-                    except Exception:
-                        pass
+            result = await environment.exec(
+                f"umask 077; set -C; rm -f -- {remote} && "
+                f"test -f {quoted_source} && test ! -L {quoted_source} && "
+                f"head -c {MAX_SOURCE_BYTES + 1} -- {quoted_source} > {remote}",
+                timeout_sec=3,
+            )
+            if result.return_code != 0:
+                return None
+            await environment.download_file(remote, target)
+            with target.open("rb") as snapshot:
+                raw = snapshot.read(MAX_SOURCE_BYTES + 1)
+            return raw if len(raw) <= MAX_SOURCE_BYTES else None
+    except asyncio.CancelledError:
+        cancelled = True
+        raise
     except Exception:
         return None
+    finally:
+        if not cancelled:
+            try:
+                async with asyncio.timeout(1):
+                    await environment.exec(f"rm -f -- {remote}", timeout_sec=1)
+            except Exception:
+                pass
 
 
 class _PreviewRunMixin(BaseAgent):

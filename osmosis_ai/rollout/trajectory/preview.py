@@ -16,7 +16,7 @@ from osmosis_ai.rollout.backend.harbor.evidence import sanitized_text
 from osmosis_ai.rollout.context import RolloutContext, RolloutProgress
 from osmosis_ai.rollout.trajectory.atif import Trajectory
 from osmosis_ai.rollout.trajectory.converter import convert_sample_to_trajectory
-from osmosis_ai.rollout.types import RolloutResultResponse, RolloutStatus
+from osmosis_ai.rollout.types import RolloutResultResponse, RolloutSample, RolloutStatus
 from osmosis_ai.rollout.utils.evidence import _open_directory, _open_regular
 
 logger: logging.Logger = logging.getLogger(__name__)
@@ -119,6 +119,32 @@ def _clip(
     return value
 
 
+def _source_bytes(
+    sample: RolloutSample, rollout_id: str, api_key: str | None
+) -> bytes | None:
+    size = 0
+    for chunk in json.JSONEncoder(ensure_ascii=True, allow_nan=False).iterencode(
+        sample.trajectory_messages
+    ):
+        size += len(chunk)
+        if size > MAX_SOURCE_BYTES:
+            return None
+    truncated = [bool(sample.extra_fields.get("_preview_truncated"))]
+    document = convert_sample_to_trajectory(
+        sample, rollout_id=rollout_id
+    ).to_json_dict()
+    document = _clip(document, truncated, api_key=api_key)
+    document["extra"] = {
+        "osmosis": {
+            "truncated": truncated[0],
+            "turn": sample.extra_fields.get("_preview_turn"),
+            "step_ids_known": not sample.extra_fields.get("_preview_truncated", False),
+        }
+    }
+    data = _json_bytes(document)
+    return data if len(data) <= MAX_SOURCE_BYTES else None
+
+
 async def capture_source(context: RolloutContext) -> None:
     if (
         not context.preview_enabled
@@ -129,35 +155,18 @@ async def capture_source(context: RolloutContext) -> None:
     try:
         async with asyncio.timeout(1):
             sample = await context.sample_source.get_preview(MAX_PREVIEW_MESSAGES)
-            if (
-                not context.preview_enabled
-                or sample is None
-                or not sample.trajectory_messages
-            ):
-                return
-            size = 0
-            for chunk in json.JSONEncoder(
-                ensure_ascii=True, allow_nan=False
-            ).iterencode(sample.trajectory_messages):
-                size += len(chunk)
-                if size > MAX_SOURCE_BYTES:
-                    return
-            truncated = [bool(sample.extra_fields.get("_preview_truncated"))]
-            document = convert_sample_to_trajectory(
-                sample, rollout_id=context.rollout_id
-            ).to_json_dict()
-            document = _clip(document, truncated, api_key=context.api_key)
-            document["extra"] = {
-                "osmosis": {
-                    "truncated": truncated[0],
-                    "turn": sample.extra_fields.get("_preview_turn"),
-                    "step_ids_known": not sample.extra_fields.get(
-                        "_preview_truncated", False
-                    ),
-                }
-            }
-            if context.preview_enabled:
-                write_snapshot(context.preview_path, document)
+        if (
+            not context.preview_enabled
+            or sample is None
+            or not sample.trajectory_messages
+        ):
+            return
+        data = await asyncio.to_thread(
+            _source_bytes, sample, context.rollout_id, context.api_key
+        )
+        # Only the collector commits; a cancelled conversion cannot publish late.
+        if context.preview_enabled and data is not None:
+            _atomic_write(context.preview_path, data)
     except Exception:
         logger.debug("Rollout preview snapshot unavailable")
 

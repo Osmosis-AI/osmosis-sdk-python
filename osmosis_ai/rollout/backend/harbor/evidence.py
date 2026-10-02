@@ -21,8 +21,8 @@ from osmosis_ai.rollout.utils.evidence import (
     _open_directory,
     _open_regular,
     evidence_path,
+    evidence_rollout_id,
 )
-from osmosis_ai.rollout.utils.identifiers import ensure_single_path_segment
 
 # Credentials in structured records, shell assignments, HTTP headers and URLs.
 # Each identifier is tried once from its first character; the lookahead finds the
@@ -117,8 +117,7 @@ def retain_trial_evidence(
     is sanitized again even after upstream credential scrubbing. Existing private
     diagnostic retention remains a separate surface.
     """
-    ensure_single_path_segment(rollout_id, label="rollout_id")
-    evidence_path(rollout_id)
+    evidence_rollout_id(rollout_id)
     if any(path.is_symlink() for path in (artifact_root, *artifact_root.parents)):
         raise ValueError("Linked artifact root")
     artifact_root.mkdir(parents=True, exist_ok=True)

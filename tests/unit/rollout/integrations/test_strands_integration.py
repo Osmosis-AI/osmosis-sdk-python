@@ -17,7 +17,12 @@ async def test_preview_is_bounded_and_isolated_from_grading_history(limit) -> No
         for text in ("first", "second", "third")
     ]
     messages[0]["role"] = "assistant"
-    source = StrandsAgentSampleSource(SimpleNamespace(messages=messages))
+    source = StrandsAgentSampleSource(
+        SimpleNamespace(
+            messages=messages,
+            conversation_manager=SimpleNamespace(removed_message_count=0),
+        )
+    )
 
     preview = await source.get_preview(limit)
 
@@ -43,6 +48,36 @@ async def test_preview_is_bounded_and_isolated_from_grading_history(limit) -> No
     assert sample.messages[-1]["content"][0]["text"] == (
         "live update" if limit > 0 else "third"
     )
+
+
+async def test_preview_does_not_claim_a_complete_history_after_strands_trims():
+    from strands.agent.conversation_manager import SlidingWindowConversationManager
+
+    from osmosis_ai.rollout.integrations.agents.strands import (
+        StrandsAgentSampleSource,
+    )
+
+    manager = SlidingWindowConversationManager()
+    agent = SimpleNamespace(
+        messages=[
+            {
+                "role": "assistant" if index % 2 else "user",
+                "content": [{"text": f"message {index}"}],
+            }
+            for index in range(50)
+        ],
+        conversation_manager=manager,
+    )
+    source = StrandsAgentSampleSource(agent)
+    manager.apply_management(agent)
+
+    preview = await source.get_preview(100)
+
+    assert len(preview.messages) == 40
+    assert preview.extra_fields == {
+        "_preview_truncated": True,
+        "_preview_turn": None,
+    }
 
 
 async def test_sample_source_preserves_native_and_converts_messages() -> None:
@@ -71,7 +106,12 @@ async def test_sample_source_keeps_native_messages_when_conversion_fails(
     )
 
     messages = [{"role": "user", "content": [{"text": "hello"}]}]
-    source = StrandsAgentSampleSource(SimpleNamespace(messages=messages))
+    source = StrandsAgentSampleSource(
+        SimpleNamespace(
+            messages=messages,
+            conversation_manager=SimpleNamespace(removed_message_count=0),
+        )
+    )
     sensitive_text = "sensitive-preview-content"
     with patch(
         "osmosis_ai.rollout.integrations.agents.strands.LiteLLMModel.format_request_messages",

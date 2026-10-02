@@ -7,7 +7,6 @@ from typing import Any
 import pytest
 
 import osmosis_ai.rollout.container.runner as runner
-import osmosis_ai.rollout.trajectory.preview as preview_module
 from osmosis_ai.rollout.container.files import (
     INPUT_FILENAME,
     RESULT_FILENAME,
@@ -187,15 +186,6 @@ class TestLivePreviewBoundary:
         ContainerInput(rollout_id="r1", preview_path=str(preview_path)).write(
             tmp_path / INPUT_FILENAME
         )
-        captured = asyncio.Event()
-        loop = asyncio.get_running_loop()
-        real_write_snapshot = preview_module.write_snapshot
-
-        def observe_snapshot(path, document):
-            real_write_snapshot(path, document)
-            loop.call_soon_threadsafe(captured.set)
-
-        monkeypatch.setattr(preview_module, "write_snapshot", observe_snapshot)
         release = asyncio.Event()
         sample_calls = 0
         final_sample = RolloutSample(
@@ -225,7 +215,9 @@ class TestLivePreviewBoundary:
 
         task = asyncio.create_task(runner.run_agent(Workflow, None))
         try:
-            await asyncio.wait_for(captured.wait(), timeout=1)
+            async with asyncio.timeout(1):
+                while not preview_path.exists():
+                    await asyncio.sleep(0)
             assert not task.done()
             preview = json.loads(preview_path.read_text())
             assert preview["steps"][-1]["message"] == "in progress"

@@ -1,7 +1,9 @@
 import asyncio
 import json
+import shlex
 import shutil
 from contextlib import suppress
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -49,6 +51,94 @@ async def test_remote_snapshot_bounds_the_download(
     assert raw == (b"x" * 16 if source_kind == "regular" else None)
     if target.exists():
         assert target.stat().st_size <= 17
+
+
+@pytest.mark.parametrize("cleanup_fails", [False, True])
+async def test_remote_read_timeouts_keep_staging_bounded(
+    tmp_path, monkeypatch, cleanup_fails, preview_agents
+):
+    source = tmp_path / "native.json"
+    source.write_bytes(b"transcript")
+    remote_paths = set()
+    timeouts = []
+    timeout = asyncio.timeout
+
+    def record_timeout(delay):
+        context = timeout(delay)
+        timeouts.append(context)
+        return context
+
+    monkeypatch.setattr(preview_agents.asyncio, "timeout", record_timeout)
+
+    class Environment:
+        async def exec(self, command, **kwargs):
+            if command.startswith("umask"):
+                remote_paths.add(Path(command.rsplit(" > ", 1)[1]))
+            elif cleanup_fails:
+                raise TimeoutError
+            process = await asyncio.create_subprocess_exec("/bin/sh", "-c", command)
+            return SimpleNamespace(return_code=await process.wait())
+
+        async def download_file(self, remote, target):
+            timeouts[-1].reschedule(asyncio.get_running_loop().time())
+            await asyncio.Future()
+
+    try:
+        for _ in range(3):
+            assert (
+                await preview_agents.read_remote_snapshot(
+                    Environment(), str(source), tmp_path / "snapshot"
+                )
+                is None
+            )
+        retained = [path for path in remote_paths if path.exists()]
+        assert len(retained) == int(cleanup_fails)
+        if retained:
+            assert retained[0].read_bytes() == b"transcript"
+    finally:
+        for path in remote_paths:
+            path.unlink(missing_ok=True)
+
+
+@pytest.mark.parametrize("link_kind", ["symlink", "hardlink"])
+@pytest.mark.parametrize("race", [False, True])
+async def test_remote_staging_cannot_overwrite_linked_file(
+    tmp_path, link_kind, race, preview_agents
+):
+    source = tmp_path / "native.json"
+    source.write_bytes(b"transcript")
+    victim = tmp_path / "victim"
+    victim.write_bytes(b"do not change")
+    remote_paths = set()
+
+    class Environment:
+        async def exec(self, command, **kwargs):
+            if command.startswith("umask"):
+                remote = Path(command.rsplit(" > ", 1)[1])
+                remote_paths.add(remote)
+                flag = "-s " if link_kind == "symlink" else ""
+                link = f"ln {flag}-- {shlex.quote(str(victim))} {remote}"
+                if race:
+                    command = f'rm() {{ command rm "$@" && {link}; }}; {command}'
+                else:
+                    command = f"{link} && {command}"
+            process = await asyncio.create_subprocess_exec(
+                "/bin/sh", "-c", command, stderr=asyncio.subprocess.DEVNULL
+            )
+            return SimpleNamespace(return_code=await process.wait())
+
+        async def download_file(self, remote, target):
+            shutil.copyfile(remote, target)
+
+    try:
+        snapshot = await preview_agents.read_remote_snapshot(
+            Environment(), str(source), tmp_path / "snapshot"
+        )
+        assert victim.read_bytes() == b"do not change"
+        assert snapshot == (None if race else b"transcript")
+    finally:
+        for path in remote_paths:
+            path.unlink(missing_ok=True)
 
 
 @pytest.mark.parametrize("agent_name", ["terminus", "mini", "opencode"])
