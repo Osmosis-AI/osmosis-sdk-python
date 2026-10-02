@@ -95,25 +95,16 @@ class RolloutFutureRegistry:
                         ),
                     )
 
-        async def publish_failure(exc: BaseException) -> None:
+        async def publish_failure() -> None:
             async with self.lock:
                 if self.entries.get(rollout_id) is entry and not entry.result.done():
-                    self.finish(
-                        entry,
-                        RolloutResultResponse(
-                            rollout_id=rollout_id,
-                            status=RolloutStatus.FAILURE,
-                            err_message=f"Rollout task crashed: {exc}"
-                            if str(exc)
-                            else "Rollout task crashed",
-                        ),
-                    )
+                    self.finish(entry, self.crash_failure(rollout_id))
 
         def complete_task(done: asyncio.Task[None]) -> None:
             if done.cancelled():
                 entry.cancel_result_task = asyncio.create_task(publish_cancelled())
-            elif (exc := done.exception()) is not None:
-                entry.cancel_result_task = asyncio.create_task(publish_failure(exc))
+            elif done.exception() is not None:
+                entry.cancel_result_task = asyncio.create_task(publish_failure())
 
         task.add_done_callback(complete_task)
 
@@ -289,6 +280,15 @@ class RolloutFutureRegistry:
             status=RolloutStatus.FAILURE,
             err_message="polling lease expired",
             err_category=RolloutErrorCategory.LEASE_EXPIRED,
+        )
+
+    @staticmethod
+    def crash_failure(rollout_id: str) -> RolloutResultResponse:
+        return RolloutResultResponse(
+            rollout_id=rollout_id,
+            status=RolloutStatus.FAILURE,
+            err_message="rollout task crashed",
+            err_category=RolloutErrorCategory.INTERNAL_ERROR,
         )
 
 

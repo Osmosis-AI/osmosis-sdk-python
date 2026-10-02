@@ -13,6 +13,7 @@ from osmosis_ai.rollout.server import create_rollout_server
 from osmosis_ai.rollout.types import (
     ExecutionOutcome,
     ExecutionResult,
+    RolloutErrorCategory,
     RolloutStatus,
 )
 
@@ -281,5 +282,6 @@ async def test_crashed_rollout_task_resolves_failure_result(monkeypatch):
             rollout_id="crash-1",
         )
         assert result.status is RolloutStatus.FAILURE
-        assert "catastrophic crash in server handling" in (result.err_message or "")
+        assert result.err_category is RolloutErrorCategory.INTERNAL_ERROR
+        assert result.err_message == "rollout task crashed"
     await registry.close()
