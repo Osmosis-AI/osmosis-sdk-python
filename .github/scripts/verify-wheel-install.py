@@ -45,6 +45,7 @@ EXTRA_REQUIREMENTS: dict[str, set[str]] = {
         "uvicorn",
         "opentelemetry-sdk",
         "opentelemetry-exporter-otlp-proto-http",
+        "urllib3",
     },
     "strands": {
         "aiohttp",
@@ -52,7 +53,9 @@ EXTRA_REQUIREMENTS: dict[str, set[str]] = {
         "litellm",
         "mcp",
         "orjson",
+        "pyjwt",
         "strands-agents",
+        "urllib3",
     },
     "openai-agents": {
         "aiohttp",
@@ -61,6 +64,8 @@ EXTRA_REQUIREMENTS: dict[str, set[str]] = {
         "mcp",
         "openai-agents",
         "orjson",
+        "pyjwt",
+        "urllib3",
     },
     "harbor": {
         "aiohttp",
@@ -69,10 +74,12 @@ EXTRA_REQUIREMENTS: dict[str, set[str]] = {
         "litellm",
         "orjson",
         "platformdirs",
+        "pyjwt",
         "toml",
+        "urllib3",
         "uv",
     },
-    "rubric": {"aiohttp", "click", "litellm", "orjson"},
+    "rubric": {"aiohttp", "click", "litellm", "orjson", "urllib3"},
     "parquet": {"pyarrow"},
     # eval = osmosis-ai[server,parquet] self-reference + the in-process
     # LiteLLM bridge and the uv executable used to launch rollout environments.
