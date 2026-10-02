@@ -385,6 +385,7 @@ class TestHarnessAgentLabelStrip:
         agent.logs_dir.mkdir()
         agent.input_path = tmp_path / "container_input.json"
         agent.agent_script = "bench-agent"
+        agent.preview_path = None
         ContainerInput(rollout_id="r1", label="42").write(agent.input_path)
 
         async def fake_exec(environment, command):
@@ -627,6 +628,62 @@ class TestNativeAgents:
         backend = self.backend_for("mini-swe-agent", template_task)
         assert backend.bundle is None
 
+    @pytest.mark.parametrize("agent_name", ["terminus-2", "mini-swe-agent", "opencode"])
+    @pytest.mark.parametrize("preview_enabled", [False, True])
+    def test_native_preview_config_uses_only_the_trusted_path(
+        self, template_task, tmp_path, monkeypatch, agent_name, preview_enabled
+    ):
+        from harbor.agents.factory import AgentFactory
+        from harbor.models.agent.name import AgentName
+
+        monkeypatch.setenv("LITELLM_LOCAL_MODEL_COST_MAP", "True")
+        native_class = AgentFactory.get_agent_class(AgentName(agent_name))
+        init = native_class.__init__
+        received = {}
+
+        def record_init(self, *args, **kwargs):
+            received.update(kwargs)
+            init(self, *args, **kwargs)
+
+        monkeypatch.setattr(native_class, "__init__", record_init)
+        if agent_name == "terminus-2":
+            monkeypatch.setattr(native_class, "_init_llm", lambda self, **kw: object())
+        overrides = {"_osmosis_preview_path": str(tmp_path / "untrusted.json")}
+        backend = self.backend_for(
+            agent_name,
+            template_task,
+            model_name="openai/student",
+            native_agent_kwargs=overrides,
+            agent_setup_timeout_sec=17,
+        )
+        preview_path = tmp_path / "trajectory.partial.json"
+        config = backend.build_trial_config(
+            template_task,
+            ExecutionRequest(id="r1", prompt=[]),
+            ContainerInput(
+                rollout_id="r1", chat_completions_url="http://t/v1", api_key="k"
+            ),
+            **({"preview_path": preview_path} if preview_enabled else {}),
+        ).agent
+        agent = AgentFactory.create_agent_from_config(config, tmp_path / "logs")
+
+        assert isinstance(agent, native_class)
+        assert agent.name() == agent_name
+        assert received["override_setup_timeout_sec"] == 17
+        assert agent.model_name == (
+            "osmosis-rollout/student" if agent_name == "opencode" else "openai/student"
+        )
+        if preview_enabled:
+            assert type(agent) is not native_class
+            assert config.name is None
+            assert config.kwargs["_osmosis_preview_path"] == str(preview_path)
+        else:
+            assert type(agent) is native_class
+            assert config.name == agent_name
+            assert config.import_path is None
+            assert "_osmosis_preview_path" not in config.kwargs
+        assert overrides == {"_osmosis_preview_path": str(tmp_path / "untrusted.json")}
+
     def test_opencode_uses_session_endpoint_in_native_harbor_agent(
         self, template_task, tmp_path
     ):
@@ -856,15 +913,29 @@ class TestNativeAgents:
         assert (task_dir / "tests" / info.wheel.name).exists()
         assert (task_dir / "tests" / "container_input.json").exists()
 
-    def test_oracle_binding_gets_no_endpoint(self, template_task):
-        backend = self.backend_for("oracle", template_task)
+    @pytest.mark.parametrize("preview_enabled", [False, True])
+    def test_oracle_binding_gets_no_endpoint_or_preview(
+        self, template_task, tmp_path, preview_enabled
+    ):
+        backend = self.backend_for(
+            "oracle",
+            template_task,
+            native_agent_kwargs={"_osmosis_preview_path": "untrusted.json"},
+        )
         config = backend.build_agent_config(
             template_task,
             ContainerInput(rollout_id="r1", chat_completions_url="http://t/v1"),
+            **(
+                {"preview_path": tmp_path / "trajectory.partial.json"}
+                if preview_enabled
+                else {}
+            ),
         )
         assert config.name == "oracle"
+        assert config.import_path is None
         assert "OPENAI_API_BASE" not in config.env
         assert "api_base" not in config.kwargs
+        assert "_osmosis_preview_path" not in config.kwargs
 
     def test_harbor_model_metadata_overrides_model(self, template_task):
         backend = self.backend_for(

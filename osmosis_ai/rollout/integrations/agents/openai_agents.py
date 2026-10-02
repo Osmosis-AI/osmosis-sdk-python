@@ -3,6 +3,7 @@
 Install ``osmosis-ai[openai-agents]`` before importing this module.
 """
 
+import copy
 import logging
 import uuid
 from collections.abc import AsyncIterator, Mapping, Sequence
@@ -112,7 +113,7 @@ class SessionSampleSource(SampleSource):
         self.session = session
 
     def _to_trajectory_messages(
-        self, messages: Sequence[Mapping[str, Any]]
+        self, messages: Sequence[Mapping[str, Any]], *, log_errors: bool = True
     ) -> Sequence[Mapping[str, Any]] | None:
         try:
             return [
@@ -123,10 +124,11 @@ class SessionSampleSource(SampleSource):
                 )
             ]
         except Exception:
-            logger.warning(
-                "Failed to convert OpenAI Agents messages for trajectory persistence",
-                exc_info=True,
-            )
+            if log_errors:
+                logger.warning(
+                    "Failed to convert OpenAI Agents messages for trajectory persistence",
+                    exc_info=True,
+                )
             return None
 
     async def get_sample(self) -> RolloutSample:
@@ -134,6 +136,28 @@ class SessionSampleSource(SampleSource):
         return RolloutSample(
             messages=items,
             trajectory_messages=self._to_trajectory_messages(items),
+        )
+
+    async def get_preview(self, max_messages: int) -> RolloutSample | None:
+        if max_messages <= 0:
+            return None
+        recent_items = await self.session.get_items(limit=max_messages + 1)
+        items = copy.deepcopy(recent_items[-max_messages:])
+        turn = (
+            sum(item.get("role") == "assistant" for item in self.session.items)
+            if isinstance(self.session, OsmosisMemorySession)
+            and all(
+                item.get("type") in {None, "message"} for item in self.session.items
+            )
+            else None
+        )
+        return RolloutSample(
+            messages=items,
+            trajectory_messages=self._to_trajectory_messages(items, log_errors=False),
+            extra_fields={
+                "_preview_truncated": len(recent_items) > max_messages,
+                "_preview_turn": turn,
+            },
         )
 
 

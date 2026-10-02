@@ -8,9 +8,12 @@ back through the ContainerResult file.
 
 from __future__ import annotations
 
+import asyncio
 import json
+import tempfile
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 from harbor.agents.installed.base import BaseInstalledAgent
 from harbor.models.agent.context import AgentContext
@@ -26,6 +29,7 @@ from osmosis_ai.rollout.container.files import (
     RESULT_FILENAME,
     ContainerInput,
 )
+from osmosis_ai.rollout.trajectory.preview import PREVIEW_INTERVAL_SEC, write_snapshot
 
 
 class OsmosisHarnessInstalledAgent(BaseInstalledAgent):
@@ -36,12 +40,17 @@ class OsmosisHarnessInstalledAgent(BaseInstalledAgent):
         bundle_path: str,
         agent_script: str,
         input_path: str,
+        _osmosis_preview_path: str | None = None,
         **kwargs: Any,
     ):
         super().__init__(logs_dir, *args, **kwargs)
         self.bundle_path: Path = Path(bundle_path)
         self.agent_script = agent_script
         self.input_path: Path = Path(input_path)
+        self.preview_path: Path | None = (
+            Path(_osmosis_preview_path) if _osmosis_preview_path else None
+        )
+        self._preview_active = False
 
     @staticmethod
     def name() -> str:
@@ -63,6 +72,11 @@ class OsmosisHarnessInstalledAgent(BaseInstalledAgent):
         if not container_input.prompt:
             container_input.prompt = [{"role": "user", "content": instruction}]
         container_input.label = None
+        container_input.preview_path = (
+            f"/tmp/osmosis-preview/{uuid4().hex}/snapshot.json"
+            if self.preview_path is not None
+            else None
+        )
 
         host_input = self.logs_dir / INPUT_FILENAME
         container_input.write(host_input)
@@ -72,9 +86,52 @@ class OsmosisHarnessInstalledAgent(BaseInstalledAgent):
                 host_input, (agent_dir / INPUT_FILENAME).as_posix()
             )
 
-        await self.exec_as_agent(
-            environment, venv_or_fallback_script(self.agent_script)
+        self._preview_active = container_input.preview_path is not None
+        preview_task = (
+            asyncio.create_task(
+                self._collect_preview(environment, container_input.preview_path)
+            )
+            if container_input.preview_path is not None
+            else None
         )
+        if preview_task is not None:
+            preview_task.add_done_callback(
+                lambda task: task.exception() if not task.cancelled() else None
+            )
+        try:
+            await self.exec_as_agent(
+                environment, venv_or_fallback_script(self.agent_script)
+            )
+        finally:
+            if preview_task is not None:
+                self._preview_active = False
+                preview_task.cancel()
+
+    async def _collect_preview(self, environment: Any, remote_path: str) -> None:
+        from osmosis_ai.rollout.backend.harbor.preview_agents import (
+            read_remote_snapshot,
+        )
+
+        if self.preview_path is None:
+            return
+        with tempfile.TemporaryDirectory(prefix="osmosis-preview-") as directory:
+            staging_path = Path(directory) / "snapshot.json"
+            while self._preview_active:
+                try:
+                    raw = await read_remote_snapshot(
+                        environment, remote_path, staging_path
+                    )
+                    if self._preview_active and raw is not None:
+                        document = json.loads(raw)
+                        if (
+                            isinstance(document, dict)
+                            and isinstance(document.get("steps"), list)
+                            and document["steps"]
+                        ):
+                            write_snapshot(self.preview_path, document)
+                except Exception:
+                    pass
+                await asyncio.sleep(PREVIEW_INTERVAL_SEC)
 
     def populate_context_post_run(self, context: AgentContext) -> None:
         result_path = self.logs_dir / RESULT_FILENAME

@@ -424,7 +424,11 @@ class HarborBackend(ExecutionBackend):
         return container_input
 
     def build_agent_config(
-        self, task_dir: Path, container_input: ContainerInput
+        self,
+        task_dir: Path,
+        container_input: ContainerInput,
+        *,
+        preview_path: Path | None = None,
     ) -> HarborAgentConfig:
         if self.native is not None and isinstance(self.agent, str):
             metadata = container_input.metadata or {}
@@ -447,10 +451,13 @@ class HarborBackend(ExecutionBackend):
                 url,
                 container_input.api_key or "dummy",
                 extra_kwargs=self.native_agent_kwargs,
+                preview_path=preview_path,
             )
-        return self.harness_agent_config(task_dir)
+        return self.harness_agent_config(task_dir, preview_path=preview_path)
 
-    def harness_agent_config(self, task_dir: Path) -> HarborAgentConfig:
+    def harness_agent_config(
+        self, task_dir: Path, *, preview_path: Path | None = None
+    ) -> HarborAgentConfig:
         if self.bundle is None:
             raise ValueError("workflow agents require a bundle")
         return HarborAgentConfig(
@@ -459,6 +466,11 @@ class HarborBackend(ExecutionBackend):
                 "bundle_path": str(self.bundle.wheel),
                 "agent_script": self.bundle.agent_script,
                 "input_path": str(task_dir / "container_input.json"),
+                **(
+                    {"_osmosis_preview_path": str(preview_path)}
+                    if preview_path is not None
+                    else {}
+                ),
             },
         )
 
@@ -468,13 +480,26 @@ class HarborBackend(ExecutionBackend):
         request: ExecutionRequest,
         container_input: ContainerInput,
         agent_config: HarborAgentConfig | None = None,
+        *,
+        preview_path: Path | None = None,
     ) -> TrialConfig:
         if agent_config is None:
-            agent_config = self.build_agent_config(task_dir, container_input)
+            agent_config = self.build_agent_config(
+                task_dir, container_input, preview_path=preview_path
+            )
         if request.agent_timeout_sec is not None:
             agent_config.override_timeout_sec = request.agent_timeout_sec
         if self.agent_setup_timeout_sec is not None:
             agent_config.override_setup_timeout_sec = self.agent_setup_timeout_sec
+        if (
+            self.native is not None
+            and "_osmosis_preview_path" in agent_config.kwargs
+            and agent_config.override_setup_timeout_sec is not None
+        ):
+            # Harbor's import-path factory omits the built-in constructor override.
+            agent_config.kwargs["override_setup_timeout_sec"] = (
+                agent_config.override_setup_timeout_sec
+            )
 
         verifier_config = VerifierConfig(
             disable=not request.grade or not (task_dir / "tests").is_dir()
@@ -555,7 +580,16 @@ class HarborBackend(ExecutionBackend):
             task_dir = self.materialize_task(task, request.id, container_input)
             pending.task = asyncio.create_task(
                 self.orchestrator.submit(
-                    self.build_trial_config(task_dir, request, container_input)
+                    self.build_trial_config(
+                        task_dir,
+                        request,
+                        container_input,
+                        preview_path=(
+                            pending.rollout_context.preview_path
+                            if pending.rollout_context is not None
+                            else None
+                        ),
+                    )
                 )
             )
             trial_result = await pending.task

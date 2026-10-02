@@ -25,6 +25,77 @@ def rollout_context():
 
 
 class TestOpenAIAgentsIntegration:
+    @pytest.mark.parametrize("limit", [-1, 0, 2, 10])
+    async def test_preview_is_bounded_and_isolated_from_grading_history(
+        self, rollout_context, limit
+    ):
+        from osmosis_ai.rollout.integrations.agents.openai_agents import (
+            OsmosisMemorySession,
+        )
+
+        session = OsmosisMemorySession()
+        items = [
+            {"role": "user", "content": [{"type": "input_text", "text": text}]}
+            for text in ("first", "second", "third")
+        ]
+        items[0] = {"role": "assistant", "content": "first"}
+        await session.add_items(items)
+
+        preview = await rollout_context.sample_source.get_preview(limit)
+
+        if limit <= 0:
+            assert preview is None
+        else:
+            assert preview is not None
+            assert preview.messages == items[-limit:]
+            assert preview.trajectory_messages is not None
+            assert preview.extra_fields == {
+                "_preview_truncated": limit < 3,
+                "_preview_turn": 1,
+            }
+            items[-1]["content"][0]["text"] = "live update"
+            assert preview.messages[-1]["content"][0]["text"] == "third"
+            assert preview.trajectory_messages[-1]["content"][0]["text"] == "third"
+            preview.messages[-1]["content"][0]["text"] = "preview edit"
+
+        sample = await rollout_context.get_sample()
+        assert sample is not None
+        assert len(sample.messages) == 3
+        assert sample.messages == items
+        assert sample.extra_fields == {}
+        assert sample.messages[-1]["content"][0]["text"] == (
+            "live update" if limit > 0 else "third"
+        )
+
+    async def test_responses_tool_history_does_not_claim_a_tail_local_turn(
+        self, rollout_context
+    ):
+        from osmosis_ai.rollout.integrations.agents.openai_agents import (
+            OsmosisMemorySession,
+        )
+
+        session = OsmosisMemorySession()
+        for index in range(110):
+            await session.add_items(
+                [
+                    {
+                        "type": "function_call",
+                        "call_id": str(index),
+                        "name": "shell",
+                        "arguments": "{}",
+                    },
+                    {
+                        "type": "function_call_output",
+                        "call_id": str(index),
+                        "output": "ok",
+                    },
+                ]
+            )
+        sample = await rollout_context.sample_source.get_preview(100)
+        assert sample.trajectory_messages
+        assert sample.extra_fields["_preview_truncated"] is True
+        assert sample.extra_fields["_preview_turn"] is None
+
     async def test_memory_session_registers_sample_source(self, rollout_context):
         from osmosis_ai.rollout.integrations.agents.openai_agents import (
             OsmosisMemorySession,
@@ -40,8 +111,9 @@ class TestOpenAIAgentsIntegration:
         assert sample.messages == items
         assert sample.trajectory_messages == items
 
+    @pytest.mark.parametrize("preview", [False, True])
     async def test_trajectory_conversion_failure_keeps_native_messages(
-        self, rollout_context, caplog
+        self, rollout_context, caplog, preview
     ):
         from osmosis_ai.rollout.integrations.agents.openai_agents import (
             OsmosisMemorySession,
@@ -50,19 +122,30 @@ class TestOpenAIAgentsIntegration:
         session = OsmosisMemorySession()
         items = [{"role": "user", "content": "hello"}]
         await session.add_items(items)
+        sensitive_text = "sensitive-preview-content"
 
         with patch(
             "osmosis_ai.rollout.integrations.agents.openai_agents.Converter.items_to_messages",
-            side_effect=RuntimeError("boom"),
+            side_effect=RuntimeError(sensitive_text),
         ):
-            sample = await rollout_context.get_sample()
+            sample = (
+                await rollout_context.sample_source.get_preview(10)
+                if preview
+                else await rollout_context.get_sample()
+            )
 
         assert sample is not None
         assert sample.messages == items
         assert sample.trajectory_messages is None
-        assert any(
-            "Failed to convert OpenAI Agents" in r.message for r in caplog.records
-        )
+        if preview:
+            assert sensitive_text not in caplog.text
+            assert not caplog.records
+        else:
+            assert any(
+                "Failed to convert OpenAI Agents" in r.message
+                and r.exc_info is not None
+                for r in caplog.records
+            )
 
     async def test_memory_session_raises_when_used_in_rollout_context_after_creation(
         self,

@@ -3,6 +3,7 @@
 Install ``osmosis-ai[strands]`` before importing this module.
 """
 
+import copy
 import logging
 from collections.abc import Mapping, Sequence
 from typing import Any, cast
@@ -60,15 +61,16 @@ class StrandsAgentSampleSource(SampleSource):
         self.agent = agent
 
     def _to_trajectory_messages(
-        self, messages: Sequence[Mapping[str, Any]]
+        self, messages: Sequence[Mapping[str, Any]], *, log_errors: bool = True
     ) -> Sequence[Mapping[str, Any]] | None:
         try:
             return LiteLLMModel.format_request_messages(cast(Any, list(messages)))
         except Exception:
-            logger.warning(
-                "Failed to convert Strands messages for trajectory persistence",
-                exc_info=True,
-            )
+            if log_errors:
+                logger.warning(
+                    "Failed to convert Strands messages for trajectory persistence",
+                    exc_info=True,
+                )
             return None
 
     async def get_sample(self) -> RolloutSample:
@@ -76,6 +78,24 @@ class StrandsAgentSampleSource(SampleSource):
         return RolloutSample(
             messages=messages,
             trajectory_messages=self._to_trajectory_messages(messages),
+        )
+
+    async def get_preview(self, max_messages: int) -> RolloutSample | None:
+        if max_messages <= 0:
+            return None
+        messages = copy.deepcopy(self.agent.messages[-max_messages:])
+        return RolloutSample(
+            messages=messages,
+            trajectory_messages=self._to_trajectory_messages(
+                messages, log_errors=False
+            ),
+            extra_fields={
+                "_preview_truncated": len(self.agent.messages) > max_messages,
+                "_preview_turn": sum(
+                    message.get("role") == "assistant"
+                    for message in self.agent.messages
+                ),
+            },
         )
 
 

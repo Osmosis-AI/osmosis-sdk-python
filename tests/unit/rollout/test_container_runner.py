@@ -1,11 +1,13 @@
 """In-container runner: the sample must cross the container boundary whole."""
 
+import asyncio
 import json
 from typing import Any
 
 import pytest
 
 import osmosis_ai.rollout.container.runner as runner
+import osmosis_ai.rollout.trajectory.preview as preview_module
 from osmosis_ai.rollout.container.files import (
     INPUT_FILENAME,
     RESULT_FILENAME,
@@ -126,6 +128,164 @@ class TestFallbackSampleBoundary:
         assert result.sample.metrics["turns"] == 2
         assert result.output is not None
         assert result.output.metrics == {"turns": 2.0}
+
+
+class TestLivePreviewBoundary:
+    async def test_workflow_completion_does_not_wait_for_preview_cancellation(
+        self, monkeypatch, tmp_path
+    ):
+        monkeypatch.setattr(runner, "AGENT_LOGS_DIR", tmp_path)
+        preview_path = tmp_path / "private-preview" / "snapshot.json"
+        ContainerInput(rollout_id="r1", preview_path=str(preview_path)).write(
+            tmp_path / INPUT_FILENAME
+        )
+        started = asyncio.Event()
+        release = asyncio.Event()
+        completed = asyncio.Event()
+
+        class Source(RecordedSource):
+            async def get_preview(self, max_messages):
+                started.set()
+                try:
+                    await asyncio.Future()
+                except asyncio.CancelledError:
+                    await release.wait()
+                completed.set()
+                return self.sample
+
+        class Workflow:
+            def __init__(self, config):
+                pass
+
+            async def run(self, ctx):
+                context = get_rollout_context()
+                assert context is not None
+                context.set_sample_source(
+                    Source(
+                        RolloutSample(
+                            messages=[{"role": "assistant", "content": "done"}]
+                        )
+                    )
+                )
+                await started.wait()
+
+        try:
+            result = await asyncio.wait_for(runner.run_agent(Workflow, None), timeout=1)
+            assert result.status == RolloutStatus.SUCCESS
+            assert not completed.is_set()
+        finally:
+            release.set()
+            await asyncio.wait_for(completed.wait(), timeout=1)
+
+        assert not preview_path.exists()
+
+    async def test_preview_is_written_before_workflow_finishes(
+        self, monkeypatch, tmp_path
+    ):
+        monkeypatch.setattr(runner, "AGENT_LOGS_DIR", tmp_path)
+        preview_path = tmp_path / "private-preview" / "snapshot.json"
+        ContainerInput(rollout_id="r1", preview_path=str(preview_path)).write(
+            tmp_path / INPUT_FILENAME
+        )
+        captured = asyncio.Event()
+        loop = asyncio.get_running_loop()
+        real_write_snapshot = preview_module.write_snapshot
+
+        def observe_snapshot(path, document):
+            real_write_snapshot(path, document)
+            loop.call_soon_threadsafe(captured.set)
+
+        monkeypatch.setattr(preview_module, "write_snapshot", observe_snapshot)
+        release = asyncio.Event()
+        sample_calls = 0
+        final_sample = RolloutSample(
+            messages=[{"role": "assistant", "content": "final"}], reward=0.75
+        )
+
+        class Source(SampleSource):
+            async def get_preview(self, max_messages):
+                return RolloutSample(
+                    messages=[{"role": "assistant", "content": "in progress"}]
+                )
+
+            async def get_sample(self):
+                nonlocal sample_calls
+                sample_calls += 1
+                return final_sample
+
+        class Workflow:
+            def __init__(self, config):
+                pass
+
+            async def run(self, ctx):
+                context = get_rollout_context()
+                assert context is not None
+                context.set_sample_source(Source())
+                await release.wait()
+
+        task = asyncio.create_task(runner.run_agent(Workflow, None))
+        try:
+            await asyncio.wait_for(captured.wait(), timeout=1)
+            assert not task.done()
+            preview = json.loads(preview_path.read_text())
+            assert preview["steps"][-1]["message"] == "in progress"
+            assert sample_calls == 0
+            assert not (tmp_path / "trajectory.json").exists()
+        finally:
+            release.set()
+            result = await task
+
+        assert sample_calls == 1
+        assert result.sample is final_sample
+        assert result.sample.reward == 0.75
+        assert (
+            json.loads((tmp_path / "trajectory.json").read_text())["steps"][-1][
+                "message"
+            ]
+            == "final"
+        )
+
+    @pytest.mark.parametrize("enabled_path", [False, True])
+    async def test_disabled_preview_never_reads_source(
+        self, monkeypatch, tmp_path, enabled_path
+    ):
+        monkeypatch.setattr(runner, "AGENT_LOGS_DIR", tmp_path)
+        preview_path = tmp_path / "private-preview" / "snapshot.json"
+        ContainerInput(
+            rollout_id="r1",
+            preview_path=str(preview_path) if enabled_path else None,
+        ).write(tmp_path / INPUT_FILENAME)
+        preview_calls = 0
+
+        class Source(RecordedSource):
+            async def get_preview(self, max_messages):
+                nonlocal preview_calls
+                preview_calls += 1
+                return self.sample
+
+        class Workflow:
+            def __init__(self, config):
+                pass
+
+            async def run(self, ctx):
+                context = get_rollout_context()
+                assert context is not None
+                if enabled_path:
+                    context.preview_enabled = False
+                context.set_sample_source(
+                    Source(
+                        RolloutSample(
+                            messages=[{"role": "assistant", "content": "done"}]
+                        )
+                    )
+                )
+                await asyncio.sleep(0)
+
+        result = await runner.run_agent(Workflow, None)
+
+        assert result.status == RolloutStatus.SUCCESS
+        assert preview_calls == 0
+        assert not preview_path.exists()
 
 
 class TestUnsupportedOutputs:
