@@ -295,4 +295,3 @@ def test_crash_failure_response() -> None:
     assert response.status is RolloutStatus.FAILURE
     assert response.err_category is RolloutErrorCategory.INTERNAL_ERROR
     assert response.err_message == "rollout task crashed"
-
