@@ -223,6 +223,14 @@ def create_rollout_server(
             )
             await registry.complete(request.rollout_id, response)
             raise
+        except Exception as exc:
+            response = RolloutResultResponse(
+                rollout_id=request.rollout_id,
+                status=RolloutStatus.FAILURE,
+                err_message=f"Rollout task crashed: {exc}" if str(exc) else "Rollout task crashed",
+            )
+            await registry.complete(request.rollout_id, response)
+            raise
         await registry.complete(request.rollout_id, response)
 
     @app.post("/rollout", status_code=202)

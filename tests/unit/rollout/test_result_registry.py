@@ -265,3 +265,23 @@ async def test_expired_poll_before_binding_cancels_execution(monkeypatch) -> Non
     assert cancelled == ["r1"]
     assert executed == []
     await store.close()
+
+
+async def test_crashing_execution_task_resolves_failure() -> None:
+    store = registry([])
+    lease = await store.register("r1")
+
+    async def crashing() -> None:
+        raise RuntimeError("fatal backend crash")
+
+    task = asyncio.create_task(crashing())
+    await store.bind_task("r1", task)
+
+    with pytest.raises(RuntimeError):
+        await task
+
+    result = await store.wait_for_result("r1", lease)
+    assert result.status is RolloutStatus.FAILURE
+    assert "fatal backend crash" in (result.err_message or "")
+    await store.close()
+
