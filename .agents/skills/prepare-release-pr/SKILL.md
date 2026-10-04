@@ -102,14 +102,6 @@ Use `[misc] chore: bump version to <version>` as the default PR title. If the us
 
 ## 6. Verify and Hand Off
 
-Run the focused checks first, then the repository gates:
-
-```bash
-uv run ruff check .
-uv run ruff format --check .
-uv run pyright osmosis_ai/
-uv run pytest
-git diff --check
-```
+Follow [CONTRIBUTING.md — Verification](../../../CONTRIBUTING.md#verification), including its type-checking guidance, for the release candidate. Start with focused checks, then complete the code/dependency gates and existing build/wheel validation appropriate to a release. If the release includes dependency changes, use the linked dependency workflow to verify the intended resolved versions and sources. Use the current [PR template](../../../.github/PULL_REQUEST_TEMPLATE.md) for the checklist instead of maintaining a copy here.
 
 Report the target version, comparison tag, changelog scope, files changed, and checks run. Call out any intentionally omitted internal changes or checks that did not run.

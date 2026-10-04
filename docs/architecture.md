@@ -113,6 +113,21 @@ The HTTP client lives under [../osmosis_ai/rollout/client/](../osmosis_ai/rollou
 
 Cloud `eval submit` / `train submit` preflight validates paths and declared dependencies, then imports the rollout entrypoint once. There is no static validation layer beyond that import: the CLI does not scan the module namespace for `AgentWorkflow` or `Grader` classes, and the server does not inspect the backend it is given. Backend constructors establish their own invariants, so genuine misconfigurations surface as import-time errors during preflight; anything subtler surfaces as an ordinary Python error on the first rollout. Running an eval (`osmosis eval submit`) exercises the rollout end to end and is the intended smoke test before training.
 
+## Runtime boundaries
+
+Compatibility follows the environment that imports and executes a dependency. Inspect the client and remote workflow environments separately, using their install manifests, lockfiles, image builds, and startup commands to establish what actually runs. A local lockfile constrains an installation only when that installation uses it. Dependency ranges in [pyproject.toml](../pyproject.toml) express SDK compatibility, while [uv.lock](../uv.lock) records this checkout's resolved environment; neither establishes a deployed image's contents.
+
+| Execution boundary | SDK entry or contract | Follow when assessing a change |
+|--------------------|-----------------------|--------------------------------|
+| Eval controller or training client | [RolloutClient](../osmosis_ai/rollout/client/client.py), [wire models](../osmosis_ai/rollout/types/protocol.py) | Admission, polling leases, lifecycle waits, cancellation, and terminal result handling. Client-only installations do not determine the remote agent's dependencies. |
+| User rollout server and workflow | [server/app.py](../osmosis_ai/rollout/server/app.py), [LocalBackend](../osmosis_ai/rollout/backend/local/backend.py), [container runner](../osmosis_ai/rollout/container/runner.py) | Verify the dependencies available in the environment loading `AgentWorkflow`/`Grader` and framework adapters, including how that environment installs the user's project. |
+| Managed source-image builder and Harbor gateway | [source_images.py](../osmosis_ai/source_images.py), [harbor_images.py](../osmosis_ai/harbor_images.py), [Harbor source handling](../osmosis_ai/rollout/backend/harbor/source.py) | Builder/gateway agreement on image identity and source binding; task validation, native-agent setup, verifier results, and cleanup in the installed Harbor. |
+| Benchmark execution | [Benchmark submit contract](benchmark.md) | Submission metadata does not establish the executor's installed dependencies or supported agents; verify these in the environment that executes the benchmark. The SDK's [native-agent bindings](../osmosis_ai/rollout/backend/harbor/native_agents.py) describe SDK `HarborBackend` support. |
+
+For an upgrade, name the candidate version and package source in each affected environment, then select tests from the [task map](README.md#task-map). Exercise the changed boundary: new dependencies resolving to an older compatible version do not test the candidate, and import smoke does not establish lifecycle behavior. Distinguish local contract evidence from any explicitly requested sandbox, training, or deployment acceptance.
+
+Telemetry has its own boundary. [Ownership/status logs](rollout-observability.md) are emitted by the server; downstream runtime log collection, run-event storage, and user-facing queries must be traced separately. HTTP admission, business completion, persisted trajectories, and diagnostics answer different questions; an HTTP success or a missing telemetry event alone does not establish the rollout result.
+
 ## See also
 
 - [rollout-sdk.md](./rollout-sdk.md) — the library API surface

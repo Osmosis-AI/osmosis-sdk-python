@@ -54,6 +54,7 @@ todo.md
 
 /CLAUDE.md
 /AGENTS.md
+/CROSS_REPO.local.md
 **/superpowers/
 
 # Agent-specific local state; shared skills live in .agents/skills.
