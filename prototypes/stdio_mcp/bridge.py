@@ -80,6 +80,7 @@ class Page[T](Model):
 ErrorCode = Literal[
     "INVALID_ARGUMENTS",
     "AUTH_REQUIRED",
+    "CREDENTIALS_UNAVAILABLE",
     "FORBIDDEN",
     "UPGRADE_REQUIRED",
     "PLATFORM_UNAVAILABLE",
@@ -174,6 +175,7 @@ def local_context(settings: Settings, args: LocalInput) -> LocalContext:
                     f"configs/{args.kind}/{entry.name}"
                     for entry in entries
                     if entry.name.endswith(".toml")
+                    and not re.search(r"[\ud800-\udfff]", entry.name)
                     and entry.is_file(follow_symlinks=False)
                 ),
             )
@@ -196,8 +198,14 @@ def request_headers(settings: Settings) -> dict[str, str]:
         headers = cli_request_headers(token=credentials.access_token)
         headers["X-Osmosis-Workspace"] = settings.workspace
         return headers
+    except BridgeError:
+        raise
+    except CLIError as exc:
+        if exc.code in {"ENV_TOKEN_PLATFORM_REQUIRED", "ENV_TOKEN_PLATFORM_MISMATCH"}:
+            raise BridgeError("AUTH_REQUIRED") from None
+        raise BridgeError("CREDENTIALS_UNAVAILABLE") from None
     except Exception:
-        raise BridgeError("AUTH_REQUIRED") from None
+        raise BridgeError("CREDENTIALS_UNAVAILABLE") from None
 
 
 async def read_platform(
@@ -342,7 +350,8 @@ def create_server(settings: Settings) -> Server:
             else:
                 async with asyncio.timeout(REMOTE_TIMEOUT_SECONDS), remote_slots:
                     value = await operation(settings, args)
-            result = output_model(data=value).model_dump(mode="json")
+            # Validate wire serialization before handing untrusted text to MCP's writer.
+            result = json.loads(output_model(data=value).model_dump_json())
         except BridgeError as exc:
             result = {"data": None, "error": exc.code}
         except TimeoutError:

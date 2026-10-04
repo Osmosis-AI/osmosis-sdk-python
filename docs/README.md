@@ -37,6 +37,7 @@ The single `osmosis-ai` distribution always includes the CLI and framework-neutr
 - [datasets.md](./datasets.md) — the dataset row contract enforced by the SDK validator.
 - [troubleshooting.md](./troubleshooting.md) — engineering issues (rollout timeouts, event-loop blocking, concurrency tuning).
 - [cli.md](./cli.md) — CLI internals for contributors (command shells, lazy imports, JSON envelopes).
+- [local-mcp-evaluation.md](./local-mcp-evaluation.md) — source-only local stdio MCP experiment, fixed workspace and read-only tool contracts, verification, and remaining acceptance.
 - [run-downloads.md](./run-downloads.md) — eval and benchmark download commands, platform route contracts, fixed local layouts, resume, confirmation, and retry behavior.
 
 ## See also

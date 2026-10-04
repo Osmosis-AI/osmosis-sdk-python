@@ -29,6 +29,7 @@ class Bridge:
     closed: asyncio.Queue[str]
     credential_reads: Path
     release_credentials: Path
+    datasets: list[dict[str, Any]]
     responses: dict[int, dict[str, Any]] = field(default_factory=dict)
 
     async def send(self, method: str, params: dict[str, Any], request_id=None):
@@ -63,6 +64,7 @@ async def bridge(
     started: asyncio.Queue[str] = asyncio.Queue()
     closed: asyncio.Queue[str] = asyncio.Queue()
     handlers: set[asyncio.Task] = set()
+    datasets: list[dict[str, Any]] = []
 
     async def handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
         task = asyncio.current_task()
@@ -96,7 +98,13 @@ async def bridge(
                     writer.write(bytes([byte]))
                     await writer.drain()
             else:
-                body = b'{"datasets":[],"total_count":0,"has_more":false}'
+                body = json.dumps(
+                    {
+                        "datasets": datasets,
+                        "total_count": len(datasets),
+                        "has_more": False,
+                    }
+                ).encode()
                 writer.write(
                     b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
                     + f"Content-Length: {len(body)}\r\n\r\n".encode()
@@ -191,7 +199,9 @@ async def bridge(
         cwd=repository,
         env=env,
     )
-    instance = Bridge(process, started, closed, credential_reads, release_credentials)
+    instance = Bridge(
+        process, started, closed, credential_reads, release_credentials, datasets
+    )
     try:
         await instance.send(
             "initialize",
@@ -216,8 +226,33 @@ async def bridge(
         await asyncio.gather(*handlers, return_exceptions=True)
 
 
+async def test_invalid_unicode_response_is_redacted_and_bridge_recovers(bridge: Bridge):
+    bridge.datasets.append(
+        {"id": "dataset-a", "file_name": "synthetic-invalid-\udcff", "status": "ready"}
+    )
+    await bridge.call(2, "list_datasets")
+    invalid = (await bridge.receive(2))["result"]
+    assert invalid["isError"] is True
+    assert invalid["structuredContent"] == {"data": None, "error": "INVALID_RESPONSE"}
+    assert "synthetic-invalid" not in json.dumps(invalid)
+
+    bridge.datasets[0]["file_name"] = "数据-😀.jsonl"
+    await bridge.call(3, "list_datasets")
+    valid = (await bridge.receive(3))["result"]
+    assert valid["isError"] is False
+    assert (
+        valid["structuredContent"]["data"]["items"][0]["file_name"] == "数据-😀.jsonl"
+    )
+    _stdout, stderr = await asyncio.wait_for(bridge.process.communicate(), timeout=3)
+    assert bridge.process.returncode == 0
+    assert b"Traceback" not in stderr
+    assert b"synthetic-invalid" not in stderr
+
+
 @pytest.mark.asyncio
-@pytest.mark.parametrize("finish", ["deadline", "cancel", "eof"])
+@pytest.mark.parametrize(
+    "finish", [pytest.param("deadline", marks=pytest.mark.slow), "cancel", "eof"]
+)
 async def test_active_http_body_is_closed_on_deadline_cancellation_and_eof(
     bridge: Bridge, finish: str
 ):
@@ -263,6 +298,7 @@ async def test_active_http_body_is_closed_on_deadline_cancellation_and_eof(
 
 
 @pytest.mark.asyncio
+@pytest.mark.slow
 async def test_remote_admission_is_bounded_and_queue_wait_uses_request_deadline(
     bridge: Bridge,
 ):
@@ -299,6 +335,7 @@ async def test_remote_admission_is_bounded_and_queue_wait_uses_request_deadline(
             active.discard(await bridge.closed.get())
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize("bridge", ["blocked-keyring"], indirect=True)
 async def test_stalled_keyring_stays_bounded_through_timeouts_and_recovers(
     bridge: Bridge,

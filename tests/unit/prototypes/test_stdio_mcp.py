@@ -11,6 +11,7 @@ from contextlib import nullcontext
 from datetime import UTC, datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -19,8 +20,10 @@ pytest.importorskip("mcp.server.lowlevel", reason="optional MCP prototype depend
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
+from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.platform.auth import credentials as credential_store
 from osmosis_ai.platform.auth.credentials import Credentials, UserInfo
+from prototypes.stdio_mcp import bridge as bridge_module
 from prototypes.stdio_mcp.bridge import (
     BridgeError,
     LocalInput,
@@ -125,7 +128,7 @@ def test_explicit_repository_containment(repository: Path, tmp_path: Path):
         Settings.create(repository, "workspace-a\r\nAuthorization: injected")
 
 
-def test_local_listing_selects_sorted_names_before_truncation(
+def test_local_listing_filters_names_before_sorted_truncation(
     repository: Path, monkeypatch: pytest.MonkeyPatch
 ):
     directory = repository / "configs/training"
@@ -133,6 +136,12 @@ def test_local_listing_selects_sorted_names_before_truncation(
         (directory / f"{index:03}.toml").touch()
     with os.scandir(directory) as entries:
         files = sorted(entries, key=lambda entry: entry.name)
+    files.extend(
+        SimpleNamespace(
+            name=f"!invalid-{surrogate}.toml", is_file=lambda **_kwargs: True
+        )
+        for surrogate in ("\ud800", "\udcff")
+    )
 
     settings = Settings.create(repository, "workspace-a")
     for order in (files, list(reversed(files))):
@@ -144,6 +153,32 @@ def test_local_listing_selects_sorted_names_before_truncation(
             f"configs/training/{index:03}.toml" for index in range(100)
         ]
         assert result.truncated is True
+
+
+@pytest.mark.parametrize(
+    ("code", "expected"),
+    [
+        (None, "AUTH_REQUIRED"),
+        ("KEYRING_UNAVAILABLE", "CREDENTIALS_UNAVAILABLE"),
+        ("CREDENTIALS_UNAVAILABLE", "CREDENTIALS_UNAVAILABLE"),
+        ("CREDENTIALS_PARSE_FAILED", "CREDENTIALS_UNAVAILABLE"),
+        ("CREDENTIALS_VERSION_CHANGED", "CREDENTIALS_UNAVAILABLE"),
+    ],
+)
+async def test_credential_failures_remain_distinct_from_missing_login(
+    repository: Path, monkeypatch: pytest.MonkeyPatch, code: str | None, expected: str
+):
+    def load():
+        if code is not None:
+            raise CLIError("synthetic-credential-detail", code=code)
+        return None
+
+    monkeypatch.setattr(bridge_module, "load_credentials", load)
+    settings = Settings.create(repository, "workspace-a")
+    with pytest.raises(BridgeError) as error:
+        await settings.credentials.read(settings)
+    assert error.value.code == expected
+    assert str(error.value) == expected
 
 
 @pytest.mark.parametrize(
