@@ -133,7 +133,7 @@ def test_explicit_repository_containment(repository: Path, tmp_path: Path):
         (302, "PLATFORM_UNAVAILABLE"),
     ],
 )
-def test_failed_reads_preserve_auth_and_never_follow_redirects(
+async def test_failed_reads_preserve_auth_and_never_follow_redirects(
     platform, repository: Path, status: int, error: str
 ):
     _url, response, requests, path, _entered, _release = platform
@@ -141,7 +141,7 @@ def test_failed_reads_preserve_auth_and_never_follow_redirects(
     before = path.read_bytes()
     settings = Settings.create(repository, "workspace-a")
     with pytest.raises(BridgeError, match=error):
-        read_platform(settings, "datasets", PageInput())
+        await read_platform(settings, "datasets", PageInput())
     assert path.read_bytes() == before
     assert len(requests) == 1
     assert requests[0][1]["X-Osmosis-Workspace"] == "workspace-a"
@@ -149,7 +149,9 @@ def test_failed_reads_preserve_auth_and_never_follow_redirects(
     assert requests[0][1]["Authorization"] == "Bearer synthetic-test-token"
 
 
-def test_response_allowlist_and_explicit_workspace_header(platform, repository: Path):
+async def test_response_allowlist_and_explicit_workspace_header(
+    platform, repository: Path
+):
     _url, response, requests, _path, _entered, _release = platform
     response["body"] = {
         "datasets": [
@@ -166,7 +168,9 @@ def test_response_allowlist_and_explicit_workspace_header(platform, repository: 
         "has_more": False,
     }
     for workspace in ("workspace-a", "workspace-b"):
-        page = list_datasets(Settings.create(repository, workspace), PageInput(limit=1))
+        page = await list_datasets(
+            Settings.create(repository, workspace), PageInput(limit=1)
+        )
         assert page.model_dump() == {
             "items": [
                 {
@@ -186,12 +190,12 @@ def test_response_allowlist_and_explicit_workspace_header(platform, repository: 
     ]
     response["body"] = {"padding": "x" * 1_048_576}
     with pytest.raises(BridgeError, match="INVALID_RESPONSE"):
-        read_platform(
+        await read_platform(
             Settings.create(repository, "workspace-a"), "datasets", PageInput()
         )
 
 
-def test_successful_continuation_preserves_limit_offset_and_workspace(
+async def test_successful_continuation_preserves_limit_offset_and_workspace(
     platform, repository: Path
 ):
     _url, response, requests, _path, _entered, _release = platform
@@ -203,7 +207,7 @@ def test_successful_continuation_preserves_limit_offset_and_workspace(
         "has_more": True,
         "next_offset": 2,
     }
-    page = list_datasets(
+    page = await list_datasets(
         Settings.create(repository, "workspace-a"), PageInput(limit=1, offset=1)
     )
     assert requests[0][0] == "/api/cli/datasets?limit=1&offset=1"
@@ -212,7 +216,7 @@ def test_successful_continuation_preserves_limit_offset_and_workspace(
     assert page.next_offset == 2
 
 
-def test_platform_binding_and_https_fail_closed(
+async def test_platform_binding_and_https_fail_closed(
     monkeypatch: pytest.MonkeyPatch, platform, repository: Path
 ):
     url, _response, requests, _path, _entered, _release = platform
@@ -220,14 +224,14 @@ def test_platform_binding_and_https_fail_closed(
     monkeypatch.setenv("OSMOSIS_TOKEN", "synthetic-env-token")
     monkeypatch.setenv("OSMOSIS_TOKEN_PLATFORM_URL", "https://wrong.invalid")
     with pytest.raises(BridgeError, match="AUTH_REQUIRED"):
-        read_platform(settings, "datasets", PageInput())
+        await read_platform(settings, "datasets", PageInput())
     assert requests == []
     monkeypatch.setenv("OSMOSIS_PLATFORM_URL", "http://remote.invalid")
     with pytest.raises(ValueError, match="HTTPS"):
         Settings.create(repository, "workspace-a")
     monkeypatch.setenv("OSMOSIS_PLATFORM_URL", url + "/changed")
     with pytest.raises(BridgeError, match="AUTH_REQUIRED"):
-        read_platform(settings, "datasets", PageInput())
+        await read_platform(settings, "datasets", PageInput())
     assert requests == []
 
 
@@ -351,7 +355,7 @@ async def test_official_stdio_client_is_noninteractive_and_nonblocking(
     assert len(requests) == 2
 
 
-def test_keyring_credentials_are_read_only_on_401(
+async def test_keyring_credentials_are_read_only_on_401(
     platform, repository: Path, monkeypatch: pytest.MonkeyPatch
 ):
     url, response, _requests, path, _entered, _release = platform
@@ -373,7 +377,7 @@ def test_keyring_credentials_are_read_only_on_401(
     response["status"] = 401
     before = path.read_bytes()
     with pytest.raises(BridgeError, match="AUTH_REQUIRED"):
-        read_platform(
+        await read_platform(
             Settings.create(repository, "workspace-a"), "datasets", PageInput()
         )
     assert path.read_bytes() == before
@@ -387,11 +391,11 @@ def test_keyring_credentials_are_read_only_on_401(
         {"datasets": [{"id": "a"}, {"id": "b"}], "total_count": 2, "has_more": False},
     ],
 )
-def test_invalid_or_unbounded_pages_fail_closed(platform, repository: Path, body):
+async def test_invalid_or_unbounded_pages_fail_closed(platform, repository: Path, body):
     _url, response, _requests, _path, _entered, _release = platform
     response["body"] = body
     with pytest.raises(BridgeError, match="INVALID_RESPONSE"):
-        read_platform(
+        await read_platform(
             Settings.create(repository, "workspace-a"), "datasets", PageInput(limit=1)
         )
 

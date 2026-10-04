@@ -28,6 +28,8 @@ from osmosis_ai.platform.auth.credentials import load_credentials
 from osmosis_ai.platform.auth.platform_client import cli_request_headers
 
 MAX_RESPONSE_BYTES = 1_048_576
+REMOTE_TIMEOUT_SECONDS = 10
+MAX_REMOTE_REQUESTS = 4
 CONFIG_KINDS = ("training", "eval", "benchmark")
 
 
@@ -151,9 +153,7 @@ def local_context(settings: Settings, args: LocalInput) -> LocalContext:
         )
 
 
-def read_platform(settings: Settings, resource: str, page: PageInput) -> dict[str, Any]:
-    if resource not in {"datasets", "training-runs"}:
-        raise BridgeError("INVALID_ARGUMENTS")
+def request_headers(settings: Settings) -> dict[str, str]:
     try:
         if get_platform_url() != settings.platform_url:
             raise BridgeError("AUTH_REQUIRED")
@@ -163,14 +163,23 @@ def read_platform(settings: Settings, resource: str, page: PageInput) -> dict[st
             raise BridgeError("AUTH_REQUIRED")
         headers = cli_request_headers(token=credentials.access_token)
         headers["X-Osmosis-Workspace"] = settings.workspace
+        return headers
     except Exception:
         raise BridgeError("AUTH_REQUIRED") from None
+
+
+async def read_platform(
+    settings: Settings, resource: str, page: PageInput
+) -> dict[str, Any]:
+    if resource not in {"datasets", "training-runs"}:
+        raise BridgeError("INVALID_ARGUMENTS")
+    headers = await asyncio.to_thread(request_headers, settings)
     try:
         # Never forward the local bearer through an HTTP redirect or ambient proxy.
-        with httpx.Client(
-            timeout=10, follow_redirects=False, trust_env=False
+        async with httpx.AsyncClient(
+            timeout=REMOTE_TIMEOUT_SECONDS, follow_redirects=False, trust_env=False
         ) as client:
-            with client.stream(
+            async with client.stream(
                 "GET",
                 f"{settings.platform_url}/api/cli/{resource}",
                 params=page.model_dump(),
@@ -185,7 +194,7 @@ def read_platform(settings: Settings, resource: str, page: PageInput) -> dict[st
                 if response.status_code != 200:
                     raise BridgeError("PLATFORM_UNAVAILABLE")
                 raw = bytearray()
-                for chunk in response.iter_bytes(chunk_size=16_384):
+                async for chunk in response.aiter_bytes(chunk_size=16_384):
                     raw.extend(chunk)
                     if len(raw) > MAX_RESPONSE_BYTES:
                         raise BridgeError("INVALID_RESPONSE")
@@ -204,8 +213,10 @@ def read_platform(settings: Settings, resource: str, page: PageInput) -> dict[st
         raise BridgeError("INVALID_RESPONSE") from None
 
 
-def list_datasets(settings: Settings, page: PageInput) -> Page[Dataset]:
-    result = PaginatedDatasets.from_dict(read_platform(settings, "datasets", page))
+async def list_datasets(settings: Settings, page: PageInput) -> Page[Dataset]:
+    result = PaginatedDatasets.from_dict(
+        await read_platform(settings, "datasets", page)
+    )
     return Page[Dataset](
         items=[
             Dataset(
@@ -222,9 +233,9 @@ def list_datasets(settings: Settings, page: PageInput) -> Page[Dataset]:
     )
 
 
-def list_training_runs(settings: Settings, page: PageInput) -> Page[TrainingRun]:
+async def list_training_runs(settings: Settings, page: PageInput) -> Page[TrainingRun]:
     result = PaginatedTrainingRuns.from_dict(
-        read_platform(settings, "training-runs", page)
+        await read_platform(settings, "training-runs", page)
     )
     return Page[TrainingRun](
         items=[
@@ -243,6 +254,7 @@ def list_training_runs(settings: Settings, page: PageInput) -> Page[TrainingRun]
 
 
 def create_server(settings: Settings) -> Server:
+    remote_slots = asyncio.Semaphore(MAX_REMOTE_REQUESTS)
     server = Server(
         "osmosis-local-prototype",
         version="0.1.0",
@@ -293,10 +305,16 @@ def create_server(settings: Settings) -> Server:
                 args = input_model.model_validate(arguments)
             except ValidationError:
                 raise BridgeError("INVALID_ARGUMENTS") from None
-            value = await asyncio.to_thread(operation, settings, args)
+            if name == "list_local_configs":
+                value = await asyncio.to_thread(operation, settings, args)
+            else:
+                async with asyncio.timeout(REMOTE_TIMEOUT_SECONDS), remote_slots:
+                    value = await operation(settings, args)
             result = output_model(data=value).model_dump(mode="json")
         except BridgeError as exc:
             result = {"data": None, "error": exc.code}
+        except TimeoutError:
+            result = {"data": None, "error": "PLATFORM_UNAVAILABLE"}
         except OSError:
             result = {"data": None, "error": "LOCAL_CONTEXT_UNAVAILABLE"}
         except Exception:
