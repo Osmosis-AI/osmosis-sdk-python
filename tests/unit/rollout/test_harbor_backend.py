@@ -385,6 +385,7 @@ class TestHarnessAgentLabelStrip:
         agent.logs_dir.mkdir()
         agent.input_path = tmp_path / "container_input.json"
         agent.agent_script = "bench-agent"
+        agent.preview_path = None
         ContainerInput(rollout_id="r1", label="42").write(agent.input_path)
 
         async def fake_exec(environment, command):
@@ -627,6 +628,62 @@ class TestNativeAgents:
         backend = self.backend_for("mini-swe-agent", template_task)
         assert backend.bundle is None
 
+    @pytest.mark.parametrize("agent_name", ["terminus-2", "mini-swe-agent", "opencode"])
+    @pytest.mark.parametrize("preview_enabled", [False, True])
+    def test_native_preview_config_uses_only_the_trusted_path(
+        self, template_task, tmp_path, monkeypatch, agent_name, preview_enabled
+    ):
+        from harbor.agents.factory import AgentFactory
+        from harbor.models.agent.name import AgentName
+
+        monkeypatch.setenv("LITELLM_LOCAL_MODEL_COST_MAP", "True")
+        native_class = AgentFactory.get_agent_class(AgentName(agent_name))
+        init = native_class.__init__
+        received = {}
+
+        def record_init(self, *args, **kwargs):
+            received.update(kwargs)
+            init(self, *args, **kwargs)
+
+        monkeypatch.setattr(native_class, "__init__", record_init)
+        if agent_name == "terminus-2":
+            monkeypatch.setattr(native_class, "_init_llm", lambda self, **kw: object())
+        overrides = {"_osmosis_preview_path": str(tmp_path / "untrusted.json")}
+        backend = self.backend_for(
+            agent_name,
+            template_task,
+            model_name="openai/student",
+            native_agent_kwargs=overrides,
+            agent_setup_timeout_sec=17,
+        )
+        preview_path = tmp_path / "trajectory.partial.json"
+        config = backend.build_trial_config(
+            template_task,
+            ExecutionRequest(id="r1", prompt=[]),
+            ContainerInput(
+                rollout_id="r1", chat_completions_url="http://t/v1", api_key="k"
+            ),
+            **({"preview_path": preview_path} if preview_enabled else {}),
+        ).agent
+        agent = AgentFactory.create_agent_from_config(config, tmp_path / "logs")
+
+        assert isinstance(agent, native_class)
+        assert agent.name() == agent_name
+        assert received["override_setup_timeout_sec"] == 17
+        assert agent.model_name == (
+            "osmosis-rollout/student" if agent_name == "opencode" else "openai/student"
+        )
+        if preview_enabled:
+            assert type(agent) is not native_class
+            assert config.name is None
+            assert config.kwargs["_osmosis_preview_path"] == str(preview_path)
+        else:
+            assert type(agent) is native_class
+            assert config.name == agent_name
+            assert config.import_path is None
+            assert "_osmosis_preview_path" not in config.kwargs
+        assert overrides == {"_osmosis_preview_path": str(tmp_path / "untrusted.json")}
+
     def test_opencode_uses_session_endpoint_in_native_harbor_agent(
         self, template_task, tmp_path
     ):
@@ -856,15 +913,29 @@ class TestNativeAgents:
         assert (task_dir / "tests" / info.wheel.name).exists()
         assert (task_dir / "tests" / "container_input.json").exists()
 
-    def test_oracle_binding_gets_no_endpoint(self, template_task):
-        backend = self.backend_for("oracle", template_task)
+    @pytest.mark.parametrize("preview_enabled", [False, True])
+    def test_oracle_binding_gets_no_endpoint_or_preview(
+        self, template_task, tmp_path, preview_enabled
+    ):
+        backend = self.backend_for(
+            "oracle",
+            template_task,
+            native_agent_kwargs={"_osmosis_preview_path": "untrusted.json"},
+        )
         config = backend.build_agent_config(
             template_task,
             ContainerInput(rollout_id="r1", chat_completions_url="http://t/v1"),
+            **(
+                {"preview_path": tmp_path / "trajectory.partial.json"}
+                if preview_enabled
+                else {}
+            ),
         )
         assert config.name == "oracle"
+        assert config.import_path is None
         assert "OPENAI_API_BASE" not in config.env
         assert "api_base" not in config.kwargs
+        assert "_osmosis_preview_path" not in config.kwargs
 
     def test_harbor_model_metadata_overrides_model(self, template_task):
         backend = self.backend_for(
@@ -1665,13 +1736,22 @@ class TestArtifactLifecycle:
         )
 
     @pytest.mark.parametrize(
-        "ending", ["cancelled_error", "cancelled_result", "exception"]
+        "ending,rollout_id",
+        [
+            ("cancelled_error", "r1"),
+            ("cancelled_result", "r1"),
+            ("exception", "r1"),
+            ("exception", "training-run::session-123"),
+        ],
     )
     async def test_interrupted_trials_retain_only_sanitized_native_evidence(
-        self, template_task, tmp_path, ending
+        self, template_task, tmp_path, ending, rollout_id
     ):
         from osmosis_ai.rollout.context import RolloutContext
-        from osmosis_ai.rollout.utils.evidence import verify_trial_evidence
+        from osmosis_ai.rollout.utils.evidence import (
+            trial_evidence_inventory,
+            verify_trial_evidence,
+        )
 
         async def run(queue, config):
             directory = config.trials_dir / config.trial_name
@@ -1699,23 +1779,29 @@ class TestArtifactLifecycle:
             return result
 
         backend = self.backend_for(template_task, tmp_path, FakeQueue(run))
-        request = ExecutionRequest(id="r1", prompt=[{"role": "user", "content": "go"}])
-        with RolloutContext(chat_completions_url="http://t/v1", rollout_id="r1"):
+        request = ExecutionRequest(
+            id=rollout_id, prompt=[{"role": "user", "content": "go"}]
+        )
+        with RolloutContext(chat_completions_url="http://t/v1", rollout_id=rollout_id):
             if ending == "cancelled_error":
                 with pytest.raises(asyncio.CancelledError):
                     await backend.execute(request)
             else:
                 await backend.execute(request)
-        retained = backend.artifact_root / "r1"
+        retained = backend.artifact_root / rollout_id
         assert {path.name for path in retained.iterdir()} == {"harbor"}
-        manifest = verify_trial_evidence(retained / "harbor", "r1")
+        manifest = verify_trial_evidence(retained / "harbor", rollout_id)
         assert manifest["complete"]
+        assert manifest["rollout_id"] == rollout_id
+        assert trial_evidence_inventory(backend.artifact_root, [rollout_id])["complete"]
         assert manifest["excluded"] == {"opencode_database": 1}
         assert "secret" not in "".join(
             path.read_text() for path in retained.rglob("*") if path.is_file()
         )
-        assert not (backend.rollouts_dir / "r1").exists()
-        assert (backend.trials_dir / "trial-r1").exists() == (ending == "exception")
+        assert not (backend.rollouts_dir / rollout_id).exists()
+        assert (backend.trials_dir / f"trial-{rollout_id}").exists() == (
+            ending == "exception"
+        )
 
     async def test_completed_trial_preserves_private_state_before_source_cleanup(
         self, template_task, tmp_path

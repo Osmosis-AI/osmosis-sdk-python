@@ -4,10 +4,12 @@ import asyncio
 import logging
 import os
 import secrets
+import tempfile
 import traceback
 from collections.abc import AsyncIterator
 from contextlib import AsyncExitStack, asynccontextmanager, suppress
 from functools import partial
+from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
@@ -24,6 +26,11 @@ from osmosis_ai.rollout.server.result_registry import (
     UnknownRolloutError,
 )
 from osmosis_ai.rollout.trajectory import save_trajectory
+from osmosis_ai.rollout.trajectory.preview import (
+    collect_source,
+    preview_root,
+    publish_previews,
+)
 from osmosis_ai.rollout.types import (
     POLLING_LEASE_HEADER,
     CancelRolloutsRequest,
@@ -79,6 +86,7 @@ def create_rollout_server(
         _configure_default_logging()
 
     scheduled_tasks: set[asyncio.Task[None]] = set()
+    preview_tasks: set[asyncio.Task[None]] = set()
     admission_lock = asyncio.Lock()
     accepting_rollouts = True
     # Keep the complete process inventory after result retention expires. A
@@ -145,6 +153,10 @@ def create_rollout_server(
                     accepting_rollouts = False
                 await _drain_scheduled_tasks()
                 await registry.close()
+                if preview_tasks:
+                    _, pending = await asyncio.wait(preview_tasks, timeout=2)
+                    for task in pending:
+                        task.cancel()
                 await asyncio.to_thread(observability.close)
 
     app = FastAPI(lifespan=_lifespan_with_drain)
@@ -205,7 +217,9 @@ def create_rollout_server(
         if exc is not None:
             logger.error("Rollout task for %s crashed", rollout_id, exc_info=exc)
 
-    async def _run_rollout(request: RolloutInitRequest) -> None:
+    async def _run_rollout(
+        request: RolloutInitRequest, preview_path: Path | None = None
+    ) -> None:
         progress = await registry.get_progress(request.rollout_id)
         await progress.set_status(RolloutStatus.RUNNING)
         try:
@@ -214,6 +228,7 @@ def create_rollout_server(
                 request,
                 progress=progress,
                 process_id=process_id,
+                preview_path=preview_path,
             )
         except asyncio.CancelledError:
             response = RolloutResultResponse(
@@ -224,6 +239,30 @@ def create_rollout_server(
             await registry.complete(request.rollout_id, response)
             raise
         await registry.complete(request.rollout_id, response)
+
+    async def _publish_preview(
+        request: RolloutInitRequest,
+        root: Path,
+        temporary: tempfile.TemporaryDirectory[str],
+        execution: asyncio.Task[None],
+    ) -> None:
+        try:
+            entry = registry.entry(request.rollout_id)
+            await publish_previews(
+                root=root,
+                source=Path(temporary.name).resolve() / "snapshot.json",
+                rollout_id=request.rollout_id,
+                api_key=request.llm_api_key,
+                progress=entry.progress,
+                result=entry.result,
+                execution=execution,
+            )
+            # Lease expiry can finish the result before backend cleanup stops writing.
+            await asyncio.wait({execution})
+        except Exception:
+            logger.debug("Rollout file preview unavailable")
+        finally:
+            temporary.cleanup()
 
     @app.post("/rollout", status_code=202)
     async def rollout(request: RolloutInitRequest) -> RolloutInitResponse:
@@ -256,18 +295,36 @@ def create_rollout_server(
             lambda result: observability.record(fields, result.result().status)
         )
         task: asyncio.Task[None] | None = None
+        root = preview_root(request.rollout_id)
+        temporary: tempfile.TemporaryDirectory[str] | None = None
+        if root is not None:
+            try:
+                temporary = tempfile.TemporaryDirectory(prefix="osmosis-preview-")
+            except OSError:
+                logger.debug("Rollout preview staging unavailable")
         try:
-            task = asyncio.create_task(_run_rollout(request))
+            path = (
+                Path(temporary.name).resolve() / "snapshot.json" if temporary else None
+            )
+            task = asyncio.create_task(_run_rollout(request, path))
             scheduled_tasks.add(task)
             admitted_ids.add(request.rollout_id)
             idle.clear()
             task.add_done_callback(partial(_finish_rollout_task, request.rollout_id))
             await registry.bind_task(request.rollout_id, task)
+            if root is not None and temporary is not None:
+                preview_task = asyncio.create_task(
+                    _publish_preview(request, root, temporary, task)
+                )
+                preview_tasks.add(preview_task)
+                preview_task.add_done_callback(preview_tasks.discard)
         except (Exception, asyncio.CancelledError):
             if task is not None:
                 task.cancel()
                 await asyncio.gather(task, return_exceptions=True)
             await registry.discard(request.rollout_id)
+            if temporary is not None:
+                temporary.cleanup()
             raise
         observability.record(fields, RolloutStatus.QUEUED)
         return RolloutInitResponse(
@@ -327,6 +384,7 @@ async def _handle_rollout(
     request: RolloutInitRequest,
     progress: RolloutProgress | None = None,
     process_id: str | None = None,
+    preview_path: Path | None = None,
 ) -> RolloutResultResponse:
     rollout_id = request.rollout_id
     rollout_ctx = RolloutContext(
@@ -335,7 +393,15 @@ async def _handle_rollout(
         rollout_id=rollout_id,
         progress=progress,
         process_id=process_id,
+        preview_path=preview_path,
     )
+    collector = (
+        asyncio.create_task(collect_source(rollout_ctx)) if preview_path else None
+    )
+    if collector is not None:
+        collector.add_done_callback(
+            lambda task: task.exception() if not task.cancelled() else None
+        )
     outcome: ExecutionOutcome | None = None
     try:
         with rollout_ctx:
@@ -362,6 +428,9 @@ async def _handle_rollout(
             err_category=categorize_exception(exc),
         )
     finally:
+        rollout_ctx.preview_enabled = False
+        if collector is not None:
+            collector.cancel()
         if outcome is not None:
             result_to_save = outcome.result_to_save
             await save_trajectory(
