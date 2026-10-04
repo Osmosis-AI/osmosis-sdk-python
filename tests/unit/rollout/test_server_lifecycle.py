@@ -10,7 +10,12 @@ from osmosis_ai.rollout.client import RolloutClient, RolloutProtocolError
 from osmosis_ai.rollout.context import get_rollout_context
 from osmosis_ai.rollout.server import app as server_module
 from osmosis_ai.rollout.server import create_rollout_server
-from osmosis_ai.rollout.types import ExecutionOutcome, ExecutionResult, RolloutStatus
+from osmosis_ai.rollout.types import (
+    ExecutionOutcome,
+    ExecutionResult,
+    RolloutErrorCategory,
+    RolloutStatus,
+)
 
 
 class Backend(ExecutionBackend):
@@ -257,3 +262,26 @@ async def test_wait_idle_retries_transient_health_but_not_auth_errors():
         with pytest.raises(RolloutProtocolError) as error:
             await client.wait_idle(timeout_sec=1)
         assert error.value.status_code == 401
+
+
+async def test_crashed_rollout_task_resolves_failure_result(monkeypatch):
+    app = create_rollout_server(backend=Backend())
+    registry = app.state.rollout_futures
+
+    async def crashing_handle(*args, **kwargs):
+        raise RuntimeError("catastrophic crash in server handling")
+
+    monkeypatch.setattr(server_module, "_handle_rollout", crashing_handle)
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app), base_url="http://test"
+    ) as http:
+        client = RolloutClient(url="http://test", http_client=http)
+        result = await client.run_rollout(
+            initial_messages=[],
+            chat_completions_url="https://model.example/v1",
+            rollout_id="crash-1",
+        )
+        assert result.status is RolloutStatus.FAILURE
+        assert result.err_category is RolloutErrorCategory.INTERNAL_ERROR
+        assert result.err_message == "rollout task crashed"
+    await registry.close()

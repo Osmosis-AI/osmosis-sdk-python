@@ -183,6 +183,7 @@ class RolloutErrorCategory(StrEnum):
     VALIDATION_ERROR = "validation_error"
     HTTP_ERROR = "http_error"
     AGENT_ERROR = "agent_error"
+    INTERNAL_ERROR = "internal_error"
 
 
 class ExecutionRequest(BaseModel):
