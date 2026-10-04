@@ -7,6 +7,7 @@ import json
 import os
 import sys
 import threading
+from contextlib import nullcontext
 from datetime import UTC, datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -122,6 +123,27 @@ def test_explicit_repository_containment(repository: Path, tmp_path: Path):
         Settings.create(outside, "workspace-a")
     with pytest.raises(ValueError, match="workspace"):
         Settings.create(repository, "workspace-a\r\nAuthorization: injected")
+
+
+def test_local_listing_selects_sorted_names_before_truncation(
+    repository: Path, monkeypatch: pytest.MonkeyPatch
+):
+    directory = repository / "configs/training"
+    for index in range(105):
+        (directory / f"{index:03}.toml").touch()
+    with os.scandir(directory) as entries:
+        files = sorted(entries, key=lambda entry: entry.name)
+
+    settings = Settings.create(repository, "workspace-a")
+    for order in (files, list(reversed(files))):
+        monkeypatch.setattr(
+            os, "scandir", lambda _fd, order=order: nullcontext(iter(order))
+        )
+        result = local_context(settings, LocalInput())
+        assert result.config_paths == [
+            f"configs/training/{index:03}.toml" for index in range(100)
+        ]
+        assert result.truncated is True
 
 
 @pytest.mark.parametrize(

@@ -4,13 +4,16 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import heapq
 import json
 import logging
 import os
 import re
 import sys
+import threading
+from concurrent.futures import Future
 from contextlib import ExitStack
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
@@ -92,8 +95,33 @@ class Result[T](Model):
 
 class BridgeError(Exception):
     def __init__(self, code: ErrorCode):
-        self.code = code
+        self.code: ErrorCode = code
         super().__init__(code)
+
+
+class CredentialReader:
+    def __init__(self) -> None:
+        self.pending: asyncio.Future[dict[str, str] | ErrorCode] | None = None
+
+    async def read(self, settings: Settings) -> dict[str, str]:
+        if self.pending is None or self.pending.done():
+            result: Future[dict[str, str] | ErrorCode] = Future()
+            self.pending = asyncio.wrap_future(result)
+
+            def load() -> None:
+                try:
+                    result.set_result(request_headers(settings))
+                except BridgeError as exc:
+                    # Keep abandoned failures as values, avoiding unhandled futures.
+                    result.set_result(exc.code)
+
+            # One outstanding read, independent of the filesystem executor. A
+            # stuck read cannot accumulate workers or delay process shutdown.
+            threading.Thread(target=load, daemon=True).start()
+        headers = await asyncio.shield(self.pending)
+        if isinstance(headers, str):
+            raise BridgeError(headers)
+        return headers
 
 
 @dataclass(frozen=True)
@@ -101,6 +129,9 @@ class Settings:
     directory: Path
     workspace: str
     platform_url: str
+    credentials: CredentialReader = field(
+        default_factory=CredentialReader, repr=False, compare=False
+    )
 
     @classmethod
     def create(cls, directory: Path, workspace: str) -> Settings:
@@ -136,19 +167,20 @@ def local_context(settings: Settings, args: LocalInput) -> LocalContext:
                     truncated=False,
                 )
             stack.callback(os.close, current)
-        paths: list[str] = []
         with os.scandir(current) as entries:
-            for entry in entries:
-                if entry.name.endswith(".toml") and entry.is_file(
-                    follow_symlinks=False
-                ):
-                    paths.append(f"configs/{args.kind}/{entry.name}")
-                    if len(paths) > 100:
-                        break
+            paths = heapq.nsmallest(
+                101,
+                (
+                    f"configs/{args.kind}/{entry.name}"
+                    for entry in entries
+                    if entry.name.endswith(".toml")
+                    and entry.is_file(follow_symlinks=False)
+                ),
+            )
         return LocalContext(
             workspace=settings.workspace,
             kind=args.kind,
-            config_paths=sorted(paths[:100]),
+            config_paths=paths[:100],
             truncated=len(paths) > 100,
         )
 
@@ -173,7 +205,7 @@ async def read_platform(
 ) -> dict[str, Any]:
     if resource not in {"datasets", "training-runs"}:
         raise BridgeError("INVALID_ARGUMENTS")
-    headers = await asyncio.to_thread(request_headers, settings)
+    headers = await settings.credentials.read(settings)
     try:
         # Never forward the local bearer through an HTTP redirect or ambient proxy.
         async with httpx.AsyncClient(

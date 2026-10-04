@@ -8,11 +8,14 @@ import os
 import sys
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 import pytest
 import pytest_asyncio
+
+from osmosis_ai.platform.auth.credentials import Credentials, UserInfo
 
 pytest.importorskip("mcp.server.lowlevel", reason="optional MCP prototype dependencies")
 
@@ -24,6 +27,8 @@ class Bridge:
     process: asyncio.subprocess.Process
     started: asyncio.Queue[str]
     closed: asyncio.Queue[str]
+    credential_reads: Path
+    release_credentials: Path
     responses: dict[int, dict[str, Any]] = field(default_factory=dict)
 
     async def send(self, method: str, params: dict[str, Any], request_id=None):
@@ -52,7 +57,9 @@ class Bridge:
 
 
 @pytest_asyncio.fixture
-async def bridge(tmp_path: Path) -> AsyncIterator[Bridge]:
+async def bridge(
+    tmp_path: Path, request: pytest.FixtureRequest
+) -> AsyncIterator[Bridge]:
     started: asyncio.Queue[str] = asyncio.Queue()
     closed: asyncio.Queue[str] = asyncio.Queue()
     handlers: set[asyncio.Task] = set()
@@ -110,6 +117,67 @@ async def bridge(tmp_path: Path) -> AsyncIterator[Bridge]:
     (repository / "configs/training/tiny.toml").write_text("private config contents")
     server = await asyncio.start_server(handle, "127.0.0.1", 0)
     url = f"http://127.0.0.1:{server.sockets[0].getsockname()[1]}"
+    credential_reads = tmp_path / "credential-reads"
+    release_credentials = tmp_path / "release-credentials"
+    env = {
+        "PATH": os.environ.get("PATH", ""),
+        "HOME": str(tmp_path / "home"),
+        "XDG_CONFIG_HOME": str(tmp_path / "config"),
+        "PYTHONPATH": str(ROOT),
+        "OSMOSIS_PLATFORM_URL": url,
+        "OSMOSIS_TOKEN": "synthetic-lifecycle-token",
+        "OSMOSIS_TOKEN_PLATFORM_URL": url,
+    }
+    if getattr(request, "param", None) == "blocked-keyring":
+        credentials = Credentials(
+            access_token="synthetic-lifecycle-token",
+            token_type="Bearer",
+            expires_at=datetime.now(UTC) + timedelta(days=1),
+            created_at=datetime.now(UTC),
+            user=UserInfo(id="user", email="test@example.invalid"),
+        ).to_dict()
+        credentials.pop("access_token")
+        metadata = tmp_path / "credentials.json"
+        metadata.write_text(
+            json.dumps(
+                {
+                    "version": 2,
+                    "platforms": {
+                        url: {
+                            **credentials,
+                            "platform_url": url,
+                            "token_store": "keyring",
+                            "keyring_account": "test-account",
+                        }
+                    },
+                }
+            )
+        )
+        metadata.chmod(0o600)
+        (tmp_path / "sitecustomize.py").write_text(
+            "import time\n"
+            "from pathlib import Path\n"
+            "import keyring\n"
+            "from keyring.backend import KeyringBackend\n"
+            "from osmosis_ai.platform.auth import credentials\n"
+            f"credentials.CREDENTIALS_FILE = Path({str(metadata)!r})\n"
+            "class BlockedKeyring(KeyringBackend):\n"
+            "    priority = 1\n"
+            "    def get_password(self, *args):\n"
+            f"        with Path({str(credential_reads)!r}).open('a') as log:\n"
+            "            log.write('read\\n')\n"
+            f"        while not Path({str(release_credentials)!r}).exists():\n"
+            "            time.sleep(0.01)\n"
+            "        return 'synthetic-lifecycle-token'\n"
+            "    def set_password(self, *args):\n"
+            "        raise AssertionError('Read-only backend')\n"
+            "    def delete_password(self, *args):\n"
+            "        raise AssertionError('Read-only backend')\n"
+            "keyring.set_keyring(BlockedKeyring())\n"
+        )
+        env.pop("OSMOSIS_TOKEN")
+        env.pop("OSMOSIS_TOKEN_PLATFORM_URL")
+        env["PYTHONPATH"] = os.pathsep.join((str(tmp_path), str(ROOT)))
     process = await asyncio.create_subprocess_exec(
         sys.executable,
         str(ROOT / "prototypes/stdio_mcp/bridge.py"),
@@ -121,17 +189,9 @@ async def bridge(tmp_path: Path) -> AsyncIterator[Bridge]:
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
         cwd=repository,
-        env={
-            "PATH": os.environ.get("PATH", ""),
-            "HOME": str(tmp_path / "home"),
-            "XDG_CONFIG_HOME": str(tmp_path / "config"),
-            "PYTHONPATH": str(ROOT),
-            "OSMOSIS_PLATFORM_URL": url,
-            "OSMOSIS_TOKEN": "synthetic-lifecycle-token",
-            "OSMOSIS_TOKEN_PLATFORM_URL": url,
-        },
+        env=env,
     )
-    instance = Bridge(process, started, closed)
+    instance = Bridge(process, started, closed, credential_reads, release_credentials)
     try:
         await instance.send(
             "initialize",
@@ -237,3 +297,44 @@ async def test_remote_admission_is_bounded_and_queue_wait_uses_request_deadline(
     async with asyncio.timeout(3):
         while active:
             active.discard(await bridge.closed.get())
+
+
+@pytest.mark.parametrize("bridge", ["blocked-keyring"], indirect=True)
+async def test_stalled_keyring_stays_bounded_through_timeouts_and_recovers(
+    bridge: Bridge,
+):
+    for wave in range(2):
+        ids = range(2 + wave * 4, 6 + wave * 4)
+        for request_id in ids:
+            await bridge.call(request_id, "list_datasets")
+        for request_id in ids:
+            result = (await bridge.receive(request_id, timeout=12))["result"]
+            assert result["structuredContent"] == {
+                "data": None,
+                "error": "PLATFORM_UNAVAILABLE",
+            }
+        await bridge.call(20 + wave, "list_local_configs")
+        local = (await bridge.receive(20 + wave))["result"]
+        assert local["structuredContent"]["data"]["config_paths"] == [
+            "configs/training/tiny.toml"
+        ]
+    assert bridge.credential_reads.read_text().splitlines() == ["read"]
+    bridge.release_credentials.touch()
+    await bridge.call(30, "list_datasets")
+    assert (await bridge.receive(30))["result"]["isError"] is False
+    # A completed lookup is not a credential cache: subsequent calls read again.
+    await bridge.call(31, "list_datasets")
+    assert (await bridge.receive(31))["result"]["isError"] is False
+    assert len(bridge.credential_reads.read_text().splitlines()) >= 2
+
+
+@pytest.mark.parametrize("bridge", ["blocked-keyring"], indirect=True)
+async def test_stalled_keyring_does_not_hold_process_open_on_eof(bridge: Bridge):
+    await bridge.call(2, "list_datasets")
+    async with asyncio.timeout(3):
+        while not bridge.credential_reads.exists():
+            await asyncio.sleep(0.01)
+    assert bridge.process.stdin is not None
+    bridge.process.stdin.close()
+    await asyncio.wait_for(bridge.process.wait(), timeout=3)
+    assert bridge.process.returncode == 0
