@@ -14,6 +14,7 @@ Repository guidance for AI agents and developers. Authoritative reference materi
 | Change rollout execution or review compatibility | [Architecture](docs/architecture.md#runtime-boundaries), then the relevant contract |
 | Change dependencies or extras | [Dependency changes](CONTRIBUTING.md#dependency-changes) |
 | Run checks, prepare a PR, or release | [Verification](CONTRIBUTING.md#verification) and [PR conventions](CONTRIBUTING.md#pull-requests) |
+| Create a pull request | Use the [create-pr skill](.agents/skills/create-pr/SKILL.md) |
 | Explain installation or user-facing usage | [README.md](README.md) and [product docs](https://docs.osmosis.ai) |
 
 ## Documentation
