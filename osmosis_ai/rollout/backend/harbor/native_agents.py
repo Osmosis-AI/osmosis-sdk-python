@@ -130,6 +130,30 @@ def native_agent_config(
             kwargs=kwargs,
         )
     if binding.wiring == "env":
+        if name == "mini-swe-agent" and (effort := kwargs.get("reasoning_effort")):
+            # Harbor's top-level effort switches openai/* to Responses even for
+            # a chat endpoint. The portable mini config preserves that endpoint.
+            if not isinstance(effort, str):
+                raise ValueError("mini-swe-agent reasoning_effort must be a string")
+            config = kwargs.get("config")
+            config_file = kwargs.get("config_file")
+            if config is not None and config_file is not None:
+                raise ValueError("'config' and 'config_file' are mutually exclusive")
+            if config_file:
+                import yaml
+
+                config = yaml.safe_load(Path(config_file).read_text())
+            if config is None:
+                config = {}
+            if not isinstance(config, dict):
+                raise ValueError("mini-swe-agent config must be a mapping")
+            kwargs["config"] = config
+            kwargs.pop("config_file", None)
+            for section in ("model", "model_kwargs"):
+                config = config.setdefault(section, {})
+                if not isinstance(config, dict):
+                    raise ValueError(f"mini-swe-agent {section} must be a mapping")
+            config["reasoning_effort"] = kwargs.pop("reasoning_effort")
         # mini-swe-agent reads OPENAI_BASE_URL before OPENAI_API_BASE; set both
         # so a host-level value can never outrank the rollout endpoint.
         env = {

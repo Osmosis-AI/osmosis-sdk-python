@@ -281,6 +281,11 @@ async def test_native_preview_updates_during_run_and_keeps_complete_snapshot(
         logs_dir=logs,
         model_name="openai/student",
         _osmosis_preview_path=str(destination),
+        **(
+            {"trajectory_config": {"linear_history": True}}
+            if agent_name == "terminus"
+            else {}
+        ),
     )
     # Harbor 0.20 uses the shared EnvironmentPaths constant instead.
     if agent_name != "terminus" and hasattr(agent, "environment_logs_dir"):
@@ -298,7 +303,6 @@ async def test_native_preview_updates_during_run_and_keeps_complete_snapshot(
 
         published.clear()
         if agent_name == "terminus":
-            agent._linear_history = True
             agent._summarization_count = 1
             (logs / "trajectory.cont-1.json").write_text(
                 json.dumps(

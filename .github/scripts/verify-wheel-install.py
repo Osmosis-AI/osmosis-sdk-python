@@ -75,6 +75,7 @@ EXTRA_REQUIREMENTS: dict[str, set[str]] = {
         "orjson",
         "platformdirs",
         "pyjwt",
+        "pyyaml",
         "toml",
         "urllib3",
         "uv",
@@ -322,6 +323,7 @@ def _smoke_harbor() -> None:
     packaging = importlib.import_module("osmosis_ai.packaging")
     assert callable(packaging.build_bundle)
     importlib.import_module("toml")
+    importlib.import_module("yaml")
     uv_executable = Path(sysconfig.get_path("scripts")) / (
         "uv.exe" if os.name == "nt" else "uv"
     )
@@ -376,7 +378,7 @@ SCENARIO_PRESENT: dict[str, set[str]] = {
     "server": {"fastapi", "uvicorn"},
     "strands": {"litellm", "strands-agents"},
     "openai-agents": {"litellm", "openai-agents"},
-    "harbor": {"daytona", "harbor", "platformdirs", "toml", "uv"},
+    "harbor": {"daytona", "harbor", "platformdirs", "pyyaml", "toml", "uv"},
     "rubric": {"litellm", "orjson"},
     "parquet": {"pyarrow"},
     "eval": {"fastapi", "litellm", "pyarrow", "uv", "uvicorn"},
@@ -389,6 +391,7 @@ SCENARIO_PRESENT: dict[str, set[str]] = {
         "orjson",
         "platformdirs",
         "pyarrow",
+        "pyyaml",
         "strands-agents",
         "toml",
         "uv",

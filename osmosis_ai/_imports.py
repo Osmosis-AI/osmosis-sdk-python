@@ -32,6 +32,7 @@ EXTRA_MODULES: Final[Mapping[str, frozenset[str]]] = {
             "platformdirs",
             "toml",
             "urllib3",
+            "yaml",
         }
     ),
     "rubric": frozenset({"aiohttp", "click", "litellm", "orjson", "urllib3"}),

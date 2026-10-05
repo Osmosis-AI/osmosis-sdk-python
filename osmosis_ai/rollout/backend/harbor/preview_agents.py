@@ -122,9 +122,16 @@ class _PreviewTerminus2(_PreviewRunMixin, Terminus2):
     async def _capture_preview(
         self, environment: BaseEnvironment, target: Path
     ) -> dict[str, Any] | None:
+        # Harbor 0.23 moved trajectory settings into its validated options.
+        options = getattr(self, "options", None)
+        linear_history = (
+            (options.trajectory_config or {}).get("linear_history", False)
+            if options is not None
+            else getattr(self, "_linear_history", False)
+        )
         filename = (
             f"trajectory.cont-{self._summarization_count}.json"
-            if self._linear_history and self._summarization_count
+            if linear_history and self._summarization_count
             else "trajectory.json"
         )
         document = read_snapshot(self.logs_dir / filename)
