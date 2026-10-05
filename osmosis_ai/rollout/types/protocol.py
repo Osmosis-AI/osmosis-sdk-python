@@ -108,25 +108,3 @@ class RolloutLifecycle(BaseModel):
 
     accepting_rollouts: bool
     active_rollouts: int = Field(ge=0)
-
-
-class DrainRolloutsRequest(BaseModel):
-    timeout_sec: float = Field(default=30, ge=0, le=300, allow_inf_nan=False)
-
-
-class DrainRolloutsResponse(RolloutLifecycle):
-    """A timed-out drain remains fenced and may be requested again."""
-
-    instance_id: str = Field(min_length=1)
-    process_id: str = Field(min_length=1)
-    drained: bool
-    rollout_ids: list[str]
-
-    @field_validator("rollout_ids")
-    @classmethod
-    def _validate_ids(cls, values: list[str]) -> list[str]:
-        for value in values:
-            ensure_single_path_segment(value, label="rollout_id")
-        if len(values) != len(set(values)):
-            raise ValueError("Duplicate rollout IDs in drain inventory")
-        return values

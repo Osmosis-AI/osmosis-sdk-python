@@ -116,9 +116,8 @@ logger: logging.Logger = logging.getLogger(__name__)
 
 
 async def _finish_archive(future: asyncio.Future[None]) -> None:
-    # Execute must remain in flight until finalization settles, even if a
-    # shutdown cancels its task repeatedly. A drain can time out while waiting,
-    # but must never report idle while this executor still writes evidence.
+    # Keep execution active until archiving settles, even when shutdown
+    # cancels the task repeatedly.
     cancelled = False
     while not future.done():
         try:

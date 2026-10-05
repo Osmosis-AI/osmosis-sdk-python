@@ -498,7 +498,7 @@ def test_excessively_nested_manifest_is_incomplete_evidence(tmp_path):
     assert trial_evidence_inventory(tmp_path, ["one"])["missing_rollout_ids"] == ["one"]
 
 
-def test_previous_process_evidence_cannot_satisfy_new_drain(tmp_path):
+def test_evidence_rejects_previous_process_identity(tmp_path):
     trial, root = source(tmp_path), tmp_path / "out"
     assert retain_trial_evidence(trial, root, "one", process_id="old")
     assert verify_trial_evidence(root / "one/harbor", "one", process_id="old")[

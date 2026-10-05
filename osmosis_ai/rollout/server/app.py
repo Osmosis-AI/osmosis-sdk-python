@@ -7,7 +7,7 @@ import secrets
 import tempfile
 import traceback
 from collections.abc import AsyncIterator
-from contextlib import AsyncExitStack, asynccontextmanager, suppress
+from contextlib import AsyncExitStack, asynccontextmanager
 from functools import partial
 from pathlib import Path
 from typing import Any
@@ -35,8 +35,6 @@ from osmosis_ai.rollout.types import (
     POLLING_LEASE_HEADER,
     CancelRolloutsRequest,
     CancelRolloutsResponse,
-    DrainRolloutsRequest,
-    DrainRolloutsResponse,
     ExecutionOutcome,
     ExecutionRequest,
     ExecutionResult,
@@ -89,12 +87,6 @@ def create_rollout_server(
     preview_tasks: set[asyncio.Task[None]] = set()
     admission_lock = asyncio.Lock()
     accepting_rollouts = True
-    # Keep the complete process inventory after result retention expires. A
-    # bounded result cache cannot prove that every admitted rollout was exported.
-    # Memory use is proportional to the number of IDs admitted by this process.
-    admitted_ids: set[str] = set()
-    idle = asyncio.Event()
-    idle.set()
     if api_key is not None and not api_key.strip():
         raise ValueError("api_key must be non-empty when provided")
     observability = RolloutObservability()
@@ -195,29 +187,8 @@ def create_rollout_server(
         payload["lifecycle"] = lifecycle()
         return payload
 
-    @app.post("/drain")
-    async def drain(request: DrainRolloutsRequest) -> DrainRolloutsResponse:
-        nonlocal accepting_rollouts
-        # Registration and task binding use the same lock: no admitted work can
-        # fall between the admission fence and the idle snapshot.
-        async with admission_lock:
-            accepting_rollouts = False
-        if not idle.is_set() and request.timeout_sec:
-            with suppress(TimeoutError):
-                await asyncio.wait_for(idle.wait(), timeout=request.timeout_sec)
-        state = lifecycle()
-        return DrainRolloutsResponse(
-            **state,
-            instance_id=instance_id,
-            process_id=process_id,
-            drained=state["active_rollouts"] == 0,
-            rollout_ids=sorted(admitted_ids),
-        )
-
     def _finish_rollout_task(rollout_id: str, task: asyncio.Task[None]) -> None:
         scheduled_tasks.discard(task)
-        if not scheduled_tasks:
-            idle.set()
         exc = None if task.cancelled() else task.exception()
         if exc is not None:
             logger.error("Rollout task for %s crashed", rollout_id, exc_info=exc)
@@ -274,7 +245,7 @@ def create_rollout_server(
         async with admission_lock:
             if not accepting_rollouts:
                 raise HTTPException(
-                    status_code=503, detail="rollout admissions are drained"
+                    status_code=503, detail="rollout server is shutting down"
                 )
             return await admit(request)
 
@@ -313,8 +284,6 @@ def create_rollout_server(
             )
             task = asyncio.create_task(_run_rollout(request, path))
             scheduled_tasks.add(task)
-            admitted_ids.add(request.rollout_id)
-            idle.clear()
             task.add_done_callback(partial(_finish_rollout_task, request.rollout_id))
             await registry.bind_task(request.rollout_id, task)
             if root is not None and temporary is not None:

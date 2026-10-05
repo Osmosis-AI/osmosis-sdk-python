@@ -1,8 +1,6 @@
 # Rollout lifecycle and native evidence
 
-`RolloutClient` supports authenticated health checks and bounded draining. The
-server owns lifecycle counters, so clients can use these operations with any
-execution backend.
+`RolloutClient` supports authenticated health checks and waiting for idle work. The server owns lifecycle counters, so clients can use these operations with any execution backend. Stop the server with SIGTERM for [graceful shutdown](#graceful-shutdown).
 
 ```python
 from osmosis_ai.rollout.client import RolloutClient
@@ -10,10 +8,7 @@ from osmosis_ai.rollout.client import RolloutClient
 client = RolloutClient(url="https://rollout.example", api_key="server-bearer-key")
 try:
     health = await client.health()
-    drained = await client.drain(timeout_sec=30)
-    if not drained.drained:
-        drained = await client.drain(timeout_sec=30)
-    # Persist process_id and rollout_ids with any export request.
+    await client.wait_idle(timeout_sec=30, process_id=health["process_id"])
 finally:
     await client.aclose()
 ```
@@ -41,28 +36,11 @@ backend's queue counters. `await client.wait_idle(timeout_sec=120)` observes thi
 counter without changing admissions. Older servers without lifecycle metadata
 are rejected. Pass `process_id=` to bind the wait to a known process.
 
-Backend outcome status and cancellation dispositions describe execution, so a
-terminal backend outcome or `not_found` cancellation can precede archive
-completion. Use the server's lifecycle counters and drain response to establish
-that retained evidence has finished writing.
-
-`POST /drain` accepts `{"timeout_sec": 30}` with a finite timeout from 0 to 300
-seconds. It fences new admissions before taking the active-work snapshot. It
-returns HTTP 200 with `accepting_rollouts: false`, `active_rollouts`, `drained`,
-`instance_id`, `process_id`, and sorted `rollout_ids` containing every admitted ID
-in that process. New rollout submissions receive HTTP 503. A timeout returns
-`drained: false` and leaves the fence set; repeating drain is safe. Result polling
-and cancellation remain available, and polling leases still require renewal.
-The drain request does not cancel admitted work.
-
-There is no reopen operation. A new process starts accepting again, and has a new
-`process_id` even when its configured `instance_id` is unchanged. A completed
-drain is valid only for that process: check its identity again before publishing
-an export or retiring its resources.
+Backend outcome status and cancellation dispositions describe execution, so a terminal backend outcome or `not_found` cancellation can precede archive completion. `wait_idle()` observes when the server has no active rollouts, including artifact finalization, but does not prevent new work from being admitted or establish that artifacts have been uploaded to external storage.
 
 ## Graceful shutdown
 
-Uvicorn handles SIGTERM and stops accepting HTTP connections. The app closes rollout admissions, gives active work 10 seconds to finish, then requests cancellation and allows up to 120 seconds for cleanup. It directly cancels remaining rollout tasks and waits another 10 seconds before calling `await backend.shutdown()`. No HTTP drain request is required.
+Uvicorn handles SIGTERM and stops accepting HTTP connections. The app closes rollout admissions, gives active work 10 seconds to finish, then requests cancellation and allows up to 120 seconds for cleanup. It directly cancels remaining rollout tasks and waits another 10 seconds before calling `await backend.shutdown()`.
 
 `ExecutionBackend.shutdown()` is a no-op by default. Backends that own persistent resources override it to clean them up and report failures to stdout. The hook runs before the caller's lifespan closes, including when startup fails. A backend shutdown error is propagated after the server closes its registry, previews, and telemetry.
 
@@ -126,7 +104,7 @@ staging is always removed, and failed cancellation cleanup is surfaced.
 Private logs and working copies have their existing server-storage lifetime;
 they are not a durable application-state backup. Retention never changes reward.
 
-Use the portable integrity helpers without importing Harbor:
+Use the portable integrity helpers without importing Harbor. Record the server's `process_id` from health before submitting work and keep the submitted rollout IDs. After downloading their evidence, verify it against those saved values; completeness applies to the supplied IDs, not every rollout on the server.
 
 ```python
 from pathlib import Path
@@ -135,11 +113,13 @@ from osmosis_ai.rollout.utils.evidence import (
     verify_trial_evidence,
 )
 
+process_id = health["process_id"]
+rollout_ids = ["rollout-1"]  # IDs recorded when submitting this work.
 manifest = verify_trial_evidence(
-    Path("download/rollout-1/harbor"), "rollout-1", process_id=drained.process_id
+    Path("download/rollout-1/harbor"), "rollout-1", process_id=process_id
 )
 inventory = trial_evidence_inventory(
-    Path("download"), drained.rollout_ids, process_id=drained.process_id
+    Path("download"), rollout_ids, process_id=process_id
 )
 assert inventory["complete"]  # Missing or partial rollouts are listed explicitly.
 ```
@@ -150,10 +130,7 @@ prefetched or cancelled work remains distinguishable. A missing native result
 is incomplete evidence, even if the server successfully finalized a failure or
 cancellation response.
 
-The server propagates its process identity through `RolloutContext` into native
-manifests. Verify it against the successful drain to reject evidence left by an
-earlier process, including reused rollout IDs. Direct backend executions without
-a server context have `process_id: null`.
+The server propagates its process identity through `RolloutContext` into native manifests. Verify it against the process identity recorded before submission to reject evidence left by an earlier process, including reused rollout IDs. Direct backend executions without a server context have `process_id: null`.
 
 ## Source image values
 
