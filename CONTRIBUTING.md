@@ -31,7 +31,7 @@ The table below lists all development commands. If you installed with **pip**, d
 | Task | Command |
 |------|---------|
 | Run all tests | `uv run pytest` |
-| Run a single file | `uv run pytest tests/unit/rollout/test_validator.py` |
+| Run a single file | `uv run pytest tests/unit/rollout/test_result_registry.py` |
 | Run tests by name | `uv run pytest -k "test_name"` |
 | Run with coverage | `uv run pytest --cov=osmosis_ai --cov-report=term-missing` |
 | Run tests with CI parallelism | `uv run pytest -n 4 --dist worksteal` |
@@ -43,21 +43,27 @@ The table below lists all development commands. If you installed with **pip**, d
 | Compare with Pyright | `uv run pyright osmosis_ai/` |
 | Verify public API types | `uv run --no-editable pyright --verifytypes osmosis_ai --ignoreexternal` |
 
+## Verification
+
+Use the [task map](docs/README.md#task-map) to select focused tests before the full suite. For dependency changes, start with [Dependency changes](#dependency-changes). The commands above and [type-checking guidance](#type-checking) are the shared verification reference for agent instructions, PR preparation, and releases; copy checklist items from the current [PR template](.github/PULL_REQUEST_TEMPLATE.md).
+
+Before handing off a code or dependency change, run Ruff lint and format checks, ty, Pyright public API verification, and pytest from the command table, plus `git diff --check`. For documentation-only changes, run `uv run pytest tests/unit/docs/test_doc_links.py` and `git diff --check`; inspect changed inline paths and heading anchors because the link test checks file targets only. Report commands actually run and any unverified gates. [CI](.github/workflows/tests.yml) additionally checks the supported Python matrix, coverage, built artifacts, and isolated wheel installations; local focused tests do not establish those results or deployment acceptance.
+
+## Dependency changes
+
+Direct optional dependencies connect three surfaces: [pyproject.toml](pyproject.toml) declares distributions, [EXTRA_MODULES](osmosis_ai/_imports.py) maps their import names to installation hints, and [wheel validation](.github/scripts/verify-wheel-install.py) checks published metadata and isolated installs. Update the affected surfaces together and refresh [uv.lock](uv.lock). Pure version changes need not alter the import mapping.
+
+1. Identify which extra or development group owns the dependency and preserve unrelated version constraints. For a compatibility upgrade, verify the candidate actually resolves to the intended version and source; an upstream release, a fork, and a downstream container can contain different code under the same version string. See [runtime boundaries](docs/architecture.md#runtime-boundaries).
+2. Sync the candidate environment with `uv sync --locked --all-extras --group dev`, then run `uv run --no-sync pytest tests/unit/test_public_api_imports.py::test_extra_modules_table_matches_pyproject_extras` before the full suite. This existing check catches missing import-hint updates; all extras must be installed for it to work.
+3. Run the affected adapter/backend tests from the [task map](docs/README.md#task-map), then the [verification gates](#verification). For published dependency or packaging changes, use the existing build and wheel-smoke jobs in [CI](.github/workflows/tests.yml); record the resolved candidate versions. Installation/import smoke alone does not verify a new transport or sandbox lifecycle.
+
 ## Testing
 
 Coverage configuration is in `pyproject.toml` under `[tool.coverage.*]`. CI enforces a minimum coverage threshold of 70%.
 
 Coverage is a regression signal, not a reason to add repetitive tests to reach 90% or higher. Test distinct behavior and failure modes; when expensive integration tests use identical inputs and setup, consolidate their assertions into one real execution. Preserve independent installation checks, subprocess lifecycle, recovery and security contracts.
 
-When changing remote run commands, preserve the naming convention: bare
-verbs act on a group's primary noun. `train` and `eval` manage runs with
-top-level `submit`, `list`, `info`, `logs`, and `stop` because the run is
-their noun; `benchmark list|info` act on benchmarks themselves (workspace list and
-benchmark page), with run lifecycle nested under `osmosis benchmark runs
-list|info|logs|stop|download`. Eval and benchmark downloads
-share the manifest transfer engine in `osmosis_ai/platform/cli/run_download.py`;
-add domain-specific routes and fixed path classifiers instead of copying the
-transfer loop.
+When changing remote run commands, preserve the naming convention: bare verbs act on a group's primary noun. `train` and `eval` manage runs with top-level `submit`, `list`, `info`, `logs`, and `stop` because the run is their noun; `benchmark list|info` act on benchmarks themselves (workspace list and benchmark page), with run lifecycle nested under `osmosis benchmark runs list|info|logs|stop|download`. Eval and benchmark downloads share the manifest transfer engine in `osmosis_ai/platform/cli/run_download.py`; add domain-specific routes and fixed path classifiers instead of copying the transfer loop.
 
 ## Linting & Formatting
 
@@ -161,7 +167,7 @@ If the title does not match the convention, the labeling job fails rather than r
 
 1. Fork the repository and create a feature branch
 2. Make your changes
-3. Run `uv run pytest` and `uv run ruff check .`
+3. Complete the applicable [verification](#verification)
 4. Submit a pull request with a properly formatted title; title-derived labels are added automatically
 
 CI will run linting, type checking (ty and Pyright public API verification), tests on supported Python versions (see `requires-python` in `pyproject.toml`), PR title validation, and a build validation on every PR.

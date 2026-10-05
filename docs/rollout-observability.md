@@ -1,5 +1,7 @@
 # Rollout ownership
 
+Implementation: [server/observability.py](../osmosis_ai/rollout/server/observability.py), wired by [server/app.py](../osmosis_ai/rollout/server/app.py). Contract tests: [test_server_observability.py](../tests/unit/rollout/test_server_observability.py). For client, workflow, and platform responsibilities, see [runtime boundaries](architecture.md#runtime-boundaries).
+
 Servers built with `create_rollout_server` can export ownership events over
 OTLP/HTTP. Install the `server` extra and set `OSMOSIS_ROLLOUT_OTLP_ENDPOINT`
 to the collector base URL (without `/v1/logs`). No events are exported when
