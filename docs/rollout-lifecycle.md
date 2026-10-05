@@ -64,11 +64,13 @@ an export or retiring its resources.
 
 Uvicorn handles SIGTERM and stops accepting HTTP connections. The app closes rollout admissions, gives active work 10 seconds to finish, then requests cancellation and allows up to 120 seconds for cleanup. It directly cancels remaining rollout tasks and waits another 10 seconds before calling `await backend.shutdown()`. No HTTP drain request is required.
 
-`ExecutionBackend.shutdown()` is a no-op by default. Backends that own persistent resources override it to clean them up and report failures to stdout. The hook runs before the caller's lifespan closes, including when startup fails.
+`ExecutionBackend.shutdown()` is a no-op by default. Backends that own persistent resources override it to clean them up and report failures to stdout. The hook runs before the caller's lifespan closes, including when startup fails. A backend shutdown error is propagated after the server closes its registry, previews, and telemetry.
 
-`HarborBackend.shutdown()` cancels any remaining trials and waits up to 180 additional seconds for them to finish. Harbor performs sandbox teardown as part of trial cancellation, using the configured environment and its `delete` setting. If trials remain unfinished, the backend prints their count to stdout, for example: `Harbor shutdown: cleanup is unconfirmed for 2 unfinished rollout(s).` The server also prints the count of rollouts whose cleanup exceeded its timeout before forcing cancellation.
+`HarborBackend.shutdown()` cancels any remaining trials and waits up to 180 additional seconds for rollout cleanup, including artifact archiving, to finish. Harbor performs sandbox teardown as part of trial cancellation, using the configured environment and its `delete` setting. If rollout cleanup remains unfinished, the backend prints its count to stdout, for example: `Harbor shutdown: cleanup is unconfirmed for 2 unfinished rollout(s).` The server also prints the count of rollouts whose cleanup exceeded its timeout before forcing cancellation.
 
 These counts describe unfinished rollout cleanup. Harbor's queue API does not expose confirmed sandbox deletion results, and one rollout can use multiple sandboxes. A completed trial can still have an internally handled deletion failure or a deletion call running in the background. The SDK therefore does not report how many sandboxes were deleted or remain alive.
+
+Harbor closes its archive executor after the last execution finishes saving artifacts. If shutdown times out, the executor stays available until those executions finish so late archive submissions can still complete. New executions are rejected once shutdown starts. A blocked filesystem operation cannot be forcibly stopped by the thread-pool API and may keep Python alive until the host terminates it.
 
 The host's termination grace period must allow the shutdown work to finish. A forced termination can interrupt cleanup before the SDK reports its final counts.
 

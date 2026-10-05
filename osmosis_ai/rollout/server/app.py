@@ -140,6 +140,12 @@ def create_rollout_server(
                 task.cancel()
             await asyncio.wait(pending, timeout=_SHUTDOWN_DRAIN_SEC)
 
+    async def close_previews() -> None:
+        if preview_tasks:
+            _, pending = await asyncio.wait(preview_tasks, timeout=2)
+            for task in pending:
+                task.cancel()
+
     @asynccontextmanager
     async def _lifespan_with_drain(app: FastAPI) -> AsyncIterator[None]:
         nonlocal accepting_rollouts
@@ -150,16 +156,13 @@ def create_rollout_server(
                 observability.start()
                 yield
             finally:
+                stack.push_async_callback(asyncio.to_thread, observability.close)
+                stack.push_async_callback(close_previews)
+                stack.push_async_callback(registry.close)
+                stack.push_async_callback(backend.shutdown)
                 async with admission_lock:
                     accepting_rollouts = False
                 await _drain_scheduled_tasks()
-                await backend.shutdown()
-                await registry.close()
-                if preview_tasks:
-                    _, pending = await asyncio.wait(preview_tasks, timeout=2)
-                    for task in pending:
-                        task.cancel()
-                await asyncio.to_thread(observability.close)
 
     app = FastAPI(lifespan=_lifespan_with_drain)
     app.state.rollout_futures = registry

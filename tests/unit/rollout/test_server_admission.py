@@ -4,7 +4,7 @@ import asyncio
 import json
 import time
 from collections.abc import AsyncIterator, Sequence
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, nullcontext
 from typing import Any
 
 import httpx
@@ -432,14 +432,31 @@ class DrainStubBackend(StubBackend):
         return ExecutionOutcome(workflow=result, grader=result)
 
 
-@pytest.mark.parametrize("active", [False, True], ids=["idle", "active"])
-async def test_lifespan_drains_before_caller_lifespan_closes(active) -> None:
+@pytest.mark.parametrize(
+    ("active", "backend_fails"),
+    [(False, False), (True, False), (True, True)],
+    ids=["idle", "active", "backend-failure"],
+)
+async def test_lifespan_drains_before_caller_lifespan_closes(
+    active, backend_fails, monkeypatch
+) -> None:
     events: list[str] = []
+    original_close = server_app_module.RolloutObservability.close
+
+    def close_observability(self):
+        original_close(self)
+        events.append("observability-closed")
+
+    monkeypatch.setattr(
+        server_app_module.RolloutObservability, "close", close_observability
+    )
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
-        yield
-        events.append("lifespan-closed")
+        try:
+            yield
+        finally:
+            events.append("lifespan-closed")
 
     class ShutdownBackend(DrainStubBackend):
         async def shutdown(self):
@@ -448,18 +465,30 @@ async def test_lifespan_drains_before_caller_lifespan_closes(active) -> None:
             )
             assert response.status_code == 503
             events.append("backend-shutdown")
+            if backend_fails:
+                raise RuntimeError("backend cleanup failed")
 
     backend = ShutdownBackend(0.05, events)
     app = create_rollout_server(backend=backend, lifespan=lifespan)
     async with httpx.AsyncClient(
         transport=ASGITransport(app=app), base_url="http://rollout"
     ) as client:
-        async with app.router.lifespan_context(app):
-            if active:
-                await client.post("/rollout", json=init_body())
-                await asyncio.sleep(0)
+        with (
+            pytest.raises(RuntimeError, match="backend cleanup failed")
+            if backend_fails
+            else nullcontext()
+        ):
+            async with app.router.lifespan_context(app):
+                if active:
+                    await client.post("/rollout", json=init_body())
+                    entry = app.state.rollout_futures.entry("r1")
+                    await asyncio.sleep(0)
+    if active:
+        assert entry.cleanup_task is not None
+        assert entry.cleanup_task.done()
     assert events == (["rollout-finished"] if active else []) + [
         "backend-shutdown",
+        "observability-closed",
         "lifespan-closed",
     ]
 

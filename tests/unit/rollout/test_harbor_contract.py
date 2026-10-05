@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import threading
 
 import pytest
 from harbor.environments.base import BaseEnvironment, ExecResult
@@ -195,18 +196,31 @@ async def test_real_trial_lifecycle_and_archive(contract_backend, cancel):
     )
 
 
-@pytest.mark.parametrize("cleanup_finishes", [True, False])
+@pytest.mark.parametrize("blocked", [None, "sandbox", "archive"])
 async def test_shutdown_cancels_trials_and_counts_unfinished_cleanup(
-    contract_backend, cleanup_finishes, monkeypatch, capsys
+    contract_backend, blocked, monkeypatch, capsys
 ):
     backend, _, environments, _ = contract_backend
     backend.environment_config.kwargs.update(
         block_agent=True,
-        block_stop=not cleanup_finishes,
+        block_stop=blocked == "sandbox",
     )
     monkeypatch.setattr(
-        backend_module, "SHUTDOWN_TIMEOUT_SEC", 1 if cleanup_finishes else 0.01
+        backend_module, "SHUTDOWN_TIMEOUT_SEC", 1 if blocked is None else 0.03
     )
+    archive_started = asyncio.Event()
+    archive_release = threading.Event()
+    if blocked == "archive":
+        loop = asyncio.get_running_loop()
+        archive = backend.archive_cancelled_trial
+
+        def blocked_archive(*args):
+            loop.call_soon_threadsafe(archive_started.set)
+            if not archive_release.wait(5):
+                raise TimeoutError("archive was not released")
+            return archive(*args)
+
+        monkeypatch.setattr(backend, "archive_cancelled_trial", blocked_archive)
     execution = asyncio.create_task(
         backend.execute(ExecutionRequest(id="contract", prompt=[], grade=True))
     )
@@ -215,19 +229,28 @@ async def test_shutdown_cancels_trials_and_counts_unfinished_cleanup(
             while not environments:
                 await asyncio.sleep(0)
             await environments[0].agent_running.wait()
+            if blocked == "archive":
+                backend.cancel_rollouts(all=True)
+                await archive_started.wait()
             await backend.shutdown()
         assert environments[0].stop_calls == 1
         output = capsys.readouterr().out
         assert SECRET not in output
-        if cleanup_finishes:
+        if blocked is None:
             assert "cleanup is unconfirmed" not in output
         else:
             assert "cleanup is unconfirmed for 1 unfinished rollout(s)" in output
             assert not execution.done()
     finally:
+        archive_release.set()
         for environment in environments:
             environment.stop_release.set()
         if not execution.done():
             backend.cancel_rollouts(all=True)
         outcome = await asyncio.wait_for(execution, timeout=5)
     assert outcome.result.status == RolloutStatus.CANCELLED
+    assert (backend.artifact_root / "contract" / "harbor" / "manifest.json").is_file()
+    with pytest.raises(
+        RuntimeError, match="cannot schedule new futures after shutdown"
+    ):
+        backend.archive_executor.submit(lambda: None)
