@@ -88,14 +88,12 @@ def _discover_markdown_files() -> list[Path]:
         dirnames[:] = [
             d
             for d in dirnames
-            if d not in _EXCLUDED_DIR_PARTS
-            and not d.endswith(".egg-info")
-            and ".local." not in d
+            if d not in _EXCLUDED_DIR_PARTS and not d.endswith(".egg-info")
         ]
         for name in filenames:
             if Path(dirpath) == _REPO_ROOT and name in _EXCLUDED_ROOT_MARKDOWN:
                 continue
-            if name.endswith(".md") and ".local." not in name:
+            if name.endswith(".md"):
                 files.append(Path(dirpath) / name)
     return sorted(files)
 

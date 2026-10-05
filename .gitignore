@@ -52,8 +52,6 @@ coverage.xml
 todo.md
 .DS_Store
 
-/CLAUDE.md
-*.local.*
 **/superpowers/
 
 # Agent-specific local state; shared skills live in .agents/skills.
