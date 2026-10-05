@@ -3,6 +3,7 @@
 Install ``osmosis-ai[strands]`` before importing this module.
 """
 
+import copy
 import logging
 from collections.abc import Mapping, Sequence
 from typing import Any, cast
@@ -34,6 +35,8 @@ __all__ = [
     "OsmosisStrandsAgent",
 ]
 
+_MEDIA_BLOCKS = ("image", "document", "video")
+
 
 def _content_block_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Convert plain-string-content messages to content-block-content messages."""
@@ -45,6 +48,61 @@ def _content_block_messages(messages: list[dict[str, Any]]) -> list[dict[str, An
         else:
             converted.append(message)
     return converted
+
+
+def _preview_blocks(blocks: list[Any]) -> list[Any]:
+    """Preview formatter input without blocks that warn on every capture.
+
+    The formatter drops reasoning and location-sourced media anyway, and other
+    media would only reach a preview as clipped base64.
+    """
+    result = []
+    for block in blocks:
+        if isinstance(block, dict):
+            if "reasoningContent" in block:
+                continue
+            media = next((kind for kind in _MEDIA_BLOCKS if kind in block), None)
+            tool_result = block.get("toolResult")
+            if media is not None:
+                if "location" in block[media].get("source", {}):
+                    continue
+                block = {"text": f"[{media} omitted from preview]"}
+            elif isinstance(tool_result, dict) and isinstance(
+                tool_result.get("content"), list
+            ):
+                block = {
+                    **block,
+                    "toolResult": {
+                        **tool_result,
+                        "content": _preview_blocks(tool_result["content"]),
+                    },
+                }
+        result.append(block)
+    return result
+
+
+def _preview_messages(messages: Sequence[Mapping[str, Any]]) -> list[Mapping[str, Any]]:
+    result: list[Mapping[str, Any]] = []
+    for message in messages:
+        content = message.get("content")
+        if not isinstance(content, list):
+            result.append(message)
+            continue
+        result.append({**message, "content": _preview_blocks(content)})
+        # The formatter moves each tool result's images into a user message of
+        # its own; keep that step so preview step IDs match the final trajectory.
+        result.extend(
+            {"role": "user", "content": [{"text": "[image omitted from preview]"}]}
+            for block in content
+            if isinstance(block, dict)
+            and isinstance(tool_result := block.get("toolResult"), dict)
+            and isinstance(tool_result.get("content"), list)
+            and any(
+                isinstance(item, dict) and "image" in item
+                for item in tool_result["content"]
+            )
+        )
+    return result
 
 
 class StrandsAgentSampleSource(SampleSource):
@@ -60,15 +118,16 @@ class StrandsAgentSampleSource(SampleSource):
         self.agent = agent
 
     def _to_trajectory_messages(
-        self, messages: Sequence[Mapping[str, Any]]
+        self, messages: Sequence[Mapping[str, Any]], *, log_errors: bool = True
     ) -> Sequence[Mapping[str, Any]] | None:
         try:
             return LiteLLMModel.format_request_messages(cast(Any, list(messages)))
         except Exception:
-            logger.warning(
-                "Failed to convert Strands messages for trajectory persistence",
-                exc_info=True,
-            )
+            if log_errors:
+                logger.warning(
+                    "Failed to convert Strands messages for trajectory persistence",
+                    exc_info=True,
+                )
             return None
 
     async def get_sample(self) -> RolloutSample:
@@ -76,6 +135,28 @@ class StrandsAgentSampleSource(SampleSource):
         return RolloutSample(
             messages=messages,
             trajectory_messages=self._to_trajectory_messages(messages),
+        )
+
+    async def get_preview(self, max_messages: int) -> RolloutSample | None:
+        if max_messages <= 0:
+            return None
+        messages = copy.deepcopy(self.agent.messages[-max_messages:])
+        history_removed = self.agent.conversation_manager.removed_message_count > 0
+        return RolloutSample(
+            messages=messages,
+            trajectory_messages=self._to_trajectory_messages(
+                _preview_messages(messages), log_errors=False
+            ),
+            extra_fields={
+                "_preview_truncated": history_removed
+                or len(self.agent.messages) > max_messages,
+                "_preview_turn": None
+                if history_removed
+                else sum(
+                    message.get("role") == "assistant"
+                    for message in self.agent.messages
+                ),
+            },
         )
 
 

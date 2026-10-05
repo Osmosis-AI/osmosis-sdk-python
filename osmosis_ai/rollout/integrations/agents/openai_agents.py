@@ -3,6 +3,7 @@
 Install ``osmosis-ai[openai-agents]`` before importing this module.
 """
 
+import copy
 import logging
 import uuid
 from collections.abc import AsyncIterator, Mapping, Sequence
@@ -93,6 +94,31 @@ class OsmosisMemorySession(SessionABC):
         self.items.clear()
 
 
+def _model_turns(items: Sequence[Any]) -> int | None:
+    """Count model responses: runs of output items separated by input items.
+
+    Unrecognized items make the count unknown. A reasoning-only response
+    directly followed by another response is counted once.
+    """
+    turns, previous_output = 0, False
+    for item in items:
+        if not isinstance(item, Mapping):
+            return None
+        kind = item.get("type")
+        if kind in {None, "message"}:
+            output = item.get("role") == "assistant"
+        elif isinstance(kind, str) and kind.endswith("_call_output"):
+            output = False
+        elif kind == "reasoning" or (isinstance(kind, str) and kind.endswith("_call")):
+            output = True
+        else:
+            return None
+        if output and not previous_output:
+            turns += 1
+        previous_output = output
+    return turns
+
+
 class SessionSampleSource(SampleSource):
     """Produces the rollout's sample from any OpenAI Agents SDK ``Session``.
 
@@ -112,7 +138,7 @@ class SessionSampleSource(SampleSource):
         self.session = session
 
     def _to_trajectory_messages(
-        self, messages: Sequence[Mapping[str, Any]]
+        self, messages: Sequence[Mapping[str, Any]], *, log_errors: bool = True
     ) -> Sequence[Mapping[str, Any]] | None:
         try:
             return [
@@ -123,10 +149,11 @@ class SessionSampleSource(SampleSource):
                 )
             ]
         except Exception:
-            logger.warning(
-                "Failed to convert OpenAI Agents messages for trajectory persistence",
-                exc_info=True,
-            )
+            if log_errors:
+                logger.warning(
+                    "Failed to convert OpenAI Agents messages for trajectory persistence",
+                    exc_info=True,
+                )
             return None
 
     async def get_sample(self) -> RolloutSample:
@@ -134,6 +161,25 @@ class SessionSampleSource(SampleSource):
         return RolloutSample(
             messages=items,
             trajectory_messages=self._to_trajectory_messages(items),
+        )
+
+    async def get_preview(self, max_messages: int) -> RolloutSample | None:
+        if max_messages <= 0:
+            return None
+        recent_items = await self.session.get_items(limit=max_messages + 1)
+        items = copy.deepcopy(recent_items[-max_messages:])
+        turn = (
+            _model_turns(self.session.items)
+            if isinstance(self.session, OsmosisMemorySession)
+            else None
+        )
+        return RolloutSample(
+            messages=items,
+            trajectory_messages=self._to_trajectory_messages(items, log_errors=False),
+            extra_fields={
+                "_preview_truncated": len(recent_items) > max_messages,
+                "_preview_turn": turn,
+            },
         )
 
 

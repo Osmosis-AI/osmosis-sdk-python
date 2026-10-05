@@ -80,12 +80,19 @@ def evidence_path(value: str) -> str:
     return value
 
 
+def evidence_rollout_id(value: str) -> str:
+    """Accept training namespaces without relaxing native inventory paths."""
+    ensure_single_path_segment(value, label="rollout_id")
+    if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*::[A-Za-z0-9][A-Za-z0-9._-]*", value):
+        return value
+    return evidence_path(value)
+
+
 def verify_trial_evidence(
     directory: Path, rollout_id: str, *, process_id: str | None = None
 ) -> dict[str, Any]:
     """Verify an exact inventory; a partial copy is never finalized evidence."""
-    ensure_single_path_segment(rollout_id, label="rollout_id")
-    evidence_path(rollout_id)
+    evidence_rollout_id(rollout_id)
     try:
         directory_fd = _open_directory(directory)
         try:
@@ -156,8 +163,7 @@ def trial_evidence_inventory(
     """Report missing/partial rollouts explicitly using a caller's expected IDs."""
     records, missing = {}, []
     for rollout_id in sorted(set(rollout_ids)):
-        ensure_single_path_segment(rollout_id, label="rollout_id")
-        evidence_path(rollout_id)
+        evidence_rollout_id(rollout_id)
         try:
             if (root / rollout_id).is_symlink():
                 raise ValueError("Linked rollout directory")

@@ -33,6 +33,7 @@ class ContainerInput(BaseModel):
     metadata: dict[str, Any] | None = None
     chat_completions_url: str = ""
     api_key: str | None = None
+    preview_path: str | None = None
 
     @classmethod
     def read(cls, path: Path) -> ContainerInput:
