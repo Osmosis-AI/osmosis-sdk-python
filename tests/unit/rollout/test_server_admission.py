@@ -432,7 +432,8 @@ class DrainStubBackend(StubBackend):
         return ExecutionOutcome(workflow=result, grader=result)
 
 
-async def test_lifespan_drains_before_caller_lifespan_closes() -> None:
+@pytest.mark.parametrize("active", [False, True], ids=["idle", "active"])
+async def test_lifespan_drains_before_caller_lifespan_closes(active) -> None:
     events: list[str] = []
 
     @asynccontextmanager
@@ -440,15 +441,27 @@ async def test_lifespan_drains_before_caller_lifespan_closes() -> None:
         yield
         events.append("lifespan-closed")
 
-    backend = DrainStubBackend(0.05, events)
+    class ShutdownBackend(DrainStubBackend):
+        async def shutdown(self):
+            response = await client.post(
+                "/rollout", json={**init_body(), "rollout_id": "late"}
+            )
+            assert response.status_code == 503
+            events.append("backend-shutdown")
+
+    backend = ShutdownBackend(0.05, events)
     app = create_rollout_server(backend=backend, lifespan=lifespan)
     async with httpx.AsyncClient(
         transport=ASGITransport(app=app), base_url="http://rollout"
     ) as client:
         async with app.router.lifespan_context(app):
-            await client.post("/rollout", json=init_body())
-            await asyncio.sleep(0)
-    assert events == ["rollout-finished", "lifespan-closed"]
+            if active:
+                await client.post("/rollout", json=init_body())
+                await asyncio.sleep(0)
+    assert events == (["rollout-finished"] if active else []) + [
+        "backend-shutdown",
+        "lifespan-closed",
+    ]
 
 
 async def test_lifespan_cancels_work_past_drain_limit(monkeypatch) -> None:
@@ -467,7 +480,7 @@ async def test_lifespan_cancels_work_past_drain_limit(monkeypatch) -> None:
 
 @pytest.mark.parametrize("cleanup_finishes", [True, False])
 async def test_lifespan_bounds_native_cancellation_cleanup(
-    monkeypatch, cleanup_finishes: bool
+    monkeypatch, capsys, cleanup_finishes: bool
 ) -> None:
     monkeypatch.setattr(server_app_module, "_SHUTDOWN_DRAIN_SEC", 0.01)
     monkeypatch.setattr(server_app_module, "_SHUTDOWN_CLEANUP_SEC", 0.1)
@@ -512,6 +525,11 @@ async def test_lifespan_bounds_native_cancellation_cleanup(
             await finished.wait()
         assert cleaning.is_set()
         assert child.cancelling() == (1 if cleanup_finishes else 2)
+        output = capsys.readouterr().out
+        if cleanup_finishes:
+            assert "cleanup is unconfirmed" not in output
+        else:
+            assert "cleanup is unconfirmed for 1 rollout(s)" in output
     finally:
         child.cancel()
         await asyncio.gather(child, return_exceptions=True)

@@ -141,6 +141,7 @@ HARNESS_AGENT_IMPORT_PATH = (
 )
 PREWARM_PREFIX = "prewarm-"
 STATUS_RETENTION_SEC = 900.0
+SHUTDOWN_TIMEOUT_SEC = 180.0
 
 
 class CredentialScrubError(RuntimeError):
@@ -882,6 +883,23 @@ class HarborBackend(ExecutionBackend):
             )
         logger.info("Prewarmed %d harbor task(s)", len(configs))
 
+    async def shutdown(self) -> None:
+        """Cancel remaining trials and report cleanup that did not finish."""
+        self.cancel_rollouts(all=True)
+        tasks = {
+            pending.task
+            for pending in self.pending.values()
+            if pending.task is not None and not pending.task.done()
+        }
+        if tasks:
+            _, unfinished = await asyncio.wait(tasks, timeout=SHUTDOWN_TIMEOUT_SEC)
+            if unfinished:
+                print(
+                    f"Harbor shutdown: cleanup is unconfirmed for "
+                    f"{len(unfinished)} unfinished rollout(s).",
+                    flush=True,
+                )
+
     def prewarm_agent_config(self, task_dir: Path) -> HarborAgentConfig:
         """Install-only trials never run the agent: no endpoint, no credentials."""
         if self.native is not None and isinstance(self.agent, str):
@@ -956,7 +974,8 @@ class HarborBackend(ExecutionBackend):
                 dispositions[rollout_id] = "not_found"
                 continue
             pending.cancel_requested = True
-            pending.task.cancel()
+            if not pending.task.cancelling():
+                pending.task.cancel()
             dispositions[rollout_id] = (
                 "cancelled_running" if pending.started else "cancelled_queued"
             )

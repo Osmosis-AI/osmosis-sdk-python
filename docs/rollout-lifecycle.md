@@ -58,8 +58,19 @@ The drain request does not cancel admitted work.
 There is no reopen operation. A new process starts accepting again, and has a new
 `process_id` even when its configured `instance_id` is unchanged. A completed
 drain is valid only for that process: check its identity again before publishing
-an export or retiring its resources. Shutdown also fences admissions before its
-bounded drain and cancellation cleanup.
+an export or retiring its resources.
+
+## Graceful shutdown
+
+Uvicorn handles SIGTERM and stops accepting HTTP connections. The app closes rollout admissions, gives active work 10 seconds to finish, then requests cancellation and allows up to 120 seconds for cleanup. It directly cancels remaining rollout tasks and waits another 10 seconds before calling `await backend.shutdown()`. No HTTP drain request is required.
+
+`ExecutionBackend.shutdown()` is a no-op by default. Backends that own persistent resources override it to clean them up and report failures to stdout. The hook runs before the caller's lifespan closes, including when startup fails.
+
+`HarborBackend.shutdown()` cancels any remaining trials and waits up to 180 additional seconds for them to finish. Harbor performs sandbox teardown as part of trial cancellation, using the configured environment and its `delete` setting. If trials remain unfinished, the backend prints their count to stdout, for example: `Harbor shutdown: cleanup is unconfirmed for 2 unfinished rollout(s).` The server also prints the count of rollouts whose cleanup exceeded its timeout before forcing cancellation.
+
+These counts describe unfinished rollout cleanup. Harbor's queue API does not expose confirmed sandbox deletion results, and one rollout can use multiple sandboxes. A completed trial can still have an internally handled deletion failure or a deletion call running in the background. The SDK therefore does not report how many sandboxes were deleted or remain alive.
+
+The host's termination grace period must allow the shutdown work to finish. A forced termination can interrupt cleanup before the SDK reports its final counts.
 
 ## Native Harbor evidence
 
