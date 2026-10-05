@@ -40,7 +40,7 @@ _EXCLUDED_DIR_PARTS = frozenset(
         "superpowers",
     }
 )
-_EXCLUDED_ROOT_MARKDOWN = frozenset({"AGENTS.md", "CLAUDE.md"})
+_EXCLUDED_ROOT_MARKDOWN = frozenset({"CLAUDE.md"})
 
 # [label](target ...) — capture target up to whitespace or the closing paren,
 # tolerating an optional <...> wrapper. A trailing `"title"` is dropped because
@@ -88,12 +88,14 @@ def _discover_markdown_files() -> list[Path]:
         dirnames[:] = [
             d
             for d in dirnames
-            if d not in _EXCLUDED_DIR_PARTS and not d.endswith(".egg-info")
+            if d not in _EXCLUDED_DIR_PARTS
+            and not d.endswith(".egg-info")
+            and ".local." not in d
         ]
         for name in filenames:
             if Path(dirpath) == _REPO_ROOT and name in _EXCLUDED_ROOT_MARKDOWN:
                 continue
-            if name.endswith(".md"):
+            if name.endswith(".md") and ".local." not in name:
                 files.append(Path(dirpath) / name)
     return sorted(files)
 
@@ -106,6 +108,7 @@ def test_scanner_is_not_vacuous() -> None:
     rels = {p.relative_to(_REPO_ROOT).as_posix() for p in _MARKDOWN_FILES}
     assert "docs/architecture.md" in rels
     assert "README.md" in rels
+    assert "AGENTS.md" in rels
 
     arch = _REPO_ROOT / "docs" / "architecture.md"
     targets = [t for _, t in _iter_local_link_targets(arch.read_text("utf-8"))]
