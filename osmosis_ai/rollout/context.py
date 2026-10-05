@@ -31,6 +31,14 @@ class SampleSource(ABC):
     async def get_sample(self) -> RolloutSample:
         """Return the rollout's current sample."""
 
+    async def get_preview(self, max_messages: int) -> RolloutSample | None:
+        """Return an isolated snapshot of at most ``max_messages`` recent messages.
+
+        Preview support is opt-in; this method must not collect the grading
+        sample or mutate live history. Nonpositive limits return ``None``.
+        """
+        return None
+
 
 rollout_contextvar: ContextVar["RolloutContext | None"] = ContextVar(
     "rollout_contextvar", default=None
@@ -83,6 +91,9 @@ class RolloutContext:
 
     For local backends, pass URL/key directly.
     For container runners, leave empty and they'll be read from env vars.
+    Setting ``preview_enabled = False`` before a sample source is registered
+    and before the workflow's first ``await`` keeps the rollout out of live
+    previews; a later change only stops further snapshots.
     """
 
     chat_completions_url: str = ""
@@ -91,6 +102,8 @@ class RolloutContext:
     sample_source: SampleSource | None = None
     progress: RolloutProgress | None = None
     process_id: str | None = None
+    preview_path: Path | None = None
+    preview_enabled: bool = True
 
     def __post_init__(self) -> None:
         if not self.chat_completions_url:

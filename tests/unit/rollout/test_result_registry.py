@@ -10,7 +10,11 @@ from osmosis_ai.rollout.server.result_registry import (
     RolloutFutureRegistry,
     UnknownRolloutError,
 )
-from osmosis_ai.rollout.types import RolloutResultResponse, RolloutStatus
+from osmosis_ai.rollout.types import (
+    RolloutErrorCategory,
+    RolloutResultResponse,
+    RolloutStatus,
+)
 
 
 def registry(
@@ -265,3 +269,29 @@ async def test_expired_poll_before_binding_cancels_execution(monkeypatch) -> Non
     assert cancelled == ["r1"]
     assert executed == []
     await store.close()
+
+
+async def test_task_crash_publishes_failure_result() -> None:
+    store = registry([])
+    lease = await store.register("r1")
+
+    async def execute() -> None:
+        raise RuntimeError("backend worker crashed")
+
+    task = asyncio.create_task(execute())
+    await store.bind_task("r1", task)
+    with pytest.raises(RuntimeError, match="backend worker crashed"):
+        await task
+    result = await store.wait_for_result("r1", lease)
+    assert result.status is RolloutStatus.FAILURE
+    assert result.err_category is RolloutErrorCategory.INTERNAL_ERROR
+    assert result.err_message == "rollout task crashed"
+    await store.close()
+
+
+def test_crash_failure_response() -> None:
+    response = RolloutFutureRegistry.crash_failure("r1")
+    assert response.rollout_id == "r1"
+    assert response.status is RolloutStatus.FAILURE
+    assert response.err_category is RolloutErrorCategory.INTERNAL_ERROR
+    assert response.err_message == "rollout task crashed"

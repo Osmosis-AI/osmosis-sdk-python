@@ -14,27 +14,39 @@ LazyExports = Mapping[str, tuple[str, str]]
 # which subset it imports. tests/unit/test_public_api_imports.py asserts each
 # set matches the extra declared in pyproject.toml.
 EXTRA_MODULES: Final[Mapping[str, frozenset[str]]] = {
-    "server": frozenset({"click", "fastapi", "opentelemetry", "uvicorn"}),
-    "strands": frozenset({"aiohttp", "click", "litellm", "mcp", "orjson", "strands"}),
+    "server": frozenset({"click", "fastapi", "opentelemetry", "urllib3", "uvicorn"}),
+    "strands": frozenset(
+        {"aiohttp", "click", "jwt", "litellm", "mcp", "orjson", "strands", "urllib3"}
+    ),
     "openai-agents": frozenset(
-        {"agents", "aiohttp", "click", "litellm", "mcp", "orjson"}
+        {"agents", "aiohttp", "click", "jwt", "litellm", "mcp", "orjson", "urllib3"}
     ),
     "harbor": frozenset(
         {
             "aiohttp",
             "click",
             "harbor",
+            "jwt",
             "litellm",
             "orjson",
             "platformdirs",
             "toml",
+            "urllib3",
             "yaml",
         }
     ),
-    "rubric": frozenset({"aiohttp", "click", "litellm", "orjson"}),
+    "rubric": frozenset({"aiohttp", "click", "litellm", "orjson", "urllib3"}),
     "parquet": frozenset({"pyarrow"}),
     "eval": frozenset(
-        {"click", "fastapi", "litellm", "opentelemetry", "pyarrow", "uvicorn"}
+        {
+            "click",
+            "fastapi",
+            "litellm",
+            "opentelemetry",
+            "pyarrow",
+            "urllib3",
+            "uvicorn",
+        }
     ),
 }
 

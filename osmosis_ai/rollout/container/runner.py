@@ -33,6 +33,7 @@ from osmosis_ai.rollout.context import (
     GraderContext,
     RolloutContext,
 )
+from osmosis_ai.rollout.trajectory.preview import collect_source
 from osmosis_ai.rollout.types import RolloutSample, RolloutStatus
 from osmosis_ai.rollout.types.output import AgentWorkflowOutput, coerce_output
 from osmosis_ai.rollout.utils.file_artifacts import (
@@ -50,6 +51,9 @@ async def run_agent(workflow_cls: Any, workflow_config: Any) -> ContainerResult:
         chat_completions_url=container_input.chat_completions_url,
         api_key=container_input.api_key,
         rollout_id=container_input.rollout_id,
+        preview_path=(
+            Path(container_input.preview_path) if container_input.preview_path else None
+        ),
     )
     ctx = AgentWorkflowContext(
         prompt=container_input.prompt,
@@ -60,28 +64,42 @@ async def run_agent(workflow_cls: Any, workflow_config: Any) -> ContainerResult:
     workflow = workflow_cls(workflow_config)
     sample = None
     with rollout_ctx:
-        returned = await workflow.run(ctx)
-        output = coerce_output(returned)
-        if output is None:
-            # The documented fallback: the ambient context's sample is the
-            # output. The lossy projection below keeps ContainerResult.output
-            # populated for readers that consult it before the full sample.
-            sample = await rollout_ctx.get_sample()
-            if sample is not None:
-                output = AgentWorkflowOutput(
-                    messages=[dict(m) for m in sample.messages],
-                    metrics={
-                        key: value
-                        for key, value in (sample.metrics or {}).items()
-                        if isinstance(value, (int, float))
-                        and not isinstance(value, bool)
-                        # Non-finite ambient telemetry would fail output
-                        # validation; drop it rather than fail the rollout.
-                        and math.isfinite(value)
-                    },
-                )
-            else:
-                output = AgentWorkflowOutput()
+        preview_task = (
+            asyncio.create_task(collect_source(rollout_ctx))
+            if rollout_ctx.preview_path is not None
+            else None
+        )
+        if preview_task is not None:
+            preview_task.add_done_callback(
+                lambda task: task.exception() if not task.cancelled() else None
+            )
+        try:
+            returned = await workflow.run(ctx)
+            output = coerce_output(returned)
+            if output is None:
+                # The documented fallback: the ambient context's sample is the
+                # output. The lossy projection below keeps ContainerResult.output
+                # populated for readers that consult it before the full sample.
+                sample = await rollout_ctx.get_sample()
+                if sample is not None:
+                    output = AgentWorkflowOutput(
+                        messages=[dict(m) for m in sample.messages],
+                        metrics={
+                            key: value
+                            for key, value in (sample.metrics or {}).items()
+                            if isinstance(value, (int, float))
+                            and not isinstance(value, bool)
+                            # Non-finite ambient telemetry would fail output
+                            # validation; drop it rather than fail the rollout.
+                            and math.isfinite(value)
+                        },
+                    )
+                else:
+                    output = AgentWorkflowOutput()
+        finally:
+            if preview_task is not None:
+                rollout_ctx.preview_enabled = False
+                preview_task.cancel()
     write_trajectory_json(sample, output, container_input.rollout_id)
     return ContainerResult(status=RolloutStatus.SUCCESS, output=output, sample=sample)
 

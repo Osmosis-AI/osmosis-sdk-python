@@ -387,7 +387,8 @@ def test_skipped_files_publish_explicit_incomplete_manifest(tmp_path, kind):
 
 
 @pytest.mark.parametrize(
-    "change", ["missing", "extra", "modified", "traversal", "link", "duplicate"]
+    "change",
+    ["missing", "extra", "modified", "traversal", "colon", "link", "duplicate"],
 )
 def test_download_verification_rejects_incomplete_or_unsafe_inventory(tmp_path, change):
     trial, root = source(tmp_path), tmp_path / "out"
@@ -405,6 +406,9 @@ def test_download_verification_rejects_incomplete_or_unsafe_inventory(tmp_path, 
         result.write_text("{}")
     elif change == "traversal":
         manifest["files"][0]["path"] = "../private"
+        manifest_path.write_text(json.dumps(manifest))
+    elif change == "colon":
+        manifest["files"][0]["path"] = "logs/run::session"
         manifest_path.write_text(json.dumps(manifest))
     elif change == "duplicate":
         manifest["files"].append(manifest["files"][0])
@@ -506,7 +510,19 @@ def test_previous_process_evidence_cannot_satisfy_new_drain(tmp_path):
     assert not inventory["complete"] and inventory["missing_rollout_ids"] == ["one"]
 
 
-@pytest.mark.parametrize("rollout_id", ["run:1", "run\n1", "run\x7f1", "run\x851"])
+@pytest.mark.parametrize(
+    "rollout_id",
+    [
+        "run:1",
+        "run::",
+        "::session",
+        "run:::session",
+        "run::..",
+        "run\n1",
+        "run\x7f1",
+        "run\x851",
+    ],
+)
 def test_native_identity_validation_matches_harbor_admission(tmp_path, rollout_id):
     trial, root = source(tmp_path), tmp_path / "out"
     with pytest.raises(ValueError, match="safe relative path"):
