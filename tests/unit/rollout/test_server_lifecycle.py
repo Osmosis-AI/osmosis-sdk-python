@@ -119,8 +119,13 @@ async def test_non_harbor_backends_keep_existing_colon_ids():
     await app.state.rollout_futures.close()
 
 
+class BlockingBackend(ExecutionBackend):
+    async def execute(self, request):
+        await asyncio.Event().wait()
+
+
 async def test_cancellation_during_binding_cannot_hide_scheduled_work(monkeypatch):
-    app = create_rollout_server(backend=Backend())
+    app = create_rollout_server(backend=BlockingBackend())
     entered = asyncio.Event()
     registry = app.state.rollout_futures
 
@@ -132,12 +137,15 @@ async def test_cancellation_during_binding_cannot_hide_scheduled_work(monkeypatc
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app), base_url="http://test"
     ) as http:
+        client = RolloutClient(url="http://test", http_client=http)
         admission = asyncio.create_task(http.post("/rollout", json=BODY))
         await entered.wait()
+        health = await client.health()
+        assert health["lifecycle"]["active_rollouts"] == 1
         admission.cancel()
         with pytest.raises(asyncio.CancelledError):
             await admission
-        client = RolloutClient(url="http://test", http_client=http)
+        # The backend never returns, so idleness proves the work was cancelled.
         await client.wait_idle(timeout_sec=1, poll_interval_sec=0.001)
         assert registry.entries == {}
     await registry.close()
