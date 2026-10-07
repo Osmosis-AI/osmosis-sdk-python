@@ -429,9 +429,9 @@ class HarborBackend(ExecutionBackend):
         self,
         task_dir: Path,
         container_input: ContainerInput,
-        *,
-        preview_path: Path | None = None,
     ) -> HarborAgentConfig:
+        ctx = get_rollout_context()
+        preview_path = ctx.preview_path if ctx is not None else None
         if self.native is not None and isinstance(self.agent, str):
             metadata = container_input.metadata or {}
             model = metadata.get("harbor_model", self.model_name)
@@ -455,11 +455,12 @@ class HarborBackend(ExecutionBackend):
                 extra_kwargs=self.native_agent_kwargs,
                 preview_path=preview_path,
             )
-        return self.harness_agent_config(task_dir, preview_path=preview_path)
+        config = self.harness_agent_config(task_dir)
+        if preview_path is not None:
+            config.kwargs["_osmosis_preview_path"] = str(preview_path)
+        return config
 
-    def harness_agent_config(
-        self, task_dir: Path, *, preview_path: Path | None = None
-    ) -> HarborAgentConfig:
+    def harness_agent_config(self, task_dir: Path) -> HarborAgentConfig:
         if self.bundle is None:
             raise ValueError("workflow agents require a bundle")
         return HarborAgentConfig(
@@ -468,11 +469,6 @@ class HarborBackend(ExecutionBackend):
                 "bundle_path": str(self.bundle.wheel),
                 "agent_script": self.bundle.agent_script,
                 "input_path": str(task_dir / "container_input.json"),
-                **(
-                    {"_osmosis_preview_path": str(preview_path)}
-                    if preview_path is not None
-                    else {}
-                ),
             },
         )
 
@@ -482,13 +478,9 @@ class HarborBackend(ExecutionBackend):
         request: ExecutionRequest,
         container_input: ContainerInput,
         agent_config: HarborAgentConfig | None = None,
-        *,
-        preview_path: Path | None = None,
     ) -> TrialConfig:
         if agent_config is None:
-            agent_config = self.build_agent_config(
-                task_dir, container_input, preview_path=preview_path
-            )
+            agent_config = self.build_agent_config(task_dir, container_input)
         if request.agent_timeout_sec is not None:
             agent_config.override_timeout_sec = request.agent_timeout_sec
         if self.agent_setup_timeout_sec is not None:
@@ -588,11 +580,6 @@ class HarborBackend(ExecutionBackend):
                         task_dir,
                         request,
                         container_input,
-                        preview_path=(
-                            pending.rollout_context.preview_path
-                            if pending.rollout_context is not None
-                            else None
-                        ),
                     )
                 )
             )
