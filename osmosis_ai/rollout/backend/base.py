@@ -41,3 +41,11 @@ class ExecutionBackend(ABC):
 
     def health(self) -> dict[str, Any]:
         return {"status": "ok"}
+
+    async def shutdown(self) -> None:
+        """Release backend resources after the server stops admitting work.
+
+        Implementations should attempt cleanup of every owned resource and
+        report anything they could not remove to stdout.
+        """
+        return None

@@ -100,8 +100,9 @@ _SDK_VERSION_TIMEOUT_SEC = 10.0
 # hung server cost another full health timeout before the run gives up.
 _PORT_ATTEMPTS = 2
 _SERVER_TERM_GRACE_SEC = 5.0
-# Cover server drain (10s), cleanup (120s), final cancellation (10s), and exit.
-_SERVER_INTERRUPTED_TERM_GRACE_SEC = 150.0
+# Cover server drain (10s), cleanup (120s), final cancellation (10s), backend
+# shutdown (180s), and exit.
+_SERVER_INTERRUPTED_TERM_GRACE_SEC = 330.0
 # Let cooperative workflows and remote sandboxes finish cancellation cleanup.
 _CANCEL_SETTLE_SEC = 120.0
 _TRAJECTORY_GRACE_SEC = 30.0

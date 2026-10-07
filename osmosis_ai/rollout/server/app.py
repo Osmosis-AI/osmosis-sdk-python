@@ -131,33 +131,38 @@ def create_rollout_server(
             await registry.cancel(all=True)
             _done, pending = await asyncio.wait(pending, timeout=_SHUTDOWN_CLEANUP_SEC)
         if pending:
-            logger.warning(
-                "Forcing cancellation of %d rollout(s) after cleanup timed out",
-                len(pending),
+            print(
+                f"Rollout shutdown: cleanup is unconfirmed for {len(pending)} "
+                "rollout(s) after the cleanup timeout; forcing cancellation.",
+                flush=True,
             )
             for task in pending:
                 task.cancel()
             await asyncio.wait(pending, timeout=_SHUTDOWN_DRAIN_SEC)
 
+    async def close_previews() -> None:
+        if preview_tasks:
+            _, pending = await asyncio.wait(preview_tasks, timeout=2)
+            for task in pending:
+                task.cancel()
+
     @asynccontextmanager
     async def _lifespan_with_drain(app: FastAPI) -> AsyncIterator[None]:
         nonlocal accepting_rollouts
         async with AsyncExitStack() as stack:
-            if lifespan is not None:
-                await stack.enter_async_context(lifespan(app))
-            observability.start()
             try:
+                if lifespan is not None:
+                    await stack.enter_async_context(lifespan(app))
+                observability.start()
                 yield
             finally:
+                stack.push_async_callback(asyncio.to_thread, observability.close)
+                stack.push_async_callback(close_previews)
+                stack.push_async_callback(registry.close)
+                stack.push_async_callback(backend.shutdown)
                 async with admission_lock:
                     accepting_rollouts = False
                 await _drain_scheduled_tasks()
-                await registry.close()
-                if preview_tasks:
-                    _, pending = await asyncio.wait(preview_tasks, timeout=2)
-                    for task in pending:
-                        task.cancel()
-                await asyncio.to_thread(observability.close)
 
     app = FastAPI(lifespan=_lifespan_with_drain)
     app.state.rollout_futures = registry

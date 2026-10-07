@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import threading
 
 import pytest
 from harbor.environments.base import BaseEnvironment, ExecResult
@@ -10,6 +11,7 @@ from harbor.models.trial.config import EnvironmentConfig
 from harbor.trial.hooks import TrialEvent
 from harbor.trial.queue import TrialQueue
 
+from osmosis_ai.rollout.backend.harbor import backend as backend_module
 from osmosis_ai.rollout.backend.harbor.backend import HarborBackend
 from osmosis_ai.rollout.types import ExecutionRequest, RolloutStatus
 
@@ -19,11 +21,13 @@ SECRET = "harbor-contract-test-secret"
 class ContractEnvironment(BaseEnvironment):
     """Mounted sandbox boundary; OracleAgent and Verifier still run normally."""
 
-    def __init__(self, *args, block_agent=False, **kwargs):
+    def __init__(self, *args, block_agent=False, block_stop=False, **kwargs):
         super().__init__(*args, **kwargs)
         self.block_agent = block_agent
         self.stop_calls = 0
         self.agent_running = asyncio.Event()
+        self.block_stop = block_stop
+        self.stop_release = asyncio.Event()
 
     @staticmethod
     def type():
@@ -42,6 +46,8 @@ class ContractEnvironment(BaseEnvironment):
     async def stop(self, delete):
         assert delete
         self.stop_calls += 1
+        if self.block_stop:
+            await self.stop_release.wait()
 
     async def upload_file(self, source_path, target_path):
         pass
@@ -151,6 +157,9 @@ async def test_real_trial_lifecycle_and_archive(contract_backend, cancel):
     assert not (backend.rollouts_dir / "contract").exists()
     assert not (backend.trials_dir / "trial-contract").exists()
     assert len(results) == 1
+    assert (
+        results[0].config.environment.import_path == f"{__name__}:ContractEnvironment"
+    )
     assert events[:3] == [
         TrialEvent.START,
         TrialEvent.ENVIRONMENT_START,
@@ -185,3 +194,63 @@ async def test_real_trial_lifecycle_and_archive(contract_backend, cancel):
         for path in archive.rglob("*")
         if path.is_file()
     )
+
+
+@pytest.mark.parametrize("blocked", [None, "sandbox", "archive"])
+async def test_shutdown_cancels_trials_and_counts_unfinished_cleanup(
+    contract_backend, blocked, monkeypatch, capsys
+):
+    backend, _, environments, _ = contract_backend
+    backend.environment_config.kwargs.update(
+        block_agent=True,
+        block_stop=blocked == "sandbox",
+    )
+    monkeypatch.setattr(
+        backend_module, "SHUTDOWN_TIMEOUT_SEC", 1 if blocked is None else 0.03
+    )
+    archive_started = asyncio.Event()
+    archive_release = threading.Event()
+    if blocked == "archive":
+        loop = asyncio.get_running_loop()
+        archive = backend.archive_cancelled_trial
+
+        def blocked_archive(*args):
+            loop.call_soon_threadsafe(archive_started.set)
+            if not archive_release.wait(5):
+                raise TimeoutError("archive was not released")
+            return archive(*args)
+
+        monkeypatch.setattr(backend, "archive_cancelled_trial", blocked_archive)
+    execution = asyncio.create_task(
+        backend.execute(ExecutionRequest(id="contract", prompt=[], grade=True))
+    )
+    try:
+        async with asyncio.timeout(5):
+            while not environments:
+                await asyncio.sleep(0)
+            await environments[0].agent_running.wait()
+            if blocked == "archive":
+                backend.cancel_rollouts(all=True)
+                await archive_started.wait()
+            await backend.shutdown()
+        assert environments[0].stop_calls == 1
+        output = capsys.readouterr().out
+        assert SECRET not in output
+        if blocked is None:
+            assert "cleanup is unconfirmed" not in output
+        else:
+            assert "cleanup is unconfirmed for 1 unfinished rollout(s)" in output
+            assert not execution.done()
+    finally:
+        archive_release.set()
+        for environment in environments:
+            environment.stop_release.set()
+        if not execution.done():
+            backend.cancel_rollouts(all=True)
+        outcome = await asyncio.wait_for(execution, timeout=5)
+    assert outcome.result.status == RolloutStatus.CANCELLED
+    assert (backend.artifact_root / "contract" / "harbor" / "manifest.json").is_file()
+    with pytest.raises(
+        RuntimeError, match="cannot schedule new futures after shutdown"
+    ):
+        backend.archive_executor.submit(lambda: None)

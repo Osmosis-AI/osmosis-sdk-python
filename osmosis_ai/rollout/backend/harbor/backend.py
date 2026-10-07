@@ -141,6 +141,7 @@ HARNESS_AGENT_IMPORT_PATH = (
 )
 PREWARM_PREFIX = "prewarm-"
 STATUS_RETENTION_SEC = 900.0
+SHUTDOWN_TIMEOUT_SEC = 180.0
 
 
 class CredentialScrubError(RuntimeError):
@@ -281,6 +282,8 @@ class HarborBackend(ExecutionBackend):
             raise ValueError("max_queue_depth must be >= 1, or None for unbounded")
         self.max_queue_depth = max_queue_depth
         self.pending: dict[str, PendingTrial] = {}
+        self.executions: set[asyncio.Future[None]] = set()
+        self.shutting_down: bool = False
         # Hooks dispatch on membership, never on caller-controlled id patterns.
         self.prewarm_trials: set[str] = set()
         self.fetch_locks: dict[str, asyncio.Lock] = {}
@@ -549,12 +552,16 @@ class HarborBackend(ExecutionBackend):
         self,
         request: ExecutionRequest,
     ) -> ExecutionOutcome:
+        if self.shutting_down:
+            raise RuntimeError("Harbor backend is shut down")
         evidence_rollout_id(request.id)
         pending = PendingTrial()
         pending.label = request.label
         pending.grade = request.grade
         pending.rollout_context = get_rollout_context()
         self.pending[request.id] = pending
+        completion: asyncio.Future[None] = asyncio.get_running_loop().create_future()
+        self.executions.add(completion)
         outcome: ExecutionOutcome | None = None
         try:
             container_input = self.build_input(request)
@@ -661,6 +668,12 @@ class HarborBackend(ExecutionBackend):
                 )
             )
             return outcome
+
+        finally:
+            self.executions.discard(completion)
+            completion.set_result(None)
+            if self.shutting_down and not self.executions:
+                self.archive_executor.shutdown(wait=False)
 
     def scrub_trial_credentials(self, rollout_id: str, api_key: str | None) -> None:
         """Remove the rollout controller key from every retained trial file.
@@ -882,6 +895,23 @@ class HarborBackend(ExecutionBackend):
             )
         logger.info("Prewarmed %d harbor task(s)", len(configs))
 
+    async def shutdown(self) -> None:
+        """Cancel trials and wait for their cleanup, including artifact saving."""
+        self.shutting_down = True
+        self.cancel_rollouts(all=True)
+        if self.executions:
+            _, unfinished = await asyncio.wait(
+                self.executions, timeout=SHUTDOWN_TIMEOUT_SEC
+            )
+            if unfinished:
+                print(
+                    f"Harbor shutdown: cleanup is unconfirmed for "
+                    f"{len(unfinished)} unfinished rollout(s).",
+                    flush=True,
+                )
+        else:
+            self.archive_executor.shutdown(wait=False)
+
     def prewarm_agent_config(self, task_dir: Path) -> HarborAgentConfig:
         """Install-only trials never run the agent: no endpoint, no credentials."""
         if self.native is not None and isinstance(self.agent, str):
@@ -956,7 +986,8 @@ class HarborBackend(ExecutionBackend):
                 dispositions[rollout_id] = "not_found"
                 continue
             pending.cancel_requested = True
-            pending.task.cancel()
+            if not pending.task.cancelling():
+                pending.task.cancel()
             dispositions[rollout_id] = (
                 "cancelled_running" if pending.started else "cancelled_queued"
             )
