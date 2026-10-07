@@ -2,6 +2,30 @@
 
 This file records changes to `osmosis-ai`. For earlier versions, see [GitHub Releases](https://github.com/Osmosis-AI/osmosis-sdk-python/releases).
 
+## 0.3.6 - 2026-10-08
+
+### Breaking Changes
+
+- Removed `POST /drain`, `RolloutClient.drain()`, and the drain request/response models; use `health()` and `wait_idle(process_id=...)` to observe completion, SIGTERM for shutdown, and retain your submitted rollout IDs for evidence verification (`wait_idle()` does not fence admissions or confirm external uploads) ([#433](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/433)).
+
+### Added
+
+- Rollout servers call `ExecutionBackend.shutdown()` to clean up backend resources, including Harbor trials and artifacts; configure the host termination grace period for the server's bounded shutdown stages and Harbor's additional cleanup wait ([#432](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/432)).
+- Hosts can enable bounded live trajectory previews for supported local sources, native Harbor agents, and bundled workflows without changing final results or grading; bundled workflows need a preview-capable SDK inside the sandbox ([#428](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/428)).
+
+### Changed
+
+- Support Harbor `>=0.20.0,<0.24` while preserving published `harbor-v1` image identities and Mini-SWE endpoints; when upgrading to Harbor 0.23, review stricter input validation, finite JSON rewards, Mini-SWE's managed Python 3.12 setup, and Terminus ATIF 1.8 consumers ([#405](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/405)).
+- Applicable extras require LiteLLM `>=1.94.3,<2.0.0` excluding `1.95.0.*`, `1.96.0.*`, and `1.96.1.*`, urllib3 `>=2.8.0`, and PyJWT `>=2.15.1` for security fixes; update conflicting application pins and regenerate lockfiles ([#416](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/416)).
+
+### Fixed
+
+- Existing Harbor subclasses retain their original `build_trial_config`, `build_agent_config`, and `harness_agent_config` signatures, avoiding startup failures from an unexpected `preview_path` keyword while keeping preview routing internal ([#435](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/435)).
+- Unexpected execution-task crashes produce a terminal `internal_error` failure instead of leaving clients polling until lease expiry ([#410](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/410)).
+- Native-evidence redaction stays linear on long identifiers, avoiding stalls that delay health checks and result polling ([#411](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/411)).
+
+[Full changelog](https://github.com/Osmosis-AI/osmosis-sdk-python/compare/v0.3.5...v0.3.6)
+
 ## 0.3.5 - 2026-09-28
 
 ### Breaking Changes
