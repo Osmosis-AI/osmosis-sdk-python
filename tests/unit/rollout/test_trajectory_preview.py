@@ -599,8 +599,5 @@ async def test_server_without_opt_in_does_not_read_sources(
                     },
                 )
             ).status_code == 202
-            assert (await http.post("/drain", json={"timeout_sec": 1})).json()[
-                "drained"
-            ]
     assert reads == []
     assert not list(tmp_path.rglob("preview.json"))

@@ -13,8 +13,6 @@ from osmosis_ai.rollout.types import (
     POLLING_LEASE_HEADER,
     CancelRolloutsRequest,
     CancelRolloutsResponse,
-    DrainRolloutsRequest,
-    DrainRolloutsResponse,
     MessageDict,
     RolloutInitRequest,
     RolloutInitResponse,
@@ -292,33 +290,6 @@ class RolloutClient:
                 if state.active_rollouts == 0:
                     return health
                 await asyncio.sleep(poll_interval_sec)
-
-    async def drain(self, *, timeout_sec: float = 30) -> DrainRolloutsResponse:
-        """Fence admissions and wait boundedly; a timeout leaves the fence set."""
-        request = DrainRolloutsRequest(timeout_sec=timeout_sec)
-        async with asyncio.timeout(timeout_sec + 5):
-            response = await self.http_client.post(
-                f"{self.url}/drain",
-                json=request.model_dump(),
-                headers=self._auth_headers,
-                timeout=timeout_sec + 5,
-                follow_redirects=False,
-            )
-        if response.status_code != 200:
-            raise RolloutProtocolError(
-                "POST /drain failed", status_code=response.status_code
-            )
-        try:
-            result = DrainRolloutsResponse.model_validate(response.json())
-        except ValueError as exc:
-            raise RolloutProtocolError(
-                "POST /drain returned invalid JSON", status_code=200
-            ) from exc
-        if result.accepting_rollouts or result.drained != (result.active_rollouts == 0):
-            raise RolloutProtocolError(
-                "POST /drain returned inconsistent state", status_code=200
-            )
-        return result
 
     async def aclose(self) -> None:
         if self.owns_http_client:

@@ -53,14 +53,13 @@ def no_archive(monkeypatch):
     monkeypatch.setattr(server_module, "save_trajectory", skip)
 
 
-async def test_authenticated_drain_fences_admission_and_is_idempotent():
+async def test_authenticated_health_and_rollout_share_process_identity():
     backend = Backend()
     app = create_rollout_server(backend=backend, api_key="secret")
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app), base_url="http://test"
     ) as http:
         assert (await http.get("/health")).status_code == 401
-        assert (await http.post("/drain", json={})).status_code == 401
         assert (await http.post("/rollout", json=BODY)).status_code == 401
         client = RolloutClient(url="http://test", http_client=http, api_key="secret")
         health = await client.health()
@@ -72,19 +71,11 @@ async def test_authenticated_drain_fences_admission_and_is_idempotent():
         )
         assert result.status == RolloutStatus.SUCCESS
         assert backend.process_id == health["process_id"]
-        drained = await client.drain(timeout_sec=0)
-        assert drained.drained and not drained.accepting_rollouts
-        assert drained.process_id == health["process_id"]
-        assert drained == await client.drain(timeout_sec=0)
-        response = await http.post(
-            "/rollout", json=BODY, headers={"Authorization": "Bearer secret"}
-        )
-        assert response.status_code == 503
         assert await client.wait_idle(timeout_sec=1) == await client.health()
     await app.state.rollout_futures.close()
 
 
-async def test_drain_waits_through_trajectory_finalization(monkeypatch):
+async def test_wait_idle_waits_through_trajectory_finalization(monkeypatch):
     finalizing, finish = asyncio.Event(), asyncio.Event()
 
     async def archive(**kwargs):
@@ -99,19 +90,16 @@ async def test_drain_waits_through_trajectory_finalization(monkeypatch):
         assert (await http.post("/rollout", json=BODY)).status_code == 202
         await finalizing.wait()
         client = RolloutClient(url="http://test", http_client=http)
-        result = await client.drain(timeout_sec=0.01)
-        assert not result.drained and result.active_rollouts == 1
-        assert result.rollout_ids == ["one"]
+        assert (await client.health())["lifecycle"]["active_rollouts"] == 1
         with pytest.raises(TimeoutError):
-            await client.wait_idle(timeout_sec=0.01)
-        assert (
-            await http.post("/rollout", json={**BODY, "rollout_id": "two"})
-        ).status_code == 503
-        waiting = asyncio.create_task(client.drain(timeout_sec=1))
+            await client.wait_idle(timeout_sec=0.01, poll_interval_sec=0.001)
+        waiting = asyncio.create_task(
+            client.wait_idle(timeout_sec=1, poll_interval_sec=0.001)
+        )
         await asyncio.sleep(0)
         assert not waiting.done()
         finish.set()
-        assert (await waiting).drained
+        assert (await waiting)["lifecycle"]["active_rollouts"] == 0
     await app.state.rollout_futures.close()
 
 
@@ -127,42 +115,17 @@ async def test_non_harbor_backends_keep_existing_colon_ids():
             rollout_id="run:1",
         )
         assert result.status == RolloutStatus.SUCCESS
-        assert (await client.drain(timeout_sec=1)).rollout_ids == ["run:1"]
+        assert result.rollout_id == "run:1"
     await app.state.rollout_futures.close()
 
 
-async def test_admission_in_progress_cannot_escape_drain(monkeypatch):
-    app = create_rollout_server(backend=Backend())
-    entered, release = asyncio.Event(), asyncio.Event()
-    registry = app.state.rollout_futures
-    register = registry.register
-
-    async def blocked(rollout_id):
-        entered.set()
-        await release.wait()
-        return await register(rollout_id)
-
-    monkeypatch.setattr(registry, "register", blocked)
-    async with httpx.AsyncClient(
-        transport=httpx.ASGITransport(app), base_url="http://test"
-    ) as http:
-        admission = asyncio.create_task(http.post("/rollout", json=BODY))
-        await entered.wait()
-        draining = asyncio.create_task(http.post("/drain", json={"timeout_sec": 1}))
-        await asyncio.sleep(0)
-        assert not draining.done()
-        release.set()
-        assert (await admission).status_code == 202
-        result = (await draining).json()
-        assert result["drained"] and result["rollout_ids"] == ["one"]
-        assert (
-            await http.post("/rollout", json={**BODY, "rollout_id": "two"})
-        ).status_code == 503
-    await registry.close()
+class BlockingBackend(ExecutionBackend):
+    async def execute(self, request):
+        await asyncio.Event().wait()
 
 
 async def test_cancellation_during_binding_cannot_hide_scheduled_work(monkeypatch):
-    app = create_rollout_server(backend=Backend())
+    app = create_rollout_server(backend=BlockingBackend())
     entered = asyncio.Event()
     registry = app.state.rollout_futures
 
@@ -174,13 +137,16 @@ async def test_cancellation_during_binding_cannot_hide_scheduled_work(monkeypatc
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app), base_url="http://test"
     ) as http:
+        client = RolloutClient(url="http://test", http_client=http)
         admission = asyncio.create_task(http.post("/rollout", json=BODY))
         await entered.wait()
+        health = await client.health()
+        assert health["lifecycle"]["active_rollouts"] == 1
         admission.cancel()
         with pytest.raises(asyncio.CancelledError):
             await admission
-        result = (await http.post("/drain", json={"timeout_sec": 1})).json()
-        assert result["drained"] and result["rollout_ids"] == ["one"]
+        # The backend never returns, so idleness proves the work was cancelled.
+        await client.wait_idle(timeout_sec=1, poll_interval_sec=0.001)
         assert registry.entries == {}
     await registry.close()
 
@@ -222,9 +188,7 @@ async def test_health_auth_does_not_follow_redirects():
         )
         with pytest.raises(RolloutProtocolError):
             await client.health()
-        with pytest.raises(RolloutProtocolError):
-            await client.drain()
-    assert len(seen) == 2
+    assert len(seen) == 1
     assert all(request.headers["authorization"] == "Bearer secret" for request in seen)
 
 
