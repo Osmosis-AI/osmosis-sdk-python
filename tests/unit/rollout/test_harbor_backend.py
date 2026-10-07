@@ -581,6 +581,98 @@ class TestBundleBackend:
         assert first.environment is not second.environment
         assert first.environment is not backend.environment_config
 
+    async def test_execute_preserves_subclass_hooks_and_isolates_previews(
+        self, bundle, template_task, tmp_path
+    ):
+        from osmosis_ai.rollout.context import RolloutContext
+
+        ready = asyncio.Barrier(3)
+        submitted = {}
+
+        class CustomBackend(HarborBackend):
+            async def resolve_task(self, request):
+                await ready.wait()
+                return await super().resolve_task(request)
+
+            def build_trial_config(
+                self, task_dir, request, container_input, agent_config=None
+            ):
+                config = super().build_trial_config(
+                    task_dir, request, container_input, agent_config
+                )
+                config.verifier.env["CUSTOM_VERIFIER"] = request.id
+                return config
+
+            def build_agent_config(self, task_dir, container_input):
+                config = super().build_agent_config(task_dir, container_input)
+                config.env["CUSTOM_AGENT"] = container_input.rollout_id
+                return config
+
+            def harness_agent_config(self, task_dir):
+                config = super().harness_agent_config(task_dir)
+                config.env["CUSTOM_HARNESS"] = "kept"
+                return config
+
+        async def run(queue, config):
+            submitted[config.trial_name] = config
+            result = trial_result(
+                agent_result=SimpleNamespace(
+                    metadata=ContainerResult(
+                        status=RolloutStatus.SUCCESS,
+                        output=AgentWorkflowOutput(
+                            messages=[{"role": "assistant", "content": "done"}]
+                        ),
+                    ).model_dump(mode="json")
+                )
+            )
+            await queue.fire("end", SimpleNamespace(config=config, result=result))
+            return result
+
+        backend = CustomBackend(
+            orchestrator=FakeQueue(run),
+            tasks_dir=template_task,
+            bundle=bundle,
+            trials_dir=tmp_path / "trials",
+        )
+        backend.rollouts_dir = tmp_path / "rollouts"
+        backend.artifact_root = tmp_path / "artifacts"
+        previews = {
+            "first": tmp_path / "first.json",
+            "second": tmp_path / "second.json",
+            "disabled": None,
+        }
+
+        async def execute(rollout_id, preview_path):
+            with RolloutContext(
+                rollout_id=rollout_id,
+                chat_completions_url="https://trainer.example/v1",
+                preview_path=preview_path,
+            ):
+                return await backend.execute(
+                    ExecutionRequest(
+                        id=rollout_id,
+                        prompt=[{"role": "user", "content": "go"}],
+                        grade=False,
+                    )
+                )
+
+        outcomes = await asyncio.wait_for(
+            asyncio.gather(*(execute(key, path) for key, path in previews.items())),
+            timeout=5,
+        )
+        assert [outcome.result.err_message for outcome in outcomes] == [None] * 3
+        assert all(
+            outcome.result.status == RolloutStatus.SUCCESS for outcome in outcomes
+        )
+        for rollout_id, preview_path in previews.items():
+            config = submitted[f"trial-{rollout_id}"]
+            assert config.agent.env["CUSTOM_AGENT"] == rollout_id
+            assert config.agent.env["CUSTOM_HARNESS"] == "kept"
+            assert config.verifier.env["CUSTOM_VERIFIER"] == rollout_id
+            assert config.agent.kwargs.get("_osmosis_preview_path") == (
+                str(preview_path) if preview_path else None
+            )
+
 
 class TestNativeAgents:
     def backend_for(self, agent, template_task, **kwargs):
@@ -636,6 +728,8 @@ class TestNativeAgents:
         from harbor.agents.factory import AgentFactory
         from harbor.models.agent.name import AgentName
 
+        from osmosis_ai.rollout.context import RolloutContext
+
         monkeypatch.setenv("LITELLM_LOCAL_MODEL_COST_MAP", "True")
         native_class = AgentFactory.get_agent_class(AgentName(agent_name))
         init = native_class.__init__
@@ -657,14 +751,14 @@ class TestNativeAgents:
             agent_setup_timeout_sec=17,
         )
         preview_path = tmp_path / "trajectory.partial.json"
-        config = backend.build_trial_config(
-            template_task,
-            ExecutionRequest(id="r1", prompt=[]),
-            ContainerInput(
-                rollout_id="r1", chat_completions_url="http://t/v1", api_key="k"
-            ),
-            **({"preview_path": preview_path} if preview_enabled else {}),
-        ).agent
+        with RolloutContext(preview_path=preview_path if preview_enabled else None):
+            config = backend.build_trial_config(
+                template_task,
+                ExecutionRequest(id="r1", prompt=[]),
+                ContainerInput(
+                    rollout_id="r1", chat_completions_url="http://t/v1", api_key="k"
+                ),
+            ).agent
         agent = AgentFactory.create_agent_from_config(config, tmp_path / "logs")
 
         assert isinstance(agent, native_class)
@@ -917,20 +1011,22 @@ class TestNativeAgents:
     def test_oracle_binding_gets_no_endpoint_or_preview(
         self, template_task, tmp_path, preview_enabled
     ):
+        from osmosis_ai.rollout.context import RolloutContext
+
         backend = self.backend_for(
             "oracle",
             template_task,
             native_agent_kwargs={"_osmosis_preview_path": "untrusted.json"},
         )
-        config = backend.build_agent_config(
-            template_task,
-            ContainerInput(rollout_id="r1", chat_completions_url="http://t/v1"),
-            **(
-                {"preview_path": tmp_path / "trajectory.partial.json"}
-                if preview_enabled
-                else {}
-            ),
-        )
+        with RolloutContext(
+            preview_path=tmp_path / "trajectory.partial.json"
+            if preview_enabled
+            else None
+        ):
+            config = backend.build_agent_config(
+                template_task,
+                ContainerInput(rollout_id="r1", chat_completions_url="http://t/v1"),
+            )
         assert config.name == "oracle"
         assert config.import_path is None
         assert "OPENAI_API_BASE" not in config.env
@@ -1474,20 +1570,24 @@ class TestCancellation:
 
 class TestPrewarm:
     def test_prewarm_config_is_install_only_without_credentials(
-        self, bundle, template_task
+        self, bundle, template_task, tmp_path
     ):
+        from osmosis_ai.rollout.context import RolloutContext
+
         backend = HarborBackend(
             orchestrator=TrialQueue(n_concurrent=1),
             tasks_dir=template_task,
             bundle=bundle,
             agent_setup_timeout_sec=120,
         )
-        config = backend.prewarm_trial_config(HarborTask(template_task))
+        with RolloutContext(preview_path=tmp_path / "ambient-preview.json"):
+            config = backend.prewarm_trial_config(HarborTask(template_task))
 
         assert config.install_only is True
         assert config.verifier.disable is True
         assert config.trial_name.startswith("trial-prewarm-")
         assert config.agent.override_setup_timeout_sec == 120
+        assert "_osmosis_preview_path" not in config.agent.kwargs
         container_input = ContainerInput.read(
             Path(config.task.path) / "container_input.json"
         )
@@ -2357,11 +2457,15 @@ class TestPrewarmIdentity:
             )
             # Prewarm must not pick up the ambient context's endpoint or key.
             with RolloutContext(
-                chat_completions_url="http://t/v1", api_key="rk-1", rollout_id="x"
+                chat_completions_url="http://t/v1",
+                api_key="rk-1",
+                rollout_id="x",
+                preview_path=tmp_path / "ambient-preview.json",
             ):
                 config = backend.prewarm_trial_config(HarborTask(template_task))
             assert config.install_only is True
             assert check(config.agent), agent
+            assert "_osmosis_preview_path" not in config.agent.kwargs
             assert config.trial_name in backend.prewarm_trials
 
     async def test_prewarm_named_rollout_id_is_not_treated_as_prewarm(
