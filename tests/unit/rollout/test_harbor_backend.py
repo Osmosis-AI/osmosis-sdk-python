@@ -1743,6 +1743,31 @@ class TestConfigValidation:
         assert trial.environment.delete is delete
         assert caller_config.kwargs == overrides
 
+    @pytest.mark.parametrize(
+        "import_path,expected",
+        [
+            (None, {"protocol": "https", "use_server_proxy": True}),
+            ("custom.environments:Sandbox", {}),
+        ],
+    )
+    def test_opensandbox_routes_through_the_server_by_default(
+        self, template_task, monkeypatch, import_path, expected
+    ):
+        from harbor.models.trial.config import EnvironmentConfig
+
+        monkeypatch.setenv("OPENSANDBOX_DOMAIN", "https://opensandbox.example.com")
+        monkeypatch.setenv("OPENSANDBOX_RUN_ID", "run-1")
+        caller_config = EnvironmentConfig(type="opensandbox", import_path=import_path)
+        backend = self.backend_for(
+            template_task, agent="oracle", environment_config=caller_config
+        )
+        trial = backend.build_trial_config(
+            template_task, request_for(), ContainerInput(rollout_id="r1")
+        )
+
+        assert trial.environment.kwargs == expected
+        assert caller_config.kwargs == {}
+
     def test_missing_harbor_model_falls_back_to_default(self, template_task):
         backend = self.backend_for(template_task, agent="terminus-2")
         base = {"rollout_id": "r1", "chat_completions_url": "http://t/v1"}
