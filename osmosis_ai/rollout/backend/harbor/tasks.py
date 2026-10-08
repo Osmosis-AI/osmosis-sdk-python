@@ -13,6 +13,7 @@ import logging
 import os
 import re
 import shutil
+import tomllib
 from enum import StrEnum
 from pathlib import Path
 from typing import Any
@@ -145,6 +146,17 @@ class HarborTask:
             raise ValueError(f"unknown harbor task id: {task_id!r}")
         return cls(path)
 
+    def uses_prebuilt_image(self) -> bool:
+        """Whether Harbor runs the task from ``[environment] docker_image`` (which
+        OpenSandbox requires) instead of building ``environment/Dockerfile``."""
+        if not (self.path / "environment" / "Dockerfile").is_file():
+            return True
+        config = self.path / "task.toml"
+        if not config.is_file():
+            return False
+        environment = tomllib.loads(config.read_text()).get("environment", {})
+        return bool(environment.get("docker_image"))
+
     def _reject_symlinks(self) -> None:
         """Task directories are external assets; refuse to copy through links.
 
@@ -185,7 +197,7 @@ class HarborTask:
         task_dir = out_dir / self.path.name
         shutil.rmtree(task_dir, ignore_errors=True)
         shutil.copytree(self.path, task_dir)
-        if sdk_requirements:
+        if sdk_requirements and not self.uses_prebuilt_image():
             patch_dockerfile_with_sdk(task_dir / "environment", sdk_requirements)
 
         if container_input.prompt:

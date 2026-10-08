@@ -451,6 +451,34 @@ class TestPatchDockerfileWithSdk:
             "uv venv" not in (template_task / "environment" / "Dockerfile").read_text()
         )
 
+    def test_materialize_skips_the_patch_for_a_prebuilt_image_task(self, tmp_path):
+        task = tmp_path / "prebuilt-task"
+        (task / "environment").mkdir(parents=True)
+        (task / "task.toml").write_text(
+            '[task]\nname = "prebuilt-task"\n\n'
+            '[environment]\ndocker_image = "python:3.12-bookworm"\n'
+        )
+        task_dir = HarborTask(task).materialize(
+            tmp_path / "r1",
+            ContainerInput(rollout_id="r1", prompt=[{"role": "user", "content": "x"}]),
+            sdk_requirements=["httpx"],
+        )
+        assert not (task_dir / "environment" / "Dockerfile").exists()
+
+    def test_materialize_skips_the_patch_when_a_prebuilt_image_is_set(
+        self, template_task, tmp_path
+    ):
+        (template_task / "task.toml").write_text(
+            '[task]\nname = "template-task"\n\n'
+            '[environment]\ndocker_image = "python:3.12-bookworm"\n'
+        )
+        task_dir = HarborTask(template_task).materialize(
+            tmp_path / "r1",
+            ContainerInput(rollout_id="r1", prompt=[{"role": "user", "content": "x"}]),
+            sdk_requirements=["httpx"],
+        )
+        assert "uv venv" not in (task_dir / "environment" / "Dockerfile").read_text()
+
     def test_backend_flag_requires_bundle(self, template_task):
         with pytest.raises(ValueError, match="requires a bundle"):
             HarborBackend(
