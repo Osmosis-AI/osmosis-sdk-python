@@ -33,8 +33,10 @@ def apply_opensandbox_defaults(kwargs: dict[str, Any]) -> None:
     # OpenSandbox's execution adapters use protocol separately from domain;
     # an explicit http:// service URL only overrides the control-plane client.
     kwargs.setdefault("protocol", scheme if scheme in {"http", "https"} else "https")
-    # Managed sandboxes are reachable only through the server, not directly.
-    kwargs.setdefault("use_server_proxy", True)
+    # Managed sandboxes are reachable only through the server. The managed
+    # entrypoint always exports a run ID; self-hosted servers keep Harbor's default.
+    if os.environ.get("OPENSANDBOX_RUN_ID"):
+        kwargs.setdefault("use_server_proxy", True)
 
 
 def uses_local_docker_runtime(environment_config: HarborEnvironmentConfig) -> bool:

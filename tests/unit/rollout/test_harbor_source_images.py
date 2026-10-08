@@ -224,8 +224,23 @@ def test_opensandbox_transport_matches_service_and_preserves_overrides(
     )
 
     monkeypatch.setenv("OPENSANDBOX_DOMAIN", domain)
+    monkeypatch.setenv("OPENSANDBOX_RUN_ID", "run-1")
     kwargs = dict(overrides)
 
     apply_opensandbox_defaults(kwargs)
 
     assert kwargs == expected
+
+
+def test_self_hosted_opensandbox_keeps_harbors_direct_default(monkeypatch):
+    from osmosis_ai.rollout.backend.harbor.environment import (
+        apply_opensandbox_defaults,
+    )
+
+    monkeypatch.setenv("OPENSANDBOX_DOMAIN", "http://localhost:8080")
+    monkeypatch.delenv("OPENSANDBOX_RUN_ID", raising=False)
+    kwargs: dict = {}
+
+    apply_opensandbox_defaults(kwargs)
+
+    assert kwargs == {"protocol": "http"}
