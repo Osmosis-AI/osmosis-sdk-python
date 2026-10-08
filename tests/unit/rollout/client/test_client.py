@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from typing import Any
 from unittest.mock import AsyncMock, call
 
@@ -198,12 +199,16 @@ async def test_result_retries_respect_last_confirmed_lease(
         await rollout_client.http_client.aclose()
 
 
+@pytest.mark.parametrize("gateway", [False, True])
 async def test_result_retry_has_a_wall_clock_lease_deadline(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, gateway: bool
 ) -> None:
     monkeypatch.setattr("osmosis_ai.rollout.client.client._RESULT_READ_GRACE_SEC", 0.01)
     monkeypatch.setattr(
         "osmosis_ai.rollout.client.client._RESULT_RETRY_DELAYS_SEC", (0.001,)
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.rollout.client.client._GATEWAY_RETRY_DELAYS_SEC", (0.001,)
     )
     polls = 0
     cancelled = asyncio.Event()
@@ -222,6 +227,8 @@ async def test_result_retry_has_a_wall_clock_lease_deadline(
             )
         polls += 1
         if polls == 1:
+            if gateway:
+                return httpx.Response(502)
             raise error
         try:
             # MockTransport does not enforce HTTPX's per-operation timeouts.
@@ -242,8 +249,139 @@ async def test_result_retry_has_a_wall_clock_lease_deadline(
             )
         assert polls == 2
         assert cancelled.is_set()
-        assert all(result is error for result in errors)
+        assert all(result is errors[0] for result in errors)
+        if gateway:
+            assert isinstance(errors[0], RolloutProtocolError)
+            assert errors[0].status_code == 502
+        else:
+            assert errors[0] is error
         assert rollout.done() and rollout.polling_finished
+    finally:
+        await rollout_client.http_client.aclose()
+
+
+@pytest.mark.parametrize(
+    ("failures", "delays"),
+    [
+        *(((status,), [0.25]) for status in (502, 503, 504)),
+        ((502, 503, 504), [0.25, 0.5, 1.0]),
+        # Transport and gateway failures draw on independent schedules.
+        (
+            (httpx.ReadError, 502, httpx.RemoteProtocolError, 504),
+            [0.1, 0.25, 0.5, 0.5],
+        ),
+    ],
+)
+async def test_result_gateway_errors_reuse_admission_and_lease(
+    failures: tuple[int | type[httpx.TransportError], ...],
+    delays: list[float],
+    retry_sleep: AsyncMock,
+) -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(http_request: httpx.Request) -> httpx.Response:
+        requests.append(http_request)
+        if http_request.method == "POST":
+            return httpx.Response(202, json=admission())
+        if len(requests) - 1 <= len(failures):
+            failure = failures[len(requests) - 2]
+            if isinstance(failure, int):
+                return httpx.Response(failure, text="<html>Bad Gateway</html>")
+            raise failure("lost result response", request=http_request)
+        return httpx.Response(200, json={"rollout_id": ROLLOUT_ID, "status": "success"})
+
+    rollout_client = client(handler)
+    try:
+        result = await completed(rollout_client)
+    finally:
+        await rollout_client.http_client.aclose()
+
+    assert result.status is RolloutStatus.SUCCESS
+    assert [r.method for r in requests] == ["POST"] + ["GET"] * (len(failures) + 1)
+    assert all(r.url.path == f"/rollout/{ROLLOUT_ID}/result" for r in requests[1:])
+    assert all(r.headers[POLLING_LEASE_HEADER] == "test-lease" for r in requests[1:])
+    assert all(r.extensions["timeout"]["read"] == 40.0 for r in requests[1:])
+    assert retry_sleep.await_args_list == [call(delay) for delay in delays]
+
+
+async def test_persistent_gateway_errors_exhaust_the_retry_schedule(
+    retry_sleep: AsyncMock, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.WARNING, logger="osmosis_ai.rollout.client.client")
+    polls = 0
+
+    def handler(http_request: httpx.Request) -> httpx.Response:
+        nonlocal polls
+        if http_request.method == "POST":
+            return httpx.Response(202, json=admission())
+        polls += 1
+        return httpx.Response(503)
+
+    rollout_client = client(handler)
+    try:
+        with pytest.raises(RolloutProtocolError) as raised:
+            await completed(rollout_client)
+    finally:
+        await rollout_client.http_client.aclose()
+
+    assert raised.value.status_code == 503
+    assert str(raised.value) == f"GET /rollout/{ROLLOUT_ID}/result returned 503"
+    assert polls == 7
+    delays = [0.25, 0.5, 1.0, 2.0, 4.0, 8.0]
+    assert retry_sleep.await_args_list == [call(delay) for delay in delays]
+    assert [record.getMessage() for record in caplog.records] == [
+        f"Retrying result read for rollout {ROLLOUT_ID} after HTTP 503 "
+        f"(attempt {attempt}) in {delay:.2f}s"
+        for attempt, delay in enumerate(delays, start=1)
+    ]
+
+
+@pytest.mark.parametrize(
+    ("poll_durations", "expected_polls"),
+    [
+        # A gateway error after a full long-poll wait leaves time to retry.
+        ((40.0,), 2),
+        # The retry could not finish before the confirmed lease deadline.
+        ((80.0,), 1),
+        # Gateway responses do not renew the lease confirmed at admission.
+        ((35.0, 39.0, 39.0), 3),
+    ],
+)
+async def test_gateway_retries_respect_last_confirmed_lease(
+    monkeypatch: pytest.MonkeyPatch,
+    retry_sleep: AsyncMock,
+    poll_durations: tuple[float, ...],
+    expected_polls: int,
+) -> None:
+    now = 0.0
+    polls = 0
+    monkeypatch.setattr("osmosis_ai.rollout.client.client.monotonic", lambda: now)
+
+    def sleep(delay: float) -> None:
+        nonlocal now
+        now += delay
+
+    retry_sleep.side_effect = sleep
+
+    def handler(http_request: httpx.Request) -> httpx.Response:
+        nonlocal now, polls
+        if http_request.method == "POST":
+            return httpx.Response(202, json=admission())
+        polls += 1
+        if polls <= len(poll_durations):
+            now += poll_durations[polls - 1]
+            return httpx.Response(502)
+        return httpx.Response(200, json={"rollout_id": ROLLOUT_ID, "status": "success"})
+
+    rollout_client = client(handler)
+    try:
+        if expected_polls > len(poll_durations):
+            assert (await completed(rollout_client)).status is RolloutStatus.SUCCESS
+        else:
+            with pytest.raises(RolloutProtocolError) as raised:
+                await completed(rollout_client)
+            assert raised.value.status_code == 502
+        assert polls == expected_polls
     finally:
         await rollout_client.http_client.aclose()
 
@@ -308,25 +446,31 @@ async def test_result_http_and_protocol_errors_are_not_retried(
         with pytest.raises(RolloutProtocolError) as raised:
             await completed(rollout_client)
         assert raised.value.status_code == response.status_code
+        assert str(raised.value).startswith(f"GET /rollout/{ROLLOUT_ID}/result ")
     finally:
         await rollout_client.http_client.aclose()
     assert polls == 1
     retry_sleep.assert_not_awaited()
 
 
+@pytest.mark.parametrize("gateway", [False, True])
 @pytest.mark.parametrize("cancel", [False, True])
-async def test_admission_and_cancellation_disconnects_are_not_retried(
-    cancel: bool, retry_sleep: AsyncMock
+async def test_admission_and_cancellation_failures_are_not_retried(
+    cancel: bool, gateway: bool, retry_sleep: AsyncMock
 ) -> None:
     requests: list[httpx.Request] = []
 
     def handler(http_request: httpx.Request) -> httpx.Response:
         requests.append(http_request)
+        if gateway:
+            return httpx.Response(502)
         raise httpx.RemoteProtocolError("lost response", request=http_request)
 
     rollout_client = client(handler)
     try:
-        with pytest.raises(httpx.RemoteProtocolError):
+        with pytest.raises(
+            RolloutProtocolError if gateway else httpx.RemoteProtocolError
+        ):
             if cancel:
                 await rollout_client.cancel_rollout(ROLLOUT_ID)
             else:

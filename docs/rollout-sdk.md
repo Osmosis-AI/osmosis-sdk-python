@@ -103,16 +103,20 @@ Artifacts are files produced by a rollout — logs, traces, generated outputs, s
 There is one rule: write files under `ctx.artifacts_dir` (available on both `AgentWorkflowContext` and `GraderContext`). It is `Path | None`, so check `if ctx.artifacts_dir:` before using it. In Harbor-backed rollouts it is the sandbox's `/logs/artifacts/`; `LocalBackend` provides an isolated per-rollout directory. If a file is produced elsewhere, copy it in once you've confirmed the dir exists (`if ctx.artifacts_dir: shutil.copy2(path, ctx.artifacts_dir / "name")`).
 
 ```python
+import asyncio
 import json
 
 
 async def grade(self, ctx: GraderContext) -> Any:
     if ctx.artifacts_dir:
-        (ctx.artifacts_dir / "trace.json").write_text(
-            json.dumps({"score_reason": "matched rubric"})
+        trace = ctx.artifacts_dir / "trace.json"
+        await asyncio.to_thread(
+            trace.write_text, json.dumps({"score_reason": "matched rubric"})
         )
     ctx.set_reward(1.0)
 ```
+
+Write artifacts off the event loop, as above. In managed runs the directory can be backed by remote storage, so closing a file may wait for its upload; a synchronous write in `run` or `grade` then blocks every rollout on the server and delays result polling.
 
 After each rollout the artifacts land on the host under `~/.osmosis/<rollout_id>/artifacts/`. `LocalBackend` writes your files at that root. Harbor mirrors its collected-trial layout, so the `/logs/artifacts/` convention dir lands at `.../artifacts/logs/artifacts/<file>`, next to any paths you declare in the task's `artifacts` config.
 
@@ -218,7 +222,7 @@ The server creates the polling lease and chooses both the long-poll wait and lea
 
 An admission deadline that expires during an HTTP request does not prove the server rejected the rollout. `RolloutAdmissionTimeoutError` reports that admission may have succeeded; the server requests cancellation of unobserved work when its polling lease expires. The client does not automatically cancel by ID: a lost duplicate-ID rejection could otherwise cancel another active rollout. Use a fresh rollout ID for each new attempt. A deadline reached while waiting to retry an explicit 429 reports only the admission timeout.
 
-Each result GET retries `httpx.RemoteProtocolError`, `httpx.NetworkError`, and `httpx.ReadTimeout` at most twice, after 0.1 and 0.5 seconds, using the same rollout ID, polling lease, and request timeout (the server's result wait plus 10 seconds). A retry starts only when its backoff and full request timeout fit before the last confirmed lease deadline; the retry request also has that wall-clock bound. The deadline is measured from the start of the last successful admission or result request, since receiving a delayed response does not renew the lease. Failed requests cannot extend it. Caller cancellation and deadlines can interrupt both requests and backoff. Other timeouts, HTTP errors, and invalid protocol responses are not retried. This recovery does not replay admission or cancellation requests; admission's existing HTTP 429 retry behavior is unchanged.
+Each result GET retries `httpx.RemoteProtocolError`, `httpx.NetworkError`, and `httpx.ReadTimeout` at most twice, after 0.1 and 0.5 seconds, using the same rollout ID, polling lease, and request timeout (the server's result wait plus 10 seconds). HTTP 502, 503, and 504 responses, which a load balancer or gateway in front of the server can return when its connection to the server fails, are retried on a separate schedule at most six times, after 0.25, 0.5, 1, 2, 4, and 8 seconds; result reads are idempotent, so the same lease is reused. A retry starts only when its backoff and full request timeout fit before the last confirmed lease deadline; the retry request also has that wall-clock bound, and reaching it raises the last failure. The deadline is measured from the start of the last successful admission or result request, since receiving a delayed response does not renew the lease. Failed requests and gateway error responses cannot extend it. Caller cancellation and deadlines can interrupt both requests and backoff. Other timeouts, other HTTP errors (including 500 and every 4xx), and invalid protocol responses are not retried; persistent gateway errors raise `RolloutProtocolError` with the last status code. This recovery does not replay admission or cancellation requests; admission's existing HTTP 429 retry behavior is unchanged.
 
 ## Server and backends
 
@@ -309,7 +313,7 @@ Note that `HarborBackend` still resolves — with a different constructor. Port 
 
 ### Running a server
 
-There is no `osmosis rollout serve` command. Scaffold a server with `osmosis rollout init <name>`, which writes `rollouts/<name>/main.py` wiring `LocalBackend` + `create_rollout_server` + `uvicorn` ([../osmosis_ai/templates/_scaffolds/rollout/main.py.tpl](../osmosis_ai/templates/_scaffolds/rollout/main.py.tpl)), then run `python rollouts/<name>/main.py` from the workspace root (it listens on `_OSMOSIS_ROLLOUT_PORT`, default 8000).
+There is no `osmosis rollout serve` command. Scaffold a server with `osmosis rollout init <name>`, which writes `rollouts/<name>/main.py` wiring `LocalBackend` + `create_rollout_server` + `uvicorn` ([../osmosis_ai/templates/_scaffolds/rollout/main.py.tpl](../osmosis_ai/templates/_scaffolds/rollout/main.py.tpl)), then run `python rollouts/<name>/main.py` from the workspace root (it listens on `_OSMOSIS_ROLLOUT_PORT`, default 8000). The scaffold and the Harbor source gateway ([backend/harbor/source.py](../osmosis_ai/rollout/backend/harbor/source.py)) pass `timeout_keep_alive=2160` to `uvicorn.run`: the Osmosis platform load balancer keeps idle connections for 2100 seconds, and with uvicorn's 5-second default it can reuse a connection the server is closing, failing the request with HTTP 502. Keep a keep-alive above 2100 seconds if you start the server another way.
 
 ## Integrations
 

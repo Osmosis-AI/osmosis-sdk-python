@@ -26,6 +26,8 @@ _MAX_RETRY_AFTER_SEC = 60.0
 _CANCEL_REQUEST_TIMEOUT_SEC = 5.0
 _RESULT_READ_GRACE_SEC = 10.0
 _RESULT_RETRY_DELAYS_SEC = (0.1, 0.5)
+_GATEWAY_RETRY_DELAYS_SEC = (0.25, 0.5, 1.0, 2.0, 4.0, 8.0)
+_GATEWAY_STATUS_CODES = frozenset({502, 503, 504})
 _FINISHED_STATUSES = frozenset(
     {RolloutStatus.SUCCESS, RolloutStatus.FAILURE, RolloutStatus.CANCELLED}
 )
@@ -166,21 +168,22 @@ def _admission(response: httpx.Response, rollout_id: str) -> RolloutInitResponse
 
 
 def _result(response: httpx.Response, rollout_id: str) -> RolloutResultResponse:
+    route = f"GET /rollout/{rollout_id}/result"
     if response.status_code != 200:
         raise RolloutProtocolError(
-            f"GET /rollout/{{id}}/result returned {response.status_code}",
+            f"{route} returned {response.status_code}",
             status_code=response.status_code,
         )
     try:
         result = RolloutResultResponse.model_validate(response.json())
     except ValueError as exc:
         raise RolloutProtocolError(
-            "GET /rollout/{id}/result returned an invalid response",
+            f"{route} returned an invalid response",
             status_code=response.status_code,
         ) from exc
     if result.rollout_id != rollout_id:
         raise RolloutProtocolError(
-            "GET /rollout/{id}/result returned a different rollout_id",
+            f"{route} returned a different rollout_id",
             status_code=response.status_code,
         )
     return result
@@ -390,9 +393,12 @@ class RolloutClient:
         self, admission: RolloutInitResponse, *, lease_deadline: float
     ) -> tuple[RolloutResultResponse, float]:
         timeout = admission.result_wait_timeout_sec + _RESULT_READ_GRACE_SEC
-        delays = iter(_RESULT_RETRY_DELAYS_SEC)
-        last_error: httpx.TransportError | None = None
+        transport_delays = iter(_RESULT_RETRY_DELAYS_SEC)
+        gateway_delays = iter(_GATEWAY_RETRY_DELAYS_SEC)
+        attempt = 0
+        last_error: Exception | None = None
         while True:
+            attempt += 1
             # A successful response confirms renewal when its request reached
             # the server, not when the long-poll response arrived. A failed
             # request may never have reached it, so cannot extend this budget.
@@ -422,24 +428,37 @@ class RolloutClient:
                 httpx.NetworkError,
                 httpx.ReadTimeout,
             ) as exc:
-                delay = next(delays, None)
-                if delay is None or monotonic() + delay + timeout >= lease_deadline:
-                    raise
-                logger.warning(
-                    "Retrying result read for rollout %s after %s in %.1fs",
-                    admission.rollout_id,
-                    type(exc).__name__,
-                    delay,
-                )
-                await asyncio.sleep(delay)
-                if monotonic() + timeout >= lease_deadline:
-                    raise
-                last_error = exc
+                error: Exception = exc
+                delay = next(transport_delays, None)
+                reason = type(exc).__name__
             else:
-                return (
-                    _result(response, admission.rollout_id),
-                    request_started + admission.polling_lease_timeout_sec,
-                )
+                try:
+                    return (
+                        _result(response, admission.rollout_id),
+                        request_started + admission.polling_lease_timeout_sec,
+                    )
+                except RolloutProtocolError as exc:
+                    # A load balancer answers 502-504 itself when the server
+                    # reset or never answered the request. Result reads are
+                    # idempotent, so these get a longer schedule of their own.
+                    if exc.status_code not in _GATEWAY_STATUS_CODES:
+                        raise
+                    error = exc
+                    delay = next(gateway_delays, None)
+                    reason = f"HTTP {exc.status_code}"
+            if delay is None or monotonic() + delay + timeout >= lease_deadline:
+                raise error
+            logger.warning(
+                "Retrying result read for rollout %s after %s (attempt %d) in %.2fs",
+                admission.rollout_id,
+                reason,
+                attempt,
+                delay,
+            )
+            await asyncio.sleep(delay)
+            if monotonic() + timeout >= lease_deadline:
+                raise error
+            last_error = error
 
     async def cancel_rollout(self, rollout_id: str) -> CancelRolloutsResponse:
         request = CancelRolloutsRequest(ids=[rollout_id])

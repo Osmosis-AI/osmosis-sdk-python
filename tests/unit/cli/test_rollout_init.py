@@ -8,6 +8,7 @@ to the wheel-corruption edge case below.
 
 from __future__ import annotations
 
+import ast
 import json
 import subprocess
 from pathlib import Path
@@ -133,6 +134,14 @@ def test_rollout_init_main_py_is_a_runnable_rollout_server(
     assert "def main()" in main_py
     assert 'if __name__ == "__main__":' in main_py
     assert "uvicorn.run(" in main_py
+    # Idle connections must outlive the platform load balancer's 2100s timeout.
+    (uvicorn_run,) = [
+        node
+        for node in ast.walk(ast.parse(main_py, filename="main.py"))
+        if isinstance(node, ast.Call) and ast.unparse(node.func) == "uvicorn.run"
+    ]
+    keywords = {keyword.arg: keyword.value for keyword in uvicorn_run.keywords}
+    assert ast.literal_eval(keywords["timeout_keep_alive"]) > 2100
 
 
 def test_rollout_init_substitutes_rollout_name_in_configs(
