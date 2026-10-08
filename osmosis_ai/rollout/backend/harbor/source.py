@@ -12,7 +12,6 @@ import tempfile
 import tomllib
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlsplit
 
 import httpx
 
@@ -173,16 +172,6 @@ def main() -> None:
         os.environ.pop("_OSMOSIS_HARBOR_CONFIG", "{}")
     )
     environment_kwargs = dict(config.environment_kwargs)
-    domain = environment_kwargs.get("domain") or os.environ.get(
-        "OPENSANDBOX_DOMAIN", ""
-    )
-    scheme = urlsplit(domain).scheme
-    # OpenSandbox's execution adapters use protocol separately from domain;
-    # an explicit http:// service URL only overrides the control-plane client.
-    environment_kwargs.setdefault(
-        "protocol", scheme if scheme in {"http", "https"} else "https"
-    )
-    environment_kwargs.setdefault("use_server_proxy", True)
     source = TaskSource(**json.loads(os.environ["_OSMOSIS_HARBOR_TASK_SOURCE"]))
     published_repository = os.environ["_OSMOSIS_HARBOR_REGISTRY"]
     registry_root = published_repository.rsplit("/", 1)[0]

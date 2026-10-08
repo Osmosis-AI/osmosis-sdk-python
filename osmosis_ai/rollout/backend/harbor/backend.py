@@ -69,6 +69,7 @@ from osmosis_ai.rollout.backend.harbor.diagnostics import (
 )
 from osmosis_ai.rollout.backend.harbor.environment import (
     apply_chat_endpoint_egress,
+    apply_opensandbox_defaults,
     is_loopback_url,
     load_task_network_config,
     rewrite_url_for_docker,
@@ -257,6 +258,11 @@ class HarborBackend(ExecutionBackend):
             # Provider-side cleanup survives a crashed rollout server.
             self.environment_config.kwargs.setdefault("auto_stop_interval_mins", 60)
             self.environment_config.kwargs.setdefault("auto_delete_interval_mins", 0)
+        if (
+            self.environment_config.type == EnvironmentType.OPENSANDBOX
+            and self.environment_config.import_path is None
+        ):
+            apply_opensandbox_defaults(self.environment_config.kwargs)
         if patch_dockerfile_with_sdk and self.bundle is None:
             raise ValueError("patch_dockerfile_with_sdk requires a bundle")
         if patch_dockerfile_with_sdk is None:

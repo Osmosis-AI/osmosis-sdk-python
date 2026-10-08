@@ -6,8 +6,11 @@ Shared by both Harbor backends, so neither depends on the other.
 from __future__ import annotations
 
 import logging
+import os
 import platform
 from pathlib import Path
+from typing import Any
+from urllib.parse import urlsplit
 
 from harbor.models.environment_type import EnvironmentType
 from harbor.models.task.config import NetworkMode
@@ -21,6 +24,17 @@ from harbor.models.trial.config import (
 from harbor.trial.network_policy import resolve_agent_phase_policy
 
 logger: logging.Logger = logging.getLogger(__name__)
+
+
+def apply_opensandbox_defaults(kwargs: dict[str, Any]) -> None:
+    """Route Harbor's OpenSandbox client the way managed OpenSandbox expects."""
+    domain = kwargs.get("domain") or os.environ.get("OPENSANDBOX_DOMAIN", "")
+    scheme = urlsplit(domain).scheme
+    # OpenSandbox's execution adapters use protocol separately from domain;
+    # an explicit http:// service URL only overrides the control-plane client.
+    kwargs.setdefault("protocol", scheme if scheme in {"http", "https"} else "https")
+    # Managed sandboxes are reachable only through the server, not directly.
+    kwargs.setdefault("use_server_proxy", True)
 
 
 def uses_local_docker_runtime(environment_config: HarborEnvironmentConfig) -> bool:
