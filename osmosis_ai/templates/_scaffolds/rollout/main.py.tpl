@@ -51,17 +51,28 @@ class MyGrader(Grader):
         # source. Assign its scalar reward with:
         #   ctx.set_reward(value)
         #
-        # Optional: write file artifacts (artifacts_dir may be None, so guard):
+        # Optional: write file artifacts (artifacts_dir may be None, so guard).
+        # Write off the event loop; blocking it delays result polling:
+        #   import asyncio
         #   import json
         #   if ctx.artifacts_dir:
-        #       (ctx.artifacts_dir / "debug.json").write_text(json.dumps({...}))
+        #       debug_file = ctx.artifacts_dir / "debug.json"
+        #       await asyncio.to_thread(debug_file.write_text, json.dumps({...}))
         ctx.set_reward(0.0)
 
 
 def main() -> None:
     backend = LocalBackend(workflow=MyAgentWorkflow, grader=MyGrader)
     app = create_rollout_server(backend=backend)
-    uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("_OSMOSIS_ROLLOUT_PORT", "8000")))
+    uvicorn.run(
+        app,
+        host="0.0.0.0",
+        port=int(os.environ.get("_OSMOSIS_ROLLOUT_PORT", "8000")),
+        # Outlive the Osmosis platform load balancer's 2100s idle timeout.
+        # With uvicorn's 5s default, the load balancer can reuse a connection
+        # the server is closing, failing the request with HTTP 502.
+        timeout_keep_alive=2160,
+    )
 
 
 if __name__ == "__main__":

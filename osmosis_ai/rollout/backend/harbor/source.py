@@ -224,6 +224,11 @@ def main() -> None:
             app,
             host="0.0.0.0",
             port=int(os.environ.get("_OSMOSIS_ROLLOUT_PORT", "8000")),
+            # Outlive a fronting load balancer's idle timeout (2100s on the
+            # Osmosis platform). With uvicorn's 5s default, the load balancer can
+            # reuse a connection the server is closing, failing the request
+            # with HTTP 502.
+            timeout_keep_alive=2160,
         )
 
 

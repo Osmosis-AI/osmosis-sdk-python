@@ -57,7 +57,10 @@ async def save_trajectory(
     ``diagnostics`` overrides ``result.extra_fields`` for the sidecar.
     """
     try:
-        await _save(
+        # Conversion and JSON encoding grow with the transcript, so they run
+        # with the writes off the event loop instead of stalling result polls.
+        await asyncio.to_thread(
+            _save,
             rollout_id=rollout_id,
             result=result,
             request_label=request_label,
@@ -75,7 +78,7 @@ async def save_trajectory(
         )
 
 
-async def _save(
+def _save(
     *,
     rollout_id: str,
     result: ExecutionResult,
@@ -93,7 +96,7 @@ async def _save(
         diagnostics_data = json.dumps(
             payload, ensure_ascii=False, indent=2, sort_keys=True, default=str
         ).encode()
-        await asyncio.to_thread(_write_document, diagnostics_dest, diagnostics_data)
+        _write_document(diagnostics_dest, diagnostics_data)
         logger.info(
             "Saved rollout diagnostics for %s -> %s", rollout_id, diagnostics_dest
         )
@@ -133,5 +136,5 @@ async def _save(
     dest = artifact_root / rollout_id / "trajectory.json"
     # Keep large token-id/logprob arrays compact inside the pretty document.
     data = format_trajectory_json(trajectory.to_json_dict()).encode()
-    await asyncio.to_thread(_write_document, dest, data)
+    _write_document(dest, data)
     logger.info("Saved trajectory document for rollout %s -> %s", rollout_id, dest)
