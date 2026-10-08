@@ -103,16 +103,20 @@ Artifacts are files produced by a rollout — logs, traces, generated outputs, s
 There is one rule: write files under `ctx.artifacts_dir` (available on both `AgentWorkflowContext` and `GraderContext`). It is `Path | None`, so check `if ctx.artifacts_dir:` before using it. In Harbor-backed rollouts it is the sandbox's `/logs/artifacts/`; `LocalBackend` provides an isolated per-rollout directory. If a file is produced elsewhere, copy it in once you've confirmed the dir exists (`if ctx.artifacts_dir: shutil.copy2(path, ctx.artifacts_dir / "name")`).
 
 ```python
+import asyncio
 import json
 
 
 async def grade(self, ctx: GraderContext) -> Any:
     if ctx.artifacts_dir:
-        (ctx.artifacts_dir / "trace.json").write_text(
-            json.dumps({"score_reason": "matched rubric"})
+        trace = ctx.artifacts_dir / "trace.json"
+        await asyncio.to_thread(
+            trace.write_text, json.dumps({"score_reason": "matched rubric"})
         )
     ctx.set_reward(1.0)
 ```
+
+Write artifacts off the event loop, as above. In managed runs the directory can be backed by remote storage, so closing a file may wait for its upload; a synchronous write in `run` or `grade` then blocks every rollout on the server and delays result polling.
 
 After each rollout the artifacts land on the host under `~/.osmosis/<rollout_id>/artifacts/`. `LocalBackend` writes your files at that root. Harbor mirrors its collected-trial layout, so the `/logs/artifacts/` convention dir lands at `.../artifacts/logs/artifacts/<file>`, next to any paths you declare in the task's `artifacts` config.
 
