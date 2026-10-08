@@ -466,7 +466,7 @@ class TestPatchDockerfileWithSdk:
         )
         assert not (task_dir / "environment" / "Dockerfile").exists()
 
-    def test_materialize_skips_the_patch_when_a_prebuilt_image_is_set(
+    def test_materialize_patches_a_dockerfile_even_with_a_prebuilt_image(
         self, template_task, tmp_path
     ):
         (template_task / "task.toml").write_text(
@@ -478,7 +478,7 @@ class TestPatchDockerfileWithSdk:
             ContainerInput(rollout_id="r1", prompt=[{"role": "user", "content": "x"}]),
             sdk_requirements=["httpx"],
         )
-        assert "uv venv" not in (task_dir / "environment" / "Dockerfile").read_text()
+        assert "uv venv" in (task_dir / "environment" / "Dockerfile").read_text()
 
     def test_backend_flag_requires_bundle(self, template_task):
         with pytest.raises(ValueError, match="requires a bundle"):

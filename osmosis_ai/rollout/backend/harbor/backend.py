@@ -539,12 +539,11 @@ class HarborBackend(ExecutionBackend):
         if (
             self.patch_dockerfile_requested
             and task.path not in self.unpatched_tasks_warned
-            and not task.builds_dockerfile()
+            and not task.has_dockerfile()
         ):
             self.unpatched_tasks_warned.add(task.path)
             logger.warning(
-                "Not pre-installing the SDK into task %s: Harbor won't build its "
-                "Dockerfile",
+                "Not pre-installing the SDK into task %s: it has no Dockerfile",
                 task.path.name,
             )
         return task.materialize(
