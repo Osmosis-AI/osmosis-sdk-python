@@ -23,6 +23,7 @@ from typing import Any
 
 from packaging.markers import default_environment
 from packaging.requirements import Requirement
+from packaging.version import Version
 
 BASE_REQUIREMENTS = {
     "anyio",
@@ -50,6 +51,7 @@ EXTRA_REQUIREMENTS: dict[str, set[str]] = {
     "strands": {
         "aiohttp",
         "click",
+        "fsspec",
         "litellm",
         "mcp",
         "orjson",
@@ -60,6 +62,7 @@ EXTRA_REQUIREMENTS: dict[str, set[str]] = {
     "openai-agents": {
         "aiohttp",
         "click",
+        "fsspec",
         "litellm",
         "mcp",
         "openai-agents",
@@ -70,6 +73,7 @@ EXTRA_REQUIREMENTS: dict[str, set[str]] = {
     "harbor": {
         "aiohttp",
         "click",
+        "fsspec",
         "harbor",
         "litellm",
         "orjson",
@@ -80,11 +84,11 @@ EXTRA_REQUIREMENTS: dict[str, set[str]] = {
         "urllib3",
         "uv",
     },
-    "rubric": {"aiohttp", "click", "litellm", "orjson", "urllib3"},
+    "rubric": {"aiohttp", "click", "fsspec", "litellm", "orjson", "urllib3"},
     "parquet": {"pyarrow"},
     # eval = osmosis-ai[server,parquet] self-reference + the in-process
     # LiteLLM bridge and the uv executable used to launch rollout environments.
-    "eval": {"litellm", "osmosis-ai", "uv"},
+    "eval": {"fsspec", "litellm", "osmosis-ai", "uv"},
     "full": {"osmosis-ai"},
 }
 
@@ -146,6 +150,10 @@ def _assert_dependency_metadata(
     for raw_requirement in distribution.requires or []:
         requirement = Requirement(raw_requirement)
         name = _normalize_distribution(requirement.name)
+        if name == "fsspec":
+            assert ">=2026.6.0" in str(requirement.specifier).split(","), (
+                f"Missing fsspec security floor: {raw_requirement}"
+            )
         if requirement.marker is None:
             actual_base.add(name)
             continue
@@ -642,6 +650,19 @@ def main() -> None:
     _assert_clean_import_state()
 
     installed = _installed_distributions()
+    if args.scenario in {
+        "strands",
+        "openai-agents",
+        "harbor",
+        "rubric",
+        "eval",
+        "full",
+    }:
+        assert Version(importlib.metadata.version("fsspec")) >= Version("2026.6.0"), (
+            "Installed fsspec is below the GHSA-27vj-qcqg-25rc security floor"
+        )
+    else:
+        assert "fsspec" not in installed, "fsspec leaked into an unrelated install"
     present = SCENARIO_PRESENT.get(args.scenario, set())
     absent = SCENARIO_ABSENT.get(args.scenario, set())
     _assert_distributions(

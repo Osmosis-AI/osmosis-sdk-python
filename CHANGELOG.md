@@ -2,6 +2,12 @@
 
 This file records changes to `osmosis-ai`. For earlier versions, see [GitHub Releases](https://github.com/Osmosis-AI/osmosis-sdk-python/releases).
 
+## Unreleased
+
+### Changed
+
+- The `strands`, `openai-agents`, `harbor`, `rubric`, and `eval` extras (including `full`) now require `fsspec>=2026.6.0` for the ReferenceFileSystem code-execution fix in [GHSA-27vj-qcqg-25rc](https://github.com/advisories/GHSA-27vj-qcqg-25rc); update conflicting application pins, regenerate lockfiles, and rebuild affected runtime images.
+
 ## 0.3.6 - 2026-10-08
 
 ### Breaking Changes
