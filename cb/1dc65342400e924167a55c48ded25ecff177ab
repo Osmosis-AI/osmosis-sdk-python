@@ -1,0 +1,37 @@
+tests/unit/cli/test_rollout_init.py
+  s_acac490f6cee24::t_8dbf7c48137a57 11
+  s_acac490f6cee24::t_cdbdc60f001845 138-144
+  s_acac490f6cee24::t_0335081085d215 137
+docs/rollout-sdk.md
+  s_acac490f6cee24::t_3ea5eba7981934 139,221,311
+docs/troubleshooting.md
+  s_acac490f6cee24::t_aa299e6b13801f 52-55
+osmosis_ai/rollout/backend/harbor/source.py
+  s_acac490f6cee24::t_4cd67867c8a70b 227-231
+osmosis_ai/rollout/client/client.py
+  s_acac490f6cee24::t_8725ab51d25277 29-30,171,174,181,186,396-399,401,431-433,435-461
+osmosis_ai/rollout/trajectory/save.py
+  s_acac490f6cee24::t_c2051eeb9b7350 60-63,81,99,139
+osmosis_ai/templates/_scaffolds/rollout/main.py.tpl
+  s_acac490f6cee24::t_1861d07254b955 54-56,59-60,67-75
+tests/unit/rollout/client/test_client.py
+  s_acac490f6cee24::t_c1f17b5b20f06c 5,202,204,210-212,230-231,252-257,263-388,449,456,458-459,465-466,471-473
+tests/unit/rollout/test_trajectory_save.py
+  s_acac490f6cee24::t_46382fff73f9a6 5,7-9,12-13,103-143
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "cb1dc65342400e924167a55c48ded25ecff177ab",
+  "prompts": {},
+  "sessions": {
+    "s_acac490f6cee24": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "19362013-2a68-429c-9e69-d25ce0411b50",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}
