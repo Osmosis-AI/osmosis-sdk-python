@@ -112,9 +112,9 @@ jobs:
         include:
           # The ordinary suite exercises the newer PyPI version in uv.lock.
           - name: minimum
-            requirement: "harbor[daytona]==0.20.0"
+            requirement: "harbor[daytona,opensandbox]==0.20.0"
           - name: osmosis-fork
-            requirement: "harbor[daytona] @ git+https://github.com/Osmosis-AI/harbor@e8257a65a90dde2d6b353d16acffcd70c6b54c5d"
+            requirement: "harbor[daytona,opensandbox] @ git+https://github.com/Osmosis-AI/harbor@e8257a65a90dde2d6b353d16acffcd70c6b54c5d"
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v7

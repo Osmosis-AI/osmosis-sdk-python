@@ -265,6 +265,8 @@ class HarborBackend(ExecutionBackend):
             apply_opensandbox_defaults(self.environment_config.kwargs)
         if patch_dockerfile_with_sdk and self.bundle is None:
             raise ValueError("patch_dockerfile_with_sdk requires a bundle")
+        self.patch_dockerfile_requested: bool = bool(patch_dockerfile_with_sdk)
+        self.unpatched_tasks_warned: set[Path] = set()
         if patch_dockerfile_with_sdk is None:
             patch_dockerfile_with_sdk = self.bundle is not None
         # The bundle's declared dependencies (stable) are pre-installed into the
@@ -534,6 +536,16 @@ class HarborBackend(ExecutionBackend):
     def materialize_task(
         self, task: HarborTask, rollout_id: str, container_input: ContainerInput
     ) -> Path:
+        if (
+            self.patch_dockerfile_requested
+            and task.path not in self.unpatched_tasks_warned
+            and not task.has_dockerfile()
+        ):
+            self.unpatched_tasks_warned.add(task.path)
+            logger.warning(
+                "Not pre-installing the SDK into task %s: it has no Dockerfile",
+                task.path.name,
+            )
         return task.materialize(
             self.rollouts_dir / rollout_id,
             container_input,

@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import logging
 import os
 import threading
 import time
@@ -451,6 +452,34 @@ class TestPatchDockerfileWithSdk:
             "uv venv" not in (template_task / "environment" / "Dockerfile").read_text()
         )
 
+    def test_materialize_skips_the_patch_for_a_prebuilt_image_task(self, tmp_path):
+        task = tmp_path / "prebuilt-task"
+        (task / "environment").mkdir(parents=True)
+        (task / "task.toml").write_text(
+            '[task]\nname = "prebuilt-task"\n\n'
+            '[environment]\ndocker_image = "python:3.12-bookworm"\n'
+        )
+        task_dir = HarborTask(task).materialize(
+            tmp_path / "r1",
+            ContainerInput(rollout_id="r1", prompt=[{"role": "user", "content": "x"}]),
+            sdk_requirements=["httpx"],
+        )
+        assert not (task_dir / "environment" / "Dockerfile").exists()
+
+    def test_materialize_patches_a_dockerfile_even_with_a_prebuilt_image(
+        self, template_task, tmp_path
+    ):
+        (template_task / "task.toml").write_text(
+            '[task]\nname = "template-task"\n\n'
+            '[environment]\ndocker_image = "python:3.12-bookworm"\n'
+        )
+        task_dir = HarborTask(template_task).materialize(
+            tmp_path / "r1",
+            ContainerInput(rollout_id="r1", prompt=[{"role": "user", "content": "x"}]),
+            sdk_requirements=["httpx"],
+        )
+        assert "uv venv" in (task_dir / "environment" / "Dockerfile").read_text()
+
     def test_backend_flag_requires_bundle(self, template_task):
         with pytest.raises(ValueError, match="requires a bundle"):
             HarborBackend(
@@ -508,6 +537,28 @@ class TestPatchDockerfileWithSdk:
             patch_dockerfile_with_sdk=False,
         )
         assert backend.sdk_requirements is None
+
+    def test_explicit_patch_warns_once_for_a_prebuilt_task(
+        self, bundle, template_task, tmp_path, caplog
+    ):
+        (template_task / "environment" / "Dockerfile").unlink()
+        backend = HarborBackend(
+            orchestrator=TrialQueue(n_concurrent=1),
+            tasks_dir=template_task,
+            bundle=bundle,
+            patch_dockerfile_with_sdk=True,
+        )
+        task = HarborTask(template_task)
+        prompt = ContainerInput(
+            rollout_id="r1", prompt=[{"role": "user", "content": "x"}]
+        )
+        with caplog.at_level(logging.WARNING):
+            backend.materialize_task(task, "r1", prompt)
+            backend.materialize_task(task, "r2", prompt)
+        warnings = [
+            r for r in caplog.records if "Not pre-installing the SDK" in r.getMessage()
+        ]
+        assert len(warnings) == 1
 
 
 class TestBundleBackend:
