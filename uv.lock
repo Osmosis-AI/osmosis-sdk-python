@@ -973,6 +973,9 @@ wheels = [
 daytona = [
     { name = "daytona" },
 ]
+opensandbox = [
+    { name = "opensandbox" },
+]
 
 [[package]]
 name = "hf-xet"
@@ -1760,6 +1763,24 @@ litellm = [
 ]
 
 [[package]]
+name = "opensandbox"
+version = "1.1.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "attrs" },
+    { name = "httpcore" },
+    { name = "httpx" },
+    { name = "httpx-sse" },
+    { name = "opentelemetry-api" },
+    { name = "pydantic" },
+    { name = "python-dateutil" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/ba/81/2a8b1e2f94ce8802a425c1e004cb678bb5f1962fad13b7884be10833246d/opensandbox-1.1.0.tar.gz", hash = "sha256:b7bf74313a99cd719337f665db9f15265bb8b5b64032fedd24069ad9b031cc95", size = 286824, upload-time = "2026-09-21T06:34:54.256Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/11/09/01540f419dba266477ce6cdec22831667e1f2898ae070906c3e973163398/opensandbox-1.1.0-py3-none-any.whl", hash = "sha256:aae471beb3e37ab206b134ff1ea590c1ca649dea0c5ec0391a7cfb416317f697", size = 642050, upload-time = "2026-09-21T06:34:52.708Z" },
+]
+
+[[package]]
 name = "opentelemetry-api"
 version = "1.39.1"
 source = { registry = "https://pypi.org/simple" }
@@ -1981,7 +2002,7 @@ full = [
     { name = "aiohttp" },
     { name = "click" },
     { name = "fastapi" },
-    { name = "harbor", extra = ["daytona"] },
+    { name = "harbor", extra = ["daytona", "opensandbox"] },
     { name = "litellm" },
     { name = "mcp" },
     { name = "openai-agents", extra = ["litellm"] },
@@ -2001,7 +2022,7 @@ full = [
 harbor = [
     { name = "aiohttp" },
     { name = "click" },
-    { name = "harbor", extra = ["daytona"] },
+    { name = "harbor", extra = ["daytona", "opensandbox"] },
     { name = "litellm" },
     { name = "orjson" },
     { name = "platformdirs" },
@@ -2077,7 +2098,7 @@ requires-dist = [
     { name = "click", marker = "extra == 'strands'", specifier = ">=8.3.3" },
     { name = "cryptography", specifier = ">=50.0.0" },
     { name = "fastapi", marker = "extra == 'server'", specifier = ">=0.100.0,<1.0.0" },
-    { name = "harbor", extras = ["daytona"], marker = "extra == 'harbor'", specifier = ">=0.20.0,<0.24" },
+    { name = "harbor", extras = ["daytona", "opensandbox"], marker = "extra == 'harbor'", specifier = ">=0.20.0,<0.24" },
     { name = "httpx", specifier = ">=0.25.0,<1.0.0" },
     { name = "keyring", specifier = ">=25.0.0" },
     { name = "litellm", marker = "extra == 'eval'", specifier = ">=1.94.3,!=1.95.0.*,!=1.96.0.*,!=1.96.1.*,<2.0.0" },
@@ -3108,8 +3129,8 @@ name = "secretstorage"
 version = "3.5.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "cryptography" },
-    { name = "jeepney" },
+    { name = "cryptography", marker = "sys_platform != 'emscripten' and sys_platform != 'win32'" },
+    { name = "jeepney", marker = "sys_platform != 'emscripten' and sys_platform != 'win32'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/1c/03/e834bcd866f2f8a49a85eaff47340affa3bfa391ee9912a952a1faa68c7b/secretstorage-3.5.0.tar.gz", hash = "sha256:f04b8e4689cbce351744d5537bf6b1329c6fc68f91fa666f60a380edddcd11be", size = 19884, upload-time = "2025-11-23T19:02:53.191Z" }
 wheels = [

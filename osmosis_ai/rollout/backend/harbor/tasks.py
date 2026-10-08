@@ -145,6 +145,9 @@ class HarborTask:
             raise ValueError(f"unknown harbor task id: {task_id!r}")
         return cls(path)
 
+    def has_dockerfile(self) -> bool:
+        return (self.path / "environment" / "Dockerfile").is_file()
+
     def _reject_symlinks(self) -> None:
         """Task directories are external assets; refuse to copy through links.
 
@@ -185,7 +188,7 @@ class HarborTask:
         task_dir = out_dir / self.path.name
         shutil.rmtree(task_dir, ignore_errors=True)
         shutil.copytree(self.path, task_dir)
-        if sdk_requirements:
+        if sdk_requirements and self.has_dockerfile():
             patch_dockerfile_with_sdk(task_dir / "environment", sdk_requirements)
 
         if container_input.prompt:
