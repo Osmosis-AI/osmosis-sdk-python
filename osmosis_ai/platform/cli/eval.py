@@ -790,15 +790,19 @@ def retry(name: str, *, yes: bool, secrets_file: str | None = None) -> Operation
     next_steps = [f"Check progress: osmosis eval info {result.name}"]
     if result.platform_url:
         next_steps.append(f"View: {result.platform_url}")
+    count = result.retryable_samples
+    # The platform counts zero when no sample was recorded and re-runs the whole run.
+    message = (
+        f"Retrying {result.name} from the start"
+        if count == 0
+        else f"Retrying {count} failed and skipped "
+        f"{'sample' if count == 1 else 'samples'} in {result.name}"
+    )
     return OperationResult(
         operation="eval.retry",
         status="success",
         resource=resource,
-        message=(
-            f"Retrying {result.retryable_samples} failed and skipped "
-            f"{'sample' if result.retryable_samples == 1 else 'samples'} in "
-            f"{result.name}"
-        ),
+        message=message,
         display_next_steps=next_steps,
     )
 
