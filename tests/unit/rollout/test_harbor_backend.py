@@ -480,21 +480,6 @@ class TestPatchDockerfileWithSdk:
         )
         assert "uv venv" not in (task_dir / "environment" / "Dockerfile").read_text()
 
-    def test_force_build_patches_even_with_a_prebuilt_image(
-        self, template_task, tmp_path
-    ):
-        (template_task / "task.toml").write_text(
-            '[task]\nname = "template-task"\n\n'
-            '[environment]\ndocker_image = "python:3.12-bookworm"\n'
-        )
-        task_dir = HarborTask(template_task).materialize(
-            tmp_path / "r1",
-            ContainerInput(rollout_id="r1", prompt=[{"role": "user", "content": "x"}]),
-            sdk_requirements=["httpx"],
-            force_build=True,
-        )
-        assert "uv venv" in (task_dir / "environment" / "Dockerfile").read_text()
-
     def test_backend_flag_requires_bundle(self, template_task):
         with pytest.raises(ValueError, match="requires a bundle"):
             HarborBackend(
@@ -574,33 +559,6 @@ class TestPatchDockerfileWithSdk:
             r for r in caplog.records if "Not pre-installing the SDK" in r.getMessage()
         ]
         assert len(warnings) == 1
-
-
-class TestOpenSandboxPatch:
-    def test_opensandbox_never_patches_even_under_force_build(
-        self, bundle, template_task, caplog
-    ):
-        from harbor.models.environment_type import EnvironmentType
-        from harbor.models.trial.config import EnvironmentConfig
-
-        backend = HarborBackend(
-            orchestrator=TrialQueue(n_concurrent=1),
-            tasks_dir=template_task,
-            bundle=bundle,
-            patch_dockerfile_with_sdk=True,
-            environment_config=EnvironmentConfig(
-                type=EnvironmentType.OPENSANDBOX, force_build=True
-            ),
-        )
-        prompt = ContainerInput(
-            rollout_id="r1", prompt=[{"role": "user", "content": "x"}]
-        )
-        with caplog.at_level(logging.WARNING):
-            task_dir = backend.materialize_task(HarborTask(template_task), "r1", prompt)
-        assert "uv venv" not in (task_dir / "environment" / "Dockerfile").read_text()
-        assert any(
-            "Not pre-installing the SDK" in r.getMessage() for r in caplog.records
-        )
 
 
 class TestBundleBackend:

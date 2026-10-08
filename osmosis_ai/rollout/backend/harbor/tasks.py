@@ -146,9 +146,10 @@ class HarborTask:
             raise ValueError(f"unknown harbor task id: {task_id!r}")
         return cls(path)
 
-    def builds_dockerfile(self, force_build: bool = False) -> bool:
-        """Whether Harbor builds this task's ``environment/Dockerfile``. It doesn't when
-        the task has no Dockerfile, or sets ``docker_image`` without ``force_build``."""
+    def builds_dockerfile(self) -> bool:
+        """Whether Harbor builds this task's ``environment/Dockerfile``. A task that
+        sets ``docker_image`` runs that image instead, since whether ``force_build``
+        overrides it differs by environment (OpenSandbox and E2B never build)."""
         if not (self.path / "environment" / "Dockerfile").is_file():
             return False
         config = self.path / "task.toml"
@@ -157,7 +158,7 @@ class HarborTask:
             if config.is_file()
             else {}
         )
-        return force_build or not environment.get("docker_image")
+        return not environment.get("docker_image")
 
     def _reject_symlinks(self) -> None:
         """Task directories are external assets; refuse to copy through links.
@@ -184,7 +185,6 @@ class HarborTask:
         grader_wheel: Path | None = None,
         sdk_requirements: list[str] | None = None,
         write_input: bool = True,
-        force_build: bool = False,
     ) -> Path:
         """Copy this task into *out_dir* and stage one rollout's files.
 
@@ -200,7 +200,7 @@ class HarborTask:
         task_dir = out_dir / self.path.name
         shutil.rmtree(task_dir, ignore_errors=True)
         shutil.copytree(self.path, task_dir)
-        if sdk_requirements and self.builds_dockerfile(force_build):
+        if sdk_requirements and self.builds_dockerfile():
             patch_dockerfile_with_sdk(task_dir / "environment", sdk_requirements)
 
         if container_input.prompt:
