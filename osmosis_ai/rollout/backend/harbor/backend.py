@@ -265,6 +265,8 @@ class HarborBackend(ExecutionBackend):
             apply_opensandbox_defaults(self.environment_config.kwargs)
         if patch_dockerfile_with_sdk and self.bundle is None:
             raise ValueError("patch_dockerfile_with_sdk requires a bundle")
+        self.patch_dockerfile_requested: bool = bool(patch_dockerfile_with_sdk)
+        self.unpatched_tasks_warned: set[Path] = set()
         if patch_dockerfile_with_sdk is None:
             patch_dockerfile_with_sdk = self.bundle is not None
         # The bundle's declared dependencies (stable) are pre-installed into the
@@ -534,6 +536,18 @@ class HarborBackend(ExecutionBackend):
     def materialize_task(
         self, task: HarborTask, rollout_id: str, container_input: ContainerInput
     ) -> Path:
+        force_build = self.environment_config.force_build
+        if (
+            self.patch_dockerfile_requested
+            and not task.builds_dockerfile(force_build)
+            and task.path not in self.unpatched_tasks_warned
+        ):
+            self.unpatched_tasks_warned.add(task.path)
+            logger.warning(
+                "patch_dockerfile_with_sdk is set but task %s runs a prebuilt image "
+                "or compose setup, so the SDK is not pre-installed into it",
+                task.path.name,
+            )
         return task.materialize(
             self.rollouts_dir / rollout_id,
             container_input,
@@ -543,6 +557,7 @@ class HarborBackend(ExecutionBackend):
             # Only the bundled harness reads the top-level input file; don't
             # stage the api_key without a consumer.
             write_input=self.bundle is not None and self.native is None,
+            force_build=force_build,
         )
 
     async def execute(

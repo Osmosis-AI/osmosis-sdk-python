@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import logging
 import os
 import threading
 import time
@@ -479,6 +480,21 @@ class TestPatchDockerfileWithSdk:
         )
         assert "uv venv" not in (task_dir / "environment" / "Dockerfile").read_text()
 
+    def test_force_build_patches_even_with_a_prebuilt_image(
+        self, template_task, tmp_path
+    ):
+        (template_task / "task.toml").write_text(
+            '[task]\nname = "template-task"\n\n'
+            '[environment]\ndocker_image = "python:3.12-bookworm"\n'
+        )
+        task_dir = HarborTask(template_task).materialize(
+            tmp_path / "r1",
+            ContainerInput(rollout_id="r1", prompt=[{"role": "user", "content": "x"}]),
+            sdk_requirements=["httpx"],
+            force_build=True,
+        )
+        assert "uv venv" in (task_dir / "environment" / "Dockerfile").read_text()
+
     def test_backend_flag_requires_bundle(self, template_task):
         with pytest.raises(ValueError, match="requires a bundle"):
             HarborBackend(
@@ -536,6 +552,26 @@ class TestPatchDockerfileWithSdk:
             patch_dockerfile_with_sdk=False,
         )
         assert backend.sdk_requirements is None
+
+    def test_explicit_patch_warns_once_for_a_prebuilt_task(
+        self, bundle, template_task, tmp_path, caplog
+    ):
+        (template_task / "environment" / "Dockerfile").unlink()
+        backend = HarborBackend(
+            orchestrator=TrialQueue(n_concurrent=1),
+            tasks_dir=template_task,
+            bundle=bundle,
+            patch_dockerfile_with_sdk=True,
+        )
+        task = HarborTask(template_task)
+        prompt = ContainerInput(
+            rollout_id="r1", prompt=[{"role": "user", "content": "x"}]
+        )
+        with caplog.at_level(logging.WARNING):
+            backend.materialize_task(task, "r1", prompt)
+            backend.materialize_task(task, "r2", prompt)
+        warnings = [r for r in caplog.records if "not pre-installed" in r.getMessage()]
+        assert len(warnings) == 1
 
 
 class TestBundleBackend:
