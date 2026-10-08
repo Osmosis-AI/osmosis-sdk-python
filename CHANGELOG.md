@@ -2,11 +2,22 @@
 
 This file records changes to `osmosis-ai`. For earlier versions, see [GitHub Releases](https://github.com/Osmosis-AI/osmosis-sdk-python/releases).
 
-## Unreleased
+## 0.3.7 - 2026-10-08
+
+### Added
+
+- The `harbor` extra includes OpenSandbox support, and `HarborBackend` applies protocol and managed proxy defaults for built-in OpenSandbox environments while preserving explicit kwargs ([#437](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/437), [#438](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/438)).
 
 ### Changed
 
-- The `strands`, `openai-agents`, `harbor`, `rubric`, and `eval` extras (including `full`) now require `fsspec>=2026.6.0` for the ReferenceFileSystem code-execution fix in [GHSA-27vj-qcqg-25rc](https://github.com/advisories/GHSA-27vj-qcqg-25rc); update conflicting application pins, regenerate lockfiles, and rebuild affected runtime images.
+- The `strands`, `openai-agents`, `harbor`, `rubric`, and `eval` extras (including `full`) require `fsspec>=2026.6.0` for a ReferenceFileSystem code-execution fix; update conflicting application pins, regenerate lockfiles, and rebuild affected runtime images ([#440](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/440)).
+
+### Fixed
+
+- Harbor tasks without a Dockerfile skip SDK pre-install patching instead of failing, allowing prebuilt-image tasks to run with the default bundle setup ([#438](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/438)).
+- `RolloutClient` retries result reads that return HTTP 502, 503, or 504 within the polling lease, and new rollout scaffolds and the Harbor source gateway keep connections alive beyond the platform load balancer's idle timeout ([#439](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/439)).
+
+[Full changelog](https://github.com/Osmosis-AI/osmosis-sdk-python/compare/v0.3.6...v0.3.7)
 
 ## 0.3.6 - 2026-10-08
 
