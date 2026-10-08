@@ -602,6 +602,27 @@ class TestRetryEvalRun:
         assert result.message == "Retrying 1 failed and skipped sample in brave-otter"
         assert result.resource["platform_url"] is None
 
+    def test_retry_with_nothing_recorded_restarts_the_run(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(
+            api_client_module.OsmosisClient,
+            "retry_eval_run",
+            lambda self, eval_run_id, *, secrets=None, credentials=None, git_identity=None: (
+                RetryEvalRunResult(
+                    id="1",
+                    name="brave-otter",
+                    status="pending",
+                    workflow_id="cloud-eval/1",
+                    retryable_samples=0,
+                )
+            ),
+        )
+
+        result = eval_module.eval_retry(name="brave-otter", yes=True)
+
+        assert result.message == "Retrying brave-otter from the start"
+
 
 class TestRetryEvalRunSecrets:
     def test_retry_resupplies_only_the_names_the_platform_asked_for(
