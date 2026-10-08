@@ -544,8 +544,8 @@ class HarborBackend(ExecutionBackend):
         ):
             self.unpatched_tasks_warned.add(task.path)
             logger.warning(
-                "patch_dockerfile_with_sdk is set but task %s runs a prebuilt image "
-                "or compose setup, so the SDK is not pre-installed into it",
+                "Not pre-installing the SDK into task %s: Harbor won't build its "
+                "Dockerfile",
                 task.path.name,
             )
         return task.materialize(

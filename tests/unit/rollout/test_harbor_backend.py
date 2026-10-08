@@ -570,7 +570,9 @@ class TestPatchDockerfileWithSdk:
         with caplog.at_level(logging.WARNING):
             backend.materialize_task(task, "r1", prompt)
             backend.materialize_task(task, "r2", prompt)
-        warnings = [r for r in caplog.records if "not pre-installed" in r.getMessage()]
+        warnings = [
+            r for r in caplog.records if "Not pre-installing the SDK" in r.getMessage()
+        ]
         assert len(warnings) == 1
 
 

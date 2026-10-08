@@ -147,9 +147,8 @@ class HarborTask:
         return cls(path)
 
     def builds_dockerfile(self, force_build: bool = False) -> bool:
-        """Whether Harbor builds ``environment/Dockerfile`` for this task, rather
-        than running its ``[environment] docker_image`` (OpenSandbox's only mode)
-        or a compose setup. Mirrors Harbor's ``should_use_prebuilt_docker_image``."""
+        """Whether Harbor builds this task's ``environment/Dockerfile``. It doesn't when
+        the task has no Dockerfile, or sets ``docker_image`` without ``force_build``."""
         if not (self.path / "environment" / "Dockerfile").is_file():
             return False
         config = self.path / "task.toml"
