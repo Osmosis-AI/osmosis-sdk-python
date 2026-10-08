@@ -71,10 +71,13 @@ server = [
 # release lines in GHSA-3cv6-jpf6-8222. 1.95.0 also lacks macOS wheels and
 # falls back to a source build requiring a newer Rust toolchain.
 # LiteLLM's tool-call path imports orjson at runtime, although LiteLLM declares
-# it only through its much larger proxy extra.
+# it only through its much larger proxy extra. fsspec arrives via tokenizers
+# and huggingface-hub; >=2026.6.0 fixes GHSA-27vj-qcqg-25rc. Each owning
+# extra repeats the floor so published wheel installs enforce it.
 strands = [
     "strands-agents[litellm]>=1.29.0,<2.0.0",
     "litellm>=1.94.3,!=1.95.0.*,!=1.96.0.*,!=1.96.1.*,<2.0.0",
+    "fsspec>=2026.6.0",
     "orjson>=3.11.6,<4.0",
     "aiohttp>=3.14.3",
     "urllib3>=2.8.0",
@@ -95,6 +98,7 @@ strands = [
 openai-agents = [
     "openai-agents[litellm]>=0.18.1,<0.21",
     "litellm>=1.94.3,!=1.95.0.*,!=1.96.0.*,!=1.96.1.*,<2.0.0",
+    "fsspec>=2026.6.0",
     "orjson>=3.11.6,<4.0",
     "aiohttp>=3.14.3",
     "urllib3>=2.8.0",
@@ -120,6 +124,7 @@ harbor = [
     # Harbor uses LiteLLM, which owns these runtime and security floors in
     # this feature.
     "litellm>=1.94.3,!=1.95.0.*,!=1.96.0.*,!=1.96.1.*,<2.0.0",
+    "fsspec>=2026.6.0",
     "orjson>=3.11.6,<4.0",
     "aiohttp>=3.14.3",
     "urllib3>=2.8.0",
@@ -130,6 +135,7 @@ harbor = [
 # LLM-as-judge rubric evaluation
 rubric = [
     "litellm>=1.94.3,!=1.95.0.*,!=1.96.0.*,!=1.96.1.*,<2.0.0",
+    "fsspec>=2026.6.0",
     "orjson>=3.11.6,<4.0",
     "aiohttp>=3.14.3",
     "urllib3>=2.8.0",
@@ -148,6 +154,7 @@ parquet = [
 eval = [
     "osmosis-ai[server,parquet]",
     "litellm>=1.94.3,!=1.95.0.*,!=1.96.0.*,!=1.96.1.*,<2.0.0",
+    "fsspec>=2026.6.0",
     "uv>=0.9.7,<0.13",
 ]
 

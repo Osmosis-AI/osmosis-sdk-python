@@ -16,15 +16,36 @@ LazyExports = Mapping[str, tuple[str, str]]
 EXTRA_MODULES: Final[Mapping[str, frozenset[str]]] = {
     "server": frozenset({"click", "fastapi", "opentelemetry", "urllib3", "uvicorn"}),
     "strands": frozenset(
-        {"aiohttp", "click", "jwt", "litellm", "mcp", "orjson", "strands", "urllib3"}
+        {
+            "aiohttp",
+            "click",
+            "fsspec",
+            "jwt",
+            "litellm",
+            "mcp",
+            "orjson",
+            "strands",
+            "urllib3",
+        }
     ),
     "openai-agents": frozenset(
-        {"agents", "aiohttp", "click", "jwt", "litellm", "mcp", "orjson", "urllib3"}
+        {
+            "agents",
+            "aiohttp",
+            "click",
+            "fsspec",
+            "jwt",
+            "litellm",
+            "mcp",
+            "orjson",
+            "urllib3",
+        }
     ),
     "harbor": frozenset(
         {
             "aiohttp",
             "click",
+            "fsspec",
             "harbor",
             "jwt",
             "litellm",
@@ -35,12 +56,13 @@ EXTRA_MODULES: Final[Mapping[str, frozenset[str]]] = {
             "yaml",
         }
     ),
-    "rubric": frozenset({"aiohttp", "click", "litellm", "orjson", "urllib3"}),
+    "rubric": frozenset({"aiohttp", "click", "fsspec", "litellm", "orjson", "urllib3"}),
     "parquet": frozenset({"pyarrow"}),
     "eval": frozenset(
         {
             "click",
             "fastapi",
+            "fsspec",
             "litellm",
             "opentelemetry",
             "pyarrow",
