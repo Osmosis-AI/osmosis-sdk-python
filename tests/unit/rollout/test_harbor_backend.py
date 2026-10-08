@@ -576,6 +576,33 @@ class TestPatchDockerfileWithSdk:
         assert len(warnings) == 1
 
 
+class TestOpenSandboxPatch:
+    def test_opensandbox_never_patches_even_under_force_build(
+        self, bundle, template_task, caplog
+    ):
+        from harbor.models.environment_type import EnvironmentType
+        from harbor.models.trial.config import EnvironmentConfig
+
+        backend = HarborBackend(
+            orchestrator=TrialQueue(n_concurrent=1),
+            tasks_dir=template_task,
+            bundle=bundle,
+            patch_dockerfile_with_sdk=True,
+            environment_config=EnvironmentConfig(
+                type=EnvironmentType.OPENSANDBOX, force_build=True
+            ),
+        )
+        prompt = ContainerInput(
+            rollout_id="r1", prompt=[{"role": "user", "content": "x"}]
+        )
+        with caplog.at_level(logging.WARNING):
+            task_dir = backend.materialize_task(HarborTask(template_task), "r1", prompt)
+        assert "uv venv" not in (task_dir / "environment" / "Dockerfile").read_text()
+        assert any(
+            "Not pre-installing the SDK" in r.getMessage() for r in caplog.records
+        )
+
+
 class TestBundleBackend:
     @pytest.fixture
     def backend(self, bundle, template_task):

@@ -537,9 +537,14 @@ class HarborBackend(ExecutionBackend):
         self, task: HarborTask, rollout_id: str, container_input: ContainerInput
     ) -> Path:
         force_build = self.environment_config.force_build
+        # OpenSandbox runs the prebuilt docker_image even under force_build.
+        builds = (
+            self.environment_config.type != EnvironmentType.OPENSANDBOX
+            and task.builds_dockerfile(force_build)
+        )
         if (
             self.patch_dockerfile_requested
-            and not task.builds_dockerfile(force_build)
+            and not builds
             and task.path not in self.unpatched_tasks_warned
         ):
             self.unpatched_tasks_warned.add(task.path)
@@ -553,7 +558,7 @@ class HarborBackend(ExecutionBackend):
             container_input,
             grader_script=self.bundle.grader_script if self.bundle else None,
             grader_wheel=self.bundle.wheel if self.bundle and self.native else None,
-            sdk_requirements=self.sdk_requirements,
+            sdk_requirements=self.sdk_requirements if builds else None,
             # Only the bundled harness reads the top-level input file; don't
             # stage the api_key without a consumer.
             write_input=self.bundle is not None and self.native is None,
