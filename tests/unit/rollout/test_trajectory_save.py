@@ -2,15 +2,9 @@
 
 import json
 import logging
-import threading
 from pathlib import Path
-from typing import Any
-
-import pytest
 
 from osmosis_ai.rollout.trajectory import save_trajectory
-from osmosis_ai.rollout.trajectory.atif import format_trajectory_json
-from osmosis_ai.rollout.trajectory.converter import convert_sample_to_trajectory
 from osmosis_ai.rollout.trajectory.report import (
     LlmCallMetrics,
     SampleReport,
@@ -98,47 +92,6 @@ async def test_save_never_raises(tmp_path: Path) -> None:
         result=make_result(make_sample()),
         artifact_root=tmp_path,
     )
-
-
-async def test_conversion_and_encoding_run_off_the_event_loop(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    # A large transcript must not stall result polling while it is saved.
-    threads: dict[str, int] = {}
-
-    class DiagnosticsProbe:
-        def __str__(self) -> str:
-            threads["diagnostics"] = threading.get_ident()
-            return "probe"
-
-    def convert(*args: Any, **kwargs: Any) -> Any:
-        threads["conversion"] = threading.get_ident()
-        return convert_sample_to_trajectory(*args, **kwargs)
-
-    def encode(*args: Any, **kwargs: Any) -> str:
-        threads["encoding"] = threading.get_ident()
-        return format_trajectory_json(*args, **kwargs)
-
-    monkeypatch.setattr(
-        "osmosis_ai.rollout.trajectory.save.convert_sample_to_trajectory", convert
-    )
-    monkeypatch.setattr(
-        "osmosis_ai.rollout.trajectory.save.format_trajectory_json", encode
-    )
-
-    await save_trajectory(
-        rollout_id="r1",
-        result=make_result(make_sample(reward=1.0)),
-        artifact_root=tmp_path,
-        diagnostics={"probe": DiagnosticsProbe()},
-    )
-
-    assert threads.keys() == {"diagnostics", "conversion", "encoding"}
-    assert threading.get_ident() not in threads.values()
-    sidecar = json.loads((tmp_path / "r1" / "diagnostics.json").read_text())
-    assert sidecar == {"probe": "probe"}
-    doc = json.loads((tmp_path / "r1" / "trajectory.json").read_text())
-    assert doc["extra"]["osmosis"]["reward"] == 1.0
 
 
 async def test_sample_less_failure_writes_diagnostics_sidecar(tmp_path: Path) -> None:
