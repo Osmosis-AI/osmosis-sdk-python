@@ -740,6 +740,15 @@ class LocalEvalRunner:
         self._sdk_mismatch_warned = False
         self._tunnel: CloudflaredTunnel | None = None
         self._cancelled = asyncio.Event()
+        # Set by a second interrupt: shut down without the cleanup grace.
+        self._force_exit = False
+        # Interrupt handlers kept installed after an interrupted dispatch, so a
+        # second interrupt during shutdown still reaches _request_cancel.
+        self._shutdown_signals: list[signal.Signals] = []
+        # The rollout server's process group while shutdown waits for it to exit,
+        # and the ordinary-grace termination a second interrupt starts against it.
+        self._terminating_pgid: int | None = None
+        self._termination_cut_short: asyncio.Task[None] | None = None
         self._halt_reason: str | None = None
         self._redactor = SecretRedactor()
         self._started_at = utc_now()
@@ -1060,6 +1069,12 @@ class LocalEvalRunner:
                 )
                 for name in missing_env_names:
                     os.environ.pop(name, None)
+                self._remove_signal_handlers(self._shutdown_signals)
+                self._shutdown_signals = []
+        if self._force_exit:
+            # A second interrupt during shutdown let it finish; exit as one
+            # during dispatch does.
+            raise KeyboardInterrupt
         return self._finalize(cancelled=cancelled)
 
     async def _start_tunnel(self, listener: LlmBridgeListener) -> None:
@@ -1227,9 +1242,12 @@ class LocalEvalRunner:
                 watchdog.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await watchdog
-            for sig in installed:
-                with contextlib.suppress(NotImplementedError, ValueError):
-                    loop.remove_signal_handler(sig)
+            if self._cancelled.is_set():
+                # Shutdown after an interrupt can wait minutes for the rollout
+                # server; _execute removes these once shutdown completes.
+                self._shutdown_signals = installed
+            else:
+                self._remove_signal_handlers(installed)
         for result in results:
             # Cancellation is how the supervisor stops in-flight work, so only an
             # unexpected exception means a worker died with items still queued.
@@ -1287,9 +1305,21 @@ class LocalEvalRunner:
         A cancelled attempt writes no terminal record, so it stays pending and
         the next invocation runs it again -- unlike Harbor, which records a
         ``CancelledError`` result and then skips the trial as complete.
+
+        A second interrupt exits without the interrupted-shutdown grace. During
+        dispatch it raises at once. Once shutdown is under way it cuts the
+        rollout server's grace short instead, so shutdown still stops the
+        tunnel and listener before _execute exits. A third interrupt raises at
+        once, even mid-shutdown, and may skip that cleanup.
         """
         if self._cancelled.is_set():
+            if self._force_exit:
+                raise KeyboardInterrupt
             self._hooks.note("second interrupt: exiting now")
+            self._force_exit = True
+            if self._shutdown_signals:
+                self._cut_server_termination_short()
+                return
             raise KeyboardInterrupt
         self._cancelled.set()
         self._hooks.note(
@@ -1298,6 +1328,27 @@ class LocalEvalRunner:
         self._write_log("warning", "cancel", "supervisor cancellation requested")
         for worker in workers:
             worker.cancel()
+
+    def _cut_server_termination_short(self) -> None:
+        """Re-terminate a stopping rollout server with the ordinary grace.
+
+        The first termination keeps polling under the interrupted grace on a
+        worker thread; it returns as soon as this one has stopped the group.
+        """
+        pgid = self._terminating_pgid
+        if pgid is None or self._termination_cut_short is not None:
+            return
+        self._termination_cut_short = asyncio.get_running_loop().create_task(
+            asyncio.to_thread(
+                terminate_process_group, pgid, grace_sec=_SERVER_TERM_GRACE_SEC
+            )
+        )
+
+    def _remove_signal_handlers(self, signals: Sequence[signal.Signals]) -> None:
+        loop = asyncio.get_running_loop()
+        for sig in signals:
+            with contextlib.suppress(NotImplementedError, ValueError):
+                loop.remove_signal_handler(sig)
 
     async def _worker(
         self,
@@ -1904,24 +1955,40 @@ class LocalEvalRunner:
             return
         self._child = None
         task = asyncio.current_task()
-        interrupted = (
+        # A second Ctrl-C promised an immediate exit, but asyncio.run still
+        # cancels this task on the way out; don't give the server the
+        # interrupted-shutdown grace in that case.
+        interrupted = not self._force_exit and (
             self._cancelled.is_set()
             or self._halt_reason is not None
             or (task is not None and task.cancelling() > 0)
         )
         if child.returncode is None:
-            with contextlib.suppress(ProcessLookupError, PermissionError, OSError):
-                await asyncio.to_thread(
-                    terminate_process_group,
-                    process_group_of(child.pid),
-                    # Admission may have been interrupted before a polling
-                    # lease arrived. Allow server drain/cleanup in that case too.
-                    grace_sec=(
-                        _SERVER_INTERRUPTED_TERM_GRACE_SEC
-                        if interrupted
-                        else _SERVER_TERM_GRACE_SEC
-                    ),
+            pgid = process_group_of(child.pid)
+            # Lets a second interrupt during this wait cut the grace short.
+            self._terminating_pgid = pgid
+            try:
+                with contextlib.suppress(ProcessLookupError, PermissionError, OSError):
+                    await asyncio.to_thread(
+                        terminate_process_group,
+                        pgid,
+                        # Admission may have been interrupted before a polling
+                        # lease arrived. Allow server drain/cleanup in that case too.
+                        grace_sec=(
+                            _SERVER_INTERRUPTED_TERM_GRACE_SEC
+                            if interrupted
+                            else _SERVER_TERM_GRACE_SEC
+                        ),
+                    )
+            finally:
+                self._terminating_pgid = None
+                cut_short, self._termination_cut_short = (
+                    self._termination_cut_short,
+                    None,
                 )
+                if cut_short is not None:
+                    with contextlib.suppress(Exception):
+                        await cut_short
         with contextlib.suppress(Exception):
             await child.wait()
         # The group leader is gone (SIGKILL is the escalation floor). A

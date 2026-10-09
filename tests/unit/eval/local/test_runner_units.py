@@ -1497,6 +1497,25 @@ async def test_server_shutdown_only_waits_for_cleanup_when_interrupted(
         await child.wait()
 
 
+def test_a_third_interrupt_exits_even_while_shutdown_is_under_way(
+    tmp_path: Path,
+) -> None:
+    import signal
+
+    runner = _runner(_spec(), tmp_path)
+    runner._cancelled.set()
+    # After an interrupted dispatch the handlers stay installed for shutdown.
+    runner._shutdown_signals = [signal.SIGINT]
+
+    # A second interrupt cuts the server's grace short and lets shutdown finish.
+    runner._request_cancel([])
+    assert runner._force_exit
+
+    # A third one exits at once, even though shutdown is still under way.
+    with pytest.raises(KeyboardInterrupt):
+        runner._request_cancel([])
+
+
 async def test_server_record_failure_is_fatal(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
