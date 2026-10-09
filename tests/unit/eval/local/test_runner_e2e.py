@@ -339,6 +339,35 @@ async def test_a_grader_crash_is_a_terminal_failure(
     assert summary.failures[0].rollout_dir.is_dir()
 
 
+async def test_a_rollout_without_a_sample_does_not_wait_for_a_trajectory(
+    harness: RunnerHarness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from osmosis_ai.eval.local import runner as runner_module
+
+    entrypoint = harness.rollout_dir / "main.py"
+    entrypoint.write_text(
+        entrypoint.read_text().replace(
+            "        delay = float(",
+            "        raise RuntimeError('workflow exploded on purpose')\n"
+            "        delay = float(",
+        )
+    )
+    # A rollout that ends without a sample never writes a trajectory, so any
+    # poll for one only holds the worker until the grace period runs out.
+    polled: list[Path] = []
+    read_valid_trajectory = runner_module.read_valid_trajectory
+
+    def record_poll(path: Path, *, rollout_id: str) -> Any:
+        polled.append(path)
+        return read_valid_trajectory(path, rollout_id=rollout_id)
+
+    monkeypatch.setattr(runner_module, "read_valid_trajectory", record_poll)
+    monkeypatch.setattr(runner_module, "_TRAJECTORY_GRACE_SEC", 0.5)
+    summary = await harness.runner().run()
+    assert summary.failed == 4
+    assert polled == []
+
+
 async def test_remove_sample_becomes_a_skipped_row(
     harness: RunnerHarness, monkeypatch: pytest.MonkeyPatch
 ) -> None:

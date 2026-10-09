@@ -1398,7 +1398,12 @@ class LocalEvalRunner:
             )
             return
         await self._commit_outcome(item, outcome)
-        await self._await_trajectory(rollout_id)
+        if outcome.sample is not None:
+            # A rollout that ended without a sample (workflow error, timeout,
+            # lease expiry) writes no trajectory; waiting would only hold this
+            # worker for the whole grace period. Snapshot refreshes re-read
+            # trajectories from disk, so nothing written later is lost.
+            await self._await_trajectory(rollout_id)
         with contextlib.suppress(Exception):
             self._refresh_snapshots(project_keys={item.key})
         self._report_progress()
