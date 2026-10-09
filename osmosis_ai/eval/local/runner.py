@@ -247,10 +247,14 @@ class ProgressSnapshot:
     total: int
     passed: int
     failed: int
+    skipped: int = 0
 
     @property
     def pass_rate(self) -> float:
-        return (self.passed / self.completed) if self.completed else 0.0
+        # Skipped samples are excluded from the denominator, as in
+        # aggregate_metrics, so the live bar agrees with metrics.json.
+        scored = self.completed - self.skipped
+        return (self.passed / scored) if scored > 0 else 0.0
 
 
 @dataclass(frozen=True)
@@ -1981,6 +1985,7 @@ class LocalEvalRunner:
                     total=len(self._selection.rows) * max(1, self._spec.n),
                     passed=passed,
                     failed=sum(1 for status in statuses if status == "failed"),
+                    skipped=sum(1 for status in statuses if status == "skipped"),
                 )
             )
 
