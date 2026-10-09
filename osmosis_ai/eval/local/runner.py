@@ -740,6 +740,8 @@ class LocalEvalRunner:
         self._sdk_mismatch_warned = False
         self._tunnel: CloudflaredTunnel | None = None
         self._cancelled = asyncio.Event()
+        # Set by a second interrupt: shut down without the cleanup grace.
+        self._force_exit = False
         self._halt_reason: str | None = None
         self._redactor = SecretRedactor()
         self._started_at = utc_now()
@@ -1290,6 +1292,7 @@ class LocalEvalRunner:
         """
         if self._cancelled.is_set():
             self._hooks.note("second interrupt: exiting now")
+            self._force_exit = True
             raise KeyboardInterrupt
         self._cancelled.set()
         self._hooks.note(
@@ -1904,7 +1907,10 @@ class LocalEvalRunner:
             return
         self._child = None
         task = asyncio.current_task()
-        interrupted = (
+        # A second Ctrl-C promised an immediate exit, but asyncio.run still
+        # cancels this task on the way out; don't give the server the
+        # interrupted-shutdown grace in that case.
+        interrupted = not self._force_exit and (
             self._cancelled.is_set()
             or self._halt_reason is not None
             or (task is not None and task.cancelling() > 0)
