@@ -1309,11 +1309,12 @@ class LocalEvalRunner:
         A second interrupt exits without the interrupted-shutdown grace. During
         dispatch it raises at once. Once shutdown is under way it cuts the
         rollout server's grace short instead, so shutdown still stops the
-        tunnel and listener before _execute exits.
+        tunnel and listener before _execute exits. A third interrupt raises at
+        once, even mid-shutdown, and may skip that cleanup.
         """
         if self._cancelled.is_set():
             if self._force_exit:
-                return
+                raise KeyboardInterrupt
             self._hooks.note("second interrupt: exiting now")
             self._force_exit = True
             if self._shutdown_signals:
