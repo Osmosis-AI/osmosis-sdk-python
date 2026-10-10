@@ -19,7 +19,7 @@ dataset = "<your-dataset-name>"  # Platform dataset name from `osmosis dataset l
 [training]
 # Optional. Omit values to use platform defaults.
 # Uncomment a field only when you want to override platform behavior.
-# lr = 1e-6                           # Learning rate
+# lr = 1e-5                           # Learning rate
 # total_epochs = 1                    # Number of training epochs
 # n_samples_per_prompt = 8            # Rollout samples per prompt
 # rollout_batch_size = 32             # Rollout batch size
