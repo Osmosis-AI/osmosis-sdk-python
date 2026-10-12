@@ -882,3 +882,182 @@ async def test_cancel_settles_cleanup_before_stopping_the_server(
     assert cleaned.exists()
     assert summary.cancelled
     assert harness.journal_lines() == []
+
+
+def test_a_second_interrupt_stops_the_server_with_the_ordinary_grace(
+    tmp_path: Path,
+    rollout_project: Path,
+    dataset_file: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Synchronous on purpose: the supervisor's SIGINT handler is only installed
+    # on the main thread's event loop, and the second interrupt must unwind
+    # through asyncio.run's own task cleanup, as it does under the CLI.
+    import signal
+
+    from osmosis_ai.eval.local import runner as runner_module
+    from osmosis_ai.eval.local.dataset import resolve_explicit_dataset_file
+    from osmosis_ai.eval.local.listener import LocalhostUvicornServer
+    from tests.unit.rollout.openai_stub import create_openai_stub_app
+
+    started = rollout_project / "started"
+    cleaning = rollout_project / "cleaning"
+    entrypoint = rollout_project / "main.py"
+    entrypoint.write_text(
+        entrypoint.read_text().replace(
+            "            await asyncio.sleep(delay)",
+            "            from pathlib import Path\n"
+            f"            Path({str(started)!r}).touch()\n"
+            "            try:\n"
+            "                await asyncio.sleep(delay)\n"
+            "            finally:\n"
+            f"                Path({str(cleaning)!r}).touch()\n"
+            "                await asyncio.sleep(60)",
+        )
+    )
+    graces: list[float] = []
+    terminate = runner_module.terminate_process_group
+
+    def record_grace(pgid: int, *, grace_sec: float) -> None:
+        graces.append(grace_sec)
+        terminate(pgid, grace_sec=0.1)
+
+    monkeypatch.setattr(runner_module, "terminate_process_group", record_grace)
+    hooks = RecordingHooks()
+    harness = RunnerHarness(
+        rollout_dir=rollout_project,
+        output_root=tmp_path / "evals",
+        dataset=resolve_explicit_dataset_file(dataset_file),
+        selection=select_rows(dataset_file),
+        hooks=hooks,
+    )
+    runner = harness.runner(
+        spec=harness.spec(env={"OSMOSIS_TEST_WORKFLOW_SLEEP": "30"}),
+        options=LocalEvalOptions(name="run-1", max_in_flight=1),
+    )
+
+    def interrupt() -> None:
+        # Only ever signal while the supervisor's handler owns SIGINT, so a
+        # failure here cannot interrupt pytest itself.
+        assert signal.getsignal(signal.SIGINT) is not signal.default_int_handler
+        os.kill(os.getpid(), signal.SIGINT)
+
+    async def interrupt_twice(workers) -> None:
+        async with asyncio.timeout(30):
+            while not started.exists():
+                await asyncio.sleep(0.01)
+            interrupt()
+            # The first interrupt is still waiting on the workflow's cleanup.
+            while not cleaning.exists():
+                await asyncio.sleep(0.01)
+        interrupt()
+
+    monkeypatch.setattr(runner, "_watch_child", interrupt_twice)
+
+    async def main() -> None:
+        async with LocalhostUvicornServer(create_openai_stub_app()) as stub:
+            monkeypatch.setenv("OPENAI_API_BASE", stub.base_url)
+            monkeypatch.setenv("OPENAI_BASE_URL", stub.base_url)
+            monkeypatch.setenv("OPENAI_API_KEY", "stub-llm-key")
+            await runner.run()
+
+    with pytest.raises(KeyboardInterrupt):
+        asyncio.run(main())
+    assert "second interrupt: exiting now" in hooks.notes
+    assert graces == [runner_module._SERVER_TERM_GRACE_SEC]
+
+
+def test_a_second_interrupt_during_server_shutdown_cuts_its_grace_short(
+    tmp_path: Path,
+    rollout_project: Path,
+    dataset_file: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # After the first interrupt, shutdown waits on the server under the
+    # interrupted grace in a worker thread. A second interrupt there must still
+    # reach the supervisor, end that wait, and let shutdown finish.
+    import signal
+    import time
+
+    from osmosis_ai.eval.local import runner as runner_module
+    from osmosis_ai.eval.local.dataset import resolve_explicit_dataset_file
+    from osmosis_ai.eval.local.listener import LocalhostUvicornServer
+    from tests.unit.rollout.openai_stub import create_openai_stub_app
+
+    started = rollout_project / "started"
+    entrypoint = rollout_project / "main.py"
+    entrypoint.write_text(
+        entrypoint.read_text().replace(
+            "            await asyncio.sleep(delay)",
+            "            from pathlib import Path\n"
+            f"            Path({str(started)!r}).touch()\n"
+            "            await asyncio.sleep(delay)",
+        )
+    )
+    graces: list[float] = []
+    long_wait_ended: list[str] = []
+    terminate = runner_module.terminate_process_group
+
+    def server_still_draining(pgid: int, *, grace_sec: float) -> None:
+        graces.append(grace_sec)
+        if grace_sec != runner_module._SERVER_INTERRUPTED_TERM_GRACE_SEC:
+            terminate(pgid, grace_sec=grace_sec)
+            return
+        # The server is still draining when the user presses Ctrl-C again. Only
+        # signal while the supervisor's handler owns SIGINT, so a failure here
+        # cannot interrupt pytest itself.
+        if signal.getsignal(signal.SIGINT) is signal.default_int_handler:
+            terminate(pgid, grace_sec=0.1)
+            raise AssertionError("no interrupt handler during server shutdown")
+        os.kill(os.getpid(), signal.SIGINT)
+        deadline = time.monotonic() + 20
+        while time.monotonic() < deadline:
+            try:
+                os.killpg(pgid, 0)
+            except ProcessLookupError:
+                long_wait_ended.append("server stopped")
+                return
+            time.sleep(0.05)
+        long_wait_ended.append("grace ran out")
+        terminate(pgid, grace_sec=0.1)
+
+    monkeypatch.setattr(runner_module, "terminate_process_group", server_still_draining)
+    hooks = RecordingHooks()
+    harness = RunnerHarness(
+        rollout_dir=rollout_project,
+        output_root=tmp_path / "evals",
+        dataset=resolve_explicit_dataset_file(dataset_file),
+        selection=select_rows(dataset_file),
+        hooks=hooks,
+    )
+    runner = harness.runner(
+        spec=harness.spec(env={"OSMOSIS_TEST_WORKFLOW_SLEEP": "30"}),
+        options=LocalEvalOptions(name="run-1", max_in_flight=1),
+    )
+
+    async def interrupt_once_started(workers) -> None:
+        async with asyncio.timeout(30):
+            while not started.exists():
+                await asyncio.sleep(0.01)
+        assert signal.getsignal(signal.SIGINT) is not signal.default_int_handler
+        os.kill(os.getpid(), signal.SIGINT)
+
+    monkeypatch.setattr(runner, "_watch_child", interrupt_once_started)
+
+    async def main() -> None:
+        async with LocalhostUvicornServer(create_openai_stub_app()) as stub:
+            monkeypatch.setenv("OPENAI_API_BASE", stub.base_url)
+            monkeypatch.setenv("OPENAI_BASE_URL", stub.base_url)
+            monkeypatch.setenv("OPENAI_API_KEY", "stub-llm-key")
+            await runner.run()
+
+    with pytest.raises(KeyboardInterrupt):
+        asyncio.run(main())
+    assert "second interrupt: exiting now" in hooks.notes
+    assert graces == [
+        runner_module._SERVER_INTERRUPTED_TERM_GRACE_SEC,
+        runner_module._SERVER_TERM_GRACE_SEC,
+    ]
+    assert long_wait_ended == ["server stopped"]
+    # Shutdown still finished: the server's ownership record is cleared.
+    assert not list((tmp_path / "evals").rglob("server.json"))
