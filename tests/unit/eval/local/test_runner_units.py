@@ -1014,6 +1014,43 @@ async def test_a_retried_failure_writes_its_own_terminal_record(tmp_path: Path) 
     assert (record.status, record.error_type) == ("failed", "supervisor_error")
 
 
+def test_the_live_pass_rate_excludes_skipped_samples_like_metrics(
+    tmp_path: Path,
+) -> None:
+    from osmosis_ai.eval.local.results import aggregate_metrics
+    from osmosis_ai.eval.local.state import TerminalRecord
+
+    runner = _runner(_spec(n=4), tmp_path)
+    snapshots: list[Any] = []
+    runner._hooks.progress = snapshots.append
+    outcomes = [
+        ("success", 1.0),
+        ("success", 0.0),
+        ("skipped", None),
+        ("skipped", None),
+    ]
+    for run_index, (status, reward) in enumerate(outcomes):
+        runner._latest[(0, run_index)] = TerminalRecord(
+            row_index=0,
+            run_index=run_index,
+            rollout_id=f"{run_index:032x}",
+            status=status,
+            reward=reward,
+        )
+
+    runner._report_progress()
+
+    metrics = aggregate_metrics(
+        [
+            {"row_index": 0, "run_index": index, "status": status, "reward": reward}
+            for index, (status, reward) in enumerate(outcomes)
+        ],
+        pass_threshold=1.0,
+    )
+    # The progress bar and metrics.json must not disagree about the same rows.
+    assert snapshots[-1].pass_rate == metrics["pass_rate"] == 0.5
+
+
 def test_the_run_log_redacts_and_is_owner_only(tmp_path: Path) -> None:
     from osmosis_ai.eval.local.runner import RunLog, SecretRedactor
 
