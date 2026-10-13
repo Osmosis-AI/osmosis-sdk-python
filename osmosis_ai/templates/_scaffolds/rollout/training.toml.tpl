@@ -4,9 +4,8 @@
 # Command: osmosis train submit configs/training/<your-rollout>.toml
 # For AI agents or automation, use `osmosis --json ...` or `osmosis --plain ...`.
 #
-# Supported models:
-#   - Qwen/Qwen3.6-35B-A3B
-#   - Qwen/Qwen3.5-122B-A10B
+# Supported model:
+#   - Qwen/Qwen3-4B
 
 [experiment]
 rollout = "<your-rollout>"  # Rollout name (directory under rollouts/)
@@ -35,7 +34,6 @@ dataset = "<your-dataset-name>"  # Platform dataset name from `osmosis dataset l
 
 [checkpoints]
 # Optional. Omit values to use platform defaults.
-# eval_interval = 10                  # Evaluate every N rollouts
 # checkpoint_save_freq = 20           # Save checkpoint every N rollouts
 
 # Environment variables

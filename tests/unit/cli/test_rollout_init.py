@@ -182,8 +182,9 @@ def test_rollout_init_substitutes_rollout_name_in_configs(
     # Non-rollout placeholders the user must still fill in remain literal.
     assert "<your-model-path>" in training_toml
     assert "<your-dataset-name>" in training_toml
-    assert "Qwen/Qwen3.6-35B-A3B" in training_toml
-    assert "Qwen/Qwen3.5-122B-A10B" in training_toml
+    assert "Qwen/Qwen3-4B" in training_toml
+    assert "eval_interval" not in training_toml
+    assert "# checkpoint_save_freq = 20" in training_toml
     assert "# [env]" in training_toml
     assert "# [secrets]" in training_toml
     assert '#   required = ["OPENAI_API_KEY"]' in training_toml
