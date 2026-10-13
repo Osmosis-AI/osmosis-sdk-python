@@ -182,7 +182,7 @@ def test_rollout_init_substitutes_rollout_name_in_configs(
     # Non-rollout placeholders the user must still fill in remain literal.
     assert "<your-model-path>" in training_toml
     assert "<your-dataset-name>" in training_toml
-    assert "Qwen/Qwen3-4B" in training_toml
+    assert "osmosis model list --type base" in training_toml
     assert "eval_interval" not in training_toml
     assert "# checkpoint_save_freq = 20" in training_toml
     assert "# [env]" in training_toml
