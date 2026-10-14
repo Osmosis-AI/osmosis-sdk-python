@@ -1,0 +1,2 @@
+# Isolated prototype only; do not add this bound to the SDK's other MCP consumers.
+mcp>=1.28.1,<2.0.0
