@@ -117,6 +117,57 @@ def failure_phase(result: Any) -> str:
     return "setup"
 
 
+_SYSTEMIC_PREWARM_PATTERNS = (
+    "401",
+    "403",
+    "429",
+    "unauthorized",
+    "forbidden",
+    "too many requests",
+    "sandbox not owned by this session",
+    "registry authentication failed",
+    "connection refused",
+    "over quota",
+    "max_sandboxes",
+    "sandbox limit",
+)
+
+
+def prewarm_failure_phase(result: Any, error: BaseException | None = None) -> str:
+    """Classify a prewarm failure into build, start, healthcheck, or agent_setup."""
+    err_info = getattr(result, "exception_info", None) if result is not None else None
+    exc_type = (
+        getattr(err_info, "exception_type", None)
+        or (type(error).__name__ if error is not None else "")
+        or ""
+    )
+    exc_msg = (
+        getattr(err_info, "exception_message", None)
+        or (str(error) if error is not None else "")
+        or ""
+    )
+    combined = f"{exc_type} {exc_msg}".lower()
+    if "build" in combined or "dockerfile" in combined:
+        return "build"
+    if "healthcheck" in combined or "health check" in combined:
+        return "healthcheck"
+    if "agentsetup" in combined or (
+        result is not None and getattr(result, "agent_setup", None) is not None
+    ):
+        return "agent_setup"
+    if "environmentstart" in combined or (
+        result is not None and getattr(result, "environment_setup", None) is not None
+    ):
+        return "start"
+    return "start" if error is not None else "agent_setup"
+
+
+def is_systemic_prewarm_error(error_text: str) -> bool:
+    """Whether a prewarm error string indicates a systemic auth/proxy/quota fault."""
+    lowered = error_text.lower()
+    return any(pattern in lowered for pattern in _SYSTEMIC_PREWARM_PATTERNS)
+
+
 def trial_metrics(result: Any) -> dict[str, Any]:
     """Token and cost totals Harbor accumulated across the trial."""
     if result is None:

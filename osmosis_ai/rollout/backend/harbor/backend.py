@@ -19,9 +19,13 @@ Task images stay pure task environments either way.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
+import os
 import shutil
+import tempfile
+import time
 import traceback
 import uuid
 from collections.abc import AsyncIterator, Callable, Sequence
@@ -63,6 +67,8 @@ from osmosis_ai.rollout.backend.harbor.diagnostics import (
     agent_phase_failure,
     diagnostic_payload,
     failure_phase,
+    is_systemic_prewarm_error,
+    prewarm_failure_phase,
     redact_secrets,
     trial_metrics,
     trial_timings,
@@ -86,7 +92,10 @@ from osmosis_ai.rollout.backend.harbor.native_agents import (
 from osmosis_ai.rollout.backend.harbor.tasks import (
     HarborTask,
     TaskMode,
+    discover_dataset_task_ids,
     parse_task_ref,
+    task_environment_signature,
+    task_has_healthcheck,
 )
 from osmosis_ai.rollout.backend.harbor.trial import (
     TRIAL_NAME_PREFIX,
@@ -158,6 +167,41 @@ def trial_cancelled(err: Any) -> bool:
     return err is not None and err.exception_type == "CancelledError"
 
 
+def _normalize_prewarm_mode(value: str | bool | None) -> str:
+    if value is False:
+        return "off"
+    if value is True or value is None:
+        return "auto"
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in ("off", "false", "0", "no"):
+            return "off"
+        if normalized in ("true", "1", "yes", "on", "auto"):
+            return "auto"
+        if normalized in ("full", "healthcheck"):
+            return normalized
+    raise ValueError(
+        f"invalid prewarm mode {value!r}; expected 'auto', 'full', 'healthcheck', or 'off'"
+    )
+
+
+def _env_prewarm_task_ids() -> list[str] | None:
+    raw = os.environ.get("_OSMOSIS_PREWARM_TASK_IDS", "").strip()
+    if not raw:
+        return None
+    if raw.startswith("["):
+        try:
+            parsed = json.loads(raw)
+        except ValueError:
+            return None
+        if not isinstance(parsed, list):
+            return None
+        items = [str(item).strip() for item in parsed if str(item).strip()]
+    else:
+        items = [part.strip() for part in raw.split(",") if part.strip()]
+    return items or None
+
+
 def _resolve_backend_bundle(
     *,
     agent: str | type | None,
@@ -213,6 +257,8 @@ class HarborBackend(ExecutionBackend):
         patch_dockerfile_with_sdk: bool | None = None,
         agent_setup_timeout_sec: float | None = None,
         max_queue_depth: int | None = None,
+        prewarm: str | bool = "auto",
+        verified_tasks: Sequence[str] | set[str] | bool = False,
     ) -> None:
         self.orchestrator = orchestrator
         self.tasks_dir: Path = Path(tasks_dir)
@@ -220,6 +266,12 @@ class HarborBackend(ExecutionBackend):
         self.model_name = model_name
         self.agent = agent
         self.agent_setup_timeout_sec = agent_setup_timeout_sec
+        self.prewarm_mode: str = _normalize_prewarm_mode(prewarm)
+        self.verified_tasks: set[str] | bool = (
+            verified_tasks if isinstance(verified_tasks, bool) else set(verified_tasks)
+        )
+        self.failed_prewarm_tasks: dict[str, str] = {}
+        self.prewarm_summary: dict[str, Any] | None = None
         self.native: NativeAgentBinding | None = native_binding(agent)
         if native_agent_kwargs and self.native is None:
             raise ValueError(
@@ -277,7 +329,7 @@ class HarborBackend(ExecutionBackend):
             else None
         )
 
-        root = Path(f"/tmp/osmosis-harbor-{self.tasks_dir.name}")
+        root = Path(tempfile.gettempdir()) / f"osmosis-harbor-{self.tasks_dir.name}"
         self.rollouts_dir: Path = root / "rollouts"
         self.rollouts_dir.mkdir(parents=True, exist_ok=True)
         self.trials_dir: Path = trials_dir or root / "trials"
@@ -363,6 +415,11 @@ class HarborBackend(ExecutionBackend):
                 "requires_public_url": uses_chat_endpoint
                 and not sandbox_reaches_host_loopback(self.environment_config),
             },
+            **(
+                {"prewarm": self.prewarm_summary}
+                if self.prewarm_summary is not None
+                else {}
+            ),
         }
 
     async def resolve_task(self, request: ExecutionRequest) -> HarborTask:
@@ -576,6 +633,20 @@ class HarborBackend(ExecutionBackend):
             container_input = self.build_input(request)
             pending.api_key = container_input.api_key
             task = await self.resolve_task(request)
+            resolved_root = self.tasks_dir.resolve()
+            task_key = (
+                task.path.relative_to(resolved_root).as_posix()
+                if task.path != resolved_root
+                and task.path.is_relative_to(resolved_root)
+                else task.path.name
+            )
+            if prewarm_failure := (
+                self.failed_prewarm_tasks.get(task_key)
+                or self.failed_prewarm_tasks.get(task.path.name)
+            ):
+                raise RuntimeError(
+                    f"task {task_key!r} failed prewarm: {prewarm_failure}"
+                )
             # Dataset mode zeroes the prompt, so the task keeps its own
             # instruction.md. In template mode the prompt owns it: silently
             # for the configured template dir, with a warning elsewhere.
@@ -854,50 +925,304 @@ class HarborBackend(ExecutionBackend):
             trial_dir = self.trials_dir / f"{TRIAL_NAME_PREFIX}{rollout_id}"
             shutil.rmtree(trial_dir, ignore_errors=True)
 
-    async def prewarm(self, task_ids: Sequence[str] | None = None) -> None:
+    def _is_task_verified(self, task_id: str) -> bool:
+        if os.environ.get("_OSMOSIS_HARBOR_TASKS_VERIFIED", "").strip().lower() in (
+            "1",
+            "true",
+            "yes",
+        ):
+            return True
+        if isinstance(self.verified_tasks, bool):
+            return self.verified_tasks
+        return task_id in self.verified_tasks
+
+    def task_requires_runtime_healthcheck(self, task: HarborTask) -> bool:
+        return task_has_healthcheck(task)
+
+    def _resolve_prewarm_concurrency_cap(self) -> int | None:
+        raw = (
+            os.environ.get("OPENSANDBOX_MAX_SANDBOXES")
+            or os.environ.get("_OSMOSIS_OPENSANDBOX_MAX_SANDBOXES")
+            or ""
+        ).strip()
+        if not raw:
+            return None
+        try:
+            max_sandboxes = int(raw)
+        except ValueError:
+            return None
+        if max_sandboxes <= 0:
+            return None
+        return max(1, max_sandboxes // 2) if max_sandboxes > 1 else 1
+
+    async def prewarm(
+        self,
+        task_ids: Sequence[str] | None = None,
+        *,
+        prewarm: str | bool | None = None,
+    ) -> None:
         """Build every task image and run agent setup before serving rollouts.
 
         Prewarm trials are install-only, carry no rollout credentials, and
         report all failing tasks together.
         """
+        env_mode = os.environ.get("_OSMOSIS_HARBOR_PREWARM")
+        effective_mode = _normalize_prewarm_mode(
+            prewarm
+            if prewarm is not None
+            else (env_mode if env_mode is not None else self.prewarm_mode)
+        )
+        self.failed_prewarm_tasks.clear()
+        if effective_mode == "off":
+            self.prewarm_summary = {
+                "mode": "off",
+                "total": 0,
+                "succeeded": 0,
+                "failed": 0,
+                "failed_tasks": {},
+            }
+            logger.info("Prewarm disabled (mode=off); skipping")
+            return
+
         if self.task_mode == TaskMode.DATASET:
-            if not task_ids:
-                raise ValueError("dataset mode prewarm requires task ids")
-            tasks = [HarborTask.from_dataset(self.tasks_dir, t) for t in task_ids]
+            if task_ids is None:
+                resolved_ids = discover_dataset_task_ids(self.tasks_dir)
+                if not resolved_ids:
+                    raise ValueError("dataset mode prewarm requires task ids")
+            else:
+                if not task_ids:
+                    raise ValueError("dataset mode prewarm requires task ids")
+                resolved_ids = list(task_ids)
+            if env_ids := _env_prewarm_task_ids():
+                env_set = set(env_ids)
+                filtered = [t for t in resolved_ids if t in env_set]
+                if filtered:
+                    resolved_ids = filtered
+                else:
+                    existing = [
+                        t
+                        for t in env_ids
+                        if (self.tasks_dir / t)
+                        .resolve()
+                        .is_relative_to(self.tasks_dir.resolve())
+                        and (self.tasks_dir / t).is_dir()
+                    ]
+                    if existing:
+                        resolved_ids = existing
+            named_tasks = [
+                (t, HarborTask.from_dataset(self.tasks_dir, t)) for t in resolved_ids
+            ]
         else:
-            tasks = [HarborTask(self.tasks_dir)]
+            template_task = HarborTask(self.tasks_dir)
+            named_tasks = [(template_task.path.name, template_task)]
 
-        configs = [self.prewarm_trial_config(task) for task in tasks]
-        logger.info("Prewarming %d harbor task(s)", len(configs))
-        failures: list[str] = []
-        try:
-            outcomes = await asyncio.gather(
-                *(self.orchestrator.submit(config) for config in configs),
-                return_exceptions=True,
+        active_tasks: list[tuple[str, list[str], HarborTask, bool]] = []
+        seen_signatures: dict[str, list[str]] = {}
+        skipped_verified = 0
+        for task_id, task in named_tasks:
+            verified = self._is_task_verified(task_id)
+            if (
+                effective_mode == "auto"
+                and verified
+                and not self.task_requires_runtime_healthcheck(task)
+            ):
+                skipped_verified += 1
+                continue
+            if self.task_mode == TaskMode.DATASET and len(named_tasks) > 1:
+                sig = task_environment_signature(
+                    task, has_sdk_requirements=bool(self.sdk_requirements)
+                )
+                if sig is not None:
+                    if sig in seen_signatures:
+                        seen_signatures[sig].append(task_id)
+                        continue
+                    group = [task_id]
+                    seen_signatures[sig] = group
+                    active_tasks.append((task_id, group, task, verified))
+                    continue
+            active_tasks.append((task_id, [task_id], task, verified))
+
+        if skipped_verified:
+            logger.info(
+                "Skipping prewarm for %d build-verified harbor task(s)",
+                skipped_verified,
             )
+        if not active_tasks:
+            self.prewarm_summary = {
+                "mode": effective_mode,
+                "total": len(named_tasks),
+                "succeeded": len(named_tasks),
+                "failed": 0,
+                "failed_tasks": {},
+            }
+            logger.info("Prewarmed %d harbor task(s)", len(named_tasks))
+            return
 
-            for config, outcome in zip(configs, outcomes, strict=True):
-                label = config.task.path.name if config.task.path else config.trial_name
+        trial_specs: list[tuple[str, list[str], TrialConfig]] = []
+        for label, group_labels, task, verified in active_tasks:
+            healthcheck_only = effective_mode == "healthcheck" or (
+                effective_mode == "auto" and verified
+            )
+            config = self.prewarm_trial_config(task, healthcheck_only=healthcheck_only)
+            trial_specs.append((label, group_labels, config))
+
+        total = len(trial_specs)
+        logger.info("Prewarming %d harbor task(s)", total)
+        cap = self._resolve_prewarm_concurrency_cap()
+        semaphore = asyncio.Semaphore(cap) if cap is not None else None
+        completed = 0
+        failures: dict[str, str] = {}
+        raw_failures: list[str] = []
+        error_signatures: set[str] = set()
+        abort_early = asyncio.Event()
+        running_tasks: list[asyncio.Task[None]] = []
+
+        async def _submit_one(
+            label: str, group_labels: list[str], config: TrialConfig
+        ) -> None:
+            nonlocal completed
+            async with semaphore if semaphore is not None else contextlib.nullcontext():
+                if abort_early.is_set():
+                    return
+                started_at = time.monotonic()
+                outcome: Any
+                try:
+                    outcome = await self.orchestrator.submit(config)
+                except asyncio.CancelledError:
+                    if abort_early.is_set():
+                        return
+                    raise
+                except BaseException as exc:
+                    outcome = exc
+                duration_s = max(0.0, time.monotonic() - started_at)
+                completed += 1
                 if isinstance(outcome, BaseException):
-                    failures.append(f"{label}: {type(outcome).__name__}: {outcome}")
-                elif (err := getattr(outcome, "exception_info", None)) is not None:
-                    failures.append(f"{label}: {err.exception_type}")
-                elif self.cleanup_successful_trials:
-                    # submit() resolved, so harbor's secret scrub has run.
-                    self.cleanup_rollout_residue(
-                        config.trial_name.removeprefix(TRIAL_NAME_PREFIX),
-                        include_trial=True,
+                    phase = prewarm_failure_phase(None, outcome)
+                    detail = f"{type(outcome).__name__}: {outcome}"
+                    raw_failures.append(f"{label}: {detail}")
+                    error_signatures.add(detail)
+                    for member in group_labels:
+                        failures[member] = f"{phase}: {detail}"
+                    logger.warning(
+                        "Prewarm task %s failed (phase=%s, duration=%.1fs): %s — Prewarm progress %d/%d",
+                        label,
+                        phase,
+                        duration_s,
+                        detail,
+                        completed,
+                        total,
                     )
+                elif (err := getattr(outcome, "exception_info", None)) is not None:
+                    phase = prewarm_failure_phase(outcome)
+                    exc_msg = getattr(err, "exception_message", None)
+                    detail = (
+                        f"{err.exception_type}: {exc_msg}"
+                        if exc_msg
+                        else str(err.exception_type)
+                    )
+                    raw_failures.append(f"{label}: {err.exception_type}")
+                    error_signatures.add(detail)
+                    for member in group_labels:
+                        failures[member] = f"{phase}: {detail}"
+                    logger.warning(
+                        "Prewarm task %s failed (phase=%s, duration=%.1fs): %s — Prewarm progress %d/%d",
+                        label,
+                        phase,
+                        duration_s,
+                        detail,
+                        completed,
+                        total,
+                    )
+                else:
+                    if self.cleanup_successful_trials:
+                        # submit() resolved, so harbor's secret scrub has run.
+                        self.cleanup_rollout_residue(
+                            config.trial_name.removeprefix(TRIAL_NAME_PREFIX),
+                            include_trial=True,
+                        )
+                    logger.info(
+                        "Prewarm task %s ok (duration=%.1fs) — Prewarm progress %d/%d",
+                        label,
+                        duration_s,
+                        completed,
+                        total,
+                    )
+                    return
+
+                if (
+                    completed >= 3
+                    and len(raw_failures) == completed
+                    and (
+                        all(is_systemic_prewarm_error(sig) for sig in error_signatures)
+                        or len(error_signatures) == 1
+                    )
+                ):
+                    abort_early.set()
+                    for sibling in running_tasks:
+                        if sibling is not asyncio.current_task() and not sibling.done():
+                            sibling.cancel()
+
+        try:
+            running_tasks = [
+                asyncio.create_task(_submit_one(label, group_labels, config))
+                for label, group_labels, config in trial_specs
+            ]
+            results = await asyncio.gather(*running_tasks, return_exceptions=True)
+            for item in results:
+                if (
+                    isinstance(item, asyncio.CancelledError)
+                    and not abort_early.is_set()
+                ):
+                    raise item
+                if isinstance(item, BaseException) and not isinstance(
+                    item, asyncio.CancelledError
+                ):
+                    raise item
         finally:
             self.prewarm_trials.difference_update(
-                config.trial_name for config in configs
+                config.trial_name for _, _, config in trial_specs
             )
-        if failures:
-            raise RuntimeError(
-                f"prewarm failed for {len(failures)} of {len(configs)} task(s):\n"
-                + "\n".join(f"  - {failure}" for failure in failures)
+
+        succeeded_count = max(0, total - len(raw_failures))
+        self.prewarm_summary = {
+            "mode": effective_mode,
+            "total": total,
+            "succeeded": succeeded_count,
+            "failed": len(raw_failures),
+            "failed_tasks": dict(failures),
+        }
+        if raw_failures:
+            summary_items = ", ".join(
+                f"{task_name}: {reason}"
+                for task_name, reason in list(failures.items())[:5]
             )
-        logger.info("Prewarmed %d harbor task(s)", len(configs))
+            logger.error(
+                "Prewarm summary: prewarmed %d/%d, %d failed: %s",
+                succeeded_count,
+                total,
+                len(raw_failures),
+                summary_items,
+            )
+            systemic = (
+                abort_early.is_set()
+                or len(raw_failures) == total
+                or (total > 1 and len(raw_failures) > total / 2)
+                or all(is_systemic_prewarm_error(sig) for sig in error_signatures)
+                or (len(raw_failures) >= 2 and len(error_signatures) == 1)
+            )
+            if systemic:
+                raise RuntimeError(
+                    f"prewarm failed for {len(raw_failures)} of {total} task(s):\n"
+                    + "\n".join(f"  - {failure}" for failure in raw_failures)
+                )
+            self.failed_prewarm_tasks.update(failures)
+            logger.warning(
+                "Starting server in best-effort mode; %d task(s) marked unavailable: %s",
+                len(failures),
+                ", ".join(sorted(failures)),
+            )
+            return
+        logger.info("Prewarmed %d harbor task(s)", total)
 
     async def shutdown(self) -> None:
         """Cancel trials and wait for their cleanup, including artifact saving."""
@@ -916,15 +1241,21 @@ class HarborBackend(ExecutionBackend):
         else:
             self.archive_executor.shutdown(wait=False)
 
-    def prewarm_agent_config(self, task_dir: Path) -> HarborAgentConfig:
+    def prewarm_agent_config(
+        self, task_dir: Path, *, healthcheck_only: bool = False
+    ) -> HarborAgentConfig:
         """Install-only trials never run the agent: no endpoint, no credentials."""
+        if healthcheck_only:
+            return HarborAgentConfig(name="oracle", model_name=self.model_name)
         if self.native is not None and isinstance(self.agent, str):
             return native_prewarm_agent_config(
                 self.agent, self.native, self.model_name, self.native_agent_kwargs
             )
         return self.harness_agent_config(task_dir)
 
-    def prewarm_trial_config(self, task: HarborTask) -> TrialConfig:
+    def prewarm_trial_config(
+        self, task: HarborTask, *, healthcheck_only: bool = False
+    ) -> TrialConfig:
         rollout_id = f"{PREWARM_PREFIX}{uuid.uuid4().hex[:8]}"
         container_input = ContainerInput(
             rollout_id=rollout_id,
@@ -937,7 +1268,9 @@ class HarborBackend(ExecutionBackend):
             task_dir,
             ExecutionRequest(id=rollout_id, prompt=[]),
             container_input,
-            agent_config=self.prewarm_agent_config(task_dir),
+            agent_config=self.prewarm_agent_config(
+                task_dir, healthcheck_only=healthcheck_only
+            ),
         )
         config.install_only = True
         config.verifier.disable = True
@@ -945,13 +1278,16 @@ class HarborBackend(ExecutionBackend):
         return config
 
     def prewarm_lifespan(
-        self, task_ids: Sequence[str] | None = None
+        self,
+        task_ids: Sequence[str] | None = None,
+        *,
+        prewarm: str | bool | None = None,
     ) -> Callable[[object], AbstractAsyncContextManager[None]]:
         """An ASGI lifespan that prewarms before the server accepts traffic."""
 
         @asynccontextmanager
         async def lifespan(app: object) -> AsyncIterator[None]:
-            await self.prewarm(task_ids)
+            await self.prewarm(task_ids, prewarm=prewarm)
             yield
 
         return lifespan

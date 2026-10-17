@@ -126,6 +126,12 @@ class SourceHarborBackend(HarborBackend):
                 "Source images cannot change their build context during rollout"
             )
 
+    def task_requires_runtime_healthcheck(self, task: Any) -> bool:
+        return (
+            self._environment_healthcheck is not None
+            or super().task_requires_runtime_healthcheck(task)
+        )
+
     def materialize_task(
         self, task: Any, rollout_id: str, container_input: Any
     ) -> Path:
@@ -213,6 +219,7 @@ def main() -> None:
                 else None
             ),
             cleanup_successful_trials=config.cleanup_successful_trials,
+            **({"prewarm": config.prewarm} if config.prewarm != "auto" else {}),
         )
         representatives = list(
             {bindings[name]["environment"]: name for name in names}.values()

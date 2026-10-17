@@ -13,6 +13,7 @@ import logging
 import os
 import re
 import shutil
+import tomllib
 from enum import StrEnum
 from pathlib import Path
 from typing import Any
@@ -214,3 +215,68 @@ class HarborTask:
             test_sh.chmod(0o755)
 
         return task_dir
+
+
+def discover_dataset_task_ids(tasks_dir: Path) -> list[str]:
+    """Discover dataset task IDs relative to *tasks_dir*.
+
+    Prefers directories containing ``task.toml`` (stopping descent inside a
+    task directory); falls back to direct subdirectories containing
+    ``instruction.md`` or ``environment/``.
+    """
+    root = tasks_dir.resolve()
+    if not root.is_dir():
+        return []
+    found: list[str] = []
+    for current, dirs, files in root.walk(follow_symlinks=False):
+        dirs[:] = sorted(d for d in dirs if not d.startswith("."))
+        if current != root and "task.toml" in files:
+            found.append(current.relative_to(root).as_posix())
+            dirs.clear()
+    if found:
+        return sorted(found)
+    return sorted(
+        child.name
+        for child in root.iterdir()
+        if child.is_dir()
+        and not child.name.startswith(".")
+        and ((child / "instruction.md").is_file() or (child / "environment").is_dir())
+    )
+
+
+def task_has_healthcheck(task: HarborTask) -> bool:
+    """Whether *task* declares a runtime ``[environment.healthcheck]``."""
+    config_path = task.path / "task.toml"
+    if not config_path.is_file():
+        return False
+    try:
+        raw = tomllib.loads(config_path.read_text())
+    except Exception:
+        return False
+    env = raw.get("environment")
+    return isinstance(env, dict) and bool(env.get("healthcheck"))
+
+
+def task_environment_signature(
+    task: HarborTask, *, has_sdk_requirements: bool = False
+) -> str | None:
+    """Return a deduplication key when *task* uses a prebuilt ``docker_image``
+    and requires no per-task Dockerfile build.
+    """
+    if has_sdk_requirements and task.has_dockerfile():
+        return None
+    config_path = task.path / "task.toml"
+    if not config_path.is_file():
+        return None
+    try:
+        raw = tomllib.loads(config_path.read_text())
+    except Exception:
+        return None
+    env = raw.get("environment")
+    if not isinstance(env, dict):
+        return None
+    image = env.get("docker_image")
+    if not isinstance(image, str) or not image.strip():
+        return None
+    healthcheck = env.get("healthcheck")
+    return json.dumps([image.strip(), healthcheck], sort_keys=True)
