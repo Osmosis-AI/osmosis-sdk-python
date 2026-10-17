@@ -132,36 +132,6 @@ class SourceHarborBackend(HarborBackend):
             or super().task_requires_runtime_healthcheck(task)
         )
 
-    def task_environment_key(self, task_id: str, task: Any) -> str | None:
-        binding = self.image_bindings.get(task_id)
-        if not binding or "environment" not in binding:
-            return None
-        if super().task_requires_runtime_healthcheck(task):
-            return None
-        return binding["environment"]
-
-    async def prewarm(self, task_ids: Any = None, **kwargs: Any) -> None:
-        await super().prewarm(task_ids, **kwargs)
-        if self.failed_prewarm_tasks:
-            failed_images = {
-                self.image_bindings[tid]["environment"]
-                for tid in list(self.failed_prewarm_tasks)
-                if tid in self.image_bindings
-                and "environment" in self.image_bindings[tid]
-            }
-            for tid, binding in self.image_bindings.items():
-                if (
-                    tid not in self.failed_prewarm_tasks
-                    and binding.get("environment") in failed_images
-                ):
-                    source_reason = next(
-                        reason
-                        for other_id, reason in self.failed_prewarm_tasks.items()
-                        if self.image_bindings.get(other_id, {}).get("environment")
-                        == binding.get("environment")
-                    )
-                    self.failed_prewarm_tasks[tid] = source_reason
-
     def materialize_task(
         self, task: Any, rollout_id: str, container_input: Any
     ) -> Path:

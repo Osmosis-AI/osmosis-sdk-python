@@ -255,28 +255,3 @@ def task_has_healthcheck(task: HarborTask) -> bool:
         return False
     env = raw.get("environment")
     return isinstance(env, dict) and bool(env.get("healthcheck"))
-
-
-def task_environment_signature(
-    task: HarborTask, *, has_sdk_requirements: bool = False
-) -> str | None:
-    """Return a deduplication key when *task* uses a prebuilt ``docker_image``
-    and requires no per-task Dockerfile build.
-    """
-    if has_sdk_requirements and task.has_dockerfile():
-        return None
-    config_path = task.path / "task.toml"
-    if not config_path.is_file():
-        return None
-    try:
-        raw = tomllib.loads(config_path.read_text())
-    except Exception:
-        return None
-    env = raw.get("environment")
-    if not isinstance(env, dict):
-        return None
-    image = env.get("docker_image")
-    if not isinstance(image, str) or not image.strip():
-        return None
-    healthcheck = env.get("healthcheck")
-    return json.dumps([image.strip(), healthcheck], sort_keys=True)
