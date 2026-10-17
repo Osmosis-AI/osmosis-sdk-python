@@ -1728,7 +1728,7 @@ class TestPrewarm:
 
         assert "Prewarm summary: prewarmed 2/3, 1 failed" in caplog.text
         assert "t2" in backend.failed_prewarm_tasks
-        assert backend.health()["prewarm"]["failed"] == 1
+        assert backend.prewarm_summary["failed"] == 1
 
         outcome = await backend.execute(
             ExecutionRequest(

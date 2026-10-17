@@ -257,7 +257,7 @@ class HarborBackend(ExecutionBackend):
         patch_dockerfile_with_sdk: bool | None = None,
         agent_setup_timeout_sec: float | None = None,
         max_queue_depth: int | None = None,
-        prewarm: str | bool = "auto",
+        prewarm: str | bool | None = None,
         verified_tasks: Sequence[str] | set[str] | bool = False,
     ) -> None:
         self.orchestrator = orchestrator
@@ -266,7 +266,9 @@ class HarborBackend(ExecutionBackend):
         self.model_name = model_name
         self.agent = agent
         self.agent_setup_timeout_sec = agent_setup_timeout_sec
-        self.prewarm_mode: str = _normalize_prewarm_mode(prewarm)
+        self.prewarm_mode: str | None = (
+            _normalize_prewarm_mode(prewarm) if prewarm is not None else None
+        )
         self.verified_tasks: set[str] | bool = (
             verified_tasks if isinstance(verified_tasks, bool) else set(verified_tasks)
         )
@@ -415,11 +417,6 @@ class HarborBackend(ExecutionBackend):
                 "requires_public_url": uses_chat_endpoint
                 and not sandbox_reaches_host_loopback(self.environment_config),
             },
-            **(
-                {"prewarm": self.prewarm_summary}
-                if self.prewarm_summary is not None
-                else {}
-            ),
         }
 
     async def resolve_task(self, request: ExecutionRequest) -> HarborTask:
@@ -634,19 +631,12 @@ class HarborBackend(ExecutionBackend):
             pending.api_key = container_input.api_key
             task = await self.resolve_task(request)
             resolved_root = self.tasks_dir.resolve()
-            task_key = (
-                task.path.relative_to(resolved_root).as_posix()
-                if task.path != resolved_root
-                and task.path.is_relative_to(resolved_root)
-                else task.path.name
-            )
-            if prewarm_failure := (
-                self.failed_prewarm_tasks.get(task_key)
-                or self.failed_prewarm_tasks.get(task.path.name)
-            ):
-                raise RuntimeError(
-                    f"task {task_key!r} failed prewarm: {prewarm_failure}"
-                )
+            if task.path != resolved_root and task.path.is_relative_to(resolved_root):
+                task_key = task.path.relative_to(resolved_root).as_posix()
+                if prewarm_failure := self.failed_prewarm_tasks.get(task_key):
+                    raise RuntimeError(
+                        f"task {task_key!r} failed prewarm: {prewarm_failure}"
+                    )
             # Dataset mode zeroes the prompt, so the task keeps its own
             # instruction.md. In template mode the prompt owns it: silently
             # for the configured template dir, with a warning elsewhere.
@@ -939,6 +929,11 @@ class HarborBackend(ExecutionBackend):
     def task_requires_runtime_healthcheck(self, task: HarborTask) -> bool:
         return task_has_healthcheck(task)
 
+    def task_environment_key(self, task_id: str, task: HarborTask) -> str | None:
+        return task_environment_signature(
+            task, has_sdk_requirements=bool(self.sdk_requirements)
+        )
+
     def _resolve_prewarm_concurrency_cap(self) -> int | None:
         raw = (
             os.environ.get("OPENSANDBOX_MAX_SANDBOXES")
@@ -966,12 +961,16 @@ class HarborBackend(ExecutionBackend):
         Prewarm trials are install-only, carry no rollout credentials, and
         report all failing tasks together.
         """
-        env_mode = os.environ.get("_OSMOSIS_HARBOR_PREWARM")
-        effective_mode = _normalize_prewarm_mode(
+        raw_mode = (
             prewarm
             if prewarm is not None
-            else (env_mode if env_mode is not None else self.prewarm_mode)
+            else (
+                self.prewarm_mode
+                if self.prewarm_mode is not None
+                else os.environ.get("_OSMOSIS_HARBOR_PREWARM")
+            )
         )
+        effective_mode = _normalize_prewarm_mode(raw_mode)
         self.failed_prewarm_tasks.clear()
         if effective_mode == "off":
             self.prewarm_summary = {
@@ -984,11 +983,13 @@ class HarborBackend(ExecutionBackend):
             logger.info("Prewarm disabled (mode=off); skipping")
             return
 
+        resolved_root = self.tasks_dir.resolve()
         if self.task_mode == TaskMode.DATASET:
             if task_ids is None:
-                resolved_ids = discover_dataset_task_ids(self.tasks_dir)
-                if not resolved_ids:
+                discovered = discover_dataset_task_ids(self.tasks_dir)
+                if not discovered:
                     raise ValueError("dataset mode prewarm requires task ids")
+                resolved_ids = discovered
             else:
                 if not task_ids:
                     raise ValueError("dataset mode prewarm requires task ids")
@@ -998,23 +999,27 @@ class HarborBackend(ExecutionBackend):
                 filtered = [t for t in resolved_ids if t in env_set]
                 if filtered:
                     resolved_ids = filtered
-                else:
-                    existing = [
-                        t
-                        for t in env_ids
-                        if (self.tasks_dir / t)
-                        .resolve()
-                        .is_relative_to(self.tasks_dir.resolve())
-                        and (self.tasks_dir / t).is_dir()
-                    ]
-                    if existing:
-                        resolved_ids = existing
-            named_tasks = [
-                (t, HarborTask.from_dataset(self.tasks_dir, t)) for t in resolved_ids
-            ]
         else:
-            template_task = HarborTask(self.tasks_dir)
-            named_tasks = [(template_task.path.name, template_task)]
+            resolved_ids = [resolved_root.name]
+
+        failures: dict[str, str] = {}
+        raw_failures: list[str] = []
+        error_signatures: set[str] = set()
+        named_tasks: list[tuple[str, HarborTask]] = []
+        for raw_id in resolved_ids:
+            try:
+                if self.task_mode == TaskMode.DATASET:
+                    task = HarborTask.from_dataset(self.tasks_dir, raw_id)
+                    canonical_id = task.path.relative_to(resolved_root).as_posix()
+                else:
+                    task = HarborTask(self.tasks_dir)
+                    canonical_id = task.path.name
+                named_tasks.append((canonical_id, task))
+            except Exception as exc:
+                detail = f"{type(exc).__name__}: {exc}"
+                raw_failures.append(f"{raw_id}: {detail}")
+                error_signatures.add(detail)
+                failures[raw_id] = f"build: {detail}"
 
         active_tasks: list[tuple[str, list[str], HarborTask, bool]] = []
         seen_signatures: dict[str, list[str]] = {}
@@ -1029,9 +1034,7 @@ class HarborBackend(ExecutionBackend):
                 skipped_verified += 1
                 continue
             if self.task_mode == TaskMode.DATASET and len(named_tasks) > 1:
-                sig = task_environment_signature(
-                    task, has_sdk_requirements=bool(self.sdk_requirements)
-                )
+                sig = self.task_environment_key(task_id, task)
                 if sig is not None:
                     if sig in seen_signatures:
                         seen_signatures[sig].append(task_id)
@@ -1047,122 +1050,139 @@ class HarborBackend(ExecutionBackend):
                 "Skipping prewarm for %d build-verified harbor task(s)",
                 skipped_verified,
             )
-        if not active_tasks:
+        if not active_tasks and not raw_failures:
             self.prewarm_summary = {
                 "mode": effective_mode,
-                "total": len(named_tasks),
-                "succeeded": len(named_tasks),
+                "total": len(resolved_ids),
+                "succeeded": skipped_verified,
                 "failed": 0,
                 "failed_tasks": {},
             }
-            logger.info("Prewarmed %d harbor task(s)", len(named_tasks))
+            logger.info("Prewarmed %d harbor task(s)", len(resolved_ids))
             return
 
         trial_specs: list[tuple[str, list[str], TrialConfig]] = []
-        for label, group_labels, task, verified in active_tasks:
-            healthcheck_only = effective_mode == "healthcheck" or (
-                effective_mode == "auto" and verified
-            )
-            config = self.prewarm_trial_config(task, healthcheck_only=healthcheck_only)
-            trial_specs.append((label, group_labels, config))
-
-        total = len(trial_specs)
-        logger.info("Prewarming %d harbor task(s)", total)
-        cap = self._resolve_prewarm_concurrency_cap()
-        semaphore = asyncio.Semaphore(cap) if cap is not None else None
-        completed = 0
-        failures: dict[str, str] = {}
-        raw_failures: list[str] = []
-        error_signatures: set[str] = set()
-        abort_early = asyncio.Event()
-        running_tasks: list[asyncio.Task[None]] = []
-
-        async def _submit_one(
-            label: str, group_labels: list[str], config: TrialConfig
-        ) -> None:
-            nonlocal completed
-            async with semaphore if semaphore is not None else contextlib.nullcontext():
-                if abort_early.is_set():
-                    return
-                started_at = time.monotonic()
-                outcome: Any
+        try:
+            for label, group_labels, task, verified in active_tasks:
+                healthcheck_only = effective_mode == "healthcheck" or (
+                    effective_mode == "auto" and verified
+                )
                 try:
-                    outcome = await self.orchestrator.submit(config)
-                except asyncio.CancelledError:
-                    if abort_early.is_set():
-                        return
-                    raise
-                except BaseException as exc:
-                    outcome = exc
-                duration_s = max(0.0, time.monotonic() - started_at)
-                completed += 1
-                if isinstance(outcome, BaseException):
-                    phase = prewarm_failure_phase(None, outcome)
-                    detail = f"{type(outcome).__name__}: {outcome}"
+                    config = self.prewarm_trial_config(
+                        task, healthcheck_only=healthcheck_only
+                    )
+                except Exception as exc:
+                    detail = f"{type(exc).__name__}: {exc}"
                     raw_failures.append(f"{label}: {detail}")
                     error_signatures.add(detail)
                     for member in group_labels:
-                        failures[member] = f"{phase}: {detail}"
-                    logger.warning(
-                        "Prewarm task %s failed (phase=%s, duration=%.1fs): %s — Prewarm progress %d/%d",
-                        label,
-                        phase,
-                        duration_s,
-                        detail,
-                        completed,
-                        total,
-                    )
-                elif (err := getattr(outcome, "exception_info", None)) is not None:
-                    phase = prewarm_failure_phase(outcome)
-                    exc_msg = getattr(err, "exception_message", None)
-                    detail = (
-                        f"{err.exception_type}: {exc_msg}"
-                        if exc_msg
-                        else str(err.exception_type)
-                    )
-                    raw_failures.append(f"{label}: {err.exception_type}")
-                    error_signatures.add(detail)
-                    for member in group_labels:
-                        failures[member] = f"{phase}: {detail}"
-                    logger.warning(
-                        "Prewarm task %s failed (phase=%s, duration=%.1fs): %s — Prewarm progress %d/%d",
-                        label,
-                        phase,
-                        duration_s,
-                        detail,
-                        completed,
-                        total,
-                    )
-                else:
-                    if self.cleanup_successful_trials:
-                        # submit() resolved, so harbor's secret scrub has run.
-                        self.cleanup_rollout_residue(
-                            config.trial_name.removeprefix(TRIAL_NAME_PREFIX),
-                            include_trial=True,
-                        )
-                    logger.info(
-                        "Prewarm task %s ok (duration=%.1fs) — Prewarm progress %d/%d",
-                        label,
-                        duration_s,
-                        completed,
-                        total,
-                    )
-                    return
+                        failures[member] = f"build: {detail}"
+                    continue
+                trial_specs.append((label, group_labels, config))
 
-                if (
-                    completed >= 3
-                    and len(raw_failures) == completed
-                    and (
-                        all(is_systemic_prewarm_error(sig) for sig in error_signatures)
-                        or len(error_signatures) == 1
-                    )
+            total = len(trial_specs) + len(raw_failures)
+            logger.info("Prewarming %d harbor task(s)", total)
+            cap = self._resolve_prewarm_concurrency_cap()
+            semaphore = asyncio.Semaphore(cap) if cap is not None else None
+            completed = len(raw_failures)
+            succeeded_tasks = skipped_verified
+            abort_early = asyncio.Event()
+            running_tasks: list[asyncio.Task[None]] = []
+
+            async def _submit_one(
+                label: str, group_labels: list[str], config: TrialConfig
+            ) -> None:
+                nonlocal completed, succeeded_tasks
+                async with (
+                    semaphore if semaphore is not None else contextlib.nullcontext()
                 ):
-                    abort_early.set()
-                    for sibling in running_tasks:
-                        if sibling is not asyncio.current_task() and not sibling.done():
-                            sibling.cancel()
+                    if abort_early.is_set():
+                        return
+                    started_at = time.monotonic()
+                    outcome: Any
+                    try:
+                        outcome = await self.orchestrator.submit(config)
+                    except asyncio.CancelledError:
+                        if abort_early.is_set():
+                            return
+                        raise
+                    except BaseException as exc:
+                        outcome = exc
+                    duration_s = max(0.0, time.monotonic() - started_at)
+                    completed += 1
+                    if isinstance(outcome, BaseException):
+                        phase = prewarm_failure_phase(None, outcome)
+                        detail = f"{type(outcome).__name__}: {outcome}"
+                        raw_failures.append(f"{label}: {detail}")
+                        error_signatures.add(detail)
+                        for member in group_labels:
+                            failures[member] = f"{phase}: {detail}"
+                        logger.warning(
+                            "Prewarm task %s failed (phase=%s, duration=%.1fs): %s — Prewarm progress %d/%d",
+                            label,
+                            phase,
+                            duration_s,
+                            detail,
+                            completed,
+                            total,
+                        )
+                    elif (err := getattr(outcome, "exception_info", None)) is not None:
+                        phase = prewarm_failure_phase(outcome)
+                        exc_msg = getattr(err, "exception_message", None)
+                        detail = (
+                            f"{err.exception_type}: {exc_msg}"
+                            if exc_msg
+                            else str(err.exception_type)
+                        )
+                        raw_failures.append(f"{label}: {err.exception_type}")
+                        error_signatures.add(detail)
+                        for member in group_labels:
+                            failures[member] = f"{phase}: {detail}"
+                        logger.warning(
+                            "Prewarm task %s failed (phase=%s, duration=%.1fs): %s — Prewarm progress %d/%d",
+                            label,
+                            phase,
+                            duration_s,
+                            detail,
+                            completed,
+                            total,
+                        )
+                    else:
+                        succeeded_tasks += len(group_labels)
+                        if self.cleanup_successful_trials:
+                            # submit() resolved, so harbor's secret scrub has run.
+                            self.cleanup_rollout_residue(
+                                config.trial_name.removeprefix(TRIAL_NAME_PREFIX),
+                                include_trial=True,
+                            )
+                        logger.info(
+                            "Prewarm task %s ok (duration=%.1fs) — Prewarm progress %d/%d",
+                            label,
+                            duration_s,
+                            completed,
+                            total,
+                        )
+                        return
 
-        try:
+                    if (
+                        completed >= 3
+                        and len(raw_failures) == completed
+                        and (
+                            all(
+                                is_systemic_prewarm_error(sig)
+                                for sig in error_signatures
+                            )
+                            or len(error_signatures) == 1
+                        )
+                    ):
+                        abort_early.set()
+                        for sibling in running_tasks:
+                            if (
+                                sibling is not asyncio.current_task()
+                                and not sibling.done()
+                            ):
+                                sibling.cancel()
+
             running_tasks = [
                 asyncio.create_task(_submit_one(label, group_labels, config))
                 for label, group_labels, config in trial_specs
@@ -1183,12 +1203,11 @@ class HarborBackend(ExecutionBackend):
                 config.trial_name for _, _, config in trial_specs
             )
 
-        succeeded_count = max(0, total - len(raw_failures))
         self.prewarm_summary = {
             "mode": effective_mode,
-            "total": total,
-            "succeeded": succeeded_count,
-            "failed": len(raw_failures),
+            "total": len(resolved_ids),
+            "succeeded": succeeded_tasks,
+            "failed": len(failures),
             "failed_tasks": dict(failures),
         }
         if raw_failures:
@@ -1198,9 +1217,9 @@ class HarborBackend(ExecutionBackend):
             )
             logger.error(
                 "Prewarm summary: prewarmed %d/%d, %d failed: %s",
-                succeeded_count,
-                total,
-                len(raw_failures),
+                succeeded_tasks,
+                len(resolved_ids),
+                len(failures),
                 summary_items,
             )
             systemic = (

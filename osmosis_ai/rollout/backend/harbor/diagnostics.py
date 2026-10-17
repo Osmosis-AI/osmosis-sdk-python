@@ -6,6 +6,7 @@ tests can pass any object with the same fields.
 from __future__ import annotations
 
 import logging
+import re
 from datetime import UTC, datetime
 from typing import Any
 
@@ -117,19 +118,16 @@ def failure_phase(result: Any) -> str:
     return "setup"
 
 
-_SYSTEMIC_PREWARM_PATTERNS = (
-    "401",
-    "403",
-    "429",
-    "unauthorized",
-    "forbidden",
-    "too many requests",
-    "sandbox not owned by this session",
-    "registry authentication failed",
-    "connection refused",
-    "over quota",
-    "max_sandboxes",
-    "sandbox limit",
+_SYSTEMIC_PREWARM_RE = re.compile(
+    r"\bhttp\s+(?:status\s+)?(?:401|403|429)\b"
+    r"|(?<!\w)(?:401|403|429)\s+(?:unauthorized|forbidden|too many requests|sandbox\b)"
+    r"|sandbox not owned by this session"
+    r"|registry authentication failed"
+    r"|invalid or missing api key"
+    r"|over quota"
+    r"|max_sandboxes"
+    r"|sandbox limit",
+    re.IGNORECASE,
 )
 
 
@@ -164,8 +162,7 @@ def prewarm_failure_phase(result: Any, error: BaseException | None = None) -> st
 
 def is_systemic_prewarm_error(error_text: str) -> bool:
     """Whether a prewarm error string indicates a systemic auth/proxy/quota fault."""
-    lowered = error_text.lower()
-    return any(pattern in lowered for pattern in _SYSTEMIC_PREWARM_PATTERNS)
+    return bool(_SYSTEMIC_PREWARM_RE.search(error_text))
 
 
 def trial_metrics(result: Any) -> dict[str, Any]:
