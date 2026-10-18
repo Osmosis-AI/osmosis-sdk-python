@@ -31,6 +31,7 @@ import uuid
 from collections.abc import AsyncIterator, Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -201,6 +202,33 @@ def _env_prewarm_task_ids() -> list[str] | None:
     return items or None
 
 
+@dataclass
+class _PrewarmPlan:
+    effective_mode: str
+    total_candidates: int
+    total_tasks: int
+    skipped_verified: int = 0
+    trial_specs: list[tuple[str, list[str], TrialConfig]] = field(default_factory=list)
+    failures: dict[str, str] = field(default_factory=dict)
+    trial_errors: list[str] = field(default_factory=list)
+    raw_failures: list[str] = field(default_factory=list)
+    succeeded_tasks: int = 0
+    aborted_early: bool = False
+
+    def record_failure(
+        self,
+        label: str,
+        group_members: Sequence[str],
+        phase: str,
+        detail: str,
+        raw_failure: str,
+    ) -> None:
+        self.raw_failures.append(raw_failure)
+        self.trial_errors.append(f"{phase}: {detail}")
+        for member in group_members:
+            self.failures[member] = f"{phase}: {detail}"
+
+
 def _format_prewarm_failure(label: str, outcome: Any) -> tuple[str, str, str] | None:
     """Return ``(phase, detail, raw_failure)`` for a failed prewarm outcome."""
     if isinstance(outcome, BaseException):
@@ -219,17 +247,17 @@ def _format_prewarm_failure(label: str, outcome: Any) -> tuple[str, str, str] | 
 
 
 def _is_systemic_prewarm_outcome(
-    total_candidates: int, raw_failures: list[str]
+    total_candidates: int, trial_errors: list[str]
 ) -> bool:
-    if not raw_failures:
+    if not trial_errors:
         return False
-    failed_count = len(raw_failures)
+    failed_count = len(trial_errors)
     return (
         failed_count == total_candidates
         or (total_candidates > 1 and failed_count > total_candidates / 2)
         or (
             failed_count >= 2
-            and all(is_systemic_prewarm_error(reason) for reason in raw_failures)
+            and all(is_systemic_prewarm_error(reason) for reason in trial_errors)
         )
     )
 
@@ -301,6 +329,10 @@ class HarborBackend(ExecutionBackend):
         self.prewarm_mode: str | None = (
             _normalize_prewarm_mode(prewarm) if prewarm is not None else None
         )
+        if isinstance(verified_tasks, str):
+            raise TypeError(
+                "verified_tasks must be a bool or a collection of task IDs, not a str"
+            )
         self.verified_tasks: set[str] | bool = (
             verified_tasks if isinstance(verified_tasks, bool) else set(verified_tasks)
         )
@@ -1011,23 +1043,16 @@ class HarborBackend(ExecutionBackend):
 
     def _plan_prewarm_trials(
         self, task_ids: Sequence[str] | None, effective_mode: str
-    ) -> tuple[
-        int,
-        int,
-        int,
-        list[tuple[str, list[str], TrialConfig]],
-        dict[str, str],
-        list[str],
-    ]:
+    ) -> _PrewarmPlan:
         resolved_root = self.tasks_dir.resolve()
         resolved_ids = self._resolve_prewarm_task_ids(task_ids)
         groups = self.prewarm_task_groups(resolved_ids)
-        total_candidates = len(groups)
-        total_tasks = sum(len(members) for _, members in groups)
-        failures: dict[str, str] = {}
-        raw_failures: list[str] = []
+        plan = _PrewarmPlan(
+            effective_mode=effective_mode,
+            total_candidates=len(groups),
+            total_tasks=sum(len(members) for _, members in groups),
+        )
         active_tasks: list[tuple[str, list[str], HarborTask, bool]] = []
-        skipped_verified = 0
 
         for raw_id, group_members in groups:
             try:
@@ -1039,9 +1064,9 @@ class HarborBackend(ExecutionBackend):
                     canonical_id = task.path.name
             except Exception as exc:
                 detail = f"{type(exc).__name__}: {exc}"
-                raw_failures.append(f"{raw_id}: {detail}")
-                for member in group_members:
-                    failures[member] = f"build: {detail}"
+                plan.record_failure(
+                    raw_id, group_members, "build", detail, f"{raw_id}: {detail}"
+                )
                 continue
             verified = self._is_task_verified(canonical_id)
             if (
@@ -1049,14 +1074,13 @@ class HarborBackend(ExecutionBackend):
                 and verified
                 and not self.task_requires_runtime_healthcheck(task)
             ):
-                skipped_verified += len(group_members)
+                plan.skipped_verified += len(group_members)
                 continue
             canonical_members = (
                 [canonical_id] if group_members == [raw_id] else list(group_members)
             )
             active_tasks.append((canonical_id, canonical_members, task, verified))
 
-        trial_specs: list[tuple[str, list[str], TrialConfig]] = []
         for label, group_members, task, verified in active_tasks:
             healthcheck_only = effective_mode == "healthcheck" or (
                 effective_mode == "auto" and verified
@@ -1067,59 +1091,47 @@ class HarborBackend(ExecutionBackend):
                 )
             except Exception as exc:
                 detail = f"{type(exc).__name__}: {exc}"
-                raw_failures.append(f"{label}: {detail}")
-                for member in group_members:
-                    failures[member] = f"build: {detail}"
+                plan.record_failure(
+                    label, group_members, "build", detail, f"{label}: {detail}"
+                )
                 continue
-            trial_specs.append((label, group_members, config))
+            plan.trial_specs.append((label, group_members, config))
 
-        return (
-            total_candidates,
-            total_tasks,
-            skipped_verified,
-            trial_specs,
-            failures,
-            raw_failures,
-        )
+        plan.succeeded_tasks = plan.skipped_verified
+        return plan
 
-    async def _run_prewarm_trials(
-        self,
-        trial_specs: list[tuple[str, list[str], TrialConfig]],
-        *,
-        total_trials: int,
-        initial_completed: int,
-        initial_succeeded: int,
-        failures: dict[str, str],
-        raw_failures: list[str],
-    ) -> tuple[int, bool]:
+    async def _run_prewarm_trials(self, plan: _PrewarmPlan) -> None:
+        total_trials = len(plan.trial_specs) + len(plan.raw_failures)
         cap = self._resolve_prewarm_concurrency_cap()
         semaphore = asyncio.Semaphore(cap) if cap is not None else None
-        completed = initial_completed
-        succeeded_tasks = initial_succeeded
+        completed = len(plan.raw_failures)
         abort_early = asyncio.Event()
         running_tasks: list[asyncio.Task[None]] = []
 
         async def _submit_one(
             label: str, group_members: list[str], config: TrialConfig
         ) -> None:
-            nonlocal completed, succeeded_tasks
+            nonlocal completed
             async with semaphore if semaphore is not None else contextlib.nullcontext():
                 if abort_early.is_set():
                     return
                 started_at = time.monotonic()
                 try:
                     outcome: Any = await self.orchestrator.submit(config)
-                except asyncio.CancelledError:
+                except asyncio.CancelledError as exc:
                     if abort_early.is_set():
                         return
-                    raise
+                    current = asyncio.current_task()
+                    if current is not None and current.cancelling():
+                        raise
+                    outcome = exc
                 except Exception as exc:
                     outcome = exc
                 duration_s = max(0.0, time.monotonic() - started_at)
                 completed += 1
                 failure = _format_prewarm_failure(label, outcome)
                 if failure is None:
-                    succeeded_tasks += len(group_members)
+                    plan.succeeded_tasks += len(group_members)
                     if self.cleanup_successful_trials:
                         self.cleanup_rollout_residue(
                             config.trial_name.removeprefix(TRIAL_NAME_PREFIX),
@@ -1134,9 +1146,7 @@ class HarborBackend(ExecutionBackend):
                     )
                     return
                 phase, detail, raw_failure = failure
-                raw_failures.append(raw_failure)
-                for member in group_members:
-                    failures[member] = f"{phase}: {detail}"
+                plan.record_failure(label, group_members, phase, detail, raw_failure)
                 logger.warning(
                     "Prewarm task %s failed (phase=%s, duration=%.1fs): %s — Prewarm progress %d/%d",
                     label,
@@ -1148,8 +1158,8 @@ class HarborBackend(ExecutionBackend):
                 )
                 if (
                     completed >= 3
-                    and len(raw_failures) == completed
-                    and all(is_systemic_prewarm_error(r) for r in failures.values())
+                    and len(plan.trial_errors) == completed
+                    and all(is_systemic_prewarm_error(r) for r in plan.trial_errors)
                 ):
                     abort_early.set()
                     for sibling in running_tasks:
@@ -1158,7 +1168,7 @@ class HarborBackend(ExecutionBackend):
 
         running_tasks = [
             asyncio.create_task(_submit_one(label, group_members, config))
-            for label, group_members, config in trial_specs
+            for label, group_members, config in plan.trial_specs
         ]
         results = await asyncio.gather(*running_tasks, return_exceptions=True)
         for item in results:
@@ -1168,51 +1178,42 @@ class HarborBackend(ExecutionBackend):
                 item, asyncio.CancelledError
             ):
                 raise item
-        return succeeded_tasks, abort_early.is_set()
+        plan.aborted_early = abort_early.is_set()
 
-    def _finalize_prewarm(
-        self,
-        *,
-        effective_mode: str,
-        total_candidates: int,
-        total_tasks: int,
-        succeeded_tasks: int,
-        failures: dict[str, str],
-        raw_failures: list[str],
-        aborted_early: bool,
-    ) -> None:
+    def _finalize_prewarm(self, plan: _PrewarmPlan) -> None:
         self.prewarm_summary = {
-            "mode": effective_mode,
-            "total": total_tasks,
-            "succeeded": succeeded_tasks,
-            "failed": len(failures),
-            "failed_tasks": dict(failures),
+            "mode": plan.effective_mode,
+            "total": plan.total_tasks,
+            "succeeded": plan.succeeded_tasks,
+            "failed": len(plan.failures),
+            "failed_tasks": dict(plan.failures),
         }
-        if not raw_failures:
-            logger.info("Prewarmed %d harbor task(s)", total_tasks)
+        if not plan.raw_failures:
+            logger.info("Prewarmed %d harbor task(s)", plan.total_tasks)
             return
         summary_items = ", ".join(
-            f"{task_name}: {reason}" for task_name, reason in list(failures.items())[:5]
+            f"{task_name}: {reason}"
+            for task_name, reason in list(plan.failures.items())[:5]
         )
         logger.error(
             "Prewarm summary: prewarmed %d/%d, %d failed: %s",
-            succeeded_tasks,
-            total_tasks,
-            len(failures),
+            plan.succeeded_tasks,
+            plan.total_tasks,
+            len(plan.failures),
             summary_items,
         )
-        if aborted_early or _is_systemic_prewarm_outcome(
-            total_candidates, raw_failures
+        if plan.aborted_early or _is_systemic_prewarm_outcome(
+            plan.total_candidates, plan.trial_errors
         ):
             raise RuntimeError(
-                f"prewarm failed for {len(raw_failures)} of {total_candidates} task(s):\n"
-                + "\n".join(f"  - {failure}" for failure in raw_failures)
+                f"prewarm failed for {len(plan.raw_failures)} of {plan.total_candidates} task(s):\n"
+                + "\n".join(f"  - {failure}" for failure in plan.raw_failures)
             )
-        self.failed_prewarm_tasks.update(failures)
+        self.failed_prewarm_tasks.update(plan.failures)
         logger.warning(
             "Starting server in best-effort mode; %d task(s) marked unavailable: %s",
-            len(failures),
-            ", ".join(sorted(failures)),
+            len(plan.failures),
+            ", ".join(sorted(plan.failures)),
         )
 
     async def prewarm(
@@ -1248,56 +1249,27 @@ class HarborBackend(ExecutionBackend):
             logger.info("Prewarm disabled (mode=off); skipping")
             return
 
-        trial_specs: list[tuple[str, list[str], TrialConfig]] = []
+        plan: _PrewarmPlan | None = None
         try:
-            (
-                total_candidates,
-                total_tasks,
-                skipped_verified,
-                trial_specs,
-                failures,
-                raw_failures,
-            ) = self._plan_prewarm_trials(task_ids, effective_mode)
-            if skipped_verified:
+            plan = self._plan_prewarm_trials(task_ids, effective_mode)
+            if plan.skipped_verified:
                 logger.info(
                     "Skipping prewarm for %d build-verified harbor task(s)",
-                    skipped_verified,
+                    plan.skipped_verified,
                 )
-            if not trial_specs and not raw_failures:
-                self._finalize_prewarm(
-                    effective_mode=effective_mode,
-                    total_candidates=total_candidates,
-                    total_tasks=total_tasks,
-                    succeeded_tasks=skipped_verified,
-                    failures={},
-                    raw_failures=[],
-                    aborted_early=False,
-                )
+            if not plan.trial_specs and not plan.raw_failures:
+                self._finalize_prewarm(plan)
                 return
-            total_trials = len(trial_specs) + len(raw_failures)
+            total_trials = len(plan.trial_specs) + len(plan.raw_failures)
             logger.info("Prewarming %d harbor task(s)", total_trials)
-            succeeded_tasks, aborted_early = await self._run_prewarm_trials(
-                trial_specs,
-                total_trials=total_trials,
-                initial_completed=len(raw_failures),
-                initial_succeeded=skipped_verified,
-                failures=failures,
-                raw_failures=raw_failures,
-            )
+            await self._run_prewarm_trials(plan)
         finally:
-            self.prewarm_trials.difference_update(
-                config.trial_name for _, _, config in trial_specs
-            )
+            if plan is not None:
+                self.prewarm_trials.difference_update(
+                    config.trial_name for _, _, config in plan.trial_specs
+                )
 
-        self._finalize_prewarm(
-            effective_mode=effective_mode,
-            total_candidates=total_candidates,
-            total_tasks=total_tasks,
-            succeeded_tasks=succeeded_tasks,
-            failures=failures,
-            raw_failures=raw_failures,
-            aborted_early=aborted_early,
-        )
+        self._finalize_prewarm(plan)
 
     async def shutdown(self) -> None:
         """Cancel trials and wait for their cleanup, including artifact saving."""
