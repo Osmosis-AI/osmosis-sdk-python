@@ -119,9 +119,10 @@ def failure_phase(result: Any) -> str:
 
 
 _SYSTEMIC_PREWARM_RE = re.compile(
-    r"\bhttp\s+(?:status\s+)?(?:401|403|429)\b"
-    r"|(?<!\w)(?:401|403|429)\s+(?:unauthorized|forbidden|too many requests|sandbox\b)"
+    r"\bhttp\s+(?:status\s+)?(?:401|403|407|429)\b"
+    r"|(?<!\w)(?:401|403|407|429)\s+(?:unauthorized|forbidden|proxy authentication required|too many requests|sandbox\b)"
     r"|sandbox not owned by this session"
+    r"|proxy error"
     r"|registry authentication failed"
     r"|invalid or missing api key"
     r"|over quota"

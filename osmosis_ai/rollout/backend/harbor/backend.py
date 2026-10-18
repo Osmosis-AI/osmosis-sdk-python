@@ -218,15 +218,18 @@ def _format_prewarm_failure(label: str, outcome: Any) -> tuple[str, str, str] | 
     return None
 
 
-def _is_systemic_prewarm_outcome(total_tasks: int, failures: dict[str, str]) -> bool:
-    if not failures:
+def _is_systemic_prewarm_outcome(
+    total_candidates: int, raw_failures: list[str]
+) -> bool:
+    if not raw_failures:
         return False
+    failed_count = len(raw_failures)
     return (
-        len(failures) == total_tasks
-        or (total_tasks > 1 and len(failures) > total_tasks / 2)
+        failed_count == total_candidates
+        or (total_candidates > 1 and failed_count > total_candidates / 2)
         or (
-            len(failures) >= 2
-            and all(is_systemic_prewarm_error(reason) for reason in failures.values())
+            failed_count >= 2
+            and all(is_systemic_prewarm_error(reason) for reason in raw_failures)
         )
     )
 
@@ -989,13 +992,19 @@ class HarborBackend(ExecutionBackend):
             filtered = self.filter_prewarm_task_ids(resolved, env_ids)
             if filtered:
                 resolved = filtered
+            else:
+                logger.warning(
+                    "_OSMOSIS_PREWARM_TASK_IDS matched no candidate tasks; "
+                    "prewarming all %d task(s)",
+                    len(resolved),
+                )
         return resolved
 
     def filter_prewarm_task_ids(
         self, candidate_ids: list[str], requested_ids: list[str]
     ) -> list[str]:
-        requested = set(requested_ids)
-        return [t for t in candidate_ids if t in requested]
+        requested = {Path(t).as_posix().strip("/") for t in requested_ids if t.strip()}
+        return [t for t in candidate_ids if Path(t).as_posix().strip("/") in requested]
 
     def prewarm_task_groups(self, task_ids: list[str]) -> list[tuple[str, list[str]]]:
         return [(t, [t]) for t in task_ids]
@@ -1005,6 +1014,7 @@ class HarborBackend(ExecutionBackend):
     ) -> tuple[
         int,
         int,
+        int,
         list[tuple[str, list[str], TrialConfig]],
         dict[str, str],
         list[str],
@@ -1012,6 +1022,7 @@ class HarborBackend(ExecutionBackend):
         resolved_root = self.tasks_dir.resolve()
         resolved_ids = self._resolve_prewarm_task_ids(task_ids)
         groups = self.prewarm_task_groups(resolved_ids)
+        total_candidates = len(groups)
         total_tasks = sum(len(members) for _, members in groups)
         failures: dict[str, str] = {}
         raw_failures: list[str] = []
@@ -1062,7 +1073,14 @@ class HarborBackend(ExecutionBackend):
                 continue
             trial_specs.append((label, group_members, config))
 
-        return total_tasks, skipped_verified, trial_specs, failures, raw_failures
+        return (
+            total_candidates,
+            total_tasks,
+            skipped_verified,
+            trial_specs,
+            failures,
+            raw_failures,
+        )
 
     async def _run_prewarm_trials(
         self,
@@ -1156,6 +1174,7 @@ class HarborBackend(ExecutionBackend):
         self,
         *,
         effective_mode: str,
+        total_candidates: int,
         total_tasks: int,
         succeeded_tasks: int,
         failures: dict[str, str],
@@ -1182,9 +1201,11 @@ class HarborBackend(ExecutionBackend):
             len(failures),
             summary_items,
         )
-        if aborted_early or _is_systemic_prewarm_outcome(total_tasks, failures):
+        if aborted_early or _is_systemic_prewarm_outcome(
+            total_candidates, raw_failures
+        ):
             raise RuntimeError(
-                f"prewarm failed for {len(raw_failures)} of {total_tasks} task(s):\n"
+                f"prewarm failed for {len(raw_failures)} of {total_candidates} task(s):\n"
                 + "\n".join(f"  - {failure}" for failure in raw_failures)
             )
         self.failed_prewarm_tasks.update(failures)
@@ -1230,6 +1251,7 @@ class HarborBackend(ExecutionBackend):
         trial_specs: list[tuple[str, list[str], TrialConfig]] = []
         try:
             (
+                total_candidates,
                 total_tasks,
                 skipped_verified,
                 trial_specs,
@@ -1244,6 +1266,7 @@ class HarborBackend(ExecutionBackend):
             if not trial_specs and not raw_failures:
                 self._finalize_prewarm(
                     effective_mode=effective_mode,
+                    total_candidates=total_candidates,
                     total_tasks=total_tasks,
                     succeeded_tasks=skipped_verified,
                     failures={},
@@ -1268,6 +1291,7 @@ class HarborBackend(ExecutionBackend):
 
         self._finalize_prewarm(
             effective_mode=effective_mode,
+            total_candidates=total_candidates,
             total_tasks=total_tasks,
             succeeded_tasks=succeeded_tasks,
             failures=failures,

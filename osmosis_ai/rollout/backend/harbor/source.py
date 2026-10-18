@@ -135,7 +135,7 @@ class SourceHarborBackend(HarborBackend):
     def filter_prewarm_task_ids(
         self, candidate_ids: list[str], requested_ids: list[str]
     ) -> list[str]:
-        requested = set(requested_ids)
+        requested = {Path(t).as_posix().strip("/") for t in requested_ids if t.strip()}
         needed_images = {
             self.image_bindings[tid].get("environment")
             for tid in requested
@@ -145,7 +145,7 @@ class SourceHarborBackend(HarborBackend):
         return [
             t
             for t in candidate_ids
-            if t in requested
+            if Path(t).as_posix().strip("/") in requested
             or (
                 t in self.image_bindings
                 and self.image_bindings[t].get("environment") in needed_images
