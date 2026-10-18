@@ -174,10 +174,10 @@ def _normalize_prewarm_mode(value: str | bool | None) -> str:
         return "auto"
     if isinstance(value, str):
         normalized = value.strip().lower()
+        if not normalized or normalized in ("true", "1", "yes", "on", "auto"):
+            return "auto"
         if normalized in ("off", "false", "0", "no"):
             return "off"
-        if normalized in ("true", "1", "yes", "on", "auto"):
-            return "auto"
         if normalized in ("full", "healthcheck"):
             return normalized
     raise ValueError(
@@ -193,8 +193,10 @@ def _env_prewarm_task_ids() -> list[str] | None:
         try:
             parsed = json.loads(raw)
         except ValueError:
+            logger.warning("Ignoring malformed _OSMOSIS_PREWARM_TASK_IDS JSON")
             return None
         if not isinstance(parsed, list):
+            logger.warning("Ignoring non-list _OSMOSIS_PREWARM_TASK_IDS JSON")
             return None
         items = [str(item).strip() for item in parsed if str(item).strip()]
     else:
@@ -1185,11 +1187,19 @@ class HarborBackend(ExecutionBackend):
             "mode": plan.effective_mode,
             "total": plan.total_tasks,
             "succeeded": plan.succeeded_tasks,
+            "skipped_verified": plan.skipped_verified,
             "failed": len(plan.failures),
             "failed_tasks": dict(plan.failures),
         }
         if not plan.raw_failures:
-            logger.info("Prewarmed %d harbor task(s)", plan.total_tasks)
+            if plan.skipped_verified:
+                logger.info(
+                    "Prewarmed %d harbor task(s) (%d verified at build time)",
+                    plan.total_tasks,
+                    plan.skipped_verified,
+                )
+            else:
+                logger.info("Prewarmed %d harbor task(s)", plan.total_tasks)
             return
         summary_items = ", ".join(
             f"{task_name}: {reason}"
@@ -1222,10 +1232,12 @@ class HarborBackend(ExecutionBackend):
         *,
         prewarm: str | bool | None = None,
     ) -> None:
-        """Build every task image and run agent setup before serving rollouts.
+        """Prepare task environments and agent dependencies before serving rollouts.
 
-        Prewarm trials are install-only, carry no rollout credentials, and
-        report all failing tasks together.
+        Prewarm trials are install-only and carry no rollout credentials.
+        Supports modes ``"auto"``, ``"full"``, ``"healthcheck"``, and ``"off"``.
+        Systemic failures raise ``RuntimeError``; isolated task failures start
+        in best-effort mode with those tasks recorded in ``failed_prewarm_tasks``.
         """
         raw_mode = (
             prewarm
@@ -1233,7 +1245,7 @@ class HarborBackend(ExecutionBackend):
             else (
                 self.prewarm_mode
                 if self.prewarm_mode is not None
-                else os.environ.get("_OSMOSIS_HARBOR_PREWARM")
+                else (os.environ.get("_OSMOSIS_HARBOR_PREWARM", "").strip() or None)
             )
         )
         effective_mode = _normalize_prewarm_mode(raw_mode)
