@@ -132,6 +132,43 @@ class SourceHarborBackend(HarborBackend):
             or super().task_requires_runtime_healthcheck(task)
         )
 
+    def filter_prewarm_task_ids(
+        self, candidate_ids: list[str], requested_ids: list[str]
+    ) -> list[str]:
+        requested = set(requested_ids)
+        needed_images = {
+            self.image_bindings[tid].get("environment")
+            for tid in requested
+            if tid in self.image_bindings
+            and self.image_bindings[tid].get("environment")
+        }
+        return [
+            t
+            for t in candidate_ids
+            if t in requested
+            or (
+                t in self.image_bindings
+                and self.image_bindings[t].get("environment") in needed_images
+            )
+        ]
+
+    def prewarm_task_groups(self, task_ids: list[str]) -> list[tuple[str, list[str]]]:
+        candidate_set = set(task_ids)
+        groups: list[tuple[str, list[str]]] = []
+        for tid in task_ids:
+            env_img = self.image_bindings.get(tid, {}).get("environment")
+            if not env_img:
+                groups.append((tid, [tid]))
+                continue
+            members = [
+                name
+                for name, binding in self.image_bindings.items()
+                if binding.get("environment") == env_img
+                and (name == tid or name not in candidate_set)
+            ]
+            groups.append((tid, members or [tid]))
+        return groups
+
     def materialize_task(
         self, task: Any, rollout_id: str, container_input: Any
     ) -> Path:
@@ -219,7 +256,11 @@ def main() -> None:
                 else None
             ),
             cleanup_successful_trials=config.cleanup_successful_trials,
-            **({"prewarm": config.prewarm} if config.prewarm != "auto" else {}),
+            **(
+                {"prewarm": config.prewarm}
+                if "prewarm" in config.model_fields_set
+                else {}
+            ),
         )
         representatives = list(
             {bindings[name]["environment"]: name for name in names}.values()
