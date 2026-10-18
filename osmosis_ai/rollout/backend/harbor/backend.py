@@ -257,10 +257,7 @@ def _is_systemic_prewarm_outcome(
     return (
         failed_count == total_candidates
         or (total_candidates > 1 and failed_count > total_candidates / 2)
-        or (
-            failed_count >= 2
-            and all(is_systemic_prewarm_error(reason) for reason in trial_errors)
-        )
+        or sum(1 for reason in trial_errors if is_systemic_prewarm_error(reason)) >= 2
     )
 
 
@@ -1024,14 +1021,9 @@ class HarborBackend(ExecutionBackend):
             resolved = list(task_ids)
         if env_ids := _env_prewarm_task_ids():
             filtered = self.filter_prewarm_task_ids(resolved, env_ids)
-            if filtered:
-                resolved = filtered
-            else:
-                logger.warning(
-                    "_OSMOSIS_PREWARM_TASK_IDS matched no candidate tasks; "
-                    "prewarming all %d task(s)",
-                    len(resolved),
-                )
+            if not filtered:
+                raise ValueError("_OSMOSIS_PREWARM_TASK_IDS matched no candidate tasks")
+            resolved = filtered
         return resolved
 
     def filter_prewarm_task_ids(
