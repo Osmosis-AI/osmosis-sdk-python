@@ -6,6 +6,7 @@ tests can pass any object with the same fields.
 from __future__ import annotations
 
 import logging
+import re
 from datetime import UTC, datetime
 from typing import Any
 
@@ -115,6 +116,53 @@ def failure_phase(result: Any) -> str:
         if info is not None:
             return name
     return "setup"
+
+
+_SYSTEMIC_PREWARM_RE = re.compile(
+    r"(?:\bhttp\s+(?:status\s+)?)?(?<!\w)(?:401|403|407|429)(?:\s+|:\s*)(?:unauthorized|forbidden|proxy authentication required|too many requests|sandbox\b)"
+    r"|sandbox not owned by this session"
+    r"|proxy error"
+    r"|registry authentication failed"
+    r"|invalid or missing api key"
+    r"|over quota"
+    r"|max_sandboxes"
+    r"|sandbox limit",
+    re.IGNORECASE,
+)
+
+
+def prewarm_failure_phase(result: Any, error: BaseException | None = None) -> str:
+    """Classify a prewarm failure into build, start, healthcheck, or agent_setup."""
+    err_info = getattr(result, "exception_info", None) if result is not None else None
+    exc_type = (
+        getattr(err_info, "exception_type", None)
+        or (type(error).__name__ if error is not None else "")
+        or ""
+    )
+    exc_msg = (
+        getattr(err_info, "exception_message", None)
+        or (str(error) if error is not None else "")
+        or ""
+    )
+    combined = f"{exc_type} {exc_msg}".lower()
+    if "build" in combined or "dockerfile" in combined:
+        return "build"
+    if "healthcheck" in combined or "health check" in combined:
+        return "healthcheck"
+    if "agentsetup" in combined or (
+        result is not None and getattr(result, "agent_setup", None) is not None
+    ):
+        return "agent_setup"
+    if "environmentstart" in combined or (
+        result is not None and getattr(result, "environment_setup", None) is not None
+    ):
+        return "start"
+    return "start" if error is not None else "agent_setup"
+
+
+def is_systemic_prewarm_error(error_text: str) -> bool:
+    """Whether a prewarm error string indicates a systemic auth/proxy/quota fault."""
+    return bool(_SYSTEMIC_PREWARM_RE.search(error_text))
 
 
 def trial_metrics(result: Any) -> dict[str, Any]:

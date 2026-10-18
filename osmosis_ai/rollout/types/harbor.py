@@ -1,8 +1,10 @@
 """Configuration for the managed native Harbor gateway, independent of task source."""
 
-from typing import Any, ClassVar
+from typing import Any, ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
+
+PrewarmMode = Literal["auto", "full", "healthcheck", "off"]
 
 
 class HarborHealthcheckConfig(BaseModel):
@@ -26,3 +28,4 @@ class HarborGatewayConfig(BaseModel):
     environment_kwargs: dict[str, Any] = Field(default_factory=dict)
     environment_healthcheck: HarborHealthcheckConfig | None = None
     cleanup_successful_trials: bool = True
+    prewarm: PrewarmMode | bool = "auto"

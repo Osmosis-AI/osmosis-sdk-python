@@ -1657,6 +1657,181 @@ class TestPrewarm:
         with pytest.raises(ValueError, match="requires task ids"):
             await backend.prewarm()
 
+    async def test_dataset_prewarm_autodiscovers_tasks_and_filters_by_env(
+        self, bundle, tmp_path, monkeypatch, caplog
+    ):
+        root = tmp_path / "dataset"
+        for name in ("t1", "t2", "t3"):
+            task_dir = root / name
+            (task_dir / "environment").mkdir(parents=True)
+            (task_dir / "environment" / "Dockerfile").write_text("FROM alpine:3.20\n")
+            (task_dir / "instruction.md").write_text(f"Solve {name}")
+            (task_dir / "task.toml").write_text("[environment]\n")
+
+        submitted = []
+
+        async def run(queue, config):
+            submitted.append(Path(config.task.path).name)
+            return trial_result()
+
+        backend = HarborBackend(
+            orchestrator=FakeQueue(run),
+            tasks_dir=root,
+            task_mode=TaskMode.DATASET,
+            bundle=bundle,
+            trials_dir=tmp_path / "trials",
+        )
+        backend.rollouts_dir = tmp_path / "rollouts"
+        backend.rollouts_dir.mkdir(parents=True, exist_ok=True)
+
+        with caplog.at_level(logging.INFO):
+            await backend.prewarm()
+
+        assert sorted(submitted) == ["t1", "t2", "t3"]
+        assert "Prewarm progress 1/3" in caplog.text
+        assert "Prewarm progress 3/3" in caplog.text
+
+        submitted.clear()
+        monkeypatch.setenv("_OSMOSIS_PREWARM_TASK_IDS", '["t2"]')
+        await backend.prewarm(["t1", "t2", "t3"])
+        assert submitted == ["t2"]
+
+    async def test_prewarm_best_effort_vs_systemic_failures(
+        self, bundle, tmp_path, caplog
+    ):
+        root = tmp_path / "dataset"
+        for name in ("t1", "t2", "t3"):
+            task_dir = root / name
+            (task_dir / "environment").mkdir(parents=True)
+            (task_dir / "environment" / "Dockerfile").write_text("FROM alpine:3.20\n")
+            (task_dir / "instruction.md").write_text(f"Solve {name}")
+            (task_dir / "task.toml").write_text("[environment]\n")
+
+        async def run_one_bad(queue, config):
+            name = Path(config.task.path).name
+            if name == "t2":
+                raise RuntimeError("Dockerfile COPY missing file")
+            return trial_result()
+
+        backend = HarborBackend(
+            orchestrator=FakeQueue(run_one_bad),
+            tasks_dir=root,
+            task_mode=TaskMode.DATASET,
+            bundle=bundle,
+            trials_dir=tmp_path / "trials",
+        )
+        backend.rollouts_dir = tmp_path / "rollouts"
+        backend.rollouts_dir.mkdir(parents=True, exist_ok=True)
+
+        with caplog.at_level(logging.INFO):
+            await backend.prewarm(["t1", "t2", "t3"])
+
+        assert "Prewarm summary: prewarmed 2/3, 1 failed" in caplog.text
+        assert "t2" in backend.failed_prewarm_tasks
+        assert backend.prewarm_summary["failed"] == 1
+
+        outcome = await backend.execute(
+            ExecutionRequest(
+                id="r-failed-task",
+                prompt=[],
+                metadata={"harbor_task_id": "t2"},
+                grade=False,
+            )
+        )
+        assert outcome.workflow.status == RolloutStatus.FAILURE
+        assert "task 't2' failed prewarm" in (outcome.workflow.err_message or "")
+
+        async def run_systemic_403(queue, config):
+            raise RuntimeError("403 sandbox not owned by this session")
+
+        backend_sys = HarborBackend(
+            orchestrator=FakeQueue(run_systemic_403),
+            tasks_dir=root,
+            task_mode=TaskMode.DATASET,
+            bundle=bundle,
+            trials_dir=tmp_path / "trials-sys",
+        )
+        backend_sys.rollouts_dir = tmp_path / "rollouts-sys"
+        backend_sys.rollouts_dir.mkdir(parents=True, exist_ok=True)
+        with pytest.raises(RuntimeError, match="prewarm failed for"):
+            await backend_sys.prewarm(["t1", "t2", "t3"])
+
+    async def test_prewarm_respects_opensandbox_cap_and_off_mode(
+        self, bundle, tmp_path, monkeypatch
+    ):
+        root = tmp_path / "dataset"
+        for name in ("t1", "t2", "t3", "t4"):
+            task_dir = root / name
+            (task_dir / "environment").mkdir(parents=True)
+            (task_dir / "environment" / "Dockerfile").write_text("FROM alpine:3.20\n")
+            (task_dir / "instruction.md").write_text(f"Solve {name}")
+            (task_dir / "task.toml").write_text("[environment]\n")
+
+        in_flight = 0
+        peak_in_flight = 0
+
+        async def run_tracked(queue, config):
+            nonlocal in_flight, peak_in_flight
+            in_flight += 1
+            peak_in_flight = max(peak_in_flight, in_flight)
+            await asyncio.sleep(0)
+            in_flight -= 1
+            return trial_result()
+
+        monkeypatch.setenv("OPENSANDBOX_MAX_SANDBOXES", "4")
+        backend = HarborBackend(
+            orchestrator=FakeQueue(run_tracked),
+            tasks_dir=root,
+            task_mode=TaskMode.DATASET,
+            bundle=bundle,
+            trials_dir=tmp_path / "trials",
+        )
+        backend.rollouts_dir = tmp_path / "rollouts"
+        backend.rollouts_dir.mkdir(parents=True, exist_ok=True)
+
+        await backend.prewarm(["t1", "t2", "t3", "t4"])
+        assert peak_in_flight <= 2
+
+        peak_in_flight = 0
+        await backend.prewarm(["t1", "t2"], prewarm="off")
+        assert peak_in_flight == 0
+        assert backend.prewarm_summary["mode"] == "off"
+
+    async def test_prewarm_skips_verified_tasks_without_healthcheck(
+        self, bundle, tmp_path
+    ):
+        root = tmp_path / "dataset"
+        for name, has_hc in (("verified-plain", False), ("verified-hc", True)):
+            task_dir = root / name
+            (task_dir / "environment").mkdir(parents=True)
+            (task_dir / "instruction.md").write_text(f"Solve {name}")
+            toml_text = '[environment]\ndocker_image = "img@sha256:' + "a" * 64 + '"\n'
+            if has_hc:
+                toml_text += '[environment.healthcheck]\ncommand = "true"\n'
+            (task_dir / "task.toml").write_text(toml_text)
+
+        submitted_configs = []
+
+        async def run(queue, config):
+            submitted_configs.append(config)
+            return trial_result()
+
+        backend = HarborBackend(
+            orchestrator=FakeQueue(run),
+            tasks_dir=root,
+            task_mode=TaskMode.DATASET,
+            agent="opencode",
+            verified_tasks=True,
+            trials_dir=tmp_path / "trials",
+        )
+        backend.rollouts_dir = tmp_path / "rollouts"
+        backend.rollouts_dir.mkdir(parents=True, exist_ok=True)
+
+        await backend.prewarm(["verified-plain", "verified-hc"])
+        assert len(submitted_configs) == 1
+        assert Path(submitted_configs[0].task.path).name == "verified-hc"
+        assert submitted_configs[0].agent.name == "oracle"
+
 
 class FakeQueue:
     """A TrialQueue that fires hooks, then simulates harbor's secret scrub

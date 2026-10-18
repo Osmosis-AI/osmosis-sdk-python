@@ -13,6 +13,7 @@ import logging
 import os
 import re
 import shutil
+import tomllib
 from enum import StrEnum
 from pathlib import Path
 from typing import Any
@@ -214,3 +215,48 @@ class HarborTask:
             test_sh.chmod(0o755)
 
         return task_dir
+
+
+def discover_dataset_task_ids(tasks_dir: Path) -> list[str]:
+    """Discover dataset task IDs relative to *tasks_dir*.
+
+    Discovers directories containing ``task.toml`` (stopping descent inside a
+    task directory) as well as direct subdirectories containing
+    ``instruction.md`` or ``environment/``.
+    """
+    root = tasks_dir.resolve()
+    if not root.is_dir():
+        return []
+    found: set[str] = set()
+    covered_top_dirs: set[str] = set()
+    for current, dirs, files in root.walk(follow_symlinks=False):
+        dirs[:] = sorted(d for d in dirs if not d.startswith("."))
+        if current != root and "task.toml" in files:
+            rel = current.relative_to(root).as_posix()
+            found.add(rel)
+            covered_top_dirs.add(rel.split("/", 1)[0])
+            dirs.clear()
+    for child in root.iterdir():
+        if (
+            child.is_dir()
+            and not child.name.startswith(".")
+            and child.name not in covered_top_dirs
+            and (
+                (child / "instruction.md").is_file() or (child / "environment").is_dir()
+            )
+        ):
+            found.add(child.name)
+    return sorted(found)
+
+
+def task_has_healthcheck(task: HarborTask) -> bool:
+    """Whether *task* declares a runtime ``[environment.healthcheck]``."""
+    config_path = task.path / "task.toml"
+    if not config_path.is_file():
+        return False
+    try:
+        raw = tomllib.loads(config_path.read_text())
+    except Exception:
+        return False
+    env = raw.get("environment")
+    return isinstance(env, dict) and bool(env.get("healthcheck"))
