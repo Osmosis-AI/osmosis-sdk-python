@@ -232,7 +232,6 @@ class _PrewarmPlan:
 
 
 def _format_prewarm_failure(label: str, outcome: Any) -> tuple[str, str, str] | None:
-    """Return ``(phase, detail, raw_failure)`` for a failed prewarm outcome."""
     if isinstance(outcome, BaseException):
         phase = prewarm_failure_phase(None, outcome)
         detail = f"{type(outcome).__name__}: {outcome}"
