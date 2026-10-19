@@ -429,6 +429,12 @@ def _base_model_info(model: BaseModelDetail, context: Any) -> DetailResult:
                     _usd_per_million(model.inference_input_usd_per_million_tokens),
                 ),
                 (
+                    "Cached Input",
+                    _usd_per_million(
+                        model.inference_cached_input_usd_per_million_tokens
+                    ),
+                ),
+                (
                     "Output",
                     _usd_per_million(model.inference_output_usd_per_million_tokens),
                 ),

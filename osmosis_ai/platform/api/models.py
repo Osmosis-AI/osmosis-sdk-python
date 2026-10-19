@@ -1214,6 +1214,7 @@ class BaseModelDetail(BaseModelInfo):
     context_window: int | None = None
     hf_url: str | None = None
     inference_input_usd_per_million_tokens: float | None = None
+    inference_cached_input_usd_per_million_tokens: float | None = None
     inference_output_usd_per_million_tokens: float | None = None
     platform_url: str | None = None
     is_internal_user: bool = False
@@ -1235,6 +1236,9 @@ class BaseModelDetail(BaseModelInfo):
             hf_url=data.get("hf_url"),
             inference_input_usd_per_million_tokens=data.get(
                 "inference_input_usd_per_million_tokens"
+            ),
+            inference_cached_input_usd_per_million_tokens=data.get(
+                "inference_cached_input_usd_per_million_tokens"
             ),
             inference_output_usd_per_million_tokens=data.get(
                 "inference_output_usd_per_million_tokens"

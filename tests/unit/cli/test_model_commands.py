@@ -1063,6 +1063,7 @@ def _base_model_detail(*, priced: bool = True) -> BaseModelDetail:
         context_window=262144,
         hf_url="https://huggingface.co/Qwen/Qwen3.6-35B-A3B",
         inference_input_usd_per_million_tokens=0.1 if priced else None,
+        inference_cached_input_usd_per_million_tokens=0.01 if priced else None,
         inference_output_usd_per_million_tokens=0.4 if priced else None,
         platform_url="https://platform.example.test/acme/models",
         has_inference_pricing=priced,
@@ -1093,11 +1094,21 @@ class TestInfoBaseModel:
         base_model = result.data["base_model"]
         assert base_model["base_model"] == "Qwen/Qwen3.6-35B-A3B"
         assert base_model["context_window"] == 262144
+        assert base_model["inference_cached_input_usd_per_million_tokens"] == 0.01
         labels = [field.label for field in result.fields]
         assert "Context Window" in labels
         section_titles = [section.plain_lines[0] for section in result.sections]
         assert "Inference Pricing:" in section_titles
         assert "Hugging Face:" in section_titles
+        pricing = next(
+            section
+            for section in result.sections
+            if section.plain_lines[0] == "Inference Pricing:"
+        )
+        assert any(
+            "Cached Input" in line and "$0.01 / 1M tokens" in line
+            for line in pricing.plain_lines
+        )
 
     def test_name_falls_back_to_base_after_lora_404(
         self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO

@@ -267,6 +267,7 @@ class TestGetBaseModel:
             "context_window": 262144,
             "hf_url": "https://huggingface.co/Qwen/Qwen3.6-35B-A3B",
             "inference_input_usd_per_million_tokens": 0.1,
+            "inference_cached_input_usd_per_million_tokens": 0.01,
             "inference_output_usd_per_million_tokens": 0.4,
             "creator_name": "Osmosis",
             "created_at": "2026-09-10T20:00:00Z",
@@ -282,6 +283,7 @@ class TestGetBaseModel:
         assert result.parameters == 35951822704
         assert result.context_window == 262144
         assert result.inference_input_usd_per_million_tokens == 0.1
+        assert result.inference_cached_input_usd_per_million_tokens == 0.01
         assert result.has_inference_pricing is True
         assert result.inference_output_usd_per_million_tokens == 0.4
         assert result.namespace == "Qwen"

@@ -149,6 +149,9 @@ def serialize_base_model_detail(model: BaseModelDetail) -> dict[str, Any]:
         data["inference_input_usd_per_million_tokens"] = (
             model.inference_input_usd_per_million_tokens
         )
+        data["inference_cached_input_usd_per_million_tokens"] = (
+            model.inference_cached_input_usd_per_million_tokens
+        )
         data["inference_output_usd_per_million_tokens"] = (
             model.inference_output_usd_per_million_tokens
         )
