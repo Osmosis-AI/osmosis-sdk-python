@@ -398,6 +398,81 @@ class TestMetricsCommandWritesFile:
         assert any(str(expected) in hint for hint in result.display_hints)
 
 
+class TestMetricsExportKeepsExistingFiles:
+    """An explicit --output file is replaced only with --overwrite, atomically."""
+
+    @pytest.fixture
+    def run_info(self, tmp_path: Path):
+        with (
+            patch(_PATCH_AUTH) as mock_auth,
+            patch(_PATCH_CLIENT) as mock_client_cls,
+        ):
+            mock_auth.return_value = _make_git_context(workspace_directory=tmp_path)
+            client = mock_client_cls.return_value
+            client.get_training_run.return_value = _make_run_detail()
+            client.get_training_run_metrics.return_value = _make_metrics()
+
+            from osmosis_ai.cli.commands.train import info
+
+            yield info
+
+    def test_refuses_existing_output_without_overwrite(
+        self, run_info, tmp_path: Path
+    ) -> None:
+        output = tmp_path / "metrics.json"
+        output.write_text("keep me")
+
+        result = run_info(name="reward-tuning-v3", output=str(output), overwrite=False)
+
+        assert output.read_text() == "keep me"
+        assert result.data["output_path"] is None
+        assert "already exists" in result.data["save_warning"]
+        assert "--overwrite" in result.data["save_warning"]
+
+    def test_overwrite_replaces_existing_output(self, run_info, tmp_path: Path) -> None:
+        output = tmp_path / "metrics.json"
+        output.write_text("stale")
+
+        result = run_info(name="reward-tuning-v3", output=str(output), overwrite=True)
+
+        assert json.loads(output.read_text())["training_run"]["name"] == (
+            "reward-tuning-v3"
+        )
+        assert result.data["output_path"] == str(output)
+
+    def test_default_export_is_refreshed(
+        self, run_info, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        default = tmp_path / ".osmosis" / "metrics" / "reward-tuning-v3_550e8400.json"
+        default.parent.mkdir(parents=True)
+        default.write_text("stale")
+
+        run_info(name="reward-tuning-v3", output=None, overwrite=False)
+
+        assert json.loads(default.read_text())["training_run"]["name"] == (
+            "reward-tuning-v3"
+        )
+
+    def test_failed_write_keeps_the_previous_file(
+        self, run_info, tmp_path: Path
+    ) -> None:
+        output = tmp_path / "metrics.json"
+        output.write_text("previous")
+
+        with patch(
+            "osmosis_ai.cli.metrics_export.os.replace",
+            side_effect=OSError("disk full"),
+        ):
+            result = run_info(
+                name="reward-tuning-v3", output=str(output), overwrite=True
+            )
+
+        assert output.read_text() == "previous"
+        assert list(tmp_path.iterdir()) == [output]
+        assert "disk full" in result.data["save_warning"]
+
+
 class TestResolveOutputPath:
     """Test _resolve_output_path smart path resolution."""
 

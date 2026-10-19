@@ -25,7 +25,6 @@ from osmosis_ai.cli.output.display import (
     format_local_date,
     format_local_datetime,
 )
-from osmosis_ai.cli.output.jsonutil import dump_cli_json
 from osmosis_ai.platform.api.client import OsmosisClient
 from osmosis_ai.platform.api.models import (
     RUN_STATUSES_ERROR,
@@ -247,12 +246,13 @@ def logs(name: str, *, limit: int, cursor: str | None = None) -> ListResult:
     )
 
 
-def info(name: str, *, output: str | None) -> DetailResult:
+def info(name: str, *, output: str | None, overwrite: bool = False) -> DetailResult:
     """Show training run details, checkpoints, and metrics."""
     from osmosis_ai.cli.metrics_export import (
         build_export_dict,
         resolve_default_metrics_output,
         resolve_metrics_output_path,
+        write_metrics_export,
     )
 
     context = require_platform_workspace_context()
@@ -447,7 +447,11 @@ def info(name: str, *, output: str | None) -> DetailResult:
                     )
                 )
                 assert export is not None
-                out_path.write_text(dump_cli_json(export, indent=2) + "\n")
+                # The default export under .osmosis/metrics/ is the CLI's own
+                # copy of the run's metrics, so it is refreshed in place.
+                write_metrics_export(
+                    out_path, export, overwrite=overwrite or output is None
+                )
                 output_path = str(out_path)
                 display_hints.append(f"Saved metrics to {output_path}")
             except (CLIError, OSError) as exc:

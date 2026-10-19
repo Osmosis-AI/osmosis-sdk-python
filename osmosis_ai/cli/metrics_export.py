@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
+import contextlib
 import datetime
 import math
+import os
 import re
+import tempfile
 from pathlib import Path
 from typing import Any, cast
 
 from osmosis_ai.cli.errors import CLIError
+from osmosis_ai.cli.output.jsonutil import dump_cli_json
 from osmosis_ai.cli.paths import parse_cli_path
 from osmosis_ai.platform.api.models import (
     EvalRunMetrics,
@@ -73,6 +77,33 @@ def resolve_metrics_output_path(output: str, run_name: str | None, run_id: str) 
         raise CLIError(f"Cannot create output path: {exc}") from exc
 
     return path
+
+
+def write_metrics_export(
+    path: Path, export: dict[str, Any], *, overwrite: bool
+) -> None:
+    """Write a metrics export atomically, keeping an existing file unless asked.
+
+    Readers see the previous file or the complete new one, never a partial
+    write.
+    """
+    # ponytail: the existence check and the replace are separate steps, so a
+    # file created between them is still replaced; link the temp file instead
+    # if concurrent exports to one path ever matter.
+    if not overwrite and path.exists():
+        raise CLIError(f"{path} already exists. Use --overwrite to replace it.")
+    text = dump_cli_json(export, indent=2) + "\n"
+    fd, temporary = tempfile.mkstemp(
+        dir=path.parent, prefix=f".{path.name}.", suffix=".tmp"
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(text)
+        os.replace(temporary, path)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.unlink(temporary)
+        raise
 
 
 def resolve_default_metrics_output(

@@ -87,7 +87,7 @@ Platform API and login errors share one error-body reader and prefer a non-empty
 
 HTTP 409 responses whose `error` (or `code`) is `deployment_conflict` remain `CONFLICT` errors on both the API and login paths. A usable server `message` is surfaced; a missing or invalid message, or one that mentions reloading (the edge router's browser-only prompt, whose exact wording is not stable), is replaced with CLI guidance to retry shortly and contact support if the conflict persists. The JSON error details retain the original response, HTTP status, and platform code. Conflicting requests are not automatically retried.
 
-JSON success and error envelopes are encoded with `allow_nan=False`. Non-finite metric values are sanitized to `null` in train/eval metrics exports (including the file written by `train info --output`); any remaining non-finite float fails the command rather than emitting invalid JSON.
+JSON success and error envelopes are encoded with `allow_nan=False`. Non-finite metric values are sanitized to `null` in train/eval metrics exports (including the file written by `train info --output`); any remaining non-finite float fails the command rather than emitting invalid JSON. `train info --output` keeps an existing file unless `--overwrite` is passed, reporting `save_warning` instead, and writes through a temporary file and an atomic replace; the default `.osmosis/metrics/` export is the CLI's own copy and is refreshed in place.
 
 Unknown exceptions become `INTERNAL` with a generic message. Set `OSMOSIS_DEBUG=1` to append the original exception and traceback to stderr (the JSON envelope is unchanged).
 
