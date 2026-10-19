@@ -12,6 +12,7 @@ from harbor.models.agent.context import AgentContext
 from osmosis_ai.rollout.backend.harbor.native_agents import (
     NATIVE_AGENTS,
     native_agent_config,
+    native_prewarm_agent_config,
 )
 
 
@@ -116,3 +117,67 @@ def test_mini_does_not_read_config_file_without_reasoning_override(tmp_path, eff
 def test_mini_rejects_invalid_reasoning_config(overrides, message):
     with pytest.raises(ValueError, match=message):
         mini_config({"reasoning_effort": "high", **overrides})
+
+
+@pytest.mark.parametrize("version", [None, "1.18.27"])
+async def test_opencode_skips_install_when_prebaked(tmp_path, version):
+    from types import SimpleNamespace
+
+    cfg = native_prewarm_agent_config(
+        "opencode",
+        NATIVE_AGENTS["opencode"],
+        "openai/student",
+        extra_kwargs={"version": version} if version else None,
+    )
+    agent = AgentFactory.create_agent_from_config(cfg, tmp_path / "logs")
+    commands = []
+
+    class Env:
+        async def exec(self, command, **kwargs):
+            commands.append(command)
+            return SimpleNamespace(return_code=0, stdout="1.18.27\n", stderr="")
+
+    agent.ensure_system_dependencies = AsyncMock()
+    agent.exec_as_agent = AsyncMock()
+    await agent.install(Env())
+
+    assert len(commands) == 1
+    assert "/opt/osmosis-agent/bin" in commands[0]
+    if version is None:
+        assert "[ -x /opt/osmosis-agent/bin/opencode ]" in commands[0]
+    agent.ensure_system_dependencies.assert_not_called()
+    agent.exec_as_agent.assert_not_called()
+
+
+@pytest.mark.parametrize("is_musl", [False, True])
+async def test_opencode_installs_when_prebaked_probe_misses(tmp_path, is_musl):
+    from types import SimpleNamespace
+
+    cfg = native_agent_config(
+        "opencode",
+        NATIVE_AGENTS["opencode"],
+        "openai/student",
+        "https://trainer/v1",
+        "key-1",
+    )
+    agent = AgentFactory.create_agent_from_config(cfg, tmp_path / "logs")
+
+    class Env:
+        async def exec(self, command, **kwargs):
+            if "opencode --version" in command:
+                return SimpleNamespace(return_code=127, stdout="", stderr="")
+            return SimpleNamespace(
+                return_code=0 if is_musl else 1, stdout="", stderr=""
+            )
+
+    agent.ensure_system_dependencies = AsyncMock()
+    agent.exec_as_agent = AsyncMock()
+    await agent.install(Env())
+
+    deps = agent.ensure_system_dependencies.call_args.args[1]
+    assert deps == (
+        ("curl", "bash", "coreutils", "nodejs", "npm")
+        if is_musl
+        else ("curl", "bash", "coreutils")
+    )
+    agent.exec_as_agent.assert_called_once()
