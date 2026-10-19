@@ -160,9 +160,10 @@ def serialize_rollout(rollout: RolloutInfo) -> dict[str, Any]:
     return {
         "id": rollout.id,
         "name": rollout.name,
-        "is_active": rollout.is_active,
+        "description": rollout.description,
         "repo_full_name": rollout.repo_full_name,
         "last_synced_commit_sha": rollout.last_synced_commit_sha,
+        "last_synced_at": rollout.last_synced_at,
         "created_at": rollout.created_at,
     }
 
