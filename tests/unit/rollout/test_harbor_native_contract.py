@@ -142,11 +142,41 @@ async def test_opencode_skips_install_when_prebaked(tmp_path, version):
     await agent.install(Env())
 
     assert len(commands) == 1
-    assert "/opt/osmosis-agent/bin" in commands[0]
+    assert 'export PATH="/opt/osmosis-agent/bin:$PATH";' in commands[0]
     if version is None:
         assert "[ -x /opt/osmosis-agent/bin/opencode ]" in commands[0]
     agent.ensure_system_dependencies.assert_not_called()
     agent.exec_as_agent.assert_not_called()
+
+
+async def test_opencode_reinstalls_when_pinned_version_mismatches_prebaked(tmp_path):
+    from types import SimpleNamespace
+
+    cfg = native_prewarm_agent_config(
+        "opencode",
+        NATIVE_AGENTS["opencode"],
+        "openai/student",
+        extra_kwargs={"version": "1.18.27"},
+    )
+    agent = AgentFactory.create_agent_from_config(cfg, tmp_path / "logs")
+
+    class Env:
+        async def exec(self, command, **kwargs):
+            if "opencode --version" in command:
+                return SimpleNamespace(return_code=0, stdout="1.0.0\n", stderr="")
+            return SimpleNamespace(return_code=1, stdout="", stderr="")
+
+    agent.ensure_system_dependencies = AsyncMock()
+    agent.exec_as_agent = AsyncMock()
+    await agent.install(Env())
+
+    agent.ensure_system_dependencies.assert_called_once()
+    assert agent.ensure_system_dependencies.call_args.args[1] == (
+        "curl",
+        "bash",
+        "coreutils",
+    )
+    agent.exec_as_agent.assert_called_once()
 
 
 @pytest.mark.parametrize("is_musl", [False, True])

@@ -45,11 +45,13 @@ def _ensure_opencode_prebaked_support() -> None:
     global _OPENCODE_PATCHED
     if _OPENCODE_PATCHED:
         return
-    from harbor.agents.installed.opencode import OpenCode, nvm_node_install_snippet
+    from harbor.agents.installed.opencode import OpenCode
+
+    orig_install = OpenCode.install
 
     def get_version_command(self: Any) -> str | None:
         return (
-            f'export PATH="$PATH:{_PREBAKED_OPENCODE_BIN_DIR}"; '
+            f'export PATH="{_PREBAKED_OPENCODE_BIN_DIR}:$PATH"; '
             "[ -f ~/.nvm/nvm.sh ] && . ~/.nvm/nvm.sh; opencode --version"
         )
 
@@ -78,24 +80,21 @@ def _ensure_opencode_prebaked_support() -> None:
 
         musl_check = await environment.exec(command=_MUSL_CHECK)
         is_musl = musl_check.return_code == 0
-        dependencies: tuple[str, ...] = (
-            ("curl", "bash", "coreutils", "nodejs", "npm")
-            if is_musl
-            else ("curl", "bash", "coreutils")
-        )
-        await self.ensure_system_dependencies(environment, dependencies)
-        version_spec = f"@{self._version}" if self._version else "@latest"
-        node_setup = (
-            "node --version && npm --version" if is_musl else nvm_node_install_snippet()
-        )
-        await self.exec_as_agent(
-            environment,
-            command=(
-                f"set -euo pipefail; {node_setup} && "
-                f"npm i -g opencode-ai{version_spec} && "
-                "opencode --version"
-            ),
-        )
+        orig_ensure = self.ensure_system_dependencies
+
+        async def ensure_filtered(env: Any, deps: tuple[str, ...]) -> None:
+            filtered = (
+                deps
+                if is_musl
+                else tuple(d for d in deps if d not in {"nodejs", "npm"})
+            )
+            await orig_ensure(env, filtered)
+
+        self.ensure_system_dependencies = ensure_filtered
+        try:
+            await orig_install(self, environment)
+        finally:
+            self.ensure_system_dependencies = orig_ensure
 
     OpenCode.get_version_command = get_version_command
     OpenCode.install = install
