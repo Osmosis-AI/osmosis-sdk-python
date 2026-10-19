@@ -1,0 +1,16 @@
+osmosis_ai/rollout/backend/harbor/native_agents.py
+  h_5979ffe3601239 48-50,54,83-97
+tests/unit/rollout/test_harbor_native_contract.py
+  h_5979ffe3601239 145,152-181
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "f8b7981690969c0c4f3718b1f7d34bb7f0a19646",
+  "prompts": {},
+  "humans": {
+    "h_5979ffe3601239": {
+      "author": "Allen Lin <allen@osmosis.ai>"
+    }
+  }
+}
