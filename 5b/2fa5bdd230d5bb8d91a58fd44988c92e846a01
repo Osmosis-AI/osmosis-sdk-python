@@ -1,0 +1,26 @@
+tests/unit/rollout/integrations/test_openai_agents.py
+  s_6762e407d9ec18::t_95b0856131306d 5,8-9,27-31,33-34,36,38-40,45-49,51,53-56,58-62,64-66,68,70-71,73-76,78,80-81,83,86-88,90,107-120,123-135,138-141,143-145,148,150-151
+  s_6762e407d9ec18::t_f88041b516b581 10-11,91-103,105
+  s_6762e407d9ec18::t_d889d632e67f33 42
+tests/unit/rollout/test_local_backend.py
+  s_6762e407d9ec18::t_860fab1eb4d362 14,22,31-38,45-48
+tests/unit/rollout/test_context.py
+  s_6762e407d9ec18::t_8408729d7819ba 12,18-25,83,85,87-88,94,96-97,99-100,102,104-105,107,109-111
+  s_6762e407d9ec18::t_d889d632e67f33 26
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.1",
+  "base_commit_sha": "5b2fa5bdd230d5bb8d91a58fd44988c92e846a01",
+  "prompts": {},
+  "sessions": {
+    "s_6762e407d9ec18": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019e03ad-1cac-7fa1-a1ed-1059dad66355",
+        "model": "gpt-5.5"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}

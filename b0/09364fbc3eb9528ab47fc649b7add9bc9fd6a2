@@ -1,0 +1,40 @@
+osmosis_ai/platform/cli/eval.py
+  s_bb5670bff79b06::t_9b2ed68f2e551b 8
+  s_bb5670bff79b06::t_cce4058cc982b2 365
+  s_bb5670bff79b06::t_df34ebdf1dc3e2 52-54
+  s_bb5670bff79b06::t_95601de63e4f51 453-458
+  s_bb5670bff79b06::t_78648515c7c607 346-363
+osmosis_ai/platform/cli/train.py
+  s_bb5670bff79b06::t_6a560f3f209cc8 154-171
+  s_bb5670bff79b06::t_903d201044c85e 55-57
+  s_bb5670bff79b06::t_cce4058cc982b2 173
+  s_bb5670bff79b06::t_67266c4630cfc3 260-265
+  s_bb5670bff79b06::t_3b766f91001225 7
+osmosis_ai/platform/cli/benchmark.py
+  s_bb5670bff79b06::t_e57f7d8c3b8b4a 61-63
+  s_bb5670bff79b06::t_e29f28f7528844 7
+  s_bb5670bff79b06::t_1ef92b1044d3ab 1142-1153
+docs/eval.md
+  s_bb5670bff79b06::t_782436d34380b0 10
+tests/unit/platform/cli/test_benchmark_submit.py
+  s_bb5670bff79b06::t_12d9642ef48ce8 12
+  s_bb5670bff79b06::t_df1406e2b88351 134,199,245,279,347
+tests/unit/cli/test_lazy_loading.py
+  s_bb5670bff79b06::t_c753ca0700c83d 178-193
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "b009364fbc3eb9528ab47fc649b7add9bc9fd6a2",
+  "prompts": {},
+  "sessions": {
+    "s_bb5670bff79b06": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "d91e686f-9b27-45d2-b450-12a612d29cae",
+        "model": "grok-4.6"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}

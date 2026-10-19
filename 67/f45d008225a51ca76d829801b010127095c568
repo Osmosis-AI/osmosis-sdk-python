@@ -1,0 +1,19 @@
+tests/unit/platform/cli/test_project_setup.py
+  s_536cf86e4a9129::t_59215b83554816 359-361
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "67f45d008225a51ca76d829801b010127095c568",
+  "prompts": {},
+  "sessions": {
+    "s_536cf86e4a9129": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "24dc9525-de13-4c64-b668-35f511a68075",
+        "model": "gpt-5.5-extra-high"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}

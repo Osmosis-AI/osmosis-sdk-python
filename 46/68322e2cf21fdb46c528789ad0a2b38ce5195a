@@ -1,0 +1,83 @@
+tests/unit/eval/evaluation/test_cli.py
+  9bd21126f82148e5 69-80
+tests/unit/platform/cli/test_workspace_setup.py
+  baf60cceeab36cdd 442-447,562-563,576-577,586,633-690,907-931
+  9bd21126f82148e5 429,436,451-452,513-514,976-977,998
+osmosis_ai/cli/commands/train.py
+  9bd21126f82148e5 150-155,157-164,166-171
+osmosis_ai/cli/commands/rollout.py
+  9bd21126f82148e5 1,6,17,22,24-31,33-34,36-38,41-49,51-58,61-70,72-79,82-85,89-106,109-116,118-119,122-123,126,131,134,137
+osmosis_ai/cli/commands/workspace.py
+  9bd21126f82148e5 5-6,131-165
+osmosis_ai/eval/common/cli.py
+  9bd21126f82148e5 50-51,54-55,140-145,147-151,192-193,210-214,260,271-273
+osmosis_ai/platform/cli/templates/research/program.md.tpl
+  9bd21126f82148e5 1-4,8-11,13-15,17,19-25
+osmosis_ai/platform/cli/templates/configs/AGENTS.md.tpl
+  9bd21126f82148e5 3,5,7-14,20,22-25,27,29,35,48-50
+docs/troubleshooting.md
+  9bd21126f82148e5 93,100,103,105-107
+osmosis_ai/platform/cli/templates/AGENTS.md.tpl
+  9bd21126f82148e5 3-4,6,8-21,23,25-30,34,36-44,55-56,61-65
+  baf60cceeab36cdd 32,46,48-53,58
+docs/eval.md
+  9bd21126f82148e5 7-9,75,81,99-101
+osmosis_ai/platform/cli/templates/gitignore.tpl
+  baf60cceeab36cdd 34-38
+osmosis_ai/eval/evaluation/cli.py
+  9bd21126f82148e5 348-352,362-374,448
+osmosis_ai/platform/cli/templates/claude/settings.json.tpl
+  baf60cceeab36cdd 1-13
+osmosis_ai/platform/cli/templates/README.md.tpl
+  9bd21126f82148e5 3,5,13-23
+docs/cli.md
+  9bd21126f82148e5 45,47,49-51,54-55,58,60-61,79-81,83-87
+docs/README.md
+  9bd21126f82148e5 5-6
+tests/unit/cli/test_rollout_validate_command.py
+  9bd21126f82148e5 1,7,10-18,20-21,24-25,29-32,35-37,40-46,49-52,54-55,58-66,69-72,74-78,83-84,86-88,91-94,96-99,101-102,107-108,110-112,115-124,129-130,132-134,137-146,151-155
+osmosis_ai/platform/cli/init.py
+  baf60cceeab36cdd 40-43,46,49,52-63,101,107-109,111-113,143-144,445-465,476-481
+  9bd21126f82148e5 44-45,47-48,50-51,89,95,440-442
+README.md
+  9bd21126f82148e5 22,28,30-31
+osmosis_ai/platform/cli/workspace_contract.py
+  9bd21126f82148e5 1,6,10-18,20,23-27,29-32,35-68,71-80,82-89,91-94,97-125,128-133,136-141,144-155,159-165
+tests/unit/cli/test_workspace_commands.py
+  9bd21126f82148e5 8-18,21,24-25,27,29,33-35,37,41
+tests/unit/cli/test_train_commands.py
+  9bd21126f82148e5 14,201-236,301-302,307,349-398
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "4668322e2cf21fdb46c528789ad0a2b38ce5195a",
+  "prompts": {
+    "9bd21126f82148e5": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "0e1f97b0-fe3d-41ca-aa6d-5dc989e3cab4",
+        "model": "default"
+      },
+      "human_author": "JoyboyBrian",
+      "messages": [],
+      "total_additions": 1041,
+      "total_deletions": 1425,
+      "accepted_lines": 936,
+      "overriden_lines": 2
+    },
+    "baf60cceeab36cdd": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "addaa35a-444b-480b-afcd-67d780cb0af5",
+        "model": "gpt-5.4-xhigh-fast"
+      },
+      "human_author": "JoyboyBrian",
+      "messages": [],
+      "total_additions": 218,
+      "total_deletions": 198,
+      "accepted_lines": 180,
+      "overriden_lines": 0
+    }
+  }
+}

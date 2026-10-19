@@ -1,0 +1,25 @@
+osmosis_ai/platform/auth/platform_client.py
+  223081426f8860aa 31-39,42-44,50-57,61-63,197-198,208-211,228-233,240-242,245-251
+tests/unit/auth/test_platform_client.py
+  223081426f8860aa 23,86-88,96-109,396-447
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.2",
+  "base_commit_sha": "867f24b5d8096ce367a3e66661f5eca7a234e6c9",
+  "prompts": {
+    "223081426f8860aa": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "e0de8f99-3cf5-4cd6-84bd-3f678cf19329",
+        "model": "gpt-5.4-xhigh-fast"
+      },
+      "human_author": "JoyboyBrian",
+      "messages": [],
+      "total_additions": 116,
+      "total_deletions": 4,
+      "accepted_lines": 116,
+      "overriden_lines": 0
+    }
+  }
+}

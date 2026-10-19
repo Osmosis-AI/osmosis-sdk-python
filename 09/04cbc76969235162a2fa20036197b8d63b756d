@@ -1,0 +1,225 @@
+tests/unit/eval/common/test_multi_candidate.py
+  d37e084805b6941d 1-181
+tests/unit/platform/cli/test_registration_v2.py
+  2880ef6cca5cc3dc 25,35,45,52
+  58f4cc17ab68c53c 1-24,26-34,36-44,46-51
+osmosis_ai/platform/cli/registration.py
+  58f4cc17ab68c53c 1-54,56-58,60-180,182-183
+  2880ef6cca5cc3dc 55,59,181
+osmosis_ai/eval/common/cli.py
+  d37e084805b6941d 73-93,122-130,132-139,141-156,205,255-295,319
+osmosis_ai/platform/cli/templates/configs/serve/default.toml.tpl
+  2c3dbf9849b058db 1-19
+osmosis_ai/cli/commands/rollout.py
+  3834cd8bc578a7ea 301
+  2880ef6cca5cc3dc 17-18,349,358
+  338343c6d7c39c20 300,302,360-369,371-385,387-388,391-393,395-398,468-470,475
+  143b670ff24b37d9 626-627,629-631,662
+  b302487fc994ade2 1,5-12,16,19-21,24,33-299,303-348,350-357,386,389-390,394,399-467,471-474,476-537,540-547,549-550,553,555-556,559,562,565,567-570,575-578,581-582,584-585,587-589,592-593
+osmosis_ai/rollout_v2/validator.py
+  677b3dba36d9b4da 1-21,23-40,42-92,94-145
+  338343c6d7c39c20 22,41,93
+tests/unit/rollout_v2/test_validator.py
+  677b3dba36d9b4da 1-7,9-10,13-227
+tests/unit/platform/cli/test_serve_config.py
+  b302487fc994ade2 168-205
+  5f4f226115ef2954 1-167,206-241
+osmosis_ai/platform/cli/serve_config.py
+  b302487fc994ade2 9,31-36,38-40
+  5f4f226115ef2954 1-8,10-30,37,41-65,68-109
+  3834cd8bc578a7ea 66-67
+osmosis_ai/eval/evaluation/cli.py
+  143b670ff24b37d9 331-338
+  d37e084805b6941d 429-433
+tests/unit/cli/test_serve_command.py
+  b302487fc994ade2 1-20,22-24,27-40,42-101,103,105-476,478-657
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.5",
+  "base_commit_sha": "0904cbc76969235162a2fa20036197b8d63b756d",
+  "prompts": {
+    "143b670ff24b37d9": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "05fc9144-87dd-4b60-a65c-209eeaafa4c1",
+        "model": "composer-2"
+      },
+      "human_author": "JoyboyBrian",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 14,
+      "overriden_lines": 0
+    },
+    "2880ef6cca5cc3dc": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f94f36c4-8c03-48a5-b3b2-caa9247caf0b",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "JoyboyBrian",
+      "messages": [],
+      "total_additions": 12,
+      "total_deletions": 29,
+      "accepted_lines": 11,
+      "overriden_lines": 0
+    },
+    "2c3dbf9849b058db": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "35c484a4-b676-4fbb-8588-687b66913cbe",
+        "model": "composer-2"
+      },
+      "human_author": "JoyboyBrian",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 19,
+      "overriden_lines": 0
+    },
+    "338343c6d7c39c20": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b576bf2a-74f0-4648-a194-1a1780fd803a",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "JoyboyBrian",
+      "messages": [],
+      "total_additions": 47,
+      "total_deletions": 60,
+      "accepted_lines": 43,
+      "overriden_lines": 0
+    },
+    "3834cd8bc578a7ea": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1005760a-bccc-4d1d-9eab-d73a79282749",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "JoyboyBrian",
+      "messages": [],
+      "total_additions": 5,
+      "total_deletions": 6,
+      "accepted_lines": 3,
+      "overriden_lines": 0
+    },
+    "49425c6dfce72c1d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "54d4d609-fd25-40a9-9ef5-a39584a1eb5b",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "JoyboyBrian",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 5,
+      "overriden_lines": 0
+    },
+    "58f4cc17ab68c53c": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "56c43fad-91c4-4fa3-b0ed-9f1f486e1ed5",
+        "model": "composer-2"
+      },
+      "human_author": "JoyboyBrian",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 228,
+      "overriden_lines": 0
+    },
+    "5f4f226115ef2954": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "55595938-5620-4e5e-9676-629b5f79a65d",
+        "model": "composer-2"
+      },
+      "human_author": "JoyboyBrian",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 300,
+      "overriden_lines": 0
+    },
+    "64c6bf0d585c2e2b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "34168a0e-e7a9-4385-afaa-687226c04a8b",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "JoyboyBrian",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 99,
+      "overriden_lines": 0
+    },
+    "677b3dba36d9b4da": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "5410c15d-76fd-49aa-aefb-b92ef7bf5722",
+        "model": "composer-2"
+      },
+      "human_author": "JoyboyBrian",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 366,
+      "overriden_lines": 0
+    },
+    "70c57484655b8b08": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "0d04dc99-5e8f-48c0-a7ae-5dd3cc23776c",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "JoyboyBrian",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 17,
+      "overriden_lines": 0
+    },
+    "74a1e70feec1fa9a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d84d45f9-d5d0-405c-b483-64de88c8ee82",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "JoyboyBrian",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 31,
+      "overriden_lines": 0
+    },
+    "b302487fc994ade2": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "b3085f87-d405-4883-8555-4ebff2355008",
+        "model": "composer-2"
+      },
+      "human_author": "JoyboyBrian",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 1205,
+      "overriden_lines": 1
+    },
+    "d37e084805b6941d": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "79c01475-e22f-4905-bd7a-eb3067cb1d02",
+        "model": "composer-2"
+      },
+      "human_author": "JoyboyBrian",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 283,
+      "overriden_lines": 0
+    }
+  }
+}

@@ -1,0 +1,40 @@
+osmosis_ai/platform/cli/project.py
+  356453e091549f5f 81-82,93,96,120,160-161,173,176-177,188-190
+osmosis_ai/platform/cli/workspace.py
+  356453e091549f5f 7,18,55-57,60-81,83,85,102-109,116,118-123
+.pre-commit-config.yaml
+  e6227a13a50da55b 14-15,18
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.8",
+  "base_commit_sha": "5cb6a6ff56cb951c533581e6a3e462f0e3494a44",
+  "prompts": {
+    "356453e091549f5f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "61ff0f72-83d4-4658-880a-21f9a52784df",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>",
+      "messages": [],
+      "total_additions": 67,
+      "total_deletions": 35,
+      "accepted_lines": 58,
+      "overriden_lines": 0
+    },
+    "e6227a13a50da55b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ab8d0143-c573-4607-96f2-c012c88419c0",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>",
+      "messages": [],
+      "total_additions": 5,
+      "total_deletions": 11,
+      "accepted_lines": 3,
+      "overriden_lines": 0
+    }
+  }
+}

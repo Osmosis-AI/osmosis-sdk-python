@@ -1,0 +1,28 @@
+osmosis_ai/eval/local/runner.py
+  s_26895092d338d1::t_586027d201f566 120
+tests/unit/platform/cli/test_eval_run.py
+  s_26895092d338d1::t_9f34296d83f502 1-69,77-395,400-427,429-438
+  s_26895092d338d1::t_b1f7fa93d96f10 70-76,439-484
+  s_26895092d338d1::t_7a02d88775fc44 396-399,428
+osmosis_ai/platform/cli/eval_run.py
+  s_26895092d338d1::t_ac88ed67490a24 183-185
+  s_26895092d338d1::t_1f9d94b99cbca4 1-182,186-388
+osmosis_ai/cli/commands/eval.py
+  s_26895092d338d1::t_b4df4445af0895 112-216
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "234ea36cf10f5fa4f25a16173c5f61bd54a8e8fa",
+  "prompts": {},
+  "sessions": {
+    "s_26895092d338d1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "0877fe01-fd08-4a72-a80e-af1ad8944608",
+        "model": "claude-opus-5"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}

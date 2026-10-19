@@ -1,0 +1,29 @@
+tests/unit/test_rubric_engine.py
+  891c126e2b769c3a 9
+osmosis_ai/rollout/eval/rubric/dataset.py
+  891c126e2b769c3a 10-36
+osmosis_ai/rollout/eval/rubric/engine.py
+  891c126e2b769c3a 115-116,355-357,360-362,372
+osmosis_ai/rollout/eval/rubric/cli.py
+  891c126e2b769c3a 124,126,141,149-150,154-156,159,165-169,172-173
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.3",
+  "base_commit_sha": "128695a4e6aa5a1a734ca5db04db8d521dab734d",
+  "prompts": {
+    "891c126e2b769c3a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "054db20d-523b-4c1e-a1d7-5c8e595235c9",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "JoyboyBrian",
+      "messages": [],
+      "total_additions": 81,
+      "total_deletions": 78,
+      "accepted_lines": 54,
+      "overriden_lines": 0
+    }
+  }
+}

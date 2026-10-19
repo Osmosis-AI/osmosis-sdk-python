@@ -1,0 +1,29 @@
+osmosis_ai/cli/commands/model.py
+  4fec2acc2c2f82fb 51,63
+osmosis_ai/platform/auth/config.py
+  4fec2acc2c2f82fb 12
+tests/unit/cli/test_model_commands.py
+  4fec2acc2c2f82fb 41,60,80
+osmosis_ai/cli/commands/train.py
+  4fec2acc2c2f82fb 91,96,213,326,331,351,356
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.5",
+  "base_commit_sha": "de5db293555f8a1eec5e338b09787796db0da946",
+  "prompts": {
+    "4fec2acc2c2f82fb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "0828a4be-9a3e-4544-88a0-64646137fd33",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "JoyboyBrian",
+      "messages": [],
+      "total_additions": 13,
+      "total_deletions": 15,
+      "accepted_lines": 13,
+      "overriden_lines": 0
+    }
+  }
+}

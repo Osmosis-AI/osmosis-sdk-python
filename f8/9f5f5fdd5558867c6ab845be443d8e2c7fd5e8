@@ -1,0 +1,19 @@
+examples/rollout/submit_with_env_vars_example.py
+  s_5be153eb2f94cd::t_6afe3da1bea7a4 1-95,100-145
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.1",
+  "base_commit_sha": "f89f5f5fdd5558867c6ab845be443d8e2c7fd5e8",
+  "prompts": {},
+  "sessions": {
+    "s_5be153eb2f94cd": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "34077c44-c006-4cb4-af33-10b2790be2e2",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "Jacob Trock <jgh@geocrypt.me>"
+    }
+  }
+}

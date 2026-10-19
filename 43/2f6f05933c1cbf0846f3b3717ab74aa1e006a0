@@ -1,0 +1,19 @@
+tests/unit/eval/local/test_runner_e2e.py
+  s_00c3865caf2bbb::t_5bd49525fbbe6a 121-124,126
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "432f6f05933c1cbf0846f3b3717ab74aa1e006a0",
+  "prompts": {},
+  "sessions": {
+    "s_00c3865caf2bbb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "00de36f5-6bb1-45b7-828d-f57951616464",
+        "model": "claude-fable-5"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}

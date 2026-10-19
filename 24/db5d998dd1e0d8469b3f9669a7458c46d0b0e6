@@ -1,0 +1,22 @@
+osmosis_ai/templates/registry.py
+  s_62a7180e61afb8::t_8e1f9ce28a4ba8 45-49
+tests/unit/templates/test_registry.py
+  s_62a7180e61afb8::t_803095874e4142 96
+  s_62a7180e61afb8::t_8e1f9ce28a4ba8 12,93-95,97-99
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "24db5d998dd1e0d8469b3f9669a7458c46d0b0e6",
+  "prompts": {},
+  "sessions": {
+    "s_62a7180e61afb8": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a04eac-3369-78a1-88bd-2025284d04d4",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}

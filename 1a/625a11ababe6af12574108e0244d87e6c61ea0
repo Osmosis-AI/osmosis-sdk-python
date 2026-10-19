@@ -1,0 +1,19 @@
+tests/unit/rollout/controller/test_llm_bridge.py
+  s_6faecad0324ac5::t_e3ccc6a5f41f68 863-887
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "1a625a11ababe6af12574108e0244d87e6c61ea0",
+  "prompts": {},
+  "sessions": {
+    "s_6faecad0324ac5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "648b3fd4-863c-4846-8e84-f62b095c4594",
+        "model": "claude-fable-5"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}

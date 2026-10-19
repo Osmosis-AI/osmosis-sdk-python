@@ -1,0 +1,38 @@
+README.md
+  b132a24cfda5f8e9 22,33,37,42-44,46,50-51,55-56,58,62-63,67-69
+CONTRIBUTING.md
+  f692b8962846be7f 62,72,82,88,98
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.4",
+  "base_commit_sha": "cfe7239068f88b3a0607f6c7fcde48eaa2e327a8",
+  "prompts": {
+    "b132a24cfda5f8e9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9f4f2f0b-c389-4af3-bfdc-5e971391b288",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>",
+      "messages": [],
+      "total_additions": 21,
+      "total_deletions": 43,
+      "accepted_lines": 20,
+      "overriden_lines": 0
+    },
+    "f692b8962846be7f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7d6bb99f-f0cd-4581-8e61-ea6a76234b62",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>",
+      "messages": [],
+      "total_additions": 30,
+      "total_deletions": 17,
+      "accepted_lines": 16,
+      "overriden_lines": 0
+    }
+  }
+}

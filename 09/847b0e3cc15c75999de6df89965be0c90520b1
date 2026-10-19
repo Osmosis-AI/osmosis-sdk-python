@@ -1,0 +1,123 @@
+tests/unit/cli/test_model_commands.py
+  s_9477fa0c8717da::t_dfa128a2106f5b 15
+osmosis_ai/templates/cookbook/multiply/rollouts/multiply/pyproject.toml
+  s_9477fa0c8717da::t_85e49109ff7dc7 15
+tests/unit/platform/api/test_models.py
+  s_9477fa0c8717da::t_bb8d1a77e50b10 7,24-41
+  s_9477fa0c8717da::t_8c9ac62e74499e 42
+tests/unit/cli/output/test_result.py
+  s_9477fa0c8717da::t_3eaad3e8934876 72,74,76,78,80-83
+tests/unit/cli/output/test_serializers.py
+  s_9477fa0c8717da::t_8147c804b2741d 142-145
+osmosis_ai/cli/commands/project.py
+  s_9477fa0c8717da::t_4a32b85586d4f7 1
+osmosis_ai/templates/cli.py
+  s_9477fa0c8717da::t_4358ceca85cf5f 4,129,131
+tests/unit/cli/test_project_link_commands.py
+  s_9477fa0c8717da::t_0c862519af222a 303-329,346,353-355,360,372-377,380,382-386
+  s_9477fa0c8717da::t_c7c312b8498537 139,152,155,157-165,167-168,176-182,184,187-194
+tests/unit/platform/api/test_client_deployments.py
+  s_9477fa0c8717da::t_89a1d4ccc38084 5
+tests/unit/cli/output/test_error.py
+  s_9477fa0c8717da::t_d19263aacad9e4 202-217
+  s_9477fa0c8717da::t_ad452b2e143b6f 154
+  s_9477fa0c8717da::t_90b187360b9e92 11,15,36-50,145-153,155-201
+osmosis_ai/cli/commands/dataset.py
+  s_9477fa0c8717da::t_c3b14733468aec 12
+tests/unit/platform/cli/test_project_setup.py
+  s_9477fa0c8717da::t_272b95e2653b33 11-15,19,23-25,43,50-52,59,80,110
+  s_9477fa0c8717da::t_26cd6f01d24f22 1,5,8,18,21,28-32,35-37,40-41,45,47-48,53-55,58,60,62-71,73,75-76,79,81,83-95,97,99-102,105-106,108-109,112,114-123
+osmosis_ai/platform/cli/templates/AGENTS.md.tpl
+  s_9477fa0c8717da::t_db796237c881f0 29-30,93
+docs/README.md
+  s_9477fa0c8717da::t_a343a41633f878 3,5-7
+osmosis_ai/cli/commands/train.py
+  s_9477fa0c8717da::t_f777033eee1fd3 580-581
+  s_9477fa0c8717da::t_43dead4f660b4d 12
+tests/unit/cli/test_command_result_migration_train_model_deployment_rollout.py
+  s_9477fa0c8717da::t_f55387d131fbf1 22,130-213,271-284,287-291
+  s_9477fa0c8717da::t_506f6a9d3222a9 390-400,407-412,421-426,434-439
+tests/unit/cli/output/test_renderer_json.py
+  s_9477fa0c8717da::t_0d6cab53c2d34e 120,122-125,129
+tests/unit/cli/test_auth_login_json.py
+  s_9477fa0c8717da::t_4f7c8f524e1655 79-112,141-170
+tests/unit/cli/test_init_json.py
+  s_9477fa0c8717da::t_6a3d96d1cfe466 18,32
+  s_9477fa0c8717da::t_b9b265c2ac7494 1,5,10-11,20-21,24-25,33-35
+docs/cli.md
+  s_9477fa0c8717da::t_9c31a7b0d19623 32-33,49-50,62-63
+  s_9477fa0c8717da::t_adab3be7781d51 101,163-165
+  s_9477fa0c8717da::t_4c0491c6f646da 280,282-287,290-317
+osmosis_ai/platform/cli/project.py
+  s_9477fa0c8717da::t_259c816131a28c 23,232-239,310-314,351-366
+  s_9477fa0c8717da::t_db9a2df0af856b 84,87,117,134
+  s_9477fa0c8717da::t_370c2344ff30c9 268,272,282-284,288,293-295,300
+  s_9477fa0c8717da::t_675f9749f054c2 83
+tests/unit/cli/test_project_doctor.py
+  s_9477fa0c8717da::t_7cb1170b4449e8 46-62
+docs/eval.md
+  s_9477fa0c8717da::t_d9ce0dd0b3b6cc 111
+osmosis_ai/platform/cli/templates/project.toml.tpl
+  s_9477fa0c8717da::t_9e5e8da1cac03f 2,7
+docs/troubleshooting.md
+  s_9477fa0c8717da::t_50510f0834efa5 51-53,63,142,144,146,149,152,154-160
+osmosis_ai/cli/commands/auth.py
+  s_9477fa0c8717da::t_b215fd758d5697 44,46-55,134-157,382,386-387
+  s_9477fa0c8717da::t_86cc42c0760682 45
+tests/unit/templates/test_cli.py
+  s_9477fa0c8717da::t_d816732e774c2f 94,96
+osmosis_ai/platform/cli/project_contract.py
+  s_9477fa0c8717da::t_d7e8dc93843013 1,3-4,56-58
+tests/unit/cli/output/test_renderer_rich.py
+  s_9477fa0c8717da::t_cace71ec61719b 92,94,97
+tests/unit/platform/cli/test_project_contract.py
+  s_9477fa0c8717da::t_db76c6b1c3483e 41,44-48
+osmosis_ai/cli/commands/deployment.py
+  s_9477fa0c8717da::t_c9dc3e47b453e2 4,34
+osmosis_ai/cli/output/error.py
+  s_9477fa0c8717da::t_8a13e8dbe10d49 14-55,57-58,139-141,143-146,149,154-158,160-161
+  s_9477fa0c8717da::t_6ce5fa57959763 56
+osmosis_ai/platform/cli/scaffold.py
+  s_9477fa0c8717da::t_dd9d897bd52ab7 1,3-5,10,16,26,74-81,85,90-91,99-108,124-129
+osmosis_ai/cli/commands/model.py
+  s_9477fa0c8717da::t_8c9ac62e74499e 15
+osmosis_ai/cli/commands/rollout.py
+  s_9477fa0c8717da::t_cc981e96e077b3 1,12
+tests/unit/platform/cli/test_dataset_upload.py
+  s_9477fa0c8717da::t_294d34fb0f14f7 1,9,70
+osmosis_ai/templates/cookbook/multiply/rollouts/multiply/README.md
+  s_9477fa0c8717da::t_c231725e68b316 34,36,42-43,59
+tests/unit/platform/api/test_client.py
+  s_9477fa0c8717da::t_88bf9063bf61c7 13-34
+README.md
+  s_9477fa0c8717da::t_400c384e61dba6 22,30,32-33,55,57-60,63,65,68-70
+tests/unit/cli/test_command_groups.py
+  s_9477fa0c8717da::t_ce990c46eb6e0f 1,41-60,83,85,100,107-108,113-121,125-126,130,132-146,149,154,159,162,180-190,192-194
+  s_9477fa0c8717da::t_1992e5c35b0fbc 13,93,96-98,101-102
+  s_9477fa0c8717da::t_884843cdac4fdd 127-129,131
+  s_9477fa0c8717da::t_294f4ec2d409db 8,10,12,39-40,61-82,84,86-89,105,157-158,161,164
+  s_9477fa0c8717da::t_6bc371668bfebf 5-6,15-38,90-92,94-95,99,103-104,106,160,163,167-171,173-177
+osmosis_ai/platform/cli/templates/configs/AGENTS.md.tpl
+  s_9477fa0c8717da::t_79fc3cb57a5703 78
+tests/unit/platform/cli/test_login.py
+  s_9477fa0c8717da::t_a696846394424d 257-292
+osmosis_ai/cli/main.py
+  s_9477fa0c8717da::t_1f30a0facaa91e 46-51,53
+  s_9477fa0c8717da::t_6ad8e3a5a2f13c 166,169
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "09847b0e3cc15c75999de6df89965be0c90520b1",
+  "prompts": {},
+  "sessions": {
+    "s_9477fa0c8717da": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "a15c2361-d4d8-4e57-b365-2161f14671da",
+        "model": "gpt-5.5-extra-high"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}

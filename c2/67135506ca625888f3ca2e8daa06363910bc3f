@@ -1,0 +1,43 @@
+tests/unit/eval/local/test_dataset.py
+  s_fdadd394b54591::t_943cc9e75711e8 398-401,411-412
+osmosis_ai/rollout/controller/__init__.py
+  s_fdadd394b54591::t_d03d295d23fcc3 16-17
+osmosis_ai/rollout/driver.py
+  s_fdadd394b54591::t_87eda1da14e7fa 10,22
+tests/unit/eval/local/conftest.py
+  s_fdadd394b54591::t_0545b99daca91e 155-159
+  s_fdadd394b54591::t_cb8fb83f9cb6d1 250,254-259
+osmosis_ai/eval/local/dataset.py
+  s_fdadd394b54591::t_b050cc5fd4063f 388-391
+tests/unit/test_public_api_imports.py
+  s_fdadd394b54591::t_e3ee20a8d140c9 352,364
+tests/unit/eval/local/test_runner_e2e.py
+  s_fdadd394b54591::t_349b23af446555 470,476,489
+osmosis_ai/eval/local/runner.py
+  s_fdadd394b54591::t_4f1c57e54e5e18 699
+  s_fdadd394b54591::t_062879cd6e5bc6 1277-1280,1283-1297,1299-1302,1304-1309,1311
+tests/unit/eval/local/test_runner_crash_resume.py
+  s_fdadd394b54591::t_31a78771549c0a 59
+  s_fdadd394b54591::t_69fec8136339ec 104-105
+osmosis_ai/rollout/controller/store.py
+  s_fdadd394b54591::t_d1c416eeb150af 8
+  s_fdadd394b54591::t_4b5ecf4ec94cc3 34,38
+tests/unit/rollout/test_driver.py
+  s_fdadd394b54591::t_0e4901202511d3 11
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "c267135506ca625888f3ca2e8daa06363910bc3f",
+  "prompts": {},
+  "sessions": {
+    "s_fdadd394b54591": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2a4a3d31-5d91-4b68-b0cb-ab16e1388f41",
+        "model": "claude-fable-5"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}

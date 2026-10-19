@@ -1,0 +1,20 @@
+osmosis_ai/platform/cli/workspace_directory_context.py
+  s_8a0b4d864cb9e3::t_ee0493a5874475 49,68-69,84-87,94-95,106
+  s_8a0b4d864cb9e3::t_c6b47ccbcf8165 88-89
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "4933d79618140b068e9c22b1d8c606a70ddd812b",
+  "prompts": {},
+  "sessions": {
+    "s_8a0b4d864cb9e3": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a04a47-aebb-7863-b3de-36a658c99539",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}

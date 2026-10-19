@@ -1,0 +1,35 @@
+osmosis_ai/rollout_v2/driver.py
+  097c6be9f37dc2ee 115,120
+osmosis_ai/eval/config.py
+  097c6be9f37dc2ee 121-122,129-130
+osmosis_ai/platform/api/client.py
+  097c6be9f37dc2ee 62-63
+osmosis_ai/eval/llm_proxy.py
+  097c6be9f37dc2ee 196-200,202-203
+osmosis_ai/eval/evaluation/cli.py
+  097c6be9f37dc2ee 49-53,60-64,362-364
+docs/troubleshooting.md
+  097c6be9f37dc2ee 49
+osmosis_ai/platform/cli/utils.py
+  097c6be9f37dc2ee 310,320,331
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8",
+  "base_commit_sha": "99457cef848f2a5e5296c0278a6b10fa2a0cec15",
+  "prompts": {
+    "097c6be9f37dc2ee": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6710b744-50a1-4917-9c52-68444478cc21",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "JoyboyBrian",
+      "messages": [],
+      "total_additions": 32,
+      "total_deletions": 17,
+      "accepted_lines": 32,
+      "overriden_lines": 0
+    }
+  }
+}

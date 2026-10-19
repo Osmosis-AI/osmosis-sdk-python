@@ -1,0 +1,28 @@
+osmosis_ai/rollout/controller/openai_responses.py
+  s_6faecad0324ac5::t_34ed1dfb1807dd 103,108-112
+tests/unit/platform/cli/test_eval_run.py
+  s_6faecad0324ac5::t_8345eff55cac8e 509
+  s_6faecad0324ac5::t_15be828925a8ef 803
+  s_6faecad0324ac5::t_393789fe8c07dd 416
+  s_6faecad0324ac5::t_14ab6b65594756 624
+tests/unit/rollout/controller/test_llm_bridge.py
+  s_6faecad0324ac5::t_af22232a6cbb09 647-669
+osmosis_ai/eval/local/runner.py
+  s_6faecad0324ac5::t_81eb2ccd2588b8 336-342
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "f104622826f49a21feba15a2bf14de7ecc459e38",
+  "prompts": {},
+  "sessions": {
+    "s_6faecad0324ac5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "648b3fd4-863c-4846-8e84-f62b095c4594",
+        "model": "claude-fable-5"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}

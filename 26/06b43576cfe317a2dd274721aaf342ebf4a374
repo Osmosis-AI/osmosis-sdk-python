@@ -1,0 +1,29 @@
+tests/unit/platform/cli/test_training_config.py
+  s_bff8d599f25a70::t_560d8bec998042 47-50,72,126-128,146,435,445,458-459,480-481,484-485,493,495-497,507-515,518-519,528-529,540,569-570
+  s_bff8d599f25a70::t_5613fad40dfee4 167
+tests/unit/platform/api/test_client.py
+  s_bff8d599f25a70::t_116314c15c2129 148-153,335-340,363-368,385-390,406-411,428-434
+  s_bff8d599f25a70::t_2bb7b2378a6f7c 315-326
+tests/unit/cli/test_rollout_init.py
+  s_bff8d599f25a70::t_d04fa5f1bb01fd 180-183
+osmosis_ai/platform/api/client.py
+  s_bff8d599f25a70::t_455314ef87ebc6 172
+osmosis_ai/platform/cli/training_config.py
+  s_bff8d599f25a70::t_c6d8f394cab493 42,44,68-69,71,87,91,107,413,421-433,468-473,484,495
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.9",
+  "base_commit_sha": "2606b43576cfe317a2dd274721aaf342ebf4a374",
+  "prompts": {},
+  "sessions": {
+    "s_bff8d599f25a70": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "3f24d686-23d3-4443-8e21-cfa94654096d",
+        "model": "gpt-5.5-extra-high"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}

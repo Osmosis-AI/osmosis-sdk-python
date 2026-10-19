@@ -1,0 +1,42 @@
+tests/unit/rollout/eval/evaluation/test_orchestrator.py
+  498eacb76ec2561f 188,205,390-488,631,638-639
+osmosis_ai/rollout/eval/evaluation/runner.py
+  0403d07728c650e8 443,725
+tests/unit/rollout/eval/evaluation/test_runner_adaptation.py
+  0403d07728c650e8 5,599-742
+osmosis_ai/rollout/eval/evaluation/orchestrator.py
+  498eacb76ec2561f 149,151-152,155,157-160,162
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.4",
+  "base_commit_sha": "c344747d557300b54c42b0d64111815add90881f",
+  "prompts": {
+    "0403d07728c650e8": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "9e3a3cad-915c-4895-9edf-0c031003656a",
+        "model": "gpt-5.3-codex-xhigh"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>",
+      "messages": [],
+      "total_additions": 145,
+      "total_deletions": 0,
+      "accepted_lines": 147,
+      "overriden_lines": 0
+    },
+    "498eacb76ec2561f": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "c80dbf49-c059-4e1e-bac4-8dc0be2c8fdf",
+        "model": "gpt-5.3-codex-xhigh"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>",
+      "messages": [],
+      "total_additions": 120,
+      "total_deletions": 11,
+      "accepted_lines": 115,
+      "overriden_lines": 0
+    }
+  }
+}

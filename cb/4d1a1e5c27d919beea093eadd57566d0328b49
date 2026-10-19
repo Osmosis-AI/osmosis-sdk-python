@@ -1,0 +1,26 @@
+pyproject.toml
+  s_174f9009090a30::t_2d08e9f84d3632 135-154
+osmosis_ai/eval/config.py
+  s_174f9009090a30::t_7d08f3a8894c57 116
+  s_174f9009090a30::t_acb8e33160811d 110-115
+tests/unit/platform/cli/test_project_setup.py
+  s_174f9009090a30::t_6ad7fc30607ea5 333-334,345-347
+osmosis_ai/platform/cli/project_mapping.py
+  s_174f9009090a30::t_fa94bd0d48630d 172-173
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.1",
+  "base_commit_sha": "cb4d1a1e5c27d919beea093eadd57566d0328b49",
+  "prompts": {},
+  "sessions": {
+    "s_174f9009090a30": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "f49c6b5a-b1da-45bb-aa07-b33e18247244",
+        "model": "gpt-5.5-extra-high"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}

@@ -1,0 +1,143 @@
+osmosis_ai/rollout/integrations/agents/openai_agents.py
+  46bcde3f629bbaec 34,78,80-82,91-92,139,154,157,160,162
+  0529fad6d951d34c 18,71-72,83,89-90,96
+  2a5520aa76a4767a 95
+  6f30de918d26065a 108,111,130,148-151,153,156,158,161,163-164,169
+  fb844ca1d8f03889 125,127
+  8c0ac63878c8b57c 9,14,62,73-74,105,124,126,128
+  98320a8341cdc55f 84,94,115,122
+  671ab8302111f2c3 77,114
+  66e40ea1a4b58005 15,17,23-24,27-31,35,37-39,42-43,45-51,53-57,75,86-87,118-119,121,131-134,136,138,140-141,147,152,165-167
+tests/unit/rollout/integrations/test_openai_agents.py
+  6f30de918d26065a 383,396-400,402
+  8c0ac63878c8b57c 17,504-506,508-509
+  0529fad6d951d34c 246-248,261-262,302-304,317-318,454-503
+  66e40ea1a4b58005 292
+  671ab8302111f2c3 351,362,366
+  2a5520aa76a4767a 264,320
+  fb844ca1d8f03889 507
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "8f4733e6bdcccdf43ee4a2fe10ee806aa0b66cc9",
+  "prompts": {
+    "0529fad6d951d34c": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "beca7e76-8a4d-4506-b745-eca899277d48",
+        "model": "gpt-5.5-extra-high"
+      },
+      "human_author": "JoyboyBrian",
+      "messages": [],
+      "total_additions": 501,
+      "total_deletions": 608,
+      "accepted_lines": 92,
+      "overriden_lines": 0
+    },
+    "2a5520aa76a4767a": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "c7afca97-e64b-4f84-bc04-32436baf60bc",
+        "model": "gpt-5.5-extra-high"
+      },
+      "human_author": "JoyboyBrian",
+      "messages": [],
+      "total_additions": 80,
+      "total_deletions": 137,
+      "accepted_lines": 3,
+      "overriden_lines": 0
+    },
+    "46bcde3f629bbaec": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9a74678b-a16c-49f0-8e60-323e5fcd9844",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "JoyboyBrian",
+      "messages": [],
+      "total_additions": 12,
+      "total_deletions": 15,
+      "accepted_lines": 12,
+      "overriden_lines": 0
+    },
+    "66e40ea1a4b58005": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b02ced88-4502-4bdc-9fac-40d3ad5a3201",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "JoyboyBrian",
+      "messages": [],
+      "total_additions": 270,
+      "total_deletions": 270,
+      "accepted_lines": 102,
+      "overriden_lines": 0
+    },
+    "671ab8302111f2c3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c61544bf-a1c2-4bd8-a43b-bb72c511f8d4",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "JoyboyBrian",
+      "messages": [],
+      "total_additions": 10,
+      "total_deletions": 40,
+      "accepted_lines": 5,
+      "overriden_lines": 0
+    },
+    "6f30de918d26065a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "68821f86-33c2-4a0b-b536-fec1b73bd261",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "JoyboyBrian",
+      "messages": [],
+      "total_additions": 140,
+      "total_deletions": 135,
+      "accepted_lines": 25,
+      "overriden_lines": 0
+    },
+    "8c0ac63878c8b57c": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "a5ce82c3-096e-494d-828d-59b185a5c5a0",
+        "model": "claude-opus-4-7-thinking-high"
+      },
+      "human_author": "JoyboyBrian",
+      "messages": [],
+      "total_additions": 84,
+      "total_deletions": 196,
+      "accepted_lines": 21,
+      "overriden_lines": 0
+    },
+    "98320a8341cdc55f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "67965e86-6238-4d5b-a188-e6af88ed61c6",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "JoyboyBrian",
+      "messages": [],
+      "total_additions": 72,
+      "total_deletions": 75,
+      "accepted_lines": 4,
+      "overriden_lines": 0
+    },
+    "fb844ca1d8f03889": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "71c776be-4192-46a8-baa4-41ad454f7a81",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "JoyboyBrian",
+      "messages": [],
+      "total_additions": 3,
+      "total_deletions": 6,
+      "accepted_lines": 3,
+      "overriden_lines": 0
+    }
+  }
+}

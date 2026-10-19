@@ -1,0 +1,21 @@
+osmosis_ai/packaging.py
+  s_160aa7e4d8afdb::t_474597516cb1d3 357-364
+tests/unit/test_packaging.py
+  s_160aa7e4d8afdb::t_739a86facecf82 620-629
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "2e0290e87b21da854aa7a1c6b348eb6baa4f8a95",
+  "prompts": {},
+  "sessions": {
+    "s_160aa7e4d8afdb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "fa8c482d-b071-4f0e-87a8-033869d9bb71",
+        "model": "claude-fable-5"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}

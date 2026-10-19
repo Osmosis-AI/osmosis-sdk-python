@@ -1,0 +1,27 @@
+tests/unit/rollout/integrations/test_openai_agents.py
+  0529fad6d951d34c 12,15,17,76-88,205,209-267,269-286,312,321,327,332,335-343,348-368,371,374-378,380,388,390-398,407-408,411,417-418
+osmosis_ai/rollout/integrations/agents/openai_agents.py
+  0529fad6d951d34c 19-20,29-32,37-91,97-100,110,119-142,146,148-149,155,161,165,167-180,184-220,222-225,227-256,258-269,271-288,290-311,313-436
+examples/rollout/multiply_openai_agents/workflow.py
+  0529fad6d951d34c 17,27-31,45,48-49
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "327363f03f4b28cb17222a78a8f1cc34e1a778f0",
+  "prompts": {
+    "0529fad6d951d34c": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "beca7e76-8a4d-4506-b745-eca899277d48",
+        "model": "gpt-5.5-extra-high"
+      },
+      "human_author": "JoyboyBrian",
+      "messages": [],
+      "total_additions": 666,
+      "total_deletions": 227,
+      "accepted_lines": 526,
+      "overriden_lines": 4
+    }
+  }
+}

@@ -1,0 +1,20 @@
+tests/unit/cli/test_train_info_checkpoints.py
+  s_5a6994042f7f30::t_7acdc2e53bdac9 119-123,125-129,242-243
+  s_5a6994042f7f30::t_c556606da394a4 15,130
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "32297373a849d3fe949986b9b8126d3714b22587",
+  "prompts": {},
+  "sessions": {
+    "s_5a6994042f7f30": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019e2288-c5ee-7d21-92cf-0615946f671c",
+        "model": "gpt-5.5"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}

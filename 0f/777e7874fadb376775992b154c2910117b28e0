@@ -1,0 +1,39 @@
+tests/unit/test_rubric_cli_command.py
+  b7ba4af957e10fff 6,576-600
+osmosis_ai/platform/cli/dataset.py
+  b7ba4af957e10fff 13,414-415,424-426
+tests/unit/cli/test_paths.py
+  b7ba4af957e10fff 1-26
+osmosis_ai/eval/rubric/cli.py
+  b7ba4af957e10fff 8,76-78
+osmosis_ai/cli/paths.py
+  b7ba4af957e10fff 1-29
+tests/unit/platform/cli/test_dataset_workspace_context.py
+  b7ba4af957e10fff 5,205,212,228,233-293
+osmosis_ai/cli/commands/train.py
+  b7ba4af957e10fff 251-254,258
+tests/unit/platform/api/test_download.py
+  b7ba4af957e10fff 105-120
+osmosis_ai/platform/api/download.py
+  b7ba4af957e10fff 41,51-54,75,95
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "0f777e7874fadb376775992b154c2910117b28e0",
+  "prompts": {
+    "b7ba4af957e10fff": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "242c2ffe-8b89-4dba-86e4-92c13c2e7bac",
+        "model": "gpt-5.5-extra-high"
+      },
+      "human_author": "JoyboyBrian",
+      "messages": [],
+      "total_additions": 199,
+      "total_deletions": 24,
+      "accepted_lines": 186,
+      "overriden_lines": 0
+    }
+  }
+}

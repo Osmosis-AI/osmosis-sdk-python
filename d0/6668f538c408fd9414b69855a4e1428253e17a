@@ -1,0 +1,19 @@
+tests/unit/eval/local/test_runner_e2e.py
+  s_3eeef8e6422901::t_1d0e95a68e8477 727,766
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "d06668f538c408fd9414b69855a4e1428253e17a",
+  "prompts": {},
+  "sessions": {
+    "s_3eeef8e6422901": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a041be-769e-7ad2-9315-69e19d65bdb1",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}

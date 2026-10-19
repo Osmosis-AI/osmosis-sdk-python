@@ -1,0 +1,25 @@
+osmosis_ai/cli/commands/train.py
+  54c625648b52e3ab 192,212-215,247-253
+tests/unit/cli/test_train_metrics_cmd.py
+  54c625648b52e3ab 468,473,478,484-502,504-507
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.23",
+  "base_commit_sha": "aadcd8c727ca906bf9cd91cb367a5657a59d8a82",
+  "prompts": {
+    "54c625648b52e3ab": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9711d59b-2680-47d4-b731-82730a54b107",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>",
+      "messages": [],
+      "total_additions": 40,
+      "total_deletions": 9,
+      "accepted_lines": 40,
+      "overriden_lines": 0
+    }
+  }
+}

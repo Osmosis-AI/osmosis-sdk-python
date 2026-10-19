@@ -1,0 +1,49 @@
+docs/eval-run-local.md
+  s_4fcb1cea973dc5::t_b854b1c7e3d341 23
+  s_4fcb1cea973dc5::t_38feac5d8fd615 11
+osmosis_ai/eval/local/_server_bootstrap.py
+  s_4fcb1cea973dc5::t_b205fd42d83dc4 16-17,30,33,36,47
+  s_4fcb1cea973dc5::t_b854b1c7e3d341 1-15,18-29,31-32,34-35,37-46,48-69
+tests/unit/test_public_api_imports.py
+  s_4fcb1cea973dc5::t_ccec3a4feff523 230-232
+osmosis_ai/cli/console.py
+  s_4fcb1cea973dc5::t_38feac5d8fd615 80-82,143-154,172-173,238-239,409-411,414
+CHANGELOG.md
+  s_4fcb1cea973dc5::t_9b28ddd8fdac55 21
+uv.lock
+  ai_agent 1666,1772
+osmosis_ai/eval/local/runner.py
+  s_4fcb1cea973dc5::t_b854b1c7e3d341 35,455,495-501,503,514-527,1421,1423-1427
+tests/unit/test_packaging.py
+  s_4fcb1cea973dc5::t_9b28ddd8fdac55 62-129
+osmosis_ai/_imports.py
+  s_4fcb1cea973dc5::t_8caf131b2cde42 36
+pyproject.toml
+  s_4fcb1cea973dc5::t_38feac5d8fd615 129-132,134
+tests/unit/platform/cli/test_eval_run.py
+  s_4fcb1cea973dc5::t_31b7701c5fd2c2 16,339-345
+  s_4fcb1cea973dc5::t_38feac5d8fd615 8,334-338
+tests/unit/eval/local/test_runner_units.py
+  s_4fcb1cea973dc5::t_85c03afeb7a892 8,16
+  s_4fcb1cea973dc5::t_b854b1c7e3d341 791,806-858
+osmosis_ai/packaging.py
+  s_4fcb1cea973dc5::t_9b28ddd8fdac55 163-167,243,251-252,293-302,307,309,371-376
+tests/unit/cli/test_console.py
+  s_4fcb1cea973dc5::t_38feac5d8fd615 121-144
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "de01ecfd1a9fdfc215cb63e32d18ab076829f03f",
+  "prompts": {},
+  "sessions": {
+    "s_4fcb1cea973dc5": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a01862-de2b-7c61-9ef5-8f6e148e92ed",
+        "model": "azure-openai/gpt-5.6-sol"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}

@@ -1,0 +1,21 @@
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.15",
+  "base_commit_sha": "00214cd668d136a680c90195264725e0a7c0d0fd",
+  "prompts": {
+    "d4f78a5a5b3db61f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "04585d75-561f-4068-8a02-a44bf76d225a",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>",
+      "messages": [],
+      "total_additions": 1,
+      "total_deletions": 1,
+      "accepted_lines": 0,
+      "overriden_lines": 0
+    }
+  }
+}

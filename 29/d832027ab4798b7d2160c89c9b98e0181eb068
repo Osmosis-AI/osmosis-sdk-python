@@ -1,0 +1,27 @@
+osmosis_ai/cli/commands/train.py
+  2a3bd7a410901aed 135-138,141,163-165
+osmosis_ai/platform/cli/training_config.py
+  2a3bd7a410901aed 9,15-16,25-26,36-37,43-44,128-132
+osmosis_ai/platform/cli/templates/skills/submit-training/SKILL.md.tpl
+  2a3bd7a410901aed 11,26
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8",
+  "base_commit_sha": "29d832027ab4798b7d2160c89c9b98e0181eb068",
+  "prompts": {
+    "2a3bd7a410901aed": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "87a2fcd7-b053-4dec-b9a2-01c5054ee6ff",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "JoyboyBrian",
+      "messages": [],
+      "total_additions": 27,
+      "total_deletions": 10,
+      "accepted_lines": 26,
+      "overriden_lines": 0
+    }
+  }
+}

@@ -1,0 +1,23 @@
+tests/unit/eval/local/test_results.py
+  s_00c3865caf2bbb::t_b8abe98e66d191 64,67-84,86-94,99,104-105,113-115
+  s_00c3865caf2bbb::t_ef351001a2525a 160
+  s_00c3865caf2bbb::t_356fdedcf32b23 1
+osmosis_ai/eval/local/results.py
+  s_00c3865caf2bbb::t_c6abbfd0d41fc3 62-70,72
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "ba943f499c27c607dae27a3f7f559faf840bdd76",
+  "prompts": {},
+  "sessions": {
+    "s_00c3865caf2bbb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "00de36f5-6bb1-45b7-828d-f57951616464",
+        "model": "claude-fable-5"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}

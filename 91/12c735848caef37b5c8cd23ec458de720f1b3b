@@ -1,0 +1,23 @@
+osmosis_ai/rollout/backend/local/backend.py
+  s_843a3455670d9b::t_b1c6fd058a4995 4,23,40-46,48-52,62,66-81,129-131,133-134,150-152,170-172,177-183,205,210-217,240-242,253,256-267
+osmosis_ai/rollout/types/protocol.py
+  s_843a3455670d9b::t_b1c6fd058a4995 1,51-59
+tests/unit/rollout/test_local_backend.py
+  s_843a3455670d9b::t_b1c6fd058a4995 6-8,20,672-793
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "9112c735848caef37b5c8cd23ec458de720f1b3b",
+  "prompts": {},
+  "sessions": {
+    "s_843a3455670d9b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e6d65603-3dd6-4d7e-9c6d-44d9d261cbd7",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}

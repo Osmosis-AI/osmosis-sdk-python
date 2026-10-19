@@ -1,0 +1,23 @@
+osmosis_ai/platform/cli/templates/skills/create-rollout/SKILL.md.tpl
+  6853596483feae23 10,14-15,21,46
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.21",
+  "base_commit_sha": "51f5d9f50cb367f05fd887e6a7722e1125a038b8",
+  "prompts": {
+    "6853596483feae23": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f533afca-e1af-4f6e-beb9-e252b72a852a",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>",
+      "messages": [],
+      "total_additions": 5,
+      "total_deletions": 5,
+      "accepted_lines": 5,
+      "overriden_lines": 0
+    }
+  }
+}

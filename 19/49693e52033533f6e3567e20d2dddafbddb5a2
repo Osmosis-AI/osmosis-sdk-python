@@ -1,0 +1,14 @@
+docs/troubleshooting.md
+  h_2ae8077fa5063a 130
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "1949693e52033533f6e3567e20d2dddafbddb5a2",
+  "prompts": {},
+  "humans": {
+    "h_2ae8077fa5063a": {
+      "author": "Jacob Trock <jgh@geocrypt.me>"
+    }
+  }
+}

@@ -1,0 +1,27 @@
+tests/unit/eval/test_config.py
+  s_9e6abdbff6fd01::t_bda077e3ca16d2 328-331,341-344
+osmosis_ai/platform/cli/templates/configs/eval/default.toml.tpl
+  s_9e6abdbff6fd01::t_1bd2e36a588440 29-30
+osmosis_ai/templates/cookbook/multiply/configs/eval/multiply.toml
+  s_9e6abdbff6fd01::t_5c40d92dfb3aaf 16-17
+osmosis_ai/eval/config.py
+  s_9e6abdbff6fd01::t_91ca01dfa31ed8 55-56,164-165
+docs/eval.md
+  s_9e6abdbff6fd01::t_9a7718875be0ee 49-50,88-89
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "4c823e01cc2567076e6ace80fda4681c6e0f4ab3",
+  "prompts": {},
+  "sessions": {
+    "s_9e6abdbff6fd01": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "954d4ca5-7fa9-4354-a367-883baffb933f",
+        "model": "gpt-5.5-extra-high"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}

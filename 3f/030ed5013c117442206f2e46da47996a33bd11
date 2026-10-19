@@ -1,0 +1,21 @@
+tests/unit/platform/api/test_models.py
+  s_c4ae36f1f07f27::t_65d1d3d646493b 244-251
+osmosis_ai/platform/api/models.py
+  s_c4ae36f1f07f27::t_ec5b02496308b2 5,179
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "3f030ed5013c117442206f2e46da47996a33bd11",
+  "prompts": {},
+  "sessions": {
+    "s_c4ae36f1f07f27": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019e22aa-4848-72d3-93ef-77ce721c0c9c",
+        "model": "gpt-5.5"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}

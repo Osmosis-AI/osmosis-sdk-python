@@ -1,0 +1,35 @@
+tests/golden/eval_local/metrics/single_attempt_all_pass.json
+  s_26895092d338d1::t_2660310f827e25 1-22
+tests/unit/eval/local/test_golden_contracts.py
+  s_26895092d338d1::t_eba2bc2ad1d131 1-28,49-54,56-81
+  s_26895092d338d1::t_cea717607559c1 29-48,55
+tests/golden/eval_local/metrics/all_failed_no_rewards.json
+  s_26895092d338d1::t_2660310f827e25 1-19
+tests/unit/eval/local/test_results.py
+  s_26895092d338d1::t_25177ac702d79f 1-134,136-182,184-244,246-448,450-490,492-555
+osmosis_ai/eval/local/results.py
+  s_26895092d338d1::t_9c5f11ee8c8968 75-77,81-83,266-268,425
+  s_26895092d338d1::t_9d8d1d5e999abe 1-74,78-80,84-265,269-424,426-510
+tests/golden/eval_local/metrics/skipped_excluded_from_scored.json
+  s_26895092d338d1::t_2660310f827e25 1-22
+tests/golden/eval_local/index/contract_cases.json
+  s_26895092d338d1::t_56546d741d217c 1-90
+tests/golden/eval_local/metrics/multi_attempt_pass_at_k.json
+  s_26895092d338d1::t_2660310f827e25 1-32
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "391b8eea2e923c0638f3070bfa0fba79f515909d",
+  "prompts": {},
+  "sessions": {
+    "s_26895092d338d1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "0877fe01-fd08-4a72-a80e-af1ad8944608",
+        "model": "claude-opus-5"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}

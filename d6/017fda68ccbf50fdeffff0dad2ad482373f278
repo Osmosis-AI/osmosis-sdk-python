@@ -1,0 +1,65 @@
+tests/unit/platform/cli/test_project_setup.py
+  07f47c186110dfce 7,13-83,97-140,142-145,270-272,298-300,315,318,320-323,325,330,332-333,335-337,343,769-771,780-794,805-816,826-837,848-859,871-876,890-895,898
+  b6f000910df11e43 141
+tests/unit/cli/test_init_json.py
+  07f47c186110dfce 6,11-17,26-39,42-55,82-89
+osmosis_ai/platform/cli/utils.py
+  b6f000910df11e43 333-336,345-347
+tests/unit/cli/test_workspace_json.py
+  b6f000910df11e43 28
+tests/unit/platform/cli/test_workspace_repo.py
+  b6f000910df11e43 55-59,63,65-69,75,94,110,120-133,282-285,287,289-292,295-296,446-467
+  07f47c186110dfce 1-54,60-62,64,70-74,76-93,95-109,111-119,134-281,286,288,293-294,297-445
+osmosis_ai/eval/common/cli.py
+  b6f000910df11e43 140-154,167
+osmosis_ai/cli/commands/train.py
+  b6f000910df11e43 24-40,48-73,77,95-97,100-110,120-123,128,132-133,136,138-140,142,144-145,149-174,177-191,408-412,415-419,421,426-432,723-727,756-758
+  07f47c186110dfce 91-94,98-99,111-119,124-127,129-131,134-135,137,141,143,146-148,175-176,192-193,379-383,391,398,401-406,422-425
+tests/unit/cli/test_train_commands.py
+  b6f000910df11e43 5,17,29-34,36,495,531,564,597,629,682-802
+  07f47c186110dfce 50-61,480-494,496-530,532-563,565-596,598-628,630-680
+tests/unit/platform/cli/test_utils.py
+  b6f000910df11e43 304-370
+osmosis_ai/platform/cli/workspace.py
+  b6f000910df11e43 102-108,442-444,447,453-456,670-672,676-679,725-726,729
+osmosis_ai/platform/cli/workspace_repo.py
+  07f47c186110dfce 1-79,86-229,236-282,284-294
+  b6f000910df11e43 80-85,230-235,283
+osmosis_ai/platform/cli/init.py
+  07f47c186110dfce 25,251-269,271,278-281,286,288,290,292,298-303,307-308,311,341,371,503-508,511-513,515,592-597,600,609-617,619,629,645,664,670-672,688
+tests/unit/eval/common/test_multi_candidate.py
+  b6f000910df11e43 187-243
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "d6017fda68ccbf50fdeffff0dad2ad482373f278",
+  "prompts": {
+    "07f47c186110dfce": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "b43d455c-9c86-4a2b-b2b6-d59319d47903",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "JoyboyBrian",
+      "messages": [],
+      "total_additions": 1408,
+      "total_deletions": 494,
+      "accepted_lines": 1274,
+      "overriden_lines": 0
+    },
+    "b6f000910df11e43": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "3d096318-65e3-463e-8834-6783b2c016a4",
+        "model": "gpt-5.5"
+      },
+      "human_author": "JoyboyBrian",
+      "messages": [],
+      "total_additions": 550,
+      "total_deletions": 90,
+      "accepted_lines": 577,
+      "overriden_lines": 0
+    }
+  }
+}

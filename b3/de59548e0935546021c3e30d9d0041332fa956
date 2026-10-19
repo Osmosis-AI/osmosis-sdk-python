@@ -1,0 +1,20 @@
+docs/rollout-sdk.md
+  h_5979ffe3601239 274
+osmosis_ai/rollout/backend/harbor/backend.py
+  h_5979ffe3601239 260,1024-1026
+osmosis_ai/rollout/backend/harbor/diagnostics.py
+  h_5979ffe3601239 122
+osmosis_ai/rollout/backend/harbor/tasks.py
+  h_5979ffe3601239 223-224,230-231,235-237,239-249
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "b3de59548e0935546021c3e30d9d0041332fa956",
+  "prompts": {},
+  "humans": {
+    "h_5979ffe3601239": {
+      "author": "Allen Lin <allen@osmosis.ai>"
+    }
+  }
+}

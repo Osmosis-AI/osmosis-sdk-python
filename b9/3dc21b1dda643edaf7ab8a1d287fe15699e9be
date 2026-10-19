@@ -1,0 +1,56 @@
+tests/unit/rollout_v2/test_context.py
+  d1f872873dfc346c 2-3,17-18,24-26,28-29
+  cc9a85947b5fc0dc 8-16
+osmosis_ai/rollout_v2/context.py
+  d1f872873dfc346c 42,46
+osmosis_ai/eval/evaluation/cli.py
+  10482b20ceddb6bc 370-375
+osmosis_ai/rollout_v2/driver.py
+  d1f872873dfc346c 79,107,109-113,120-121
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.6",
+  "base_commit_sha": "b93dc21b1dda643edaf7ab8a1d287fe15699e9be",
+  "prompts": {
+    "10482b20ceddb6bc": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2fbcc6c2-1672-4236-a555-cd57cf12f1bd",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "JoyboyBrian",
+      "messages": [],
+      "total_additions": 178,
+      "total_deletions": 6,
+      "accepted_lines": 8,
+      "overriden_lines": 2
+    },
+    "cc9a85947b5fc0dc": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "12085cb7-91ff-4fb6-baa2-c91d7728e49e",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "JoyboyBrian",
+      "messages": [],
+      "total_additions": 28,
+      "total_deletions": 28,
+      "accepted_lines": 9,
+      "overriden_lines": 0
+    },
+    "d1f872873dfc346c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a9dbb303-72e6-4744-a254-f07029727c45",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "JoyboyBrian",
+      "messages": [],
+      "total_additions": 33,
+      "total_deletions": 33,
+      "accepted_lines": 20,
+      "overriden_lines": 2
+    }
+  }
+}

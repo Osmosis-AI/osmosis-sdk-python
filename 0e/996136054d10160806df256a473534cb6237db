@@ -1,0 +1,25 @@
+tests/unit/rollout/controller/test_proxy_client.py
+  s_31a10c50d379a7::t_e45ca598543696 429,448-452
+osmosis_ai/rollout/controller/proxy_client.py
+  s_31a10c50d379a7::t_ae90391f39b5af 190
+  s_31a10c50d379a7::t_034856de3d2c36 71-75
+  s_31a10c50d379a7::t_4c66603c6f5ba2 171,175-179
+  s_31a10c50d379a7::t_3679b26678bc4a 280-282
+  s_31a10c50d379a7::t_733a4e74d8f900 297
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "0e996136054d10160806df256a473534cb6237db",
+  "prompts": {},
+  "sessions": {
+    "s_31a10c50d379a7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d3f8df0c-7a77-41dc-9589-2a0712d6b8fd",
+        "model": "claude-fable-5"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}

@@ -1,0 +1,26 @@
+tests/unit/cli/test_lazy_loading.py
+  s_a456a4625c0abd::t_7494405f97aca7 120-123,143-144
+  s_a456a4625c0abd::t_53ea9ad390c516 177-180
+osmosis_ai/platform/cli/secret_redact.py
+  s_a456a4625c0abd::t_78664d40e6c098 18-19
+  s_a456a4625c0abd::t_e3d91a34c27c0f 41-42
+tests/unit/platform/cli/test_secret_redact.py
+  s_a456a4625c0abd::t_a005c3c4a9a6b9 17
+  s_a456a4625c0abd::t_a52254e4866312 25-29
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "ca101a235dd000f7e3c681c9b6a2424d318ddcf9",
+  "prompts": {},
+  "sessions": {
+    "s_a456a4625c0abd": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "01dc3604-3779-4fc4-9ec6-e8b93d69cd45",
+        "model": "grok-4.6"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}

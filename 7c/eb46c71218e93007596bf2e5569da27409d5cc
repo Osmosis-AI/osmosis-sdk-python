@@ -1,0 +1,23 @@
+osmosis_ai/rollout/backend/harbor/tasks.py
+  s_843a3455670d9b::t_b54339c4861e8e 13,148-164,184
+tests/unit/rollout/test_harbor_backend.py
+  s_843a3455670d9b::t_b54339c4861e8e 280-322,1413-1486
+osmosis_ai/rollout/backend/harbor/backend.py
+  s_843a3455670d9b::t_b54339c4861e8e 463-465,498-534,544-546
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "7ceb46c71218e93007596bf2e5569da27409d5cc",
+  "prompts": {},
+  "sessions": {
+    "s_843a3455670d9b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e6d65603-3dd6-4d7e-9c6d-44d9d261cbd7",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}

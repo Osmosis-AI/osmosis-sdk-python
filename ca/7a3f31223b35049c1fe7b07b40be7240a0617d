@@ -1,0 +1,25 @@
+osmosis_ai/platform/cli/dataset.py
+  f8e2d2e0d53e33c8 509
+tests/unit/platform/cli/test_dataset_validation.py
+  f8e2d2e0d53e33c8 223-240
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.5",
+  "base_commit_sha": "ca7a3f31223b35049c1fe7b07b40be7240a0617d",
+  "prompts": {
+    "f8e2d2e0d53e33c8": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "83efc014-392b-463e-9058-ebd7d2e61db9",
+        "model": "gpt-5.3-codex-xhigh"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>",
+      "messages": [],
+      "total_additions": 19,
+      "total_deletions": 1,
+      "accepted_lines": 19,
+      "overriden_lines": 0
+    }
+  }
+}

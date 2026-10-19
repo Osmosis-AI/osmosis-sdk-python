@@ -1,0 +1,36 @@
+pyproject.toml
+  3182f29c746671ff 110-127
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8",
+  "base_commit_sha": "762116c253d84bc522288411802f366216517c51",
+  "prompts": {
+    "3182f29c746671ff": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b5be5a22-7d58-4222-954b-12a364ecf78d",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "JoyboyBrian",
+      "messages": [],
+      "total_additions": 25,
+      "total_deletions": 12,
+      "accepted_lines": 18,
+      "overriden_lines": 0
+    },
+    "5fd8fe1a7dc83b80": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a5ab331e-232d-444a-9b38-20f65b2cbfd2",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "JoyboyBrian",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 4,
+      "overriden_lines": 0
+    }
+  }
+}

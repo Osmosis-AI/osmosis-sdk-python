@@ -1,0 +1,27 @@
+tests/unit/cli/test_serve_command.py
+  4d86d4b6d16e3c82 281
+osmosis_ai/cli/commands/rollout.py
+  4d86d4b6d16e3c82 366,466
+osmosis_ai/platform/cli/serve_config.py
+  4d86d4b6d16e3c82 9
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.5",
+  "base_commit_sha": "a562d988d36ae9699864fa7b14450f8975aa64de",
+  "prompts": {
+    "4d86d4b6d16e3c82": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f5e2cb96-6b27-45c8-b2be-857056fef7f8",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "JoyboyBrian",
+      "messages": [],
+      "total_additions": 25,
+      "total_deletions": 556,
+      "accepted_lines": 4,
+      "overriden_lines": 0
+    }
+  }
+}

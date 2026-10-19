@@ -1,0 +1,23 @@
+tests/unit/cli/test_command_groups.py
+  223081426f8860aa 45-52
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.2",
+  "base_commit_sha": "c512269cd40507e807544a27f89e8886a16881f9",
+  "prompts": {
+    "223081426f8860aa": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "e0de8f99-3cf5-4cd6-84bd-3f678cf19329",
+        "model": "gpt-5.4-xhigh-fast"
+      },
+      "human_author": "JoyboyBrian",
+      "messages": [],
+      "total_additions": 10,
+      "total_deletions": 15,
+      "accepted_lines": 10,
+      "overriden_lines": 0
+    }
+  }
+}

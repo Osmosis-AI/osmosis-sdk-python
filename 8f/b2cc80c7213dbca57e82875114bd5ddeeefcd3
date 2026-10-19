@@ -1,0 +1,25 @@
+osmosis_ai/eval/evaluation/cli.py
+  54571e6a96cf3933 426
+osmosis_ai/cli/commands/rollout.py
+  54571e6a96cf3933 192
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8",
+  "base_commit_sha": "8fb2cc80c7213dbca57e82875114bd5ddeeefcd3",
+  "prompts": {
+    "54571e6a96cf3933": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "131f2976-f96a-4b41-9ac2-ac3d1c5eae82",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "JoyboyBrian",
+      "messages": [],
+      "total_additions": 2,
+      "total_deletions": 0,
+      "accepted_lines": 2,
+      "overriden_lines": 0
+    }
+  }
+}

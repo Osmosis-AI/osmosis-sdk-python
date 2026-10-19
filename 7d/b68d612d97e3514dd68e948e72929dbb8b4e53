@@ -1,0 +1,22 @@
+pyproject.toml
+  s_76eaedeaa9e4c9::t_2314e2b3fa8a25 62-65
+  s_76eaedeaa9e4c9::t_b68c70cbf20ece 70,81,109,117
+uv.lock
+  ai_agent 1751-1754
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "7db68d612d97e3514dd68e948e72929dbb8b4e53",
+  "prompts": {},
+  "sessions": {
+    "s_76eaedeaa9e4c9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6132497e-a813-46fc-bc17-c955b1601538",
+        "model": "claude-opus-5"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}

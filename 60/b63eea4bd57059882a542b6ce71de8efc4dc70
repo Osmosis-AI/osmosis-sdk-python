@@ -1,0 +1,29 @@
+osmosis_ai/platform/api/models.py
+  223081426f8860aa 623
+tests/unit/cli/test_deploy_commands.py
+  223081426f8860aa 70
+osmosis_ai/platform/api/client.py
+  223081426f8860aa 419,425-426,430-436
+tests/unit/platform/api/test_client_deployments.py
+  223081426f8860aa 7-8,106-112
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.2",
+  "base_commit_sha": "60b63eea4bd57059882a542b6ce71de8efc4dc70",
+  "prompts": {
+    "223081426f8860aa": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "e0de8f99-3cf5-4cd6-84bd-3f678cf19329",
+        "model": "gpt-5.4-xhigh-fast"
+      },
+      "human_author": "JoyboyBrian",
+      "messages": [],
+      "total_additions": 102,
+      "total_deletions": 105,
+      "accepted_lines": 22,
+      "overriden_lines": 0
+    }
+  }
+}

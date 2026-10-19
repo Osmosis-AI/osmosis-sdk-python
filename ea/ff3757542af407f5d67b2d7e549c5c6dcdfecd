@@ -1,0 +1,27 @@
+osmosis_ai/eval/local/upload.py
+  s_f23fd429fb892a::t_ec1df27809f4a5 250-257
+  s_f23fd429fb892a::t_3a578464ea8c18 74-82
+  s_f23fd429fb892a::t_13b1622642d280 479
+tests/unit/eval/local/test_upload.py
+  s_f23fd429fb892a::t_98984fef87e845 219
+  s_f23fd429fb892a::t_ef75f62d1f364d 223-256
+  s_f23fd429fb892a::t_4f884bdde447b0 194-203
+  s_f23fd429fb892a::t_0bfa7b34b6fbfb 257-290
+  s_f23fd429fb892a::t_c53ab0f904a85b 291-299
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "eaff3757542af407f5d67b2d7e549c5c6dcdfecd",
+  "prompts": {},
+  "sessions": {
+    "s_f23fd429fb892a": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "a1773b5d-114d-4ae6-b308-27b3647d026a",
+        "model": "grok-4.6"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}

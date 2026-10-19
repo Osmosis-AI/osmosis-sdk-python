@@ -1,0 +1,67 @@
+tests/unit/platform/cli/conftest.py
+  1dcddb036307b2af 1-12
+osmosis_ai/platform/cli/constants.py
+  1c486fa2b133bb35 49-67
+osmosis_ai/platform/cli/project.py
+  1c486fa2b133bb35 38,51-53
+osmosis_ai/platform/cli/templates/configs/AGENTS.md.tpl
+  1c486fa2b133bb35 58
+osmosis_ai/platform/cli/templates/skills/create-rollout/SKILL.md.tpl
+  1c486fa2b133bb35 14,22
+osmosis_ai/platform/cli/templates/skills/submit-training/SKILL.md.tpl
+  1c486fa2b133bb35 9,61
+tests/unit/platform/cli/test_workspace_setup.py
+  0426b72868e2a469 542-544
+  1dcddb036307b2af 535,541
+tests/unit/platform/cli/test_status_formatting.py
+  1dcddb036307b2af 15,63,82
+osmosis_ai/platform/cli/init.py
+  0426b72868e2a469 10,167-168,179
+  1c486fa2b133bb35 20,169-173,265-268
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.21",
+  "base_commit_sha": "084eb0cfafd6911fdb4bd6f2d66b4c41ea049b25",
+  "prompts": {
+    "0426b72868e2a469": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "65ffc26e-810d-4282-9a96-61d987454233",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>",
+      "messages": [],
+      "total_additions": 12,
+      "total_deletions": 3,
+      "accepted_lines": 7,
+      "overriden_lines": 0
+    },
+    "1c486fa2b133bb35": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4cb8c28f-0d2a-45ec-aacc-337b7b23541b",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>",
+      "messages": [],
+      "total_additions": 39,
+      "total_deletions": 19,
+      "accepted_lines": 38,
+      "overriden_lines": 0
+    },
+    "1dcddb036307b2af": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d9d9d58e-1fed-4634-8784-614f635b7118",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>",
+      "messages": [],
+      "total_additions": 17,
+      "total_deletions": 13,
+      "accepted_lines": 17,
+      "overriden_lines": 0
+    }
+  }
+}

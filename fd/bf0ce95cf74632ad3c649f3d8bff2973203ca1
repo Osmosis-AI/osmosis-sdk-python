@@ -1,0 +1,61 @@
+osmosis_ai/platform/cli/templates/configs/AGENTS.md.tpl
+  5fe8329ccb9fd29a 20
+  f7508f8e003d5296 22
+osmosis_ai/platform/cli/training_config.py
+  c689004947f800be 18,48,101,134
+  5fe8329ccb9fd29a 73,75
+tests/unit/platform/cli/test_training_config.py
+  c689004947f800be 25,52,74,101,134,166-168,174,218,241,263
+tests/unit/cli/test_train_commands.py
+  c689004947f800be 219,284
+osmosis_ai/platform/cli/templates/skills/submit-training/SKILL.md.tpl
+  c689004947f800be 27
+osmosis_ai/platform/cli/templates/configs/training/default.toml.tpl
+  c689004947f800be 14
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.0",
+  "base_commit_sha": "fdbf0ce95cf74632ad3c649f3d8bff2973203ca1",
+  "prompts": {
+    "5fe8329ccb9fd29a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e95a127b-4b16-41f0-a133-edc9c8914d40",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "JoyboyBrian",
+      "messages": [],
+      "total_additions": 4,
+      "total_deletions": 9,
+      "accepted_lines": 3,
+      "overriden_lines": 0
+    },
+    "c689004947f800be": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7a3277bb-35e3-45cf-b7a4-96331fc9abdf",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "JoyboyBrian",
+      "messages": [],
+      "total_additions": 45,
+      "total_deletions": 45,
+      "accepted_lines": 20,
+      "overriden_lines": 0
+    },
+    "f7508f8e003d5296": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9d2159b2-06dc-499e-8956-176dff30a4a2",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "JoyboyBrian",
+      "messages": [],
+      "total_additions": 25,
+      "total_deletions": 25,
+      "accepted_lines": 1,
+      "overriden_lines": 0
+    }
+  }
+}

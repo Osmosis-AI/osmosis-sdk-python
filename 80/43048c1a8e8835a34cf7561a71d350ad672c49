@@ -1,0 +1,24 @@
+osmosis_ai/rollout/integrations/agents/openai_agents.py
+  s_6762e407d9ec18::t_666c8233940889 46-49,51-57,60,67
+tests/unit/rollout/integrations/test_openai_agents.py
+  s_6762e407d9ec18::t_83be5cbd4ac3f8 162-202,209-213
+  s_6762e407d9ec18::t_3f07908974786d 43-60
+  s_6762e407d9ec18::t_3733e516753798 8,203-208
+  s_6762e407d9ec18::t_1348448c556bfb 214
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.1",
+  "base_commit_sha": "8043048c1a8e8835a34cf7561a71d350ad672c49",
+  "prompts": {},
+  "sessions": {
+    "s_6762e407d9ec18": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019e03ad-1cac-7fa1-a1ed-1059dad66355",
+        "model": "gpt-5.5"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}

@@ -1,0 +1,42 @@
+.github/workflows/auto-label-pr.yml
+  5f9c51d36da3dd3d 7-10,14,46-48,50,56
+.github/workflows/tests.yml
+  5f9c51d36da3dd3d 12-14,19,31,52,85
+.github/workflows/check-pr-title.yml
+  5f9c51d36da3dd3d 10-13,16,18,24,29,35
+.github/workflows/auto-approve.yml
+  5f9c51d36da3dd3d 5-8,12
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.4",
+  "base_commit_sha": "8e99288540bfc55e5480ac30376b74c1711f85d8",
+  "prompts": {
+    "5f9c51d36da3dd3d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7a4fb336-9ad8-44f0-97e5-85ad1439ddd2",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>",
+      "messages": [],
+      "total_additions": 37,
+      "total_deletions": 8,
+      "accepted_lines": 35,
+      "overriden_lines": 0
+    },
+    "d2fa8bab89bf8f0e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "542ece8b-cc1b-4ad3-8179-c24b65a542e0",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>",
+      "messages": [],
+      "total_additions": 3,
+      "total_deletions": 5,
+      "accepted_lines": 0,
+      "overriden_lines": 0
+    }
+  }
+}

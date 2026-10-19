@@ -1,0 +1,25 @@
+tests/unit/eval/evaluation/test_cli.py
+  d7cdcbb13ea2cdf5 97-100,102-108
+tests/unit/cli/test_serve_command.py
+  d7cdcbb13ea2cdf5 84-87
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8",
+  "base_commit_sha": "07b34c3cbd1a719cbadbb3cfbb9f3b4b0e25ad2d",
+  "prompts": {
+    "d7cdcbb13ea2cdf5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "87f0123e-438c-4fdc-835f-c04db9094f3c",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "JoyboyBrian",
+      "messages": [],
+      "total_additions": 15,
+      "total_deletions": 3,
+      "accepted_lines": 15,
+      "overriden_lines": 0
+    }
+  }
+}

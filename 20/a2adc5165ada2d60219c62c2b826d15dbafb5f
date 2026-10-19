@@ -1,0 +1,25 @@
+osmosis_ai/rollout/eval/evaluation/cli.py
+  a54007bdedcb61e3 318
+docs/eval-mode.md
+  a54007bdedcb61e3 211,213-412,478
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.8",
+  "base_commit_sha": "20a2adc5165ada2d60219c62c2b826d15dbafb5f",
+  "prompts": {
+    "a54007bdedcb61e3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ead9ddac-005e-4a5d-87aa-9736b61bf21e",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>",
+      "messages": [],
+      "total_additions": 246,
+      "total_deletions": 118,
+      "accepted_lines": 204,
+      "overriden_lines": 0
+    }
+  }
+}

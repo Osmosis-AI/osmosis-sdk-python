@@ -1,0 +1,41 @@
+tests/unit/eval/local/conftest.py
+  s_e400aa9b4bcde5::t_9060588dd89e76 133,145-146
+osmosis_ai/platform/cli/eval_run.py
+  s_e400aa9b4bcde5::t_ee401aaa94a4e4 135-138,140-141
+  s_e400aa9b4bcde5::t_6e0e55cafe2a04 139
+tests/unit/eval/local/test_server_bootstrap.py
+  s_e400aa9b4bcde5::t_17b1174b81ccda 109
+  s_e400aa9b4bcde5::t_8fcedc2275fc42 16,22,47,64,66,79,87,105-108,110,121
+tests/unit/platform/cli/test_eval_run.py
+  s_e400aa9b4bcde5::t_ddcb09b1946101 830
+  s_e400aa9b4bcde5::t_3d82542e1a40ed 831-833
+  s_e400aa9b4bcde5::t_076dda6b54cd5b 819-829,834-837
+tests/unit/eval/local/test_runner_units.py
+  s_e400aa9b4bcde5::t_8fcedc2275fc42 17-21,425-428,441,488-505,511-525,527
+  s_e400aa9b4bcde5::t_06f336f043c487 668-669
+  s_e400aa9b4bcde5::t_865c28814e0736 509-510,526
+  s_e400aa9b4bcde5::t_a184a5c9633543 977
+tests/unit/eval/local/test_runner_cancel_settle.py
+  s_e400aa9b4bcde5::t_027b2c8ff75109 44
+osmosis_ai/eval/local/runner.py
+  s_e400aa9b4bcde5::t_8fcedc2275fc42 34-37,541,562,1765-1781
+  s_e400aa9b4bcde5::t_ee401aaa94a4e4 204-206,1783
+osmosis_ai/eval/local/_server_bootstrap.py
+  s_e400aa9b4bcde5::t_8fcedc2275fc42 1,5-7,15,21,25,29-36,50,52,71-75
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "fc351c2c374301673a8eb397103e2cafddf75c0e",
+  "prompts": {},
+  "sessions": {
+    "s_e400aa9b4bcde5": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a04985-4420-7b21-b20d-a662777b59d8",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}

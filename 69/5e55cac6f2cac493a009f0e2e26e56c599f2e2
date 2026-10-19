@@ -1,0 +1,34 @@
+tests/integration/test_cli_subprocess_contract.py
+  s_8032c779241d68::t_eb511cf211905a 86
+tests/unit/platform/cli/test_workspace_directory_setup.py
+  s_8032c779241d68::t_fae393b2956178 71
+tests/unit/cli/test_workspace_json.py
+  s_8032c779241d68::t_40fd932ad3d900 80
+osmosis_ai/platform/cli/scaffold.py
+  s_8032c779241d68::t_0725927fc12fce 16,101
+osmosis_ai/templates/catalog.py
+  s_8032c779241d68::t_5d5e4e6e491bd9 144
+  s_8032c779241d68::t_4209b4fbe3f8c8 104,107,112-116,139
+osmosis_ai/platform/cli/workspace_directory_contract.py
+  s_8032c779241d68::t_5cbe71bd22a455 13,47
+tests/unit/cli/test_workspace_doctor.py
+  s_8032c779241d68::t_553a59f250b22b 52
+osmosis_ai/platform/cli/workspace_directory.py
+  s_8032c779241d68::t_849d142da52ba3 61,119-122
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "695e55cac6f2cac493a009f0e2e26e56c599f2e2",
+  "prompts": {},
+  "sessions": {
+    "s_8032c779241d68": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "148eded6-63fc-4951-aae0-99a7b7a0df70",
+        "model": "gpt-5.5-extra-high"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}

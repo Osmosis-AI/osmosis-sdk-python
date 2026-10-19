@@ -1,0 +1,22 @@
+osmosis_ai/rollout/controller/llm_bridge.py
+  s_cb0e1e0cc6d73d::t_1f5a90f2fb4cd5 110-111
+  s_cb0e1e0cc6d73d::t_1291b9a100dd49 109,112-120
+tests/unit/rollout/controller/test_llm_bridge.py
+  s_cb0e1e0cc6d73d::t_244252023c1edb 5,42,50-62,523
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "3c32ce71f42e2bf86d9527c091303b2e586386f6",
+  "prompts": {},
+  "sessions": {
+    "s_cb0e1e0cc6d73d": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0351b-44a6-7121-97b1-9af33ff6bebc",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}

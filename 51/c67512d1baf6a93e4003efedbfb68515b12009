@@ -1,0 +1,58 @@
+tests/unit/auth/test_credentials.py
+  s_5cd0e80a3dd195::t_cb5d89d877f109 798,1102
+  s_5cd0e80a3dd195::t_15e4a0d25027c0 785-797,799-814
+  s_5cd0e80a3dd195::t_2453bd71a782d9 7,1085-1101,1103-1131
+osmosis_ai/cli/output/error.py
+  s_5cd0e80a3dd195::t_f0c9882c526252 126,134-135
+osmosis_ai/platform/auth/platform_client.py
+  s_5cd0e80a3dd195::t_4b8c253da61812 186-188
+tests/unit/auth/test_local_config.py
+  s_5cd0e80a3dd195::t_457bcfca55d1e0 37
+osmosis_ai/platform/auth/local_config.py
+  s_5cd0e80a3dd195::t_170195a1896ebc 17-21,29-32
+osmosis_ai/platform/auth/credentials.py
+  s_5cd0e80a3dd195::t_4784a0aaadaa03 17,219-224,230-231,523,553
+  s_5cd0e80a3dd195::t_05c8d7849239ff 84
+  s_5cd0e80a3dd195::t_fe6bfce8322de5 363-364,370-375,426-440
+  s_5cd0e80a3dd195::t_f63bbdf57858ce 609-614,625,738-742,750,756-760,762-770
+  s_5cd0e80a3dd195::t_70c9ee0e7b98b7 21,71-83,85-114,122-125,134-135,137,139-146,148-153,225-229
+tests/unit/cli/test_insecure_platform_url.py
+  s_5cd0e80a3dd195::t_574f20722f28bd 101,116,127,139,141-142,145,162,166-184
+  s_5cd0e80a3dd195::t_cb5d89d877f109 117
+osmosis_ai/platform/cli/auth.py
+  s_5cd0e80a3dd195::t_5bfe7845f31e05 26-29,215-233,290-295,314,317-323,340-342,372-387,445-448
+tests/unit/platform/cli/test_quickstart.py
+  s_5cd0e80a3dd195::t_1d945d10888397 267-270,1104-1106,1147-1149,1210-1212,1219-1243
+osmosis_ai/cli/main.py
+  s_5cd0e80a3dd195::t_bcf6b22a1bcd3b 112-115
+  s_5cd0e80a3dd195::t_8b9996f034732f 122,129,133-135,138
+docs/cli.md
+  s_5cd0e80a3dd195::t_d3811d5cb3301a 11,15,17,19
+tests/unit/platform/cli/test_login.py
+  s_5cd0e80a3dd195::t_457bcfca55d1e0 282,316-332
+osmosis_ai/platform/cli/quickstart.py
+  s_5cd0e80a3dd195::t_1333d41860bf93 38,40,146,148-158
+tests/unit/cli/output/test_error.py
+  s_5cd0e80a3dd195::t_52f466bf2d1033 304-313
+osmosis_ai/platform/auth/flow.py
+  s_5cd0e80a3dd195::t_4b8c253da61812 24
+tests/unit/cli/test_auth_login_json.py
+  s_5cd0e80a3dd195::t_f4143fc1a0bd5f 335-336,339-341,344,346,356-358,406,424,438,441,446-454,462,484,507
+  s_5cd0e80a3dd195::t_cb5d89d877f109 349-351
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "51c67512d1baf6a93e4003efedbfb68515b12009",
+  "prompts": {},
+  "sessions": {
+    "s_5cd0e80a3dd195": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a02135-fbe1-72c3-9502-583fdae74e03",
+        "model": "azure-openai/gpt-5.6-sol"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}

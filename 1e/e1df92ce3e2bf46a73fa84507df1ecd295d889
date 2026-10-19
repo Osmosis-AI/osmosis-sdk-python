@@ -1,0 +1,25 @@
+osmosis_ai/platform/cli/init.py
+  09d2dc437a22f2d1 48,54,62,66,69-71,78,83,88,102,105-107,121,134-149,151-152,154-169,188-189,191,212,339-342
+tests/unit/platform/cli/test_workspace_setup.py
+  09d2dc437a22f2d1 54,311-397,399-425,559-612
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.21",
+  "base_commit_sha": "1ee1df92ce3e2bf46a73fa84507df1ecd295d889",
+  "prompts": {
+    "09d2dc437a22f2d1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f713c40a-78c6-4553-a531-1257808c6b6d",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>",
+      "messages": [],
+      "total_additions": 222,
+      "total_deletions": 111,
+      "accepted_lines": 226,
+      "overriden_lines": 2
+    }
+  }
+}

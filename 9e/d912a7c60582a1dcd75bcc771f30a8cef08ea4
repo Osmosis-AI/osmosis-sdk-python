@@ -1,0 +1,25 @@
+osmosis_ai/cli/commands/model.py
+  s_9477fa0c8717da::t_ad104f0a30427a 27
+osmosis_ai/cli/commands/train.py
+  s_9477fa0c8717da::t_0fbe777b9f2742 208
+osmosis_ai/cli/commands/deployment.py
+  s_9477fa0c8717da::t_455f7f622dfd78 141
+osmosis_ai/cli/commands/rollout.py
+  s_9477fa0c8717da::t_afb26593cc33a9 24
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "9ed912a7c60582a1dcd75bcc771f30a8cef08ea4",
+  "prompts": {},
+  "sessions": {
+    "s_9477fa0c8717da": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "a15c2361-d4d8-4e57-b365-2161f14671da",
+        "model": "gpt-5.5-extra-high"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}

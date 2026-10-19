@@ -1,0 +1,44 @@
+osmosis_ai/platform/auth/config.py
+  589245eabbc95fac 15
+osmosis_ai/platform/auth/local_config.py
+  589245eabbc95fac 5-8,13,15-17,19,22,27,67-82,84-94,153-155,166-171,179-182,192-197
+  4b0828df0a03c7f5 128-133,140-146
+tests/unit/auth/test_local_config.py
+  4b0828df0a03c7f5 138-173
+  589245eabbc95fac 1-137
+osmosis_ai/platform/cli/logout.py
+  4b0828df0a03c7f5 12,71,97,129
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.7",
+  "base_commit_sha": "b47cf54618e5d4f0e7470b77011a42509866d3d3",
+  "prompts": {
+    "4b0828df0a03c7f5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "182db88e-93dc-4d43-9d98-3438254037e6",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>",
+      "messages": [],
+      "total_additions": 60,
+      "total_deletions": 0,
+      "accepted_lines": 60,
+      "overriden_lines": 0
+    },
+    "589245eabbc95fac": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2c2d834c-1826-4424-838e-ea2ad196afd8",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>",
+      "messages": [],
+      "total_additions": 204,
+      "total_deletions": 35,
+      "accepted_lines": 200,
+      "overriden_lines": 0
+    }
+  }
+}

@@ -1,0 +1,21 @@
+osmosis_ai/platform/cli/training_config.py
+  s_98f3e1807d65c8::t_05870afaa0aa7c 211
+  s_98f3e1807d65c8::t_cd0ceee642ebbe 49
+  s_98f3e1807d65c8::t_3f6a2707d86706 90
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "fbd12b108fc84e0a6eb72bb837623cff7a300ce2",
+  "prompts": {},
+  "sessions": {
+    "s_98f3e1807d65c8": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "175f1539-c7f6-465b-a699-d6bb1880642e",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "Jacob Trock <jgh@geocrypt.me>"
+    }
+  }
+}

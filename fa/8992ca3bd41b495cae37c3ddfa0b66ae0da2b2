@@ -1,0 +1,31 @@
+osmosis_ai/platform/cli/login.py
+  d0c07fa518509d72 47-53
+tests/unit/auth/test_platform_client.py
+  d0c07fa518509d72 508,510,512,515-518,521-529,531,533-534,538-539
+tests/unit/auth/test_flow.py
+  d0c07fa518509d72 122
+osmosis_ai/platform/cli/project.py
+  d0c07fa518509d72 42,152,235,325,342
+tests/unit/auth/test_device_flow.py
+  d0c07fa518509d72 66
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.15",
+  "base_commit_sha": "fa8992ca3bd41b495cae37c3ddfa0b66ae0da2b2",
+  "prompts": {
+    "d0c07fa518509d72": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "3d42906f-c979-45ed-b6df-9c0bc8c6e0ad",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>",
+      "messages": [],
+      "total_additions": 37,
+      "total_deletions": 30,
+      "accepted_lines": 36,
+      "overriden_lines": 0
+    }
+  }
+}

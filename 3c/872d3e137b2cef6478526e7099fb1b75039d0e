@@ -1,0 +1,36 @@
+osmosis_ai/rollout/controller/proxy_client.py
+  s_b8b8cd2bb0577b::t_d87161e86f2107 257,260
+  s_b8b8cd2bb0577b::t_3dd8778e7d93b5 96-106,108
+  s_b8b8cd2bb0577b::t_d23e04a9fce071 144
+tests/unit/rollout/controller/test_proxy_client.py
+  s_b8b8cd2bb0577b::t_587132e5cf66b1 191-207
+osmosis_ai/rollout/server/app.py
+  s_b8b8cd2bb0577b::t_a8b1bd33b778fd 92
+  s_b8b8cd2bb0577b::t_e83eb8d56347d6 397
+  s_b8b8cd2bb0577b::t_e971ae5def3914 371
+  s_b8b8cd2bb0577b::t_11301aaf972e8a 103,111-114,116-117
+  s_b8b8cd2bb0577b::t_15c663156ea0f3 190-194
+tests/unit/rollout/test_server_admission.py
+  s_b8b8cd2bb0577b::t_df404958d9e9e0 18-35,53
+  s_b8b8cd2bb0577b::t_6ac213f2e725a6 362-382
+  s_b8b8cd2bb0577b::t_f974ad4fff9d5e 260
+tests/unit/rollout/integrations/test_eval_proxy_contract.py
+  s_b8b8cd2bb0577b::t_dfbc0d10a9ff1c 7-13,16-17
+  s_b8b8cd2bb0577b::t_cffc4fa0e16463 15
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "3c872d3e137b2cef6478526e7099fb1b75039d0e",
+  "prompts": {},
+  "sessions": {
+    "s_b8b8cd2bb0577b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "14ec33d4-08f7-44b5-85cd-b6b109b2c545",
+        "model": "claude-fable-5"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}

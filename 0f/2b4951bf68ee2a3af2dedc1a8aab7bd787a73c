@@ -1,0 +1,25 @@
+docs/README.md
+  s_afc9930f162efd::t_647cc1c75960fd 26
+README.md
+  s_afc9930f162efd::t_647cc1c75960fd 40
+.github/scripts/verify-wheel-install.py
+  s_afc9930f162efd::t_647cc1c75960fd 364,369,390,406,420,430,441,454,471,483-485
+docs/rollout-sdk.md
+  s_afc9930f162efd::t_647cc1c75960fd 33
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "0f2b4951bf68ee2a3af2dedc1a8aab7bd787a73c",
+  "prompts": {},
+  "sessions": {
+    "s_afc9930f162efd": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a049ae-6930-7882-81a1-e17807c3759d",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}

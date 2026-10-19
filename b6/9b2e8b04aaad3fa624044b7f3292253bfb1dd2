@@ -1,0 +1,36 @@
+tests/unit/eval/evaluation/test_cache.py
+  s_9477fa0c8717da::t_03711fb4eb2587 7,15,40-44,490-562
+tests/unit/cli/test_eval_run_json.py
+  s_9477fa0c8717da::t_1d19517dcee2e3 4,63-67,133-136,159-178
+tests/unit/eval/evaluation/test_cli.py
+  s_9477fa0c8717da::t_497ae8972eced0 4,17-21
+osmosis_ai/cli/commands/auth.py
+  s_9477fa0c8717da::t_787b4d016135c8 6,41,78-80,82-90
+  s_9477fa0c8717da::t_3f77e4bb0e4dc4 42-43,300-303
+tests/unit/platform/cli/test_login.py
+  s_9477fa0c8717da::t_c26c15b43b6b55 39,42-44,183,186,209-212,219,241-243,247-248,271-274,281-282,307-308
+tests/unit/cli/test_auth_login_json.py
+  s_9477fa0c8717da::t_007f0911f92b8e 24-33,76-77,80-82,84-87,90,111-114,119,122,142-145,149,169-172
+tests/unit/cli/test_whoami.py
+  s_9477fa0c8717da::t_1cd149a925cac0 108-113,139,167,215,249,287,317
+tests/unit/cli/test_command_groups.py
+  s_9477fa0c8717da::t_acb42f4de15cf0 83,148
+osmosis_ai/cli/commands/eval.py
+  s_9477fa0c8717da::t_2e26793e7a0e07 18-23,48-49,137-138,172-173
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "b69b2e8b04aaad3fa624044b7f3292253bfb1dd2",
+  "prompts": {},
+  "sessions": {
+    "s_9477fa0c8717da": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "a15c2361-d4d8-4e57-b365-2161f14671da",
+        "model": "gpt-5.5-extra-high"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}

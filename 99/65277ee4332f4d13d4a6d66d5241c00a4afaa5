@@ -1,0 +1,34 @@
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8",
+  "base_commit_sha": "9965277ee4332f4d13d4a6d66d5241c00a4afaa5",
+  "prompts": {
+    "c57de807c93565f7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "0b1cd918-ea2f-4188-8abb-7aea10af8ea6",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "JoyboyBrian",
+      "messages": [],
+      "total_additions": 1,
+      "total_deletions": 1,
+      "accepted_lines": 0,
+      "overriden_lines": 0
+    },
+    "e20a92f3d2f9c459": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "cb4872e1-0281-4021-b570-288884fa498b",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "JoyboyBrian",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 60,
+      "overriden_lines": 0
+    }
+  }
+}

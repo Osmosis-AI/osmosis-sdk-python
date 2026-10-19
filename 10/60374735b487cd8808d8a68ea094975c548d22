@@ -1,0 +1,19 @@
+tests/unit/platform/cli/test_training_config.py
+  s_bff8d599f25a70::t_9f8a35254e2213 414,431-433,436,460-461
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.9",
+  "base_commit_sha": "1060374735b487cd8808d8a68ea094975c548d22",
+  "prompts": {},
+  "sessions": {
+    "s_bff8d599f25a70": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "3f24d686-23d3-4443-8e21-cfa94654096d",
+        "model": "gpt-5.5-extra-high"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}

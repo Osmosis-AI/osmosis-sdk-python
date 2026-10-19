@@ -1,0 +1,22 @@
+tests/unit/cli/output/test_display.py
+  s_4e4dcaa768d23e::t_4773b6b4137568 3
+  s_4e4dcaa768d23e::t_22fcd80f268ff1 25-26,28
+osmosis_ai/cli/output/renderer.py
+  s_4e4dcaa768d23e::t_22fcd80f268ff1 210,214
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "8408c4acafbe26f660d45542fcb59aa79e850a58",
+  "prompts": {},
+  "sessions": {
+    "s_4e4dcaa768d23e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019e22b7-7ff6-7c62-93a1-c62437f4f869",
+        "model": "gpt-5.5"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}

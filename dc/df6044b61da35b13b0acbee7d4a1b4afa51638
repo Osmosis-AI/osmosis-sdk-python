@@ -1,0 +1,22 @@
+osmosis_ai/rollout/backend/harbor/environment.py
+  s_a9c316605de91d::t_294afee087b8f1 116-117
+tests/unit/rollout/test_harbor_environment.py
+  s_a9c316605de91d::t_294afee087b8f1 75
+  s_a9c316605de91d::t_b317dc27b47b25 81-84
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "dcdf6044b61da35b13b0acbee7d4a1b4afa51638",
+  "prompts": {},
+  "sessions": {
+    "s_a9c316605de91d": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a04047-33cd-7593-b5d1-d933477beb1b",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}

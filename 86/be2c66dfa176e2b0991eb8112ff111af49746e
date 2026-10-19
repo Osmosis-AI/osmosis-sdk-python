@@ -1,0 +1,25 @@
+tests/unit/platform/cli/test_training_config.py
+  s_5be153eb2f94cd::t_5c35266899240a 190-191
+tests/unit/platform/api/test_client.py
+  s_5be153eb2f94cd::t_9c53ece06215f4 577
+  s_5be153eb2f94cd::t_0a70602af6adca 535
+  s_5be153eb2f94cd::t_b19b5047e9cba6 490
+  s_5be153eb2f94cd::t_a93ea4f3b4a694 555
+  s_5be153eb2f94cd::t_aca8e958be681f 515
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.1",
+  "base_commit_sha": "86be2c66dfa176e2b0991eb8112ff111af49746e",
+  "prompts": {},
+  "sessions": {
+    "s_5be153eb2f94cd": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "34077c44-c006-4cb4-af33-10b2790be2e2",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "Jacob Trock <jgh@geocrypt.me>"
+    }
+  }
+}

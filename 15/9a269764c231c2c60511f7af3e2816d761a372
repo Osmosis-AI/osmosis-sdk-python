@@ -1,0 +1,23 @@
+osmosis_ai/cli/metrics_graph.py
+  3cd16066ed3e8bfa 86-88,94-96,128-138,149,154-155,199-208,210-212,247,250
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.23",
+  "base_commit_sha": "159a269764c231c2c60511f7af3e2816d761a372",
+  "prompts": {
+    "3cd16066ed3e8bfa": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b35b2cc2-9b61-491e-875d-387f1f148385",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>",
+      "messages": [],
+      "total_additions": 36,
+      "total_deletions": 31,
+      "accepted_lines": 36,
+      "overriden_lines": 0
+    }
+  }
+}

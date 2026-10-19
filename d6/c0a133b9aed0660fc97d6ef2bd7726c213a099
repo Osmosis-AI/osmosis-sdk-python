@@ -1,0 +1,21 @@
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.0",
+  "base_commit_sha": "d6c0a133b9aed0660fc97d6ef2bd7726c213a099",
+  "prompts": {
+    "755df9428ab60ed2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "faebf673-f4ce-421f-8d66-9f4a3c0f6993",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jacob Trock",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 9,
+      "accepted_lines": 66,
+      "overriden_lines": 0
+    }
+  }
+}

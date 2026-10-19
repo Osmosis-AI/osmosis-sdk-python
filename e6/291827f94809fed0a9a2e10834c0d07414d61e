@@ -1,0 +1,49 @@
+tests/unit/platform/cli/test_secret_redact.py
+  s_a456a4625c0abd::t_a87bf551920916 15-18
+  s_a456a4625c0abd::t_a45387ab54b600 24-42
+osmosis_ai/platform/auth/config.py
+  s_a456a4625c0abd::t_568e4a2cef71a0 11-12
+  s_a456a4625c0abd::t_eeb2954929106d 32-36,39-42
+osmosis_ai/cli/main.py
+  s_a456a4625c0abd::t_603955e8d16446 213
+osmosis_ai/cli/output/error.py
+  s_a456a4625c0abd::t_264d5cce3382d5 96-98
+  s_a456a4625c0abd::t_ada9306bee0df9 114-116
+  s_a456a4625c0abd::t_38dd990ae7c57a 192
+tests/unit/auth/test_config.py
+  s_a456a4625c0abd::t_0673c34b780bbf 7
+  s_a456a4625c0abd::t_57d323cc36fd7a 33-46
+osmosis_ai/platform/cli/secret_redact.py
+  s_a456a4625c0abd::t_074259bd096eb6 24
+  s_a456a4625c0abd::t_af75690c9d5c27 21-23,26-30
+tests/unit/cli/test_auth_login_json.py
+  s_a456a4625c0abd::t_d282050a28341d 55-88
+  s_a456a4625c0abd::t_9e968ace1f4896 542-543,551-553,563-579
+  s_a456a4625c0abd::t_4f5a494fc35fb5 534
+tests/unit/cli/output/test_error.py
+  s_a456a4625c0abd::t_e90b8e64db4ad8 22
+  s_a456a4625c0abd::t_7c50a642527f96 225-261,266-271
+  s_a456a4625c0abd::t_26d2511d25e8d9 262-265
+tests/unit/cli/test_insecure_platform_url.py
+  s_a456a4625c0abd::t_1316eef979df95 102-118
+osmosis_ai/cli/commands/auth.py
+  s_a456a4625c0abd::t_3ed6305542b5d0 18
+  s_a456a4625c0abd::t_1c2476a719768e 72-77
+  s_a456a4625c0abd::t_6607242d7853a7 56
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "e6291827f94809fed0a9a2e10834c0d07414d61e",
+  "prompts": {},
+  "sessions": {
+    "s_a456a4625c0abd": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "01dc3604-3779-4fc4-9ec6-e8b93d69cd45",
+        "model": "grok-4.6"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}

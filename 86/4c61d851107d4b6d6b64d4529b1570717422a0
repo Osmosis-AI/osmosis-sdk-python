@@ -1,0 +1,23 @@
+osmosis_ai/platform/cli/login.py
+  19c3b36311a0dc94 4,34-48,50-60
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.8",
+  "base_commit_sha": "864c61d851107d4b6d6b64d4529b1570717422a0",
+  "prompts": {
+    "19c3b36311a0dc94": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e7afdcfe-5467-4efe-9c10-92ab63cdc02c",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>",
+      "messages": [],
+      "total_additions": 28,
+      "total_deletions": 4,
+      "accepted_lines": 27,
+      "overriden_lines": 0
+    }
+  }
+}

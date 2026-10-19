@@ -1,0 +1,27 @@
+osmosis_ai/platform/api/client.py
+  abdaa94ae695d142 53,62
+osmosis_ai/platform/cli/dataset.py
+  abdaa94ae695d142 152,155,159,164,166,171,173,179
+osmosis_ai/platform/api/models.py
+  abdaa94ae695d142 92-95,99,113-115
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.5",
+  "base_commit_sha": "a93fea7dbec7222ece337546f941ebdd4a147fee",
+  "prompts": {
+    "abdaa94ae695d142": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c4ea3ea1-7bb9-4df7-95c4-582d0dd07fe6",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>",
+      "messages": [],
+      "total_additions": 43,
+      "total_deletions": 68,
+      "accepted_lines": 24,
+      "overriden_lines": 0
+    }
+  }
+}

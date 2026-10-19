@@ -1,0 +1,23 @@
+.pre-commit-config.yaml
+  79930c5a98be6fbb 14,17-20,22-25
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.8",
+  "base_commit_sha": "fc5aa7b8945bc95825fff56b86b6c800e7bdc2a3",
+  "prompts": {
+    "79930c5a98be6fbb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8ee40822-50e8-471c-b8e3-fe3cc9e97dea",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>",
+      "messages": [],
+      "total_additions": 9,
+      "total_deletions": 3,
+      "accepted_lines": 9,
+      "overriden_lines": 0
+    }
+  }
+}

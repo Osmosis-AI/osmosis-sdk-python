@@ -1,0 +1,19 @@
+tests/integration/test_cli_subprocess_contract.py
+  s_7179959449d359::t_894f0cd27d9588 13-22,36-37
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "765c469cd74216f2d65d5ae2145ec79a645e8533",
+  "prompts": {},
+  "sessions": {
+    "s_7179959449d359": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "58e506bd-c732-476d-9ff5-76a6997fac3e",
+        "model": "grok-4.6"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}

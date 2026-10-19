@@ -1,0 +1,27 @@
+osmosis_ai/platform/cli/init.py
+  914a08ad3c300577 102,446,466
+tests/unit/platform/cli/test_workspace_setup.py
+  914a08ad3c300577 490-507,935,950-951
+osmosis_ai/platform/cli/templates/AGENTS.md.tpl
+  914a08ad3c300577 52-53
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "d953a61586d2aafdaabde4464b832c7c0736531a",
+  "prompts": {
+    "914a08ad3c300577": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "943fa021-7833-4744-b0d2-b32395b8267e",
+        "model": "gpt-5.5-extra-high"
+      },
+      "human_author": "JoyboyBrian",
+      "messages": [],
+      "total_additions": 28,
+      "total_deletions": 4,
+      "accepted_lines": 26,
+      "overriden_lines": 0
+    }
+  }
+}

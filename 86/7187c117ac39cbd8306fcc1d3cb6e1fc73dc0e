@@ -1,0 +1,31 @@
+tests/unit/cli/output/test_display.py
+  s_4e4dcaa768d23e::t_92569346ac3440 1-31
+osmosis_ai/cli/output/display.py
+  s_4e4dcaa768d23e::t_786040d2ca9011 1-59
+osmosis_ai/cli/output/__init__.py
+  s_4e4dcaa768d23e::t_786040d2ca9011 22,42
+tests/unit/cli/output/test_renderer_rich.py
+  s_4e4dcaa768d23e::t_92569346ac3440 14,61-96
+osmosis_ai/cli/output/renderer.py
+  s_4e4dcaa768d23e::t_786040d2ca9011 148-152,198-202,210-217,236-237
+tests/unit/cli/output/test_renderer_plain.py
+  s_4e4dcaa768d23e::t_92569346ac3440 14,44-61
+osmosis_ai/cli/output/result.py
+  s_4e4dcaa768d23e::t_786040d2ca9011 6,26-37,51-52,68
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "867187c117ac39cbd8306fcc1d3cb6e1fc73dc0e",
+  "prompts": {},
+  "sessions": {
+    "s_4e4dcaa768d23e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019e22b7-7ff6-7c62-93a1-c62437f4f869",
+        "model": "gpt-5.5"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}

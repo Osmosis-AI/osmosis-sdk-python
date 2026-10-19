@@ -1,0 +1,25 @@
+osmosis_ai/platform/api/download.py
+  b7ba4af957e10fff 7,10,18-19,72-102,115
+tests/unit/platform/api/test_download.py
+  b7ba4af957e10fff 76-140
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "5d4dc09e31415ffef823de7004cbef2f23f7139e",
+  "prompts": {
+    "b7ba4af957e10fff": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "242c2ffe-8b89-4dba-86e4-92c13c2e7bac",
+        "model": "gpt-5.5-extra-high"
+      },
+      "human_author": "JoyboyBrian",
+      "messages": [],
+      "total_additions": 101,
+      "total_deletions": 3,
+      "accepted_lines": 101,
+      "overriden_lines": 0
+    }
+  }
+}

@@ -1,0 +1,29 @@
+tests/unit/platform/api/test_models.py
+  86cf4ccb2c0048aa 1-212,214,216-230
+tests/unit/platform/api/test_client.py
+  86cf4ccb2c0048aa 1-90
+tests/unit/platform/api/test_upload.py
+  86cf4ccb2c0048aa 1-62,64-65,67-432
+tests/unit/platform/cli/test_project_validation.py
+  86cf4ccb2c0048aa 1-117
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.7",
+  "base_commit_sha": "7a225a782ae7dfd89d060c8993d73cb17a6e9368",
+  "prompts": {
+    "86cf4ccb2c0048aa": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ed8e113d-d4a1-4175-b8a8-60303a14486a",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>",
+      "messages": [],
+      "total_additions": 869,
+      "total_deletions": 5,
+      "accepted_lines": 865,
+      "overriden_lines": 3
+    }
+  }
+}

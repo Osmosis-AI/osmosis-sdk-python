@@ -1,0 +1,38 @@
+tests/unit/cli/test_project_doctor.py
+  s_2de893efbc15ff::t_f0e96743a09700 52,54-74,86,108,127,146,161,172
+  s_2de893efbc15ff::t_732fa9656f9f3f 6-7,11-27
+osmosis_ai/platform/cli/project.py
+  s_2de893efbc15ff::t_934b1fea0522c3 96
+osmosis_ai/templates/source.py
+  s_2de893efbc15ff::t_70ae32625055f4 100-105,119
+  s_2de893efbc15ff::t_f22a2ca7efdf59 118
+tests/unit/platform/cli/test_project_setup.py
+  s_2de893efbc15ff::t_8a76763373c9b8 18-56,89,195-197
+  s_2de893efbc15ff::t_ccbb8b96de8fa1 85-88
+osmosis_ai/templates/catalog.py
+  s_2de893efbc15ff::t_c639d1c19800ce 4
+  s_2de893efbc15ff::t_c7336528283a06 96-100,116-117,121,125
+tests/unit/templates/test_source.py
+  s_2de893efbc15ff::t_ccbb8b96de8fa1 19-21
+  s_2de893efbc15ff::t_a1efce5292d972 1-18,22-41
+osmosis_ai/platform/cli/scaffold.py
+  s_2de893efbc15ff::t_84471cdcf50f41 15,19,51-69,72,81,84,89-91,93,95-96,100,114,118-121,126,128,135,140
+  s_2de893efbc15ff::t_413b4666977ebe 92
+  s_2de893efbc15ff::t_4269c2ec88cadf 105,107-110,115-117
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "39e6b7f63ab12e5d015c6df21741871b108de479",
+  "prompts": {},
+  "sessions": {
+    "s_2de893efbc15ff": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019e27cc-4d8d-74a2-8232-cccf02ca3078",
+        "model": "gpt-5.5"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}

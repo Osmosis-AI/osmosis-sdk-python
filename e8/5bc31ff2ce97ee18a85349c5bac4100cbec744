@@ -1,0 +1,57 @@
+osmosis_ai/platform/cli/workspace_directory.py
+  s_8032c779241d68::t_5501202a292a06 63,97,105
+tests/unit/platform/cli/test_workspace_directory_contract.py
+  s_8032c779241d68::t_a6b8e1f799d96d 123
+tests/unit/cli/test_auth_login_json.py
+  s_8032c779241d68::t_02b685a8ce1081 83
+  s_8032c779241d68::t_a5e20b0635f7de 115,144,172
+tests/unit/cli/test_workspace_json.py
+  s_8032c779241d68::t_a5bd172e4e051e 46,71
+tests/unit/cli/test_command_groups.py
+  s_8032c779241d68::t_70bed966784711 23,28,47,62,67,135,195
+tests/unit/platform/cli/test_login.py
+  s_8032c779241d68::t_15a7d0a8f61ebc 259
+  s_8032c779241d68::t_991d830885a5f8 283,316,347,381
+osmosis_ai/cli/commands/auth.py
+  s_8032c779241d68::t_2542940dbe56c6 46,87
+osmosis_ai/cli/output/error.py
+  s_8032c779241d68::t_d34ca66af6beef 15,38
+docs/README.md
+  s_8032c779241d68::t_bac4c2dd99c68b 12
+tests/unit/cli/test_workspace_commands.py
+  s_8032c779241d68::t_161826e4f0a6b9 25,28,44,46,48-49
+osmosis_ai/cli/main.py
+  s_8032c779241d68::t_2887d2871851e1 206,209
+docs/troubleshooting.md
+  s_8032c779241d68::t_f512b5154b3d60 53
+osmosis_ai/platform/cli/workspace_directory_contract.py
+  s_8032c779241d68::t_6fc3e2f609e2a5 69
+osmosis_ai/cli/commands/workspace.py
+  s_8032c779241d68::t_f2999bde441945 1
+tests/unit/cli/test_workspace_doctor.py
+  s_8032c779241d68::t_e914576145bd80 46,98,130,146,160,186,197,213,231,251
+tests/unit/cli/output/test_error.py
+  s_8032c779241d68::t_e8dcc5b62a38fc 150,152-155,217
+osmosis_ai/platform/cli/scaffold.py
+  s_8032c779241d68::t_4948707083d344 210
+docs/cli.md
+  s_8032c779241d68::t_59bffb7fe562cb 44,65,68-70,76
+README.md
+  s_8032c779241d68::t_cca957a15cf9e1 31,64
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "e85bc31ff2ce97ee18a85349c5bac4100cbec744",
+  "prompts": {},
+  "sessions": {
+    "s_8032c779241d68": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "148eded6-63fc-4951-aae0-99a7b7a0df70",
+        "model": "gpt-5.5-extra-high"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}

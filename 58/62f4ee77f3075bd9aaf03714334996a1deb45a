@@ -1,0 +1,19 @@
+osmosis_ai/rollout/controller/llm_bridge.py
+  s_dc71f490a941a0::t_7c3fa1bd649e90 516-521,535
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "5862f4ee77f3075bd9aaf03714334996a1deb45a",
+  "prompts": {},
+  "sessions": {
+    "s_dc71f490a941a0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "84d28b7e-d22b-4c7c-884d-de274853ebfc",
+        "model": "claude-fable-5"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}

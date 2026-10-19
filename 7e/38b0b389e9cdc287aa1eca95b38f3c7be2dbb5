@@ -1,0 +1,23 @@
+tests/unit/platform/cli/test_login.py
+  s_9477fa0c8717da::t_b693bccd972346 345
+tests/unit/cli/test_console.py
+  s_9477fa0c8717da::t_56b948fc57ef2c 217,219,224
+osmosis_ai/cli/commands/auth.py
+  s_9477fa0c8717da::t_b45f86002b2c16 171,173,177,179,181,188,190,278,280,284,289,291,298,300
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "7e38b0b389e9cdc287aa1eca95b38f3c7be2dbb5",
+  "prompts": {},
+  "sessions": {
+    "s_9477fa0c8717da": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "a15c2361-d4d8-4e57-b365-2161f14671da",
+        "model": "gpt-5.5-extra-high"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}

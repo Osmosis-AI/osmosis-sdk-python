@@ -1,0 +1,145 @@
+tests/unit/platform/cli/test_benchmark_runs.py
+  s_8a0b4d864cb9e3::t_9be2f87165dcb1 28
+  s_8a0b4d864cb9e3::t_232fcdfcc8047f 112,161,186,254,293,323,350,404
+osmosis_ai/platform/cli/train.py
+  s_8a0b4d864cb9e3::t_f850a8681ec4a2 49,52,172,199,228,258,446,474,486
+  s_8a0b4d864cb9e3::t_645415295d9a3d 169
+  s_8a0b4d864cb9e3::t_85b114e6779e90 109
+tests/unit/cli/test_eval_commands.py
+  s_8a0b4d864cb9e3::t_44e41894d4967b 56
+osmosis_ai/cli/main.py
+  s_8a0b4d864cb9e3::t_45ff3bbaefe3a9 200
+  s_8a0b4d864cb9e3::t_d6b740dc83b4d2 197-199,201,223-230
+osmosis_ai/platform/cli/utils.py
+  s_8a0b4d864cb9e3::t_27359453e5be0d 39,41-42,110-114,277,301,423
+tests/unit/cli/test_train_commands.py
+  s_8a0b4d864cb9e3::t_7996a30915581a 152
+osmosis_ai/cli/commands/eval.py
+  s_8a0b4d864cb9e3::t_645415295d9a3d 263
+tests/unit/platform/cli/test_status_formatting.py
+  s_8a0b4d864cb9e3::t_44e41894d4967b 42
+tests/unit/cli/test_train_metrics_cmd.py
+  s_8a0b4d864cb9e3::t_44e41894d4967b 65
+docs/eval-run-local.md
+  s_8a0b4d864cb9e3::t_645415295d9a3d 17
+osmosis_ai/platform/cli/workspace_directory_context.py
+  s_8a0b4d864cb9e3::t_05db68591aaeed 30,34,84,86-87,90-94,101-102,151,153-155,175,178,180
+  s_8a0b4d864cb9e3::t_e7b2861668a20c 160-162
+  s_8a0b4d864cb9e3::t_246ebf389587aa 164-166
+  s_8a0b4d864cb9e3::t_608818c7c4dc4d 29,31-33,35-48,73-83,95,97-100,108,111,118-143,158-159,163,176,182-183
+  s_8a0b4d864cb9e3::t_35c657b852a8a4 152
+tests/unit/cli/test_train_info_checkpoints.py
+  s_8a0b4d864cb9e3::t_aea7af5416f89a 59
+osmosis_ai/platform/cli/eval.py
+  s_8a0b4d864cb9e3::t_85b114e6779e90 307
+  s_8a0b4d864cb9e3::t_645415295d9a3d 363
+  s_8a0b4d864cb9e3::t_5f0512d5d514c2 47,50-53,396,423,453,596,646
+  s_8a0b4d864cb9e3::t_9e738374fbeed2 366
+  s_8a0b4d864cb9e3::t_d17fb1768c2707 734
+osmosis_ai/platform/cli/eval_run.py
+  s_8a0b4d864cb9e3::t_e500b00b96a92a 335-342,535,681,714
+  s_8a0b4d864cb9e3::t_05db68591aaeed 41-42
+  s_8a0b4d864cb9e3::t_5e26789d131c0b 408-409,412-413,467,472
+  s_8a0b4d864cb9e3::t_6c798e303bd9ef 39-40,43,334,468
+tests/unit/platform/cli/test_dataset_upload.py
+  s_8a0b4d864cb9e3::t_44e41894d4967b 483,535
+CHANGELOG.md
+  s_8a0b4d864cb9e3::t_645415295d9a3d 5-14
+tests/unit/platform/cli/test_submit_workspace_scope.py
+  s_8a0b4d864cb9e3::t_85b114e6779e90 62,68
+  s_8a0b4d864cb9e3::t_98a74205339839 1-61,63-67,69-112
+tests/unit/cli/test_secret_commands.py
+  s_8a0b4d864cb9e3::t_44e41894d4967b 50,427
+tests/unit/platform/cli/test_workspace_directory_context.py
+  s_8a0b4d864cb9e3::t_98a74205339839 13,138-173,175-179
+  s_8a0b4d864cb9e3::t_05db68591aaeed 174,180-201
+osmosis_ai/platform/workspace_scope.py
+  s_8a0b4d864cb9e3::t_d17fb1768c2707 41
+  s_8a0b4d864cb9e3::t_bd07aa68831244 1-4,6-7,9-40
+  s_8a0b4d864cb9e3::t_9c7dd8da6491d9 5,8
+tests/unit/cli/test_model_commands.py
+  s_8a0b4d864cb9e3::t_44e41894d4967b 97
+osmosis_ai/platform/auth/platform_client.py
+  s_8a0b4d864cb9e3::t_92a23897381a12 325-330,551-564,592-596
+  s_8a0b4d864cb9e3::t_a194db5a5ffa68 305-311
+osmosis_ai/platform/cli/stop_run.py
+  s_8a0b4d864cb9e3::t_18b693154950a6 11-12,22,39
+osmosis_ai/cli/commands/train.py
+  s_8a0b4d864cb9e3::t_645415295d9a3d 25
+tests/unit/auth/test_platform_client.py
+  s_8a0b4d864cb9e3::t_a194db5a5ffa68 617-626
+  s_8a0b4d864cb9e3::t_98a74205339839 30,278-307,340-341
+tests/unit/platform/cli/test_benchmark_catalog.py
+  s_8a0b4d864cb9e3::t_9be2f87165dcb1 39
+  s_8a0b4d864cb9e3::t_232fcdfcc8047f 86,190,259,332,389,434,528,752
+docs/cli.md
+  s_8a0b4d864cb9e3::t_645415295d9a3d 13-16,18
+  s_8a0b4d864cb9e3::t_85b114e6779e90 17
+osmosis_ai/platform/cli/dataset.py
+  s_8a0b4d864cb9e3::t_ee1e3f3e7bc449 36,52,376,419,452,478,503,520,536,566,595,631,654,710
+  s_8a0b4d864cb9e3::t_526ff015853d66 60,99,210,257
+osmosis_ai/cli/commands/benchmark.py
+  s_8a0b4d864cb9e3::t_645415295d9a3d 33,83
+osmosis_ai/platform/cli/secret.py
+  s_8a0b4d864cb9e3::t_526ff015853d66 301
+  s_8a0b4d864cb9e3::t_cca6ee2f4ecd65 36,39,163,195,242,249,273,325,374
+tests/unit/cli/test_dataset_commands_json.py
+  s_8a0b4d864cb9e3::t_44e41894d4967b 53
+tests/unit/platform/cli/test_eval_run.py
+  s_8a0b4d864cb9e3::t_98a74205339839 218-235
+  s_8a0b4d864cb9e3::t_9be2f87165dcb1 125,127-128
+  s_8a0b4d864cb9e3::t_05db68591aaeed 126
+osmosis_ai/platform/cli/benchmark.py
+  s_8a0b4d864cb9e3::t_645415295d9a3d 201,689
+  s_8a0b4d864cb9e3::t_63463389265063 50,53-54,203,226,536,672,691,719,863,942,952,989,1012-1013,1046,1107,1136-1137,1215,1249
+  s_8a0b4d864cb9e3::t_246ebf389587aa 1132
+tests/unit/platform/cli/test_dataset_workspace_context.py
+  s_8a0b4d864cb9e3::t_44e41894d4967b 49
+osmosis_ai/platform/cli/shared_submit.py
+  s_8a0b4d864cb9e3::t_85b114e6779e90 90,351,368,401-403,412-414,478,487,506-510,522
+  s_8a0b4d864cb9e3::t_d17fb1768c2707 3,6,18,36-40,47,346-350,352-353,358-367,369-381,383-400
+  s_8a0b4d864cb9e3::t_02f86bf0ebfd9c 126,217,277,284-285,288,315-345,382
+  s_8a0b4d864cb9e3::t_728fad5459b6bd 354-357
+tests/unit/platform/cli/test_benchmark_submit.py
+  s_8a0b4d864cb9e3::t_98a74205339839 187-221
+  s_8a0b4d864cb9e3::t_9be2f87165dcb1 87,164,174-178,181-186,407,411,425-428
+  s_8a0b4d864cb9e3::t_232fcdfcc8047f 131,172,240,286,320,389,416
+tests/unit/cli/test_benchmark_download.py
+  s_8a0b4d864cb9e3::t_44e41894d4967b 58
+tests/unit/cli/output/test_root_callback.py
+  s_8a0b4d864cb9e3::t_096a3265e279c0 14,26-30,63,122-144,146-152
+  s_8a0b4d864cb9e3::t_755cc2bca557d3 145
+osmosis_ai/platform/api/client.py
+  s_8a0b4d864cb9e3::t_85b114e6779e90 60-61,301,631
+  s_8a0b4d864cb9e3::t_06cb0faa59a97a 72,97,116,141,167,204,225,240,254,271,342,357,371,387,405,451,467,482,497,518,541,564,588,610,764,794,810,827,849,867,885,902,918,935,950,964,982,1035
+  s_8a0b4d864cb9e3::t_d699305cdbb9e4 1005,1021
+tests/unit/cli/test_eval_download.py
+  s_8a0b4d864cb9e3::t_7996a30915581a 58-62
+tests/unit/cli/test_command_result_migration_train_model_rollout.py
+  s_8a0b4d864cb9e3::t_aea7af5416f89a 75
+  s_8a0b4d864cb9e3::t_7996a30915581a 78-83
+docs/eval.md
+  s_8a0b4d864cb9e3::t_645415295d9a3d 19-21,68,93
+  s_8a0b4d864cb9e3::t_85b114e6779e90 27
+osmosis_ai/platform/cli/model.py
+  s_8a0b4d864cb9e3::t_645415295d9a3d 116
+  s_8a0b4d864cb9e3::t_0524a92b76087c 40,43,129,213,225,251,368,378,390,405,419
+docs/benchmark.md
+  s_8a0b4d864cb9e3::t_645415295d9a3d 7,18,21,102-103,108
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "bdf43e31de89d7e675f24059a4ad64eb668d4e97",
+  "prompts": {},
+  "sessions": {
+    "s_8a0b4d864cb9e3": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a04a47-aebb-7863-b3de-36a658c99539",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}

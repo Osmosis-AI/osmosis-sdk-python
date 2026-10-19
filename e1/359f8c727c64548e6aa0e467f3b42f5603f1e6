@@ -1,0 +1,64 @@
+osmosis_ai/rollout/eval/evaluation/cli.py
+  f19e81460c66a88d 144
+  bc47e184ce656ece 102-103,126-128
+tests/unit/rollout/test_console.py
+  bc47e184ce656ece 1,7,10-11,13,24-25,28-29,31,33,35,38-39,41,43,45-47
+tests/unit/rollout/eval/evaluation/test_report.py
+  bc47e184ce656ece 37-38,40,42,44-49,52-55,62-63
+tests/unit/cli/test_console.py
+  bc47e184ce656ece 1,43,48,65,89,119,156-157,174,177,180,182-184
+tests/unit/platform/cli/test_status_formatting.py
+  bc47e184ce656ece 23,110
+osmosis_ai/rollout/eval/evaluation/report.py
+  e00cda6fb5c4e3e5 11-12,171
+  bc47e184ce656ece 160
+osmosis_ai/cli/console.py
+  bc47e184ce656ece 1,3-5,31,33-34,51,54-56,59-61,69-70,150-151,153-154,156,160,170,179,198
+  e00cda6fb5c4e3e5 66,192
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.15",
+  "base_commit_sha": "e1359f8c727c64548e6aa0e467f3b42f5603f1e6",
+  "prompts": {
+    "bc47e184ce656ece": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "0eb23387-8802-43f6-ade0-257856f5e75f",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>",
+      "messages": [],
+      "total_additions": 1069,
+      "total_deletions": 494,
+      "accepted_lines": 986,
+      "overriden_lines": 0
+    },
+    "e00cda6fb5c4e3e5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "73dadee5-c601-4563-9738-2a4a92a17f8d",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>",
+      "messages": [],
+      "total_additions": 5,
+      "total_deletions": 8,
+      "accepted_lines": 5,
+      "overriden_lines": 0
+    },
+    "f19e81460c66a88d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "74427ada-3941-473a-b9b1-d55bcc524bca",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>",
+      "messages": [],
+      "total_additions": 1,
+      "total_deletions": 1,
+      "accepted_lines": 1,
+      "overriden_lines": 0
+    }
+  }
+}

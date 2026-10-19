@@ -1,0 +1,31 @@
+tests/unit/cli/test_train_commands.py
+  914a08ad3c300577 128,132-133,148,153,178
+tests/unit/cli/test_train_info_checkpoints.py
+  914a08ad3c300577 1,67,91,115,143,162,182
+osmosis_ai/cli/commands/train.py
+  914a08ad3c300577 77-78,143-148
+osmosis_ai/platform/api/models.py
+  914a08ad3c300577 633
+osmosis_ai/platform/api/client.py
+  914a08ad3c300577 508
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "fb76d85ee79cf691144a4b8a1fd1177052c37603",
+  "prompts": {
+    "914a08ad3c300577": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "943fa021-7833-4744-b0d2-b32395b8267e",
+        "model": "gpt-5.5-extra-high"
+      },
+      "human_author": "JoyboyBrian",
+      "messages": [],
+      "total_additions": 25,
+      "total_deletions": 17,
+      "accepted_lines": 25,
+      "overriden_lines": 0
+    }
+  }
+}

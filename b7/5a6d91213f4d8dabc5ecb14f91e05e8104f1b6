@@ -1,0 +1,25 @@
+CONTRIBUTING.md
+  0a781b3467613950 42,59,64,74
+.github/workflows/tests.yml
+  0a781b3467613950 43
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.4",
+  "base_commit_sha": "b75a6d91213f4d8dabc5ecb14f91e05e8104f1b6",
+  "prompts": {
+    "0a781b3467613950": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c3d83715-7db6-45e4-a678-6e477d5b2151",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>",
+      "messages": [],
+      "total_additions": 5,
+      "total_deletions": 8,
+      "accepted_lines": 5,
+      "overriden_lines": 0
+    }
+  }
+}

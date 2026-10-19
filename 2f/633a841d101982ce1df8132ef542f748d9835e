@@ -1,0 +1,44 @@
+osmosis_ai/cli/commands/template.py
+  s_213e6e15e8822b::t_f9ae524c34b0de 14,28,51
+osmosis_ai/templates/source.py
+  s_213e6e15e8822b::t_98f9cf8bafaf6a 69,85
+  s_213e6e15e8822b::t_610319fb71c154 3-6
+  s_213e6e15e8822b::t_9829c16d8f9b64 1,48,56,92,101,111
+osmosis_ai/platform/cli/scaffold.py
+  s_213e6e15e8822b::t_d5235660ee5d26 52,60,108
+tests/unit/platform/cli/test_project_setup.py
+  s_213e6e15e8822b::t_8d4c95fcb91582 164-177
+tests/unit/cli/test_template_cmd.py
+  s_213e6e15e8822b::t_f49e136a97e4e4 73-76
+  s_213e6e15e8822b::t_51ea86e491b459 77-87
+  s_213e6e15e8822b::t_d7f4830ac660f8 64-72,230-232
+tests/unit/templates/test_cli.py
+  s_213e6e15e8822b::t_6c801daeaf92ce 13,106-110,117-118,348-350
+  s_213e6e15e8822b::t_a33e393f978963 111-116
+tests/unit/templates/test_registry.py
+  s_213e6e15e8822b::t_6836065fb06055 1
+  s_213e6e15e8822b::t_acae64f9934acb 9,90-102
+osmosis_ai/templates/cli.py
+  s_213e6e15e8822b::t_a9a462d37721ad 3-4,45,56,63,212
+osmosis_ai/templates/registry.py
+  s_213e6e15e8822b::t_53c3f292bd4e76 49,61,71
+tests/unit/templates/test_source.py
+  s_213e6e15e8822b::t_978be94fc3c11d 9-12,70-102
+  s_213e6e15e8822b::t_5f12c18c26e9b6 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "2f633a841d101982ce1df8132ef542f748d9835e",
+  "prompts": {},
+  "sessions": {
+    "s_213e6e15e8822b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019e285d-d845-7133-bb9f-aee8d90adf4b",
+        "model": "gpt-5.5"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}

@@ -1,0 +1,23 @@
+examples/rollout_v2/Dockerfile
+  3fe8be6aa3fb72bc 1-37
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8",
+  "base_commit_sha": "37e2a7bb4d4950a621e49fd584f0ad7f9ddbffa0",
+  "prompts": {
+    "3fe8be6aa3fb72bc": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4c380542-070c-40cd-b949-22bfe3fcdda2",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jacob Trock",
+      "messages": [],
+      "total_additions": 44,
+      "total_deletions": 7,
+      "accepted_lines": 37,
+      "overriden_lines": 0
+    }
+  }
+}
