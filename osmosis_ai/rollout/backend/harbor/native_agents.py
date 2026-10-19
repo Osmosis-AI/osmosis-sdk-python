@@ -78,23 +78,25 @@ def _ensure_opencode_prebaked_support() -> None:
             ):
                 return
 
-        musl_check = await environment.exec(command=_MUSL_CHECK)
-        is_musl = musl_check.return_code == 0
-        orig_ensure = self.ensure_system_dependencies
+        orig_ensure = getattr(self, "ensure_system_dependencies", None)
+        if orig_ensure is not None:
+            musl_check = await environment.exec(command=_MUSL_CHECK)
+            is_musl = musl_check.return_code == 0
 
-        async def ensure_filtered(env: Any, deps: tuple[str, ...]) -> None:
-            filtered = (
-                deps
-                if is_musl
-                else tuple(d for d in deps if d not in {"nodejs", "npm"})
-            )
-            await orig_ensure(env, filtered)
+            async def ensure_filtered(env: Any, deps: tuple[str, ...]) -> None:
+                filtered = (
+                    deps
+                    if is_musl
+                    else tuple(d for d in deps if d not in {"nodejs", "npm"})
+                )
+                await orig_ensure(env, filtered)
 
-        self.ensure_system_dependencies = ensure_filtered
+            self.ensure_system_dependencies = ensure_filtered
         try:
             await orig_install(self, environment)
         finally:
-            self.ensure_system_dependencies = orig_ensure
+            if orig_ensure is not None:
+                self.ensure_system_dependencies = orig_ensure
 
     OpenCode.get_version_command = get_version_command
     OpenCode.install = install

@@ -159,23 +159,28 @@ async def test_opencode_reinstalls_when_pinned_version_mismatches_prebaked(tmp_p
         extra_kwargs={"version": "1.18.27"},
     )
     agent = AgentFactory.create_agent_from_config(cfg, tmp_path / "logs")
+    has_ensure = hasattr(agent, "ensure_system_dependencies")
 
     class Env:
         async def exec(self, command, **kwargs):
             if "opencode --version" in command:
                 return SimpleNamespace(return_code=0, stdout="1.0.0\n", stderr="")
-            return SimpleNamespace(return_code=1, stdout="", stderr="")
+            if "ldd --version" in command:
+                return SimpleNamespace(return_code=1, stdout="", stderr="")
+            return SimpleNamespace(return_code=0, stdout="", stderr="")
 
-    agent.ensure_system_dependencies = AsyncMock()
+    if has_ensure:
+        agent.ensure_system_dependencies = AsyncMock()
     agent.exec_as_agent = AsyncMock()
     await agent.install(Env())
 
-    agent.ensure_system_dependencies.assert_called_once()
-    assert agent.ensure_system_dependencies.call_args.args[1] == (
-        "curl",
-        "bash",
-        "coreutils",
-    )
+    if has_ensure:
+        agent.ensure_system_dependencies.assert_called_once()
+        assert agent.ensure_system_dependencies.call_args.args[1] == (
+            "curl",
+            "bash",
+            "coreutils",
+        )
     agent.exec_as_agent.assert_called_once()
 
 
@@ -191,23 +196,28 @@ async def test_opencode_installs_when_prebaked_probe_misses(tmp_path, is_musl):
         "key-1",
     )
     agent = AgentFactory.create_agent_from_config(cfg, tmp_path / "logs")
+    has_ensure = hasattr(agent, "ensure_system_dependencies")
 
     class Env:
         async def exec(self, command, **kwargs):
             if "opencode --version" in command:
                 return SimpleNamespace(return_code=127, stdout="", stderr="")
-            return SimpleNamespace(
-                return_code=0 if is_musl else 1, stdout="", stderr=""
-            )
+            if "ldd --version" in command:
+                return SimpleNamespace(
+                    return_code=0 if is_musl else 1, stdout="", stderr=""
+                )
+            return SimpleNamespace(return_code=0, stdout="", stderr="")
 
-    agent.ensure_system_dependencies = AsyncMock()
+    if has_ensure:
+        agent.ensure_system_dependencies = AsyncMock()
     agent.exec_as_agent = AsyncMock()
     await agent.install(Env())
 
-    deps = agent.ensure_system_dependencies.call_args.args[1]
-    assert deps == (
-        ("curl", "bash", "coreutils", "nodejs", "npm")
-        if is_musl
-        else ("curl", "bash", "coreutils")
-    )
+    if has_ensure:
+        deps = agent.ensure_system_dependencies.call_args.args[1]
+        assert deps == (
+            ("curl", "bash", "coreutils", "nodejs", "npm")
+            if is_musl
+            else ("curl", "bash", "coreutils")
+        )
     agent.exec_as_agent.assert_called_once()
