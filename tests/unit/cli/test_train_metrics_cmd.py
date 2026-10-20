@@ -417,19 +417,34 @@ class TestMetricsExportKeepsExistingFiles:
 
             yield info
 
+    @pytest.mark.parametrize("output_kind", ["absolute", "relative", "symlink"])
     def test_refuses_existing_output_without_overwrite(
-        self, run_info, tmp_path: Path
+        self,
+        run_info,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        output_kind: str,
     ) -> None:
+        monkeypatch.chdir(tmp_path)
         output = tmp_path / "metrics.json"
         output.write_text("keep me")
+        if output_kind == "relative":
+            output = Path("metrics.json")
+        elif output_kind == "symlink":
+            link = Path("link.json")
+            link.symlink_to(output)
+            output = link
+        existing_paths = set(tmp_path.iterdir())
 
         result = run_info(name="reward-tuning-v3", output=str(output), overwrite=False)
 
         assert output.read_text() == "keep me"
-        assert list(tmp_path.iterdir()) == [output]
+        assert set(tmp_path.iterdir()) == existing_paths
         assert result.data["output_path"] is None
-        assert "already exists" in result.data["save_warning"]
-        assert "--overwrite" in result.data["save_warning"]
+        assert result.data["save_warning"] == (
+            f"Could not save metrics: {output} already exists. "
+            "Use --overwrite to replace it."
+        )
 
     def test_keeps_a_file_created_during_the_export(
         self, run_info, tmp_path: Path
@@ -500,14 +515,15 @@ class TestMetricsExportKeepsExistingFiles:
             "reward-tuning-v3"
         )
 
+    @pytest.mark.parametrize("operation", ["replace", "fsync"])
     def test_failed_write_keeps_the_previous_file(
-        self, run_info, tmp_path: Path
+        self, run_info, tmp_path: Path, operation: str
     ) -> None:
         output = tmp_path / "metrics.json"
         output.write_text("previous")
 
         with patch(
-            "osmosis_ai.cli.metrics_export.os.replace",
+            f"osmosis_ai.cli.metrics_export.os.{operation}",
             side_effect=OSError("disk full"),
         ):
             result = run_info(

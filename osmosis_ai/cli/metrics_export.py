@@ -90,25 +90,27 @@ def write_metrics_export(
     through, a new file gets the umask-derived mode, and a replaced file keeps
     its own.
     """
-    path = path.resolve()
+    destination = path.resolve()
     text = dump_cli_json(export, indent=2) + "\n"
     # A fixed short name stays within the filesystem's name-length limit
     # however long the destination name is.
-    temporary = path.with_name(f".osmosis-metrics-{secrets.token_hex(8)}.tmp")
+    temporary = destination.with_name(f".osmosis-metrics-{secrets.token_hex(8)}.tmp")
     try:
         with open(temporary, "x", encoding="utf-8") as handle:
             handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
         if overwrite:
             with contextlib.suppress(FileNotFoundError):
-                os.chmod(temporary, stat.S_IMODE(path.stat().st_mode))
-            os.replace(temporary, path)
+                os.chmod(temporary, stat.S_IMODE(destination.stat().st_mode))
+            os.replace(temporary, destination)
         else:
             # Unlike os.replace, os.link refuses an existing destination, so a
             # file another process creates meanwhile is kept as well.
             # ponytail: needs hard links on the destination filesystem (not
             # FAT/exFAT); fall back to exists() + replace if that ever matters.
             try:
-                os.link(temporary, path)
+                os.link(temporary, destination)
             except FileExistsError:
                 raise CLIError(
                     f"{path} already exists. Use --overwrite to replace it."

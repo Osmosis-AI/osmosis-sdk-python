@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import json
+import os
+from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -12,6 +15,7 @@ from osmosis_ai.cli.metrics_export import (
     build_export_dict,
     resolve_eval_metrics_output,
     resolve_eval_output_dir,
+    write_metrics_export,
 )
 from osmosis_ai.platform.api.models import (
     EvalPassAtKPoint,
@@ -26,6 +30,37 @@ from osmosis_ai.platform.api.models import (
     TrainingRunMetrics,
     TrainingRunMetricsOverview,
 )
+
+
+@pytest.mark.parametrize("overwrite", [False, True])
+def test_metrics_export_syncs_complete_data_before_publication(
+    tmp_path: Path, overwrite: bool
+) -> None:
+    output = tmp_path / "metrics.json"
+    if overwrite:
+        output.write_text("previous")
+    export = {"metrics": [1, 2, 3]}
+    expected = json.dumps(export, indent=2) + "\n"
+    fsync = os.fsync
+
+    def sync_complete_file(fd: int) -> None:
+        assert os.fstat(fd).st_size == len(expected.encode())
+        temporary = next(path for path in tmp_path.iterdir() if path != output)
+        assert temporary.read_text() == expected
+        if overwrite:
+            assert output.read_text() == "previous"
+        else:
+            assert not output.exists()
+        fsync(fd)
+
+    with patch(
+        "osmosis_ai.cli.metrics_export.os.fsync", side_effect=sync_complete_file
+    ) as sync:
+        write_metrics_export(output, export, overwrite=overwrite)
+
+    sync.assert_called_once()
+    assert output.read_text() == expected
+    assert list(tmp_path.iterdir()) == [output]
 
 
 def test_eval_scoped_metrics_path_is_fixed(tmp_path) -> None:
