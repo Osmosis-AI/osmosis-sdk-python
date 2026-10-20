@@ -79,12 +79,15 @@ strands = [
     "litellm>=1.94.3,!=1.95.0.*,!=1.96.0.*,!=1.96.1.*,<2.0.0",
     "fsspec>=2026.6.0",
     "orjson>=3.11.6,<4.0",
-    "aiohttp>=3.14.3",
+    # GHSA-2g87-pp6c-29x5, GHSA-5wr8-gcqf-gqf3, GHSA-494j-54xm-rwp3.
+    "aiohttp>=3.14.4",
+    # Transitive via aiohttp; fixes GHSA-54p9-h82j-f925.
+    "multidict>=6.9.1",
     "urllib3>=2.8.0",
     # mcp arrives transitively via the adapters, which pin their own supported
-    # major (strands-agents <2, openai-agents <3). >=1.28.1 is the
-    # server-transport security floor (#260); no ceiling of our own.
-    "mcp>=1.28.1",
+    # major (strands-agents <2, openai-agents <3). GHSA-84m7-p3x7-pcfv
+    # requires >=1.30.0 on 1.x or >=2.2.0 on 2.x; no ceiling of our own.
+    "mcp>=1.30.0,!=2.0.*,!=2.1.*",
     # MCP auth needs PyJWT's validation fixes, including 2.15.1's
     # compatibility repair for valid padded JWT signatures.
     "pyjwt>=2.15.1",
@@ -100,10 +103,11 @@ openai-agents = [
     "litellm>=1.94.3,!=1.95.0.*,!=1.96.0.*,!=1.96.1.*,<2.0.0",
     "fsspec>=2026.6.0",
     "orjson>=3.11.6,<4.0",
-    "aiohttp>=3.14.3",
+    "aiohttp>=3.14.4",
+    "multidict>=6.9.1",
     "urllib3>=2.8.0",
     # Security floor only; see the strands extra.
-    "mcp>=1.28.1",
+    "mcp>=1.30.0,!=2.0.*,!=2.1.*",
     "pyjwt>=2.15.1",
     "click>=8.3.3",
 ]
@@ -126,7 +130,8 @@ harbor = [
     "litellm>=1.94.3,!=1.95.0.*,!=1.96.0.*,!=1.96.1.*,<2.0.0",
     "fsspec>=2026.6.0",
     "orjson>=3.11.6,<4.0",
-    "aiohttp>=3.14.3",
+    "aiohttp>=3.14.4",
+    "multidict>=6.9.1",
     "urllib3>=2.8.0",
     "pyjwt>=2.15.1",
     "click>=8.3.3",
@@ -137,7 +142,8 @@ rubric = [
     "litellm>=1.94.3,!=1.95.0.*,!=1.96.0.*,!=1.96.1.*,<2.0.0",
     "fsspec>=2026.6.0",
     "orjson>=3.11.6,<4.0",
-    "aiohttp>=3.14.3",
+    "aiohttp>=3.14.4",
+    "multidict>=6.9.1",
     "urllib3>=2.8.0",
     "click>=8.3.3",
 ]
@@ -155,6 +161,8 @@ eval = [
     "osmosis-ai[server,parquet]",
     "litellm>=1.94.3,!=1.95.0.*,!=1.96.0.*,!=1.96.1.*,<2.0.0",
     "fsspec>=2026.6.0",
+    "aiohttp>=3.14.4",
+    "multidict>=6.9.1",
     "uv>=0.9.7,<0.13",
 ]
 
