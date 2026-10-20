@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import runpy
 import tomllib
+from importlib.metadata import Distribution, distribution
 from pathlib import Path
 
+import pytest
 from packaging.requirements import Requirement
+from packaging.specifiers import SpecifierSet
 from packaging.version import Version
 
 REPO_ROOT = Path(__file__).parents[2]
@@ -40,3 +44,45 @@ def test_locked_fsspec_meets_security_floor() -> None:
     assert all(
         Version(package["version"]) >= Version("2026.6.0") for package in packages
     )
+
+
+@pytest.mark.parametrize(
+    ("package", "constraint", "safe"),
+    [
+        ("aiohttp", ">=3.14.5", True),
+        ("aiohttp", "~=3.14.4", True),
+        ("multidict", ">=6.10.0", True),
+        ("mcp", ">=1.31.0,<2", True),
+        ("mcp", ">=2.2.0", True),
+        ("aiohttp", ">=3.14.3", False),
+        ("multidict", ">=6.7.0", False),
+        ("multidict", ">=6.9.0", False),
+        ("mcp", ">=1.29.1,<2", False),
+        ("mcp", ">=1.30.0", False),
+        ("mcp", ">=1.30.0,!=2.0.*", False),
+        ("mcp", ">=1.30.0,!=2.1.*", False),
+    ],
+)
+def test_wheel_verifier_checks_allowed_versions(
+    tmp_path: Path, package: str, constraint: str, safe: bool
+) -> None:
+    metadata = distribution("osmosis-ai").metadata
+    requirements = metadata.get_all("Requires-Dist", [])
+    del metadata["Requires-Dist"]
+    for raw in requirements:
+        requirement = Requirement(raw)
+        if requirement.name == package:
+            requirement.specifier = SpecifierSet(constraint)
+        metadata["Requires-Dist"] = str(requirement)
+    (tmp_path / "METADATA").write_text(metadata.as_string())
+
+    verifier = runpy.run_path(
+        str(REPO_ROOT / ".github/scripts/verify-wheel-install.py")
+    )["_assert_dependency_metadata"]
+    if safe:
+        verifier(Distribution.at(tmp_path))
+    else:
+        with pytest.raises(
+            AssertionError, match=f"{package} requirement allows vulnerable"
+        ):
+            verifier(Distribution.at(tmp_path))
