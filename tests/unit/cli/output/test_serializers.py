@@ -168,8 +168,9 @@ def test_serialize_rollout_keys() -> None:
         {
             "id": "ro_1",
             "name": "my-rollout",
-            "is_active": True,
+            "description": "Solves arithmetic.",
             "repo_full_name": "org/repo",
+            "last_synced_at": "2026-04-26T00:00:00Z",
             "last_synced_commit_sha": "abc123",
             "created_at": "2026-04-26T00:00:00Z",
         }
