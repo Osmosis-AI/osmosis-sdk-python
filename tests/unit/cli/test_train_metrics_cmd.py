@@ -465,6 +465,22 @@ class TestMetricsExportKeepsExistingFiles:
         )
         assert result.data["output_path"] == str(output)
 
+    def test_overwrite_writes_through_a_symlinked_output(
+        self, run_info, tmp_path: Path
+    ) -> None:
+        target = tmp_path / "target.json"
+        target.write_text("stale")
+        link = tmp_path / "link.json"
+        link.symlink_to(target)
+
+        result = run_info(name="reward-tuning-v3", output=str(link), overwrite=True)
+
+        assert link.is_symlink()
+        assert json.loads(target.read_text())["training_run"]["name"] == (
+            "reward-tuning-v3"
+        )
+        assert result.data["output_path"] == str(link)
+
     @pytest.mark.parametrize("output", [None, ""])
     def test_default_export_is_refreshed(
         self,

@@ -86,9 +86,11 @@ def write_metrics_export(
     """Write a metrics export atomically, keeping an existing file unless asked.
 
     Readers see the previous file or the complete new one, never a partial
-    write. A new file gets the umask-derived mode and a replaced file keeps
-    its own, as an in-place write would.
+    write. As with an in-place write, a symlinked destination is written
+    through, a new file gets the umask-derived mode, and a replaced file keeps
+    its own.
     """
+    path = path.resolve()
     text = dump_cli_json(export, indent=2) + "\n"
     # A fixed short name stays within the filesystem's name-length limit
     # however long the destination name is.
