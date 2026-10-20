@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import json
+import stat
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -425,9 +426,33 @@ class TestMetricsExportKeepsExistingFiles:
         result = run_info(name="reward-tuning-v3", output=str(output), overwrite=False)
 
         assert output.read_text() == "keep me"
+        assert list(tmp_path.iterdir()) == [output]
         assert result.data["output_path"] is None
         assert "already exists" in result.data["save_warning"]
         assert "--overwrite" in result.data["save_warning"]
+
+    def test_keeps_a_file_created_during_the_export(
+        self, run_info, tmp_path: Path
+    ) -> None:
+        from osmosis_ai.cli import metrics_export
+
+        output = tmp_path / "metrics.json"
+        dump = metrics_export.dump_cli_json
+
+        def dump_while_another_export_lands(*args, **kwargs):
+            output.write_text("other export")
+            return dump(*args, **kwargs)
+
+        with patch.object(
+            metrics_export, "dump_cli_json", dump_while_another_export_lands
+        ):
+            result = run_info(
+                name="reward-tuning-v3", output=str(output), overwrite=False
+            )
+
+        assert output.read_text() == "other export"
+        assert list(tmp_path.iterdir()) == [output]
+        assert "already exists" in result.data["save_warning"]
 
     def test_overwrite_replaces_existing_output(self, run_info, tmp_path: Path) -> None:
         output = tmp_path / "metrics.json"
@@ -440,15 +465,20 @@ class TestMetricsExportKeepsExistingFiles:
         )
         assert result.data["output_path"] == str(output)
 
+    @pytest.mark.parametrize("output", [None, ""])
     def test_default_export_is_refreshed(
-        self, run_info, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+        self,
+        run_info,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        output: str | None,
     ) -> None:
         monkeypatch.chdir(tmp_path)
         default = tmp_path / ".osmosis" / "metrics" / "reward-tuning-v3_550e8400.json"
         default.parent.mkdir(parents=True)
         default.write_text("stale")
 
-        run_info(name="reward-tuning-v3", output=None, overwrite=False)
+        run_info(name="reward-tuning-v3", output=output, overwrite=False)
 
         assert json.loads(default.read_text())["training_run"]["name"] == (
             "reward-tuning-v3"
@@ -471,6 +501,29 @@ class TestMetricsExportKeepsExistingFiles:
         assert output.read_text() == "previous"
         assert list(tmp_path.iterdir()) == [output]
         assert "disk full" in result.data["save_warning"]
+
+    def test_modes_match_an_in_place_write(self, run_info, tmp_path: Path) -> None:
+        reference = tmp_path / "reference.txt"
+        reference.write_text("")
+        created = tmp_path / "created.json"
+        replaced = tmp_path / "replaced.json"
+        replaced.write_text("stale")
+        replaced.chmod(0o640)
+
+        run_info(name="reward-tuning-v3", output=str(created), overwrite=False)
+        run_info(name="reward-tuning-v3", output=str(replaced), overwrite=True)
+
+        assert stat.S_IMODE(created.stat().st_mode) == stat.S_IMODE(
+            reference.stat().st_mode
+        )
+        assert stat.S_IMODE(replaced.stat().st_mode) == 0o640
+
+    def test_saves_a_maximum_length_output_name(self, run_info, tmp_path: Path) -> None:
+        output = tmp_path / f"{'m' * 250}.json"
+
+        result = run_info(name="reward-tuning-v3", output=str(output), overwrite=False)
+
+        assert result.data["output_path"] == str(output)
 
 
 class TestResolveOutputPath:

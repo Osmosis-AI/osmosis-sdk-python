@@ -7,7 +7,8 @@ import datetime
 import math
 import os
 import re
-import tempfile
+import secrets
+import stat
 from pathlib import Path
 from typing import Any, cast
 
@@ -85,25 +86,34 @@ def write_metrics_export(
     """Write a metrics export atomically, keeping an existing file unless asked.
 
     Readers see the previous file or the complete new one, never a partial
-    write.
+    write. A new file gets the umask-derived mode and a replaced file keeps
+    its own, as an in-place write would.
     """
-    # ponytail: the existence check and the replace are separate steps, so a
-    # file created between them is still replaced; link the temp file instead
-    # if concurrent exports to one path ever matter.
-    if not overwrite and path.exists():
-        raise CLIError(f"{path} already exists. Use --overwrite to replace it.")
     text = dump_cli_json(export, indent=2) + "\n"
-    fd, temporary = tempfile.mkstemp(
-        dir=path.parent, prefix=f".{path.name}.", suffix=".tmp"
-    )
+    # A fixed short name stays within the filesystem's name-length limit
+    # however long the destination name is.
+    temporary = path.with_name(f".osmosis-metrics-{secrets.token_hex(8)}.tmp")
     try:
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        with open(temporary, "x", encoding="utf-8") as handle:
             handle.write(text)
-        os.replace(temporary, path)
-    except BaseException:
+        if overwrite:
+            with contextlib.suppress(FileNotFoundError):
+                os.chmod(temporary, stat.S_IMODE(path.stat().st_mode))
+            os.replace(temporary, path)
+        else:
+            # Unlike os.replace, os.link refuses an existing destination, so a
+            # file another process creates meanwhile is kept as well.
+            # ponytail: needs hard links on the destination filesystem (not
+            # FAT/exFAT); fall back to exists() + replace if that ever matters.
+            try:
+                os.link(temporary, path)
+            except FileExistsError:
+                raise CLIError(
+                    f"{path} already exists. Use --overwrite to replace it."
+                ) from None
+    finally:
         with contextlib.suppress(OSError):
             os.unlink(temporary)
-        raise
 
 
 def resolve_default_metrics_output(

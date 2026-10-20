@@ -450,7 +450,7 @@ def info(name: str, *, output: str | None, overwrite: bool = False) -> DetailRes
                 # The default export under .osmosis/metrics/ is the CLI's own
                 # copy of the run's metrics, so it is refreshed in place.
                 write_metrics_export(
-                    out_path, export, overwrite=overwrite or output is None
+                    out_path, export, overwrite=overwrite or not output
                 )
                 output_path = str(out_path)
                 display_hints.append(f"Saved metrics to {output_path}")
