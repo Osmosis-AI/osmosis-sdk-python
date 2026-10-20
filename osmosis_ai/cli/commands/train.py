@@ -41,11 +41,16 @@ def info(
             " filename inside it. (default in rich mode: .osmosis/metrics/)"
         ),
     ),
+    overwrite: bool = typer.Option(
+        False,
+        "--overwrite",
+        help="Replace the --output file if it already exists.",
+    ),
 ) -> CommandResult:
     """Show training run details, checkpoints, and metrics."""
     from osmosis_ai.platform.cli.train import info as _info
 
-    return _info(name, output=output)
+    return _info(name, output=output, overwrite=overwrite)
 
 
 @app.command("logs")
