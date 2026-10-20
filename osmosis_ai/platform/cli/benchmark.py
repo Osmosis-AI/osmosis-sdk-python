@@ -1130,6 +1130,11 @@ def submit(
 
     execution = config.execution_config
     summary_rows = [
+        (
+            ("Workspace", context.workspace_name)
+            if context.workspace_name is not None
+            else ("Repository", str(context.git_identity))
+        ),
         ("Benchmark", config.experiment.benchmark),
         ("Tasks", _task_selection_label(config)),
         ("Agents", str(len(config.agents))),

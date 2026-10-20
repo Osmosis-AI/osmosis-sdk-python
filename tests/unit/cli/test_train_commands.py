@@ -30,6 +30,7 @@ from osmosis_ai.platform.api.models import (
     TrainingRunDetail,
     TrainingRunMetrics,
     TrainingRunMetricsOverview,
+    WorkspaceSummary,
 )
 from osmosis_ai.platform.auth import PlatformAPIError
 from tests.unit.submit_preflight_helpers import (
@@ -1794,6 +1795,7 @@ class TestSubmitNonInteractiveContext:
         details = envelope["error"]["details"]
         assert details["prompt"] == "Submit this training run?"
         assert details["summary"] == {
+            "Repository": GIT_IDENTITY,
             "Rollout": "calculator",
             "Entrypoint": "main.py",
             "Model": "Qwen/Qwen3.6-35B-A3B",
@@ -1804,6 +1806,58 @@ class TestSubmitNonInteractiveContext:
             "Platform source selection may differ from your local branch" in warning
             for warning in details["warnings"]
         )
+
+    def test_submit_json_names_the_selected_workspace(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+        tmp_path: Path,
+    ) -> None:
+        config_path = TestSubmit._write_config(tmp_path)
+        git_context = type(
+            "GitContext",
+            (),
+            {
+                "workspace_directory": config_path.parents[2].resolve(),
+                "git_identity": GIT_IDENTITY,
+                "repo_url": REPO_URL,
+                "credentials": FAKE_CREDENTIALS,
+            },
+        )()
+        monkeypatch.setattr(
+            shared_submit_module,
+            "resolve_git_workspace_directory_context",
+            lambda *, cwd: git_context,
+        )
+
+        class FakeClient:
+            def list_workspaces(self, *, credentials):
+                return [
+                    WorkspaceSummary(
+                        id="workspace-1",
+                        name="acme",
+                        connected_repo_full_name=GIT_IDENTITY,
+                    )
+                ]
+
+            def submit_training_run(self, **kwargs):
+                raise AssertionError("API must not be reached without confirmation")
+
+        monkeypatch.setattr(shared_submit_module, "OsmosisClient", FakeClient)
+
+        from osmosis_ai.cli import main as cli
+
+        exit_code = cli.main(
+            ["--workspace", "acme", "--json", "train", "submit", str(config_path)]
+        )
+        envelope = json.loads(capsys.readouterr().err)
+
+        assert exit_code != 0
+        assert envelope["error"]["code"] == "INTERACTIVE_REQUIRED"
+        summary = envelope["error"]["details"]["summary"]
+        assert list(summary)[:2] == ["Workspace", "Repository"]
+        assert summary["Workspace"] == "acme"
+        assert summary["Repository"] == GIT_IDENTITY
 
     def test_submit_json_includes_git_warnings(
         self,
