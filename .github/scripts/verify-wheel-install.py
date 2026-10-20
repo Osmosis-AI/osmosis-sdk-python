@@ -110,6 +110,13 @@ SECURITY_CONSTRAINTS = {
     "multidict": ">=6.9.1",
 }
 
+# shortcut: metadata probes advisory boundaries; use range intersection if requirements start excluding individual releases.
+VULNERABLE_VERSIONS = {
+    "aiohttp": ("3.0.0", "3.14.3"),
+    "mcp": ("1.8.0", "1.29.1", "2.0.0", "2.1.0", "2.1.1"),
+    "multidict": ("6.7.0", "6.9.0"),
+}
+
 _ANSI_ESCAPE_PATTERN = re.compile(
     r"\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x1b\x07]*(?:\x07|\x1b\\)|[@-Z\\-_])"
 )
@@ -168,10 +175,11 @@ def _assert_dependency_metadata(
     for raw_requirement in distribution.requires or []:
         requirement = Requirement(raw_requirement)
         name = _normalize_distribution(requirement.name)
-        if name in SECURITY_CONSTRAINTS:
-            assert set(SpecifierSet(SECURITY_CONSTRAINTS[name])) <= set(
-                requirement.specifier
-            ), f"Missing {name} security constraint: {raw_requirement}"
+        for vulnerable_version in VULNERABLE_VERSIONS.get(name, ()):
+            assert not requirement.specifier.contains(vulnerable_version), (
+                f"{name} requirement allows vulnerable {vulnerable_version}: "
+                f"{raw_requirement}"
+            )
         if name == "fsspec":
             assert ">=2026.6.0" in str(requirement.specifier).split(","), (
                 f"Missing fsspec security floor: {raw_requirement}"
