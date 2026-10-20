@@ -23,6 +23,7 @@ from typing import Any
 
 from packaging.markers import default_environment
 from packaging.requirements import Requirement
+from packaging.specifiers import SpecifierSet
 from packaging.version import Version
 
 BASE_REQUIREMENTS = {
@@ -54,6 +55,7 @@ EXTRA_REQUIREMENTS: dict[str, set[str]] = {
         "fsspec",
         "litellm",
         "mcp",
+        "multidict",
         "orjson",
         "pyjwt",
         "strands-agents",
@@ -65,6 +67,7 @@ EXTRA_REQUIREMENTS: dict[str, set[str]] = {
         "fsspec",
         "litellm",
         "mcp",
+        "multidict",
         "openai-agents",
         "orjson",
         "pyjwt",
@@ -76,6 +79,7 @@ EXTRA_REQUIREMENTS: dict[str, set[str]] = {
         "fsspec",
         "harbor",
         "litellm",
+        "multidict",
         "orjson",
         "platformdirs",
         "pyjwt",
@@ -84,12 +88,26 @@ EXTRA_REQUIREMENTS: dict[str, set[str]] = {
         "urllib3",
         "uv",
     },
-    "rubric": {"aiohttp", "click", "fsspec", "litellm", "orjson", "urllib3"},
+    "rubric": {
+        "aiohttp",
+        "click",
+        "fsspec",
+        "litellm",
+        "multidict",
+        "orjson",
+        "urllib3",
+    },
     "parquet": {"pyarrow"},
     # eval = osmosis-ai[server,parquet] self-reference + the in-process
     # LiteLLM bridge and the uv executable used to launch rollout environments.
-    "eval": {"fsspec", "litellm", "osmosis-ai", "uv"},
+    "eval": {"aiohttp", "fsspec", "litellm", "multidict", "osmosis-ai", "uv"},
     "full": {"osmosis-ai"},
+}
+
+SECURITY_CONSTRAINTS = {
+    "aiohttp": ">=3.14.4",
+    "mcp": ">=1.30.0,!=2.0.*,!=2.1.*",
+    "multidict": ">=6.9.1",
 }
 
 _ANSI_ESCAPE_PATTERN = re.compile(
@@ -150,6 +168,10 @@ def _assert_dependency_metadata(
     for raw_requirement in distribution.requires or []:
         requirement = Requirement(raw_requirement)
         name = _normalize_distribution(requirement.name)
+        if name in SECURITY_CONSTRAINTS:
+            assert set(SpecifierSet(SECURITY_CONSTRAINTS[name])) <= set(
+                requirement.specifier
+            ), f"Missing {name} security constraint: {raw_requirement}"
         if name == "fsspec":
             assert ">=2026.6.0" in str(requirement.specifier).split(","), (
                 f"Missing fsspec security floor: {raw_requirement}"
@@ -650,6 +672,11 @@ def main() -> None:
     _assert_clean_import_state()
 
     installed = _installed_distributions()
+    for name, constraint in SECURITY_CONSTRAINTS.items():
+        if name in installed:
+            assert Version(importlib.metadata.version(name)) in SpecifierSet(
+                constraint
+            ), f"Installed {name} violates its security constraint: {constraint}"
     if args.scenario in {
         "strands",
         "openai-agents",
