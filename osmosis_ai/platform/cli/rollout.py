@@ -71,13 +71,6 @@ def list_rollouts(*, limit: int, all_: bool, branch: str | None = None) -> ListR
                 min_width=20,
             ),
             ListColumn(
-                key="is_active",
-                label="Active",
-                no_wrap=True,
-                min_width=6,
-                max_width=6,
-            ),
-            ListColumn(
                 key="last_synced_commit_sha",
                 label="Commit",
                 no_wrap=True,
@@ -95,7 +88,6 @@ def list_rollouts(*, limit: int, all_: bool, branch: str | None = None) -> ListR
         display_items=[
             {
                 **item,
-                "is_active": "yes" if item["is_active"] else "no",
                 "last_synced_commit_sha": (item["last_synced_commit_sha"] or "")[:8],
                 "created_at": format_local_date(item["created_at"]).split(" ", 1)[0],
             }

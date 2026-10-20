@@ -110,3 +110,50 @@ def test_source_submit_workspace_rejects_unmatched_scope(
         shared_submit_module._resolve_source_submit_context(
             tmp_path / "repo" / "configs" / "eval" / "default.toml"
         )
+
+
+@pytest.mark.parametrize(
+    ("workspace_name", "git_identity", "row"),
+    [
+        ("acme", None, ("Workspace", "acme")),
+        (None, "acme/rollouts", ("Repository", "acme/rollouts")),
+    ],
+)
+def test_benchmark_submit_confirmation_names_its_target(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    workspace_name: str | None,
+    git_identity: str | None,
+    row: tuple[str, str],
+) -> None:
+    import osmosis_ai.platform.cli.benchmark as benchmark_module
+    from osmosis_ai.platform.cli.workspace_directory_context import (
+        PlatformWorkspaceContext,
+    )
+
+    config_path = tmp_path / "benchmark.toml"
+    config_path.write_text(
+        '[experiment]\nbenchmark = "Terminal-Bench 2.1"\n\n'
+        '[[agents]]\nharness = "codex"\n\n'
+        '[agents.model]\ntype = "hosted"\n'
+        'base_model = "Qwen/Qwen3-8B"\nlora_model_name = "terminal-agent"\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        benchmark_module,
+        "require_platform_workspace_context",
+        lambda: PlatformWorkspaceContext(
+            credentials=object(),
+            workspace_name=workspace_name,
+            workspace_directory=None if workspace_name else tmp_path,
+            git_identity=git_identity,
+            repo_url=None,
+        ),
+    )
+
+    with pytest.raises(CLIError) as exc_info:
+        benchmark_module.submit(config_path, yes=False)
+
+    assert exc_info.value.code == CLIErrorCode.INTERACTIVE_REQUIRED
+    summary = exc_info.value.details["summary"]
+    assert next(iter(summary.items())) == row

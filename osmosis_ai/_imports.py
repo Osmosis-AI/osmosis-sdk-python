@@ -23,6 +23,7 @@ EXTRA_MODULES: Final[Mapping[str, frozenset[str]]] = {
             "jwt",
             "litellm",
             "mcp",
+            "multidict",
             "orjson",
             "strands",
             "urllib3",
@@ -37,6 +38,7 @@ EXTRA_MODULES: Final[Mapping[str, frozenset[str]]] = {
             "jwt",
             "litellm",
             "mcp",
+            "multidict",
             "orjson",
             "urllib3",
         }
@@ -49,6 +51,7 @@ EXTRA_MODULES: Final[Mapping[str, frozenset[str]]] = {
             "harbor",
             "jwt",
             "litellm",
+            "multidict",
             "orjson",
             "platformdirs",
             "toml",
@@ -56,14 +59,18 @@ EXTRA_MODULES: Final[Mapping[str, frozenset[str]]] = {
             "yaml",
         }
     ),
-    "rubric": frozenset({"aiohttp", "click", "fsspec", "litellm", "orjson", "urllib3"}),
+    "rubric": frozenset(
+        {"aiohttp", "click", "fsspec", "litellm", "multidict", "orjson", "urllib3"}
+    ),
     "parquet": frozenset({"pyarrow"}),
     "eval": frozenset(
         {
+            "aiohttp",
             "click",
             "fastapi",
             "fsspec",
             "litellm",
+            "multidict",
             "opentelemetry",
             "pyarrow",
             "urllib3",

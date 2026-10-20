@@ -544,9 +544,10 @@ def test_rollout_list_json_returns_envelope(
                     RolloutInfo(
                         id="rollout_1",
                         name="demo",
-                        is_active=True,
+                        description="Solves arithmetic.",
                         repo_full_name="osmosis/demo",
                         last_synced_commit_sha="abc123",
+                        last_synced_at="2026-04-26T00:00:00Z",
                         created_at="2026-04-26T00:00:00Z",
                     )
                 ],
@@ -565,6 +566,9 @@ def test_rollout_list_json_returns_envelope(
     assert exit_code == 0
     payload = json.loads(captured.out)
     assert payload["items"][0]["name"] == "demo"
+    assert payload["items"][0]["description"] == "Solves arithmetic."
+    assert payload["items"][0]["last_synced_at"] == "2026-04-26T00:00:00Z"
+    assert "is_active" not in payload["items"][0]
     assert payload["next_offset"] is None
     _assert_git_context(payload)
 
@@ -583,7 +587,6 @@ def test_rollout_list_columns_prioritize_name_over_id(
                     RolloutInfo(
                         id="rollout_1",
                         name="demo",
-                        is_active=True,
                         repo_full_name="osmosis/demo",
                         last_synced_commit_sha="abcdef123456",
                         created_at=created_at,
@@ -605,7 +608,6 @@ def test_rollout_list_columns_prioritize_name_over_id(
 
     assert [column.key for column in result.columns] == [
         "name",
-        "is_active",
         "last_synced_commit_sha",
         "created_at",
     ]
@@ -613,14 +615,10 @@ def test_rollout_list_columns_prioritize_name_over_id(
     assert name_column.ratio == 6
     assert name_column.overflow == "fold"
     assert name_column.min_width == 20
-    assert result.columns[1].no_wrap is True
-    assert result.columns[1].min_width == 6
-    assert result.columns[1].max_width == 6
-    assert result.columns[2].max_width == 8
-    assert result.columns[3].max_width == 10
+    assert result.columns[1].max_width == 8
+    assert result.columns[2].max_width == 10
     assert result.items[0]["last_synced_commit_sha"] == "abcdef123456"
     assert result.display_items is not None
-    assert result.display_items[0]["is_active"] == "yes"
     assert result.display_items[0]["last_synced_commit_sha"] == "abcdef12"
     assert (
         result.display_items[0]["created_at"]
