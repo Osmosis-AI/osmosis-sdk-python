@@ -1,0 +1,21 @@
+osmosis_ai/platform/api/models.py
+  s_9c8dc240a14149::t_09dfa7701360a9 1222-1223
+tests/unit/platform/api/test_client_models.py
+  s_9c8dc240a14149::t_1e6361fb5bd66c 13,304-312
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "62db7ed5fc511e1119ff1b2bafc08c609fe873fc",
+  "prompts": {},
+  "sessions": {
+    "s_9c8dc240a14149": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2395dc39-aa9b-4f7a-b3c9-ede926d9d09c",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Allen Lin <allen@osmosis.ai>"
+    }
+  }
+}
