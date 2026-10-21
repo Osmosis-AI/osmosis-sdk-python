@@ -283,7 +283,7 @@ app = create_rollout_server(backend=backend, lifespan=backend.prewarm_lifespan()
 
 #### Harbor version compatibility
 
-The `harbor` extra supports `>=0.20.0,<0.24`; applications select their own release or fork revision. The SDK owns the stable [`harbor-v1` source-image identity](rollout-lifecycle.md#source-image-values), so upgrading Harbor does not change existing image tags.
+The `harbor` extra supports `>=0.20.0,<0.25`; applications select their own release or fork revision. The SDK owns the stable [`harbor-v1` source-image identity](rollout-lifecycle.md#source-image-values), so upgrading Harbor does not change existing image tags.
 
 When moving an existing task or native agent configuration to Harbor 0.23:
 

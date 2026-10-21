@@ -2198,7 +2198,7 @@ requires-dist = [
     { name = "fsspec", marker = "extra == 'openai-agents'", specifier = ">=2026.6.0" },
     { name = "fsspec", marker = "extra == 'rubric'", specifier = ">=2026.6.0" },
     { name = "fsspec", marker = "extra == 'strands'", specifier = ">=2026.6.0" },
-    { name = "harbor", extras = ["daytona", "opensandbox"], marker = "extra == 'harbor'", specifier = ">=0.20.0,<0.24" },
+    { name = "harbor", extras = ["daytona", "opensandbox"], marker = "extra == 'harbor'", specifier = ">=0.20.0,<0.25" },
     { name = "httpx", specifier = ">=0.25.0,<1.0.0" },
     { name = "keyring", specifier = ">=25.0.0" },
     { name = "litellm", marker = "extra == 'eval'", specifier = ">=1.94.3,!=1.95.0.*,!=1.96.0.*,!=1.96.1.*,<2.0.0" },
