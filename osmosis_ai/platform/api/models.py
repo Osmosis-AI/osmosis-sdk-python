@@ -1219,6 +1219,8 @@ class BaseModelDetail(BaseModelInfo):
     is_internal_user: bool = False
     # The platform omits both price keys when the model has no published rate.
     has_inference_pricing: bool = False
+    # Kept last so positional construction binds the earlier fields.
+    inference_cached_input_usd_per_million_tokens: float | None = None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> BaseModelDetail:
@@ -1235,6 +1237,9 @@ class BaseModelDetail(BaseModelInfo):
             hf_url=data.get("hf_url"),
             inference_input_usd_per_million_tokens=data.get(
                 "inference_input_usd_per_million_tokens"
+            ),
+            inference_cached_input_usd_per_million_tokens=data.get(
+                "inference_cached_input_usd_per_million_tokens"
             ),
             inference_output_usd_per_million_tokens=data.get(
                 "inference_output_usd_per_million_tokens"
