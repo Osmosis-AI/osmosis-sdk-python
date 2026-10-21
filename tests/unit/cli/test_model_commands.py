@@ -1124,8 +1124,71 @@ class TestInfoBaseModel:
         result = platform_model_module.info("Qwen3.6-35B-A3B")
 
         assert result.title == "Base Model Info"
-        section_titles = [section.plain_lines[0] for section in result.sections]
-        assert "Inference Pricing:" not in section_titles
+        pricing = next(
+            section
+            for section in result.sections
+            if section.plain_lines[0] == "Inference Pricing:"
+        )
+        assert pricing.plain_lines[1:] == [
+            "Input: –",
+            "Cached Input: –",
+            "Output: –",
+        ]
+        base_model = result.data["base_model"]
+        assert base_model["inference_input_usd_per_million_tokens"] is None
+        assert base_model["inference_cached_input_usd_per_million_tokens"] is None
+        assert base_model["inference_output_usd_per_million_tokens"] is None
+
+    def test_missing_cached_price_renders_dash(
+        self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
+    ) -> None:
+        detail = BaseModelDetail.from_dict(
+            {
+                "id": "base-1",
+                "model_name": "Qwen3.6-35B-A3B",
+                "base_model": "Qwen/Qwen3.6-35B-A3B",
+                "inference_input_usd_per_million_tokens": 0.1,
+                "inference_output_usd_per_million_tokens": 0.4,
+            }
+        )
+
+        class FakeClient:
+            def get_base_model(self, name, *, git_identity, credentials=None):
+                return detail
+
+        monkeypatch.setattr(platform_model_module, "OsmosisClient", FakeClient)
+        result = platform_model_module.info("Qwen/Qwen3.6-35B-A3B")
+
+        pricing = next(
+            section
+            for section in result.sections
+            if section.plain_lines[0] == "Inference Pricing:"
+        )
+        assert pricing.plain_lines[1:] == [
+            "Input: $0.10 / 1M tokens",
+            "Cached Input: –",
+            "Output: $0.40 / 1M tokens",
+        ]
+        base_model = result.data["base_model"]
+        assert base_model["inference_cached_input_usd_per_million_tokens"] is None
+
+    @pytest.mark.parametrize(
+        ("value", "expected"),
+        [
+            (1.2, "$1.20 / 1M tokens"),
+            (0.1, "$0.10 / 1M tokens"),
+            (0.03, "$0.03 / 1M tokens"),
+            (0.015, "$0.015 / 1M tokens"),
+            (0.002, "$0.002 / 1M tokens"),
+            (0.0005, "$0.0005 / 1M tokens"),
+            (0, "$0.00 / 1M tokens"),
+            (None, "–"),
+        ],
+    )
+    def test_usd_per_million_keeps_sub_cent_precision(
+        self, value: float | None, expected: str
+    ) -> None:
+        assert platform_model_module._usd_per_million(value) == expected
 
     def test_both_404_raise_model_not_found(
         self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO

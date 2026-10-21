@@ -401,7 +401,11 @@ def _format_context_window(value: int | None) -> str:
 
 
 def _usd_per_million(value: float | None) -> str:
-    return "–" if value is None else f"${value:,.2f} / 1M tokens"
+    if value is None:
+        return "–"
+    # Below $0.10, keep up to 4 decimals so a $0.015 cached-input rate isn't rounded.
+    whole, decimals = f"{value:,.{2 if value >= 0.1 else 4}f}".split(".")
+    return f"${whole}.{decimals.rstrip('0').ljust(2, '0')} / 1M tokens"
 
 
 def _base_model_info(model: BaseModelDetail, context: Any) -> DetailResult:
@@ -420,28 +424,22 @@ def _base_model_info(model: BaseModelDetail, context: Any) -> DetailResult:
     )
 
     sections: list[DetailSection] = []
-    if model.has_inference_pricing:
-        pricing = kv_section(
-            "Inference Pricing",
-            [
-                (
-                    "Input",
-                    _usd_per_million(model.inference_input_usd_per_million_tokens),
-                ),
-                (
-                    "Cached Input",
-                    _usd_per_million(
-                        model.inference_cached_input_usd_per_million_tokens
-                    ),
-                ),
-                (
-                    "Output",
-                    _usd_per_million(model.inference_output_usd_per_million_tokens),
-                ),
-            ],
-        )
-        if pricing is not None:
-            sections.append(pricing)
+    pricing = kv_section(
+        "Inference Pricing",
+        [
+            ("Input", _usd_per_million(model.inference_input_usd_per_million_tokens)),
+            (
+                "Cached Input",
+                _usd_per_million(model.inference_cached_input_usd_per_million_tokens),
+            ),
+            (
+                "Output",
+                _usd_per_million(model.inference_output_usd_per_million_tokens),
+            ),
+        ],
+    )
+    if pricing is not None:
+        sections.append(pricing)
     if model.hf_url:
         hf = kv_section("Hugging Face", [("URL", model.hf_url)])
         if hf is not None:
