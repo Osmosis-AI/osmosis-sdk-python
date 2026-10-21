@@ -47,15 +47,15 @@ def test_locked_fsspec_meets_security_floor() -> None:
 
 
 @pytest.mark.parametrize(
-    ("name", "extra", "floor", "previous"),
+    ("name", "extra", "floor"),
     [
-        ("certifi", None, "2026.10.19", "2026.10.18"),
-        ("uv", "harbor", "0.13.4", "0.13.3"),
-        ("uv", "eval", "0.13.4", "0.13.3"),
+        ("certifi", None, "2026.10.19"),
+        ("uv", "harbor", "0.13.4"),
+        ("uv", "eval", "0.13.4"),
     ],
 )
 def test_ca_bundle_floors_allow_patched_releases(
-    name: str, extra: str | None, floor: str, previous: str
+    name: str, extra: str | None, floor: str
 ) -> None:
     project = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text())["project"]
     requirements = (
@@ -69,7 +69,7 @@ def test_ca_bundle_floors_allow_patched_releases(
     assert len(matches) == 1
     requirement = matches[0]
     assert requirement.marker is None, "The security floor must cover every platform"
-    assert previous not in requirement.specifier
+    assert f">={floor}" in str(requirement.specifier).split(",")
     assert floor in requirement.specifier, (
         "The upper bound must admit the patched release"
     )
