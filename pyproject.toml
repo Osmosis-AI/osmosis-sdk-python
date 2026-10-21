@@ -27,6 +27,9 @@ dependencies = [
     # owns the dependency; lower bounds still allow patched releases to float.
     "python-dotenv>=1.2.2,<2.0.0",
     "httpx>=0.25.0,<1.0.0",
+    # HTTPX's CA bundle: GHSA-6q48-6c7w-9gw2. The reviewed fix removes the
+    # affected emSign root while retaining the unaffected roots.
+    "certifi>=2026.10.19",
     # Transitive via httpx (async TLS). >=4.14.2 is the security floor for
     # CVE-2026-63374 (TLSStream IDNA host name spoofing) and CVE-2026-64847.
     "anyio>=4.14.2",
@@ -79,12 +82,15 @@ strands = [
     "litellm>=1.94.3,!=1.95.0.*,!=1.96.0.*,!=1.96.1.*,<2.0.0",
     "fsspec>=2026.6.0",
     "orjson>=3.11.6,<4.0",
-    "aiohttp>=3.14.3",
+    # GHSA-2g87-pp6c-29x5, GHSA-5wr8-gcqf-gqf3, GHSA-494j-54xm-rwp3.
+    "aiohttp>=3.14.4",
+    # Transitive via aiohttp; fixes GHSA-54p9-h82j-f925.
+    "multidict>=6.9.1",
     "urllib3>=2.8.0",
     # mcp arrives transitively via the adapters, which pin their own supported
-    # major (strands-agents <2, openai-agents <3). >=1.28.1 is the
-    # server-transport security floor (#260); no ceiling of our own.
-    "mcp>=1.28.1",
+    # major (strands-agents <2, openai-agents <3). GHSA-84m7-p3x7-pcfv
+    # requires >=1.30.0 on 1.x or >=2.2.0 on 2.x; no ceiling of our own.
+    "mcp>=1.30.0,!=2.0.*,!=2.1.*",
     # MCP auth needs PyJWT's validation fixes, including 2.15.1's
     # compatibility repair for valid padded JWT signatures.
     "pyjwt>=2.15.1",
@@ -100,10 +106,11 @@ openai-agents = [
     "litellm>=1.94.3,!=1.95.0.*,!=1.96.0.*,!=1.96.1.*,<2.0.0",
     "fsspec>=2026.6.0",
     "orjson>=3.11.6,<4.0",
-    "aiohttp>=3.14.3",
+    "aiohttp>=3.14.4",
+    "multidict>=6.9.1",
     "urllib3>=2.8.0",
     # Security floor only; see the strands extra.
-    "mcp>=1.28.1",
+    "mcp>=1.30.0,!=2.0.*,!=2.1.*",
     "pyjwt>=2.15.1",
     "click>=8.3.3",
 ]
@@ -111,7 +118,7 @@ openai-agents = [
 # Harbor execution backend. Support compatible release lines; application
 # deployments own their exact release or fork revision.
 harbor = [
-    "harbor[daytona,opensandbox]>=0.20.0,<0.24",
+    "harbor[daytona,opensandbox]>=0.20.0,<0.25",
     "pyyaml>=6.0.2",
     # osmosis_ai.packaging builds the bundle wheel that Harbor installs in the
     # task container: toml rewrites the rollout project's pyproject.toml and
@@ -120,13 +127,15 @@ harbor = [
     # base install.
     "toml>=0.10.2,<1.0.0",
     "platformdirs>=4.0",
-    "uv>=0.9.7,<0.13",
+    # uv has its own bundled CA store; GHSA-hq85-5cpj-mr62 requires 0.13.4.
+    "uv>=0.13.4,<0.14",
     # Harbor uses LiteLLM, which owns these runtime and security floors in
     # this feature.
     "litellm>=1.94.3,!=1.95.0.*,!=1.96.0.*,!=1.96.1.*,<2.0.0",
     "fsspec>=2026.6.0",
     "orjson>=3.11.6,<4.0",
-    "aiohttp>=3.14.3",
+    "aiohttp>=3.14.4",
+    "multidict>=6.9.1",
     "urllib3>=2.8.0",
     "pyjwt>=2.15.1",
     "click>=8.3.3",
@@ -137,7 +146,8 @@ rubric = [
     "litellm>=1.94.3,!=1.95.0.*,!=1.96.0.*,!=1.96.1.*,<2.0.0",
     "fsspec>=2026.6.0",
     "orjson>=3.11.6,<4.0",
-    "aiohttp>=3.14.3",
+    "aiohttp>=3.14.4",
+    "multidict>=6.9.1",
     "urllib3>=2.8.0",
     "click>=8.3.3",
 ]
@@ -155,7 +165,10 @@ eval = [
     "osmosis-ai[server,parquet]",
     "litellm>=1.94.3,!=1.95.0.*,!=1.96.0.*,!=1.96.1.*,<2.0.0",
     "fsspec>=2026.6.0",
-    "uv>=0.9.7,<0.13",
+    "aiohttp>=3.14.4",
+    "multidict>=6.9.1",
+    # Same bundled CA security floor as the Harbor build tool.
+    "uv>=0.13.4,<0.14",
 ]
 
 # Full installation with all optional features

@@ -449,14 +449,21 @@ def run_cloud_submit[ConfigT: BaseSubmitConfig](
             raise CLIError(commit_check.error)
         commit_preflight_warnings = list(commit_check.warnings)
 
-    summary_rows = build_submit_summary_rows(
-        rollout=config.experiment_rollout,
-        entrypoint=config.experiment_entrypoint,
-        model=config.experiment_model_path,
-        dataset=config.experiment_dataset,
-        branch=config.experiment_branch,
-        commit_sha=config.experiment_commit_sha,
-    )
+    workspace_name = get_workspace_name()
+    # Name where the run lands: the selected workspace, otherwise the one
+    # connected to the source repository.
+    summary_rows = [
+        *([("Workspace", workspace_name)] if workspace_name is not None else []),
+        ("Repository", context.git_identity),
+        *build_submit_summary_rows(
+            rollout=config.experiment_rollout,
+            entrypoint=config.experiment_entrypoint,
+            model=config.experiment_model_path,
+            dataset=config.experiment_dataset,
+            branch=config.experiment_branch,
+            commit_sha=config.experiment_commit_sha,
+        ),
+    ]
 
     console.table(
         [(label, console.escape(value)) for label, value in summary_rows],
@@ -508,7 +515,6 @@ def run_cloud_submit[ConfigT: BaseSubmitConfig](
     display_next_steps, next_steps_structured = spec.build_next_steps(result, config)
 
     result_context = git_result_context(context)
-    workspace_name = get_workspace_name()
     if workspace_name is not None:
         result_context["workspace"] = {"name": workspace_name}
 

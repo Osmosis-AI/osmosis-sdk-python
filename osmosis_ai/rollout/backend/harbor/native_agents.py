@@ -36,6 +36,73 @@ NATIVE_AGENTS: dict[str, NativeAgentBinding] = {
 }
 
 
+_PREBAKED_OPENCODE_BIN_DIR = "/opt/osmosis-agent/bin"
+_MUSL_CHECK = "ldd --version 2>&1 | grep -qi musl || [ -f /etc/alpine-release ]"
+_OPENCODE_PATCHED = False
+
+
+def _ensure_opencode_prebaked_support() -> None:
+    global _OPENCODE_PATCHED
+    if _OPENCODE_PATCHED:
+        return
+    from harbor.agents.installed.opencode import OpenCode
+
+    orig_install = OpenCode.install
+
+    def get_version_command(self: Any) -> str | None:
+        return (
+            f'export PATH="{_PREBAKED_OPENCODE_BIN_DIR}:$PATH"; '
+            "[ -f ~/.nvm/nvm.sh ] && . ~/.nvm/nvm.sh; opencode --version"
+        )
+
+    async def install(self: Any, environment: Any) -> None:
+        version_cmd = self.get_version_command()
+        if version_cmd:
+            probe_cmd = (
+                f"command -v stdbuf >/dev/null 2>&1 && {{ {version_cmd}; }}"
+                if self._version is not None
+                else (
+                    f"[ -x {_PREBAKED_OPENCODE_BIN_DIR}/opencode ] && "
+                    f"command -v stdbuf >/dev/null 2>&1 && {{ {version_cmd}; }}"
+                )
+            )
+            probe = await environment.exec(command=probe_cmd)
+            if (
+                probe.return_code == 0
+                and probe.stdout
+                and (
+                    self.parse_version(probe.stdout) == self._version
+                    if self._version is not None
+                    else bool(self.parse_version(probe.stdout))
+                )
+            ):
+                return
+
+        orig_ensure = getattr(self, "ensure_system_dependencies", None)
+        if orig_ensure is not None:
+            musl_check = await environment.exec(command=_MUSL_CHECK)
+            is_musl = musl_check.return_code == 0
+
+            async def ensure_filtered(env: Any, deps: tuple[str, ...]) -> None:
+                filtered = (
+                    deps
+                    if is_musl
+                    else tuple(d for d in deps if d not in {"nodejs", "npm"})
+                )
+                await orig_ensure(env, filtered)
+
+            self.ensure_system_dependencies = ensure_filtered
+        try:
+            await orig_install(self, environment)
+        finally:
+            if orig_ensure is not None:
+                self.ensure_system_dependencies = orig_ensure
+
+    OpenCode.get_version_command = get_version_command
+    OpenCode.install = install
+    _OPENCODE_PATCHED = True
+
+
 def native_prewarm_agent_config(
     name: str,
     binding: NativeAgentBinding,
@@ -43,6 +110,8 @@ def native_prewarm_agent_config(
     extra_kwargs: dict[str, Any] | None = None,
 ) -> HarborAgentConfig:
     """Setup-only config: installs the agent with no endpoint or credentials."""
+    if binding.wiring == "opencode":
+        _ensure_opencode_prebaked_support()
     kwargs = copy.deepcopy({**binding.kwargs, **(extra_kwargs or {})})
     kwargs.pop("_osmosis_preview_path", None)
     return HarborAgentConfig(
@@ -93,6 +162,7 @@ def native_agent_config(
         import_path = f"osmosis_ai.rollout.backend.harbor.preview_agents:{wrapper}"
         kwargs["_osmosis_preview_path"] = str(preview_path)
     if binding.wiring == "opencode":
+        _ensure_opencode_prebaked_support()
         if not isinstance(model_name, str):
             raise ValueError("OpenCode model_name must have the form provider/model")
         provider, separator, model_id = model_name.partition("/")

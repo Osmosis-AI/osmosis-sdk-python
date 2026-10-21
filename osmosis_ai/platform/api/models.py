@@ -1477,7 +1477,7 @@ class RolloutInfo:
     id: str
     name: str
     description: str | None = None
-    is_active: bool = True
+    last_synced_at: str | None = None
     last_synced_commit_sha: str | None = None
     repo_full_name: str | None = None
     created_at: str = ""
@@ -1488,7 +1488,7 @@ class RolloutInfo:
             id=data["id"],
             name=data.get("name", ""),
             description=data.get("description"),
-            is_active=data.get("is_active", True),
+            last_synced_at=data.get("last_synced_at"),
             last_synced_commit_sha=data.get("last_synced_commit_sha"),
             repo_full_name=data.get("repo_full_name"),
             created_at=data.get("created_at", ""),

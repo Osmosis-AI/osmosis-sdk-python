@@ -2,13 +2,18 @@
 
 from __future__ import annotations
 
+import contextlib
 import datetime
 import math
+import os
 import re
+import secrets
+import stat
 from pathlib import Path
 from typing import Any, cast
 
 from osmosis_ai.cli.errors import CLIError
+from osmosis_ai.cli.output.jsonutil import dump_cli_json
 from osmosis_ai.cli.paths import parse_cli_path
 from osmosis_ai.platform.api.models import (
     EvalRunMetrics,
@@ -73,6 +78,46 @@ def resolve_metrics_output_path(output: str, run_name: str | None, run_id: str) 
         raise CLIError(f"Cannot create output path: {exc}") from exc
 
     return path
+
+
+def write_metrics_export(
+    path: Path, export: dict[str, Any], *, overwrite: bool
+) -> None:
+    """Write a metrics export atomically, keeping an existing file unless asked.
+
+    Readers see the previous file or the complete new one, never a partial
+    write. As with an in-place write, a symlinked destination is written
+    through, a new file gets the umask-derived mode, and a replaced file keeps
+    its own.
+    """
+    destination = path.resolve()
+    text = dump_cli_json(export, indent=2) + "\n"
+    # A fixed short name stays within the filesystem's name-length limit
+    # however long the destination name is.
+    temporary = destination.with_name(f".osmosis-metrics-{secrets.token_hex(8)}.tmp")
+    try:
+        with open(temporary, "x", encoding="utf-8") as handle:
+            handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
+        if overwrite:
+            with contextlib.suppress(FileNotFoundError):
+                os.chmod(temporary, stat.S_IMODE(destination.stat().st_mode))
+            os.replace(temporary, destination)
+        else:
+            # Unlike os.replace, os.link refuses an existing destination, so a
+            # file another process creates meanwhile is kept as well.
+            # ponytail: needs hard links on the destination filesystem (not
+            # FAT/exFAT); fall back to exists() + replace if that ever matters.
+            try:
+                os.link(temporary, destination)
+            except FileExistsError:
+                raise CLIError(
+                    f"{path} already exists. Use --overwrite to replace it."
+                ) from None
+    finally:
+        with contextlib.suppress(OSError):
+            os.unlink(temporary)
 
 
 def resolve_default_metrics_output(
