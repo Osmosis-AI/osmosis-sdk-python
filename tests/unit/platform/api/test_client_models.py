@@ -10,6 +10,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock, patch
 
 from osmosis_ai.platform.api.client import OsmosisClient
+from osmosis_ai.platform.api.models import BaseModelDetail
 
 GIT_IDENTITY = "git_test"
 
@@ -267,6 +268,7 @@ class TestGetBaseModel:
             "context_window": 262144,
             "hf_url": "https://huggingface.co/Qwen/Qwen3.6-35B-A3B",
             "inference_input_usd_per_million_tokens": 0.1,
+            "inference_cached_input_usd_per_million_tokens": 0.01,
             "inference_output_usd_per_million_tokens": 0.4,
             "creator_name": "Osmosis",
             "created_at": "2026-09-10T20:00:00Z",
@@ -282,6 +284,7 @@ class TestGetBaseModel:
         assert result.parameters == 35951822704
         assert result.context_window == 262144
         assert result.inference_input_usd_per_million_tokens == 0.1
+        assert result.inference_cached_input_usd_per_million_tokens == 0.01
         assert result.has_inference_pricing is True
         assert result.inference_output_usd_per_million_tokens == 0.4
         assert result.namespace == "Qwen"
@@ -298,3 +301,12 @@ class TestGetBaseModel:
         result = client.get_base_model("Qwen3-4B", git_identity=GIT_IDENTITY)
         assert result.has_inference_pricing is False
         assert result.context_window is None
+
+
+def test_base_model_detail_keeps_positional_field_order():
+    detail = BaseModelDetail(
+        "m", "name", None, None, "", "", "", None, None, None, 0.1, 0.4
+    )
+    assert detail.inference_input_usd_per_million_tokens == 0.1
+    assert detail.inference_output_usd_per_million_tokens == 0.4
+    assert detail.inference_cached_input_usd_per_million_tokens is None

@@ -27,6 +27,9 @@ dependencies = [
     # owns the dependency; lower bounds still allow patched releases to float.
     "python-dotenv>=1.2.2,<2.0.0",
     "httpx>=0.25.0,<1.0.0",
+    # HTTPX's CA bundle: GHSA-6q48-6c7w-9gw2. The reviewed fix removes the
+    # affected emSign root while retaining the unaffected roots.
+    "certifi>=2026.10.19",
     # Transitive via httpx (async TLS). >=4.14.2 is the security floor for
     # CVE-2026-63374 (TLSStream IDNA host name spoofing) and CVE-2026-64847.
     "anyio>=4.14.2",
@@ -124,7 +127,8 @@ harbor = [
     # base install.
     "toml>=0.10.2,<1.0.0",
     "platformdirs>=4.0",
-    "uv>=0.9.7,<0.13",
+    # uv has its own bundled CA store; GHSA-hq85-5cpj-mr62 requires 0.13.4.
+    "uv>=0.13.4,<0.14",
     # Harbor uses LiteLLM, which owns these runtime and security floors in
     # this feature.
     "litellm>=1.94.3,!=1.95.0.*,!=1.96.0.*,!=1.96.1.*,<2.0.0",
@@ -163,7 +167,8 @@ eval = [
     "fsspec>=2026.6.0",
     "aiohttp>=3.14.4",
     "multidict>=6.9.1",
-    "uv>=0.9.7,<0.13",
+    # Same bundled CA security floor as the Harbor build tool.
+    "uv>=0.13.4,<0.14",
 ]
 
 # Full installation with all optional features
