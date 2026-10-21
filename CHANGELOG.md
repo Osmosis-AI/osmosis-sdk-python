@@ -2,6 +2,31 @@
 
 This file records changes to `osmosis-ai`. For earlier versions, see [GitHub Releases](https://github.com/Osmosis-AI/osmosis-sdk-python/releases).
 
+## 0.3.8 - 2026-10-20
+
+### Breaking Changes
+
+- Removed `RolloutInfo.is_active` and the `is_active` field from `osmosis rollout list --json`; remove reads of this always-true flag, and use the newly exposed `description` and `last_synced_at` fields where relevant ([#450](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/450)).
+
+### Added
+
+- Harbor prewarm supports configurable modes, progress logs, automatic dataset task discovery, and OpenSandbox concurrency limits, while allowing startup after isolated task failures and rejecting systemic failures ([#449](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/449)).
+- Train, eval, and benchmark submit confirmations identify the selected workspace or its source repository, including in JSON confirmation details ([#451](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/451)).
+
+### Changed
+
+- The `harbor` extra accepts Harbor `>=0.20.0,<0.25`, and native OpenCode reuses compatible runtimes prebaked under `/opt/osmosis-agent/bin` instead of reinstalling them ([#453](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/453)).
+- The `strands`, `openai-agents`, `harbor`, `rubric`, and `eval` extras require `aiohttp>=3.14.4` and `multidict>=6.9.1`, and the agent adapters require MCP `>=1.30.0` excluding `2.0.*` and `2.1.*`; update conflicting pins, regenerate lockfiles, and rebuild affected runtime images ([#455](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/455)).
+
+### Fixed
+
+- `osmosis train info --output <path>` preserves existing files unless `--overwrite` is passed, and metrics exports are written atomically ([#452](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/452)).
+- Local eval releases worker slots without waiting for nonexistent trajectories after rollouts return no sample, and its live pass rate excludes skipped samples to match final metrics ([#443](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/443), [#445](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/445)).
+- A second Ctrl-C during local eval skips the long shutdown waits and gives the rollout server five seconds before force-stopping it, while still stopping the tunnel and listener; sandbox cleanup may remain incomplete ([#444](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/444)).
+- New training scaffolds omit unsupported `eval_interval` examples and direct users to `osmosis model list --type base` for supported models ([#447](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/447), [#448](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/448)).
+
+[Full changelog](https://github.com/Osmosis-AI/osmosis-sdk-python/compare/v0.3.7...v0.3.8)
+
 ## 0.3.7 - 2026-10-08
 
 ### Added
