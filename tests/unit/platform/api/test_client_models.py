@@ -10,6 +10,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock, patch
 
 from osmosis_ai.platform.api.client import OsmosisClient
+from osmosis_ai.platform.api.models import BaseModelDetail
 
 GIT_IDENTITY = "git_test"
 
@@ -300,3 +301,12 @@ class TestGetBaseModel:
         result = client.get_base_model("Qwen3-4B", git_identity=GIT_IDENTITY)
         assert result.has_inference_pricing is False
         assert result.context_window is None
+
+
+def test_base_model_detail_keeps_positional_field_order():
+    detail = BaseModelDetail(
+        "m", "name", None, None, "", "", "", None, None, None, 0.1, 0.4
+    )
+    assert detail.inference_input_usd_per_million_tokens == 0.1
+    assert detail.inference_output_usd_per_million_tokens == 0.4
+    assert detail.inference_cached_input_usd_per_million_tokens is None

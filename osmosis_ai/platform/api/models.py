@@ -1214,12 +1214,13 @@ class BaseModelDetail(BaseModelInfo):
     context_window: int | None = None
     hf_url: str | None = None
     inference_input_usd_per_million_tokens: float | None = None
-    inference_cached_input_usd_per_million_tokens: float | None = None
     inference_output_usd_per_million_tokens: float | None = None
     platform_url: str | None = None
     is_internal_user: bool = False
     # The platform omits both price keys when the model has no published rate.
     has_inference_pricing: bool = False
+    # Kept last so positional construction binds the earlier fields.
+    inference_cached_input_usd_per_million_tokens: float | None = None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> BaseModelDetail:
