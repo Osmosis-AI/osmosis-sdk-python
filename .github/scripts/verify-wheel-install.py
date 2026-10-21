@@ -28,6 +28,7 @@ from packaging.version import Version
 
 BASE_REQUIREMENTS = {
     "anyio",
+    "certifi",
     "cryptography",
     "httpx",
     "keyring",
@@ -106,15 +107,19 @@ EXTRA_REQUIREMENTS: dict[str, set[str]] = {
 
 SECURITY_CONSTRAINTS = {
     "aiohttp": ">=3.14.4",
+    "certifi": ">=2026.10.19",
     "mcp": ">=1.30.0,!=2.0.*,!=2.1.*",
     "multidict": ">=6.9.1",
+    "uv": ">=0.13.4",
 }
 
 # shortcut: metadata probes advisory boundaries; use range intersection if requirements start excluding individual releases.
 VULNERABLE_VERSIONS = {
     "aiohttp": ("3.0.0", "3.14.3"),
+    "certifi": ("2019.3.9", "2025.11.12", "2026.10.18"),
     "mcp": ("1.8.0", "1.29.1", "2.0.0", "2.1.0", "2.1.1"),
     "multidict": ("6.7.0", "6.9.0"),
+    "uv": ("0.9.7", "0.12.3", "0.13.3"),
 }
 
 _ANSI_ESCAPE_PATTERN = re.compile(
