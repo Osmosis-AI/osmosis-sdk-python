@@ -17,6 +17,7 @@ This file records changes to `osmosis-ai`. For earlier versions, see [GitHub Rel
 
 - The `harbor` extra accepts Harbor `>=0.20.0,<0.25`, and native OpenCode reuses compatible runtimes prebaked under `/opt/osmosis-agent/bin` instead of reinstalling them ([#453](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/453)).
 - The `strands`, `openai-agents`, `harbor`, `rubric`, and `eval` extras require `aiohttp>=3.14.4` and `multidict>=6.9.1`, and the agent adapters require MCP `>=1.30.0` excluding `2.0.*` and `2.1.*`; update conflicting pins, regenerate lockfiles, and rebuild affected runtime images ([#455](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/455)).
+- The base installation requires `certifi>=2026.10.19`, and the `harbor` and `eval` extras require `uv>=0.13.4,<0.14`, so neither CA bundle trusts the emSign root whose intermediate CA keys were compromised; update conflicting pins, regenerate lockfiles, and rebuild affected runtime images ([#457](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/457)).
 
 ### Fixed
 
