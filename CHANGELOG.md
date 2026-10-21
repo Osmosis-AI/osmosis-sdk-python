@@ -2,16 +2,17 @@
 
 This file records changes to `osmosis-ai`. For earlier versions, see [GitHub Releases](https://github.com/Osmosis-AI/osmosis-sdk-python/releases).
 
-## 0.3.8 - 2026-10-20
+## 0.3.8 - 2026-10-21
 
 ### Breaking Changes
 
-- Removed `RolloutInfo.is_active` and the `is_active` field from `osmosis rollout list --json`; remove reads of this always-true flag, and use the newly exposed `description` and `last_synced_at` fields where relevant ([#450](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/450)).
+- Removed `RolloutInfo.is_active` and the `is_active` field from `osmosis rollout list --json`; remove reads and constructor arguments for this always-true flag, and use `description` and `last_synced_at` for descriptive and sync metadata ([#450](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/450)).
 
 ### Added
 
 - Harbor prewarm supports configurable modes, progress logs, automatic dataset task discovery, and OpenSandbox concurrency limits, while allowing startup after isolated task failures and rejecting systemic failures ([#449](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/449)).
 - Train, eval, and benchmark submit confirmations identify the selected workspace or its source repository, including in JSON confirmation details ([#451](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/451)).
+- Base model info shows cached-input pricing, preserves small prices, and includes all three price fields in JSON with `null` for unavailable rates ([#454](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/454)).
 
 ### Changed
 
