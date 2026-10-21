@@ -47,20 +47,67 @@ def test_locked_fsspec_meets_security_floor() -> None:
 
 
 @pytest.mark.parametrize(
+    ("name", "extra", "floor"),
+    [
+        ("certifi", None, "2026.10.19"),
+        ("uv", "harbor", "0.13.4"),
+        ("uv", "eval", "0.13.4"),
+    ],
+)
+def test_ca_bundle_floors_allow_patched_releases(
+    name: str, extra: str | None, floor: str
+) -> None:
+    project = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text())["project"]
+    requirements = (
+        project["dependencies"]
+        if extra is None
+        else project["optional-dependencies"][extra]
+    )
+    matches = [
+        Requirement(raw) for raw in requirements if Requirement(raw).name == name
+    ]
+    assert len(matches) == 1
+    requirement = matches[0]
+    assert requirement.marker is None, "The security floor must cover every platform"
+    assert f">={floor}" in str(requirement.specifier).split(",")
+    assert floor in requirement.specifier, (
+        "The upper bound must admit the patched release"
+    )
+
+
+@pytest.mark.parametrize(
+    ("name", "floor"), [("certifi", "2026.10.19"), ("uv", "0.13.4")]
+)
+def test_locked_ca_bundles_meet_security_floors(name: str, floor: str) -> None:
+    lock = tomllib.loads((REPO_ROOT / "uv.lock").read_text())
+    packages = [package for package in lock["package"] if package["name"] == name]
+    assert packages, f"The lock must still resolve {name}"
+    assert all(Version(package["version"]) >= Version(floor) for package in packages)
+
+
+@pytest.mark.parametrize(
     ("package", "constraint", "safe"),
     [
         ("aiohttp", ">=3.14.5", True),
         ("aiohttp", "~=3.14.4", True),
+        ("certifi", ">=2026.10.19", True),
+        ("certifi", ">=2026.10.20", True),
         ("multidict", ">=6.10.0", True),
         ("mcp", ">=1.31.0,<2", True),
         ("mcp", ">=2.2.0", True),
+        ("uv", ">=0.13.4,<0.14", True),
+        ("uv", "~=0.13.5", True),
         ("aiohttp", ">=3.14.3", False),
+        ("certifi", ">=2025.11.12", False),
+        ("certifi", ">=2026.10.18", False),
         ("multidict", ">=6.7.0", False),
         ("multidict", ">=6.9.0", False),
         ("mcp", ">=1.29.1,<2", False),
         ("mcp", ">=1.30.0", False),
         ("mcp", ">=1.30.0,!=2.0.*", False),
         ("mcp", ">=1.30.0,!=2.1.*", False),
+        ("uv", ">=0.9.7,<0.13", False),
+        ("uv", ">=0.13.3,<0.14", False),
     ],
 )
 def test_wheel_verifier_checks_allowed_versions(
