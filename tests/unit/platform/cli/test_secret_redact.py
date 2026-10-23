@@ -33,6 +33,7 @@ def test_redact_never_rebuilds_the_secret_from_the_marker() -> None:
     assert redact_secret_value({"]]]": ["]]]"]}, "]]") == {"[REDACTED]": ["[REDACTED]"]}
     # A secret inside the marker itself survives any marker-based replacement.
     assert redact_secret_text("ARE", "RE") == ""
+    assert redact_secret_value({"value": "x"}, "RE") == {"value": ""}
     # Redacting "y" one secret at a time turned "yx" into "[REDACTED]x".
     redacted = redact_provided_secrets(PlatformAPIError("yx"), ["]x", "y"])
     assert str(redacted) == "[REDACTED]"

@@ -47,7 +47,7 @@ def _redact_value(data: Any, secrets: tuple[str, ...]) -> Any:
         for key, value in data.items():
             out_key: Any = _redact_str(key, secrets) if isinstance(key, str) else key
             if str(key).lower() in {"value", "secret", "secret_value"}:
-                redacted[out_key] = "[REDACTED]"
+                redacted[out_key] = _redact_str("[REDACTED]", secrets)
             else:
                 redacted[out_key] = _redact_value(value, secrets)
         return redacted
