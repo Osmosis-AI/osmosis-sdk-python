@@ -79,8 +79,9 @@ class RolloutProgress:
             # Multi-step trials start their agent once per step; keep the first.
             if self.agent_started_at is None:
                 self.agent_started_at = at
+                self.changed.notify_all()
 
-    async def wait_for_status_change(self) -> RolloutStatus:
+    async def wait_for_change(self) -> RolloutStatus:
         async with self.changed:
             if self.status in {
                 RolloutStatus.SUCCESS,
@@ -88,8 +89,12 @@ class RolloutProgress:
                 RolloutStatus.CANCELLED,
             }:
                 return self.status
-            status = self.status
-            await self.changed.wait_for(lambda: self.status is not status)
+            status, started = self.status, self.agent_started_at
+            await self.changed.wait_for(
+                lambda: (
+                    self.status is not status or self.agent_started_at is not started
+                )
+            )
             return self.status
 
 

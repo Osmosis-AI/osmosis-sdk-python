@@ -165,7 +165,7 @@ class RolloutFutureRegistry:
             return future.result()
         try:
             async with asyncio.timeout(self.result_wait_timeout_sec):
-                await progress.wait_for_status_change()
+                await progress.wait_for_change()
         except TimeoutError:
             pass
         async with self.lock:

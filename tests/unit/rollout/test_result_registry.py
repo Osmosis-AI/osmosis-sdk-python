@@ -78,6 +78,20 @@ async def test_wait_returns_on_status_change() -> None:
     await store.close()
 
 
+async def test_wait_returns_when_the_agent_starts() -> None:
+    store = registry([], wait=1.0, lease=2.0)
+    lease = await store.register("r1")
+    progress = await store.get_progress("r1")
+    await progress.set_status(RolloutStatus.RUNNING)
+    waiter = asyncio.create_task(store.wait_for_result("r1", lease))
+    await asyncio.sleep(0)
+    await progress.mark_agent_started(AGENT_STARTED_AT)
+    result = await asyncio.wait_for(waiter, timeout=0.1)
+    assert result.status is RolloutStatus.RUNNING
+    assert result.agent_started_at == AGENT_STARTED_AT
+    await store.close()
+
+
 async def test_wait_timeout_does_not_cancel_shared_future() -> None:
     store = registry([])
     lease = await store.register("r1")
