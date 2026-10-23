@@ -92,7 +92,9 @@ class RolloutFutureRegistry:
                     self.finish(
                         entry,
                         RolloutResultResponse(
-                            rollout_id=rollout_id, status=RolloutStatus.CANCELLED
+                            rollout_id=rollout_id,
+                            status=RolloutStatus.CANCELLED,
+                            agent_started_at=entry.progress.agent_started_at,
                         ),
                     )
 
@@ -287,7 +289,7 @@ class RolloutFutureRegistry:
 
     @staticmethod
     def lease_failure(
-        rollout_id: str, agent_started_at: datetime | None = None
+        rollout_id: str, agent_started_at: datetime | None
     ) -> RolloutResultResponse:
         return RolloutResultResponse(
             rollout_id=rollout_id,
@@ -299,7 +301,7 @@ class RolloutFutureRegistry:
 
     @staticmethod
     def crash_failure(
-        rollout_id: str, agent_started_at: datetime | None = None
+        rollout_id: str, agent_started_at: datetime | None
     ) -> RolloutResultResponse:
         return RolloutResultResponse(
             rollout_id=rollout_id,

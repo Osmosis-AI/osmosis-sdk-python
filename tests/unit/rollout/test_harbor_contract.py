@@ -18,14 +18,18 @@ from osmosis_ai.rollout.context import RolloutContext, RolloutProgress
 from osmosis_ai.rollout.types import ExecutionRequest, RolloutStatus
 
 SECRET = "harbor-contract-test-secret"
+START_FAILURE = "sandbox provisioning failed"
 
 
 class ContractEnvironment(BaseEnvironment):
     """Mounted sandbox boundary; OracleAgent and Verifier still run normally."""
 
-    def __init__(self, *args, block_agent=False, block_stop=False, **kwargs):
+    def __init__(
+        self, *args, block_agent=False, block_stop=False, fail_start=False, **kwargs
+    ):
         super().__init__(*args, **kwargs)
         self.block_agent = block_agent
+        self.fail_start = fail_start
         self.stop_calls = 0
         self.agent_running = asyncio.Event()
         self.block_stop = block_stop
@@ -43,7 +47,8 @@ class ContractEnvironment(BaseEnvironment):
         pass
 
     async def start(self, force_build):
-        pass
+        if self.fail_start:
+            raise RuntimeError(START_FAILURE)
 
     async def stop(self, delete):
         assert delete
@@ -119,8 +124,9 @@ def contract_backend(tmp_path, monkeypatch):
         if event.event == TrialEvent.END:
             # Harbor emits END before its final secret scrub. SDK must wait for
             # submit() to finish before copying these bytes to durable storage.
-            log = backend.trials_dir / "trial-contract" / "agent" / "oracle.txt"
-            assert log.read_text() == SECRET
+            if TrialEvent.AGENT_START in events:
+                log = backend.trials_dir / "trial-contract" / "agent" / "oracle.txt"
+                assert log.read_text() == SECRET
             results.append(event.result)
 
     for event in TrialEvent:
@@ -201,6 +207,22 @@ async def test_real_trial_lifecycle_and_archive(contract_backend, cancel):
         for path in archive.rglob("*")
         if path.is_file()
     )
+
+
+async def test_environment_start_failure_never_reports_agent_start(contract_backend):
+    backend, events, _, results = contract_backend
+    backend.environment_config.kwargs["fail_start"] = True
+    progress = RolloutProgress()
+    with RolloutContext(rollout_id="contract", progress=progress):
+        execution = asyncio.create_task(
+            backend.execute(ExecutionRequest(id="contract", prompt=[], grade=True))
+        )
+    outcome = await asyncio.wait_for(execution, timeout=5)
+
+    assert results[0].exception_info.exception_message == START_FAILURE
+    assert outcome.result.status == RolloutStatus.FAILURE
+    assert TrialEvent.AGENT_START not in events
+    assert progress.agent_started_at is None
 
 
 @pytest.mark.parametrize("blocked", [None, "sandbox", "archive"])

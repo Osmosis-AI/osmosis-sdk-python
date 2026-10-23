@@ -221,6 +221,30 @@ async def test_cancel_before_execution_publishes_a_terminal_result() -> None:
     await store.close()
 
 
+@pytest.mark.parametrize(
+    "started_at",
+    [None, AGENT_STARTED_AT],
+    ids=["before-agent-start", "after-agent-start"],
+)
+async def test_task_cancellation_reports_agent_start(
+    started_at: datetime | None,
+) -> None:
+    store = registry([])
+    lease = await store.register("r1")
+    progress = await store.get_progress("r1")
+    if started_at is not None:
+        await progress.mark_agent_started(started_at)
+    task = asyncio.create_task(asyncio.sleep(30))
+    await store.bind_task("r1", task)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    result = await store.wait_for_result("r1", lease)
+    assert result.status is RolloutStatus.CANCELLED
+    assert result.agent_started_at == started_at
+    await store.close()
+
+
 async def test_cancel_before_binding_is_replayed_without_executing() -> None:
     cancelled: list[str] = []
     executed: list[str] = []
@@ -399,8 +423,18 @@ async def test_task_crash_failure_reports_agent_start(
 
 
 def test_crash_failure_response() -> None:
-    response = RolloutFutureRegistry.crash_failure("r1")
+    response = RolloutFutureRegistry.crash_failure("r1", None)
     assert response.rollout_id == "r1"
     assert response.status is RolloutStatus.FAILURE
     assert response.err_category is RolloutErrorCategory.INTERNAL_ERROR
     assert response.err_message == "rollout task crashed"
+
+
+@pytest.mark.parametrize(
+    "factory",
+    [RolloutFutureRegistry.lease_failure, RolloutFutureRegistry.crash_failure],
+    ids=["lease", "crash"],
+)
+def test_failure_responses_require_the_agent_start(factory) -> None:
+    with pytest.raises(TypeError, match="agent_started_at"):
+        factory("r1")
