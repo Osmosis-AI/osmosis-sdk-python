@@ -101,6 +101,13 @@ class TestPublicSurface:
         assert backend.health()["backend"] == "harbor"
         assert backend.health()["chat_endpoint"]["environment"] == "docker"
 
+    def test_backends_report_their_own_agent_start(self):
+        """Otherwise the server stamps at execute() entry, before sandbox setup."""
+        from osmosis_ai.rollout.backend.harbor.source import SourceHarborBackend
+
+        assert HarborBackend.reports_agent_start is True
+        assert SourceHarborBackend.reports_agent_start is True
+
     @pytest.mark.parametrize("rollout_id", ["run:1", "run\n1", "run\x7f1", "run\x851"])
     async def test_unsafe_evidence_ids_fail_before_harbor_work(
         self, template_task, rollout_id, monkeypatch
@@ -2964,6 +2971,135 @@ class TestExecutionOutcomes:
             "reward": None,
             "err_message": None,
         }
+
+
+AGENT_STARTED_AT = datetime(2026, 10, 22, 17, 30, tzinfo=UTC)
+
+
+class TestAgentStartHook:
+    @pytest.fixture
+    def queue(self):
+        return FakeQueue()
+
+    @pytest.fixture
+    def backend(self, template_task, tmp_path, queue):
+        backend = HarborBackend(
+            orchestrator=queue,
+            tasks_dir=template_task,
+            agent="terminus-2",
+            trials_dir=tmp_path / "trials",
+        )
+        backend.rollouts_dir = tmp_path / "rollouts"
+        backend.rollouts_dir.mkdir(parents=True, exist_ok=True)
+        backend.artifact_root = tmp_path / "durable"
+        return backend
+
+    @staticmethod
+    def admit(backend, rollout_id="r1"):
+        from osmosis_ai.rollout.context import RolloutContext, RolloutProgress
+
+        progress = RolloutProgress()
+        pending = PendingTrial()
+        pending.rollout_context = RolloutContext(
+            rollout_id=rollout_id, progress=progress
+        )
+        backend.pending[rollout_id] = pending
+        return progress
+
+    @staticmethod
+    def agent_start(rollout_id="r1", at=AGENT_STARTED_AT):
+        return SimpleNamespace(
+            config=SimpleNamespace(trial_name=f"trial-{rollout_id}"), timestamp=at
+        )
+
+    async def test_agent_start_hook_marks_progress(self, backend, queue):
+        progress = self.admit(backend)
+
+        await queue.fire("agent-start", self.agent_start())
+
+        assert progress.agent_started_at == AGENT_STARTED_AT
+
+    async def test_agent_start_hook_first_write_wins(self, backend, queue):
+        """Multi-step trials fire AGENT_START once per step."""
+        progress = self.admit(backend)
+
+        await queue.fire("agent-start", self.agent_start())
+        await queue.fire(
+            "agent-start",
+            self.agent_start(at=AGENT_STARTED_AT + timedelta(minutes=5)),
+        )
+
+        assert progress.agent_started_at == AGENT_STARTED_AT
+
+    @pytest.mark.parametrize("failure", ["no_context", "mark_raises"])
+    async def test_agent_start_hook_never_raises(
+        self, backend, queue, monkeypatch, caplog, failure
+    ):
+        """Harbor emits AGENT_START outside the agent's try; a raise fails the trial."""
+        from unittest.mock import AsyncMock
+
+        rollout_id = "rollout-agent-start-1"
+        progress = self.admit(backend, rollout_id)
+        pending = backend.pending[rollout_id]
+        if failure == "no_context":
+            pending.rollout_context = None
+        else:
+            monkeypatch.setattr(
+                pending.rollout_context,
+                "mark_agent_started",
+                AsyncMock(side_effect=RuntimeError("progress unavailable")),
+            )
+
+        with caplog.at_level(logging.WARNING):
+            await queue.fire("agent-start", self.agent_start(rollout_id))
+
+        assert progress.agent_started_at is None
+        assert any(
+            record.levelno == logging.WARNING and rollout_id in record.getMessage()
+            for record in caplog.records
+        )
+
+    async def test_agent_start_hook_ignores_prewarm_trials(self, backend, queue):
+        progress = self.admit(backend, "prewarm-abc")
+        backend.prewarm_trials.add("trial-prewarm-abc")
+
+        await queue.fire("agent-start", self.agent_start("prewarm-abc"))
+
+        assert progress.agent_started_at is None
+
+    async def test_setup_failure_leaves_agent_start_unset(self, backend, queue):
+        from osmosis_ai.rollout.context import RolloutContext, RolloutProgress
+
+        async def run(queue, config):
+            result = trial_result(
+                exception_info=SimpleNamespace(
+                    exception_type="EnvironmentStartTimeoutError",
+                    exception_message="sandbox did not start",
+                    exception_traceback="",
+                    occurred_at=None,
+                )
+            )
+            event = SimpleNamespace(
+                config=config, result=result, timestamp=AGENT_STARTED_AT
+            )
+            await queue.fire("start", event)
+            await queue.fire("end", event)
+            return result
+
+        queue.run = run
+        progress = RolloutProgress()
+        with RolloutContext(
+            chat_completions_url="http://t/v1",
+            api_key="rk-1",
+            rollout_id="r1",
+            progress=progress,
+        ):
+            outcome = await backend.execute(
+                ExecutionRequest(id="r1", prompt=[{"role": "user", "content": "go"}])
+            )
+
+        assert outcome.result.status == RolloutStatus.FAILURE
+        assert progress.agent_started_at is None
 
 
 class TestFailureCategorization:

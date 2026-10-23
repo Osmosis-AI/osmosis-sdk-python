@@ -3,6 +3,7 @@
 import asyncio
 import json
 import threading
+from datetime import UTC, datetime
 
 import pytest
 from harbor.environments.base import BaseEnvironment, ExecResult
@@ -13,6 +14,7 @@ from harbor.trial.queue import TrialQueue
 
 from osmosis_ai.rollout.backend.harbor import backend as backend_module
 from osmosis_ai.rollout.backend.harbor.backend import HarborBackend
+from osmosis_ai.rollout.context import RolloutContext, RolloutProgress
 from osmosis_ai.rollout.types import ExecutionRequest, RolloutStatus
 
 SECRET = "harbor-contract-test-secret"
@@ -131,9 +133,12 @@ def contract_backend(tmp_path, monkeypatch):
 async def test_real_trial_lifecycle_and_archive(contract_backend, cancel):
     backend, events, environments, results = contract_backend
     backend.environment_config.kwargs["block_agent"] = cancel
-    execution = asyncio.create_task(
-        backend.execute(ExecutionRequest(id="contract", prompt=[], grade=True))
-    )
+    progress = RolloutProgress()
+    before = datetime.now(UTC)
+    with RolloutContext(rollout_id="contract", progress=progress):
+        execution = asyncio.create_task(
+            backend.execute(ExecutionRequest(id="contract", prompt=[], grade=True))
+        )
     try:
         if cancel:
             # Wait for the real agent to reach the sandbox boundary; never guess
@@ -166,6 +171,8 @@ async def test_real_trial_lifecycle_and_archive(contract_backend, cancel):
         TrialEvent.AGENT_START,
     ]
     assert events[-1] == TrialEvent.END
+    assert progress.agent_started_at is not None
+    assert before <= progress.agent_started_at <= datetime.now(UTC)
     if cancel:
         assert outcome.result.status == RolloutStatus.CANCELLED
         assert TrialEvent.CANCEL in events
