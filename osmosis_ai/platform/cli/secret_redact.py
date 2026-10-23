@@ -13,17 +13,24 @@ from typing import Any
 from osmosis_ai.platform.auth.platform_client import PlatformAPIError
 
 
+def _redact_str(text: str, secret_value: str) -> str:
+    redacted = text.replace(secret_value, "[REDACTED]")
+    # The marker can join its neighbours into the secret again ("]]]" with the
+    # secret "]]" becomes "[REDACTED]]"); then no part of the text is safe.
+    return "[REDACTED]" if secret_value in redacted else redacted
+
+
 def redact_secret_value(data: Any, secret_value: str) -> Any:
     """Return a copy of *data* with the current plaintext secret removed."""
     if not secret_value:
         return data
     if isinstance(data, str):
-        return data.replace(secret_value, "[REDACTED]")
+        return _redact_str(data, secret_value)
     if isinstance(data, dict):
         redacted: dict[Any, Any] = {}
         for key, value in data.items():
             out_key: Any = (
-                key.replace(secret_value, "[REDACTED]") if isinstance(key, str) else key
+                _redact_str(key, secret_value) if isinstance(key, str) else key
             )
             if str(key).lower() in {"value", "secret", "secret_value"}:
                 redacted[out_key] = "[REDACTED]"
@@ -40,7 +47,7 @@ def redact_secret_text(value: str | None, secret_value: str) -> str | None:
         return None
     if not secret_value:
         return value
-    return value.replace(secret_value, "[REDACTED]")
+    return _redact_str(value, secret_value)
 
 
 def redact_secret_platform_error(

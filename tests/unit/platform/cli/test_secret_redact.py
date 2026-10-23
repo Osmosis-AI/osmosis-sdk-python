@@ -27,6 +27,12 @@ def test_redact_empty_secret_leaves_input_unchanged() -> None:
     assert redact_secret_text("ab", "") == "ab"
 
 
+def test_redact_never_rebuilds_the_secret_from_the_marker() -> None:
+    # Plain replacement turns "]]]" into "[REDACTED]]", which ends in the secret.
+    assert redact_secret_text("]]]", "]]") == "[REDACTED]"
+    assert redact_secret_value({"]]]": ["]]]"]}, "]]") == {"[REDACTED]": ["[REDACTED]"]}
+
+
 def test_redact_secret_value_redacts_keys_containing_secret() -> None:
     data = {
         f"echo-{SENTINEL}": "ok",
