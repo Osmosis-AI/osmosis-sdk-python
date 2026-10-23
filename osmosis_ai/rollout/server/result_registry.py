@@ -5,6 +5,7 @@ import logging
 import math
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from datetime import datetime
 
 from osmosis_ai.rollout.context import RolloutProgress
 from osmosis_ai.rollout.server.lease import LeaseManager
@@ -98,7 +99,10 @@ class RolloutFutureRegistry:
         async def publish_failure() -> None:
             async with self.lock:
                 if self.entries.get(rollout_id) is entry and not entry.result.done():
-                    self.finish(entry, self.crash_failure(rollout_id))
+                    self.finish(
+                        entry,
+                        self.crash_failure(rollout_id, entry.progress.agent_started_at),
+                    )
 
         def complete_task(done: asyncio.Task[None]) -> None:
             if done.cancelled():
@@ -125,7 +129,9 @@ class RolloutFutureRegistry:
             if entry.result.done():
                 return False
             if self.leases.expired(rollout_id):
-                response = self.lease_failure(rollout_id)
+                response = self.lease_failure(
+                    rollout_id, entry.progress.agent_started_at
+                )
                 expired = True
             self.finish(entry, response)
         if expired:
@@ -142,7 +148,10 @@ class RolloutFutureRegistry:
             entry = self.entry(rollout_id)
             if not entry.result.done():
                 if not self.leases.renew(rollout_id, lease_token):
-                    self.finish(entry, self.lease_failure(rollout_id))
+                    self.finish(
+                        entry,
+                        self.lease_failure(rollout_id, entry.progress.agent_started_at),
+                    )
                     expired = True
             else:
                 self.leases.authenticate(rollout_id, lease_token)
@@ -175,7 +184,9 @@ class RolloutFutureRegistry:
                 return
             if not self.leases.expired(rollout_id):
                 return
-            self.finish(entry, self.lease_failure(rollout_id))
+            self.finish(
+                entry, self.lease_failure(rollout_id, entry.progress.agent_started_at)
+            )
         self.cancel_execution(entry)
 
     async def close(self) -> None:
@@ -275,21 +286,27 @@ class RolloutFutureRegistry:
         return entry
 
     @staticmethod
-    def lease_failure(rollout_id: str) -> RolloutResultResponse:
+    def lease_failure(
+        rollout_id: str, agent_started_at: datetime | None = None
+    ) -> RolloutResultResponse:
         return RolloutResultResponse(
             rollout_id=rollout_id,
             status=RolloutStatus.FAILURE,
             err_message="polling lease expired",
             err_category=RolloutErrorCategory.LEASE_EXPIRED,
+            agent_started_at=agent_started_at,
         )
 
     @staticmethod
-    def crash_failure(rollout_id: str) -> RolloutResultResponse:
+    def crash_failure(
+        rollout_id: str, agent_started_at: datetime | None = None
+    ) -> RolloutResultResponse:
         return RolloutResultResponse(
             rollout_id=rollout_id,
             status=RolloutStatus.FAILURE,
             err_message="rollout task crashed",
             err_category=RolloutErrorCategory.INTERNAL_ERROR,
+            agent_started_at=agent_started_at,
         )
 
 

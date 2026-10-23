@@ -8,6 +8,7 @@ import tempfile
 import traceback
 from collections.abc import AsyncIterator
 from contextlib import AsyncExitStack, asynccontextmanager
+from datetime import UTC, datetime
 from functools import partial
 from pathlib import Path
 from typing import Any
@@ -379,6 +380,8 @@ async def _handle_rollout(
         )
     outcome: ExecutionOutcome | None = None
     try:
+        if not backend.reports_agent_start:
+            await rollout_ctx.mark_agent_started(datetime.now(UTC))
         with rollout_ctx:
             outcome = await backend.execute(
                 ExecutionRequest(

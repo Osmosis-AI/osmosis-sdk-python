@@ -93,6 +93,8 @@ async def mark_agent_started() -> None:
 
 
 class AgentStartedBackend(StubBackend):
+    reports_agent_start = True
+
     def __init__(self, *, fail: bool = False) -> None:
         super().__init__()
         self.fail = fail
@@ -105,13 +107,36 @@ class AgentStartedBackend(StubBackend):
 
 
 class SetupFailureBackend(StubBackend):
+    reports_agent_start = True
+
     async def execute(self, request: ExecutionRequest) -> ExecutionOutcome:
         raise RuntimeError("sandbox create failed")
 
 
 class AgentStartedBlockingBackend(BlockingBackend):
+    reports_agent_start = True
+
     async def execute(self, request: ExecutionRequest) -> ExecutionOutcome:
         await mark_agent_started()
+        return await super().execute(request)
+
+
+class SetupBlockingBackend(BlockingBackend):
+    reports_agent_start = True
+
+
+class UnreportedStartBackend(StubBackend):
+    def __init__(self, *, fail: bool = False) -> None:
+        super().__init__()
+        self.fail = fail
+        self.stamped_at_execute: datetime | None = None
+
+    async def execute(self, request: ExecutionRequest) -> ExecutionOutcome:
+        ctx = get_rollout_context()
+        assert ctx is not None and ctx.progress is not None
+        self.stamped_at_execute = ctx.progress.agent_started_at
+        if self.fail:
+            raise RuntimeError("agent crashed")
         return await super().execute(request)
 
 
@@ -181,6 +206,23 @@ def test_final_result_without_agent_start_is_null() -> None:
     body = response.json()
     assert body["status"] == "failure"
     assert body["agent_started_at"] is None
+
+
+@pytest.mark.parametrize(("fail", "status"), [(False, "success"), (True, "failure")])
+def test_server_stamps_agent_start_for_a_backend_that_does_not_report_it(
+    fail: bool, status: str
+) -> None:
+    backend = UnreportedStartBackend(fail=fail)
+    before = datetime.now(UTC)
+    with TestClient(create_rollout_server(backend=backend)) as client:
+        admission = client.post("/rollout", json=init_body())
+        response = client.get("/rollout/r1/result", headers=lease_headers(admission))
+    after = datetime.now(UTC)
+    body = response.json()
+    assert body["status"] == status
+    started_at = datetime.fromisoformat(body["agent_started_at"])
+    assert before <= started_at <= after
+    assert backend.stamped_at_execute == started_at
 
 
 def test_result_requires_a_polling_lease() -> None:
@@ -339,7 +381,7 @@ async def cancelled_result_body(backend: BlockingBackend) -> dict[str, Any]:
 
 
 async def test_cancelled_before_agent_start_reports_null() -> None:
-    body = await cancelled_result_body(BlockingBackend())
+    body = await cancelled_result_body(SetupBlockingBackend())
     assert body["status"] == "cancelled"
     assert body["agent_started_at"] is None
 

@@ -1,11 +1,15 @@
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
-from typing import Any
+from typing import Any, ClassVar
 
 from osmosis_ai.rollout.types import ExecutionOutcome, ExecutionRequest
 
 
 class ExecutionBackend(ABC):
+    # True when execute() calls RolloutContext.mark_agent_started itself; otherwise
+    # the server stamps the agent start when execute() begins.
+    reports_agent_start: ClassVar[bool] = False
+
     @abstractmethod
     async def execute(
         self,

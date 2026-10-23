@@ -150,6 +150,52 @@ async def test_expiry_publishes_failure_and_cancels() -> None:
     await store.close()
 
 
+@pytest.mark.parametrize(
+    "started_at",
+    [None, AGENT_STARTED_AT],
+    ids=["before-agent-start", "after-agent-start"],
+)
+async def test_expiry_failure_reports_agent_start(started_at: datetime | None) -> None:
+    store = registry([], lease=0.02)
+    lease = await store.register("r1")
+    progress = await store.get_progress("r1")
+    if started_at is not None:
+        await progress.mark_agent_started(started_at)
+    await asyncio.sleep(0.04)
+    result = await store.wait_for_result("r1", lease)
+    assert result.err_category is RolloutErrorCategory.LEASE_EXPIRED
+    assert result.agent_started_at == started_at
+    await store.close()
+
+
+async def test_poll_after_lease_deadline_reports_agent_start(monkeypatch) -> None:
+    store = registry([])
+    lease = await store.register("r1")
+    progress = await store.get_progress("r1")
+    await progress.mark_agent_started(AGENT_STARTED_AT)
+    monkeypatch.setattr(store.leases, "renew", lambda *_args: False)
+    result = await store.wait_for_result("r1", lease)
+    assert result.err_category is RolloutErrorCategory.LEASE_EXPIRED
+    assert result.agent_started_at == AGENT_STARTED_AT
+    await store.close()
+
+
+async def test_completion_after_lease_deadline_reports_agent_start(
+    monkeypatch,
+) -> None:
+    store = registry([])
+    await store.register("r1")
+    progress = await store.get_progress("r1")
+    await progress.mark_agent_started(AGENT_STARTED_AT)
+    monkeypatch.setattr(store.leases, "expired", lambda _rollout_id: True)
+    finished = RolloutResultResponse(rollout_id="r1", status=RolloutStatus.SUCCESS)
+    assert not await store.complete("r1", finished)
+    result = store.entry("r1").result.result()
+    assert result.err_category is RolloutErrorCategory.LEASE_EXPIRED
+    assert result.agent_started_at == AGENT_STARTED_AT
+    await store.close()
+
+
 async def test_unknown_invalid_and_duplicate_are_distinct() -> None:
     store = registry([])
     with pytest.raises(UnknownRolloutError):
@@ -322,6 +368,33 @@ async def test_task_crash_publishes_failure_result() -> None:
     assert result.status is RolloutStatus.FAILURE
     assert result.err_category is RolloutErrorCategory.INTERNAL_ERROR
     assert result.err_message == "rollout task crashed"
+    await store.close()
+
+
+@pytest.mark.parametrize(
+    "started_at",
+    [None, AGENT_STARTED_AT],
+    ids=["before-agent-start", "after-agent-start"],
+)
+async def test_task_crash_failure_reports_agent_start(
+    started_at: datetime | None,
+) -> None:
+    store = registry([])
+    lease = await store.register("r1")
+    progress = await store.get_progress("r1")
+    if started_at is not None:
+        await progress.mark_agent_started(started_at)
+
+    async def execute() -> None:
+        raise RuntimeError("backend worker crashed")
+
+    task = asyncio.create_task(execute())
+    await store.bind_task("r1", task)
+    with pytest.raises(RuntimeError, match="backend worker crashed"):
+        await task
+    result = await store.wait_for_result("r1", lease)
+    assert result.err_category is RolloutErrorCategory.INTERNAL_ERROR
+    assert result.agent_started_at == started_at
     await store.close()
 
 
