@@ -156,6 +156,7 @@ class TestLoadRubricDataset:
         [
             ([], r"must include 'messages'.*or 'solution_str'"),
             ([{"role": "user", "content": "Hello"}], "at least one assistant message"),
+            ([1], "at least one assistant message"),
         ],
     )
     def test_invalid_messages_raise(

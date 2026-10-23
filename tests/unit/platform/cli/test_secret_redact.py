@@ -27,6 +27,18 @@ def test_redact_empty_secret_leaves_input_unchanged() -> None:
     assert redact_secret_text("ab", "") == "ab"
 
 
+def test_redact_never_rebuilds_the_secret_from_the_marker() -> None:
+    # Plain replacement turns "]]]" into "[REDACTED]]", which ends in the secret.
+    assert redact_secret_text("]]]", "]]") == "[REDACTED]"
+    assert redact_secret_value({"]]]": ["]]]"]}, "]]") == {"[REDACTED]": ["[REDACTED]"]}
+    # A secret inside the marker itself survives any marker-based replacement.
+    assert redact_secret_text("ARE", "RE") == ""
+    assert redact_secret_value({"value": "x"}, "RE") == {"value": ""}
+    # Redacting "y" one secret at a time turned "yx" into "[REDACTED]x".
+    redacted = redact_provided_secrets(PlatformAPIError("yx"), ["]x", "y"])
+    assert str(redacted) == "[REDACTED]"
+
+
 def test_redact_secret_value_redacts_keys_containing_secret() -> None:
     data = {
         f"echo-{SENTINEL}": "ok",

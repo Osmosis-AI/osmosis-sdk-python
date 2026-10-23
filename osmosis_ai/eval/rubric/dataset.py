@@ -18,7 +18,7 @@ def extract_assistant_content(messages: list[dict[str, Any]]) -> str:
     Returns an empty string when no assistant message is found.
     """
     for msg in reversed(messages):
-        if msg.get("role") == "assistant":
+        if isinstance(msg, dict) and msg.get("role") == "assistant":
             content = msg.get("content")
             if isinstance(content, str) and content.strip():
                 return content.strip()

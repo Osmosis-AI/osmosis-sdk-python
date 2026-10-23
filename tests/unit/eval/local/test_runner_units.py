@@ -87,6 +87,16 @@ def test_source_digest_is_a_full_sha256(tmp_path: Path) -> None:
     assert all(char in "0123456789abcdef" for char in digest)
 
 
+def test_source_digest_separates_paths_from_contents(tmp_path: Path) -> None:
+    # Unframed, both trees hash the byte stream "abc".
+    first, second = tmp_path / "first", tmp_path / "second"
+    first.mkdir()
+    second.mkdir()
+    (first / "ab").write_bytes(b"c")
+    (second / "a").write_bytes(b"bc")
+    assert compute_source_digest(first) != compute_source_digest(second)
+
+
 def test_source_digest_excludes_a_nested_output_dir(tmp_path: Path) -> None:
     # Otherwise the run would change its own digest just by writing results.
     project = tmp_path / "rollout"

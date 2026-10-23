@@ -97,8 +97,16 @@ def source_digest(root: Path, *, extra: str = "", exclude: Path | None = None) -
     digest. *extra* is mixed in first, letting a caller bind the digest to
     out-of-tree inputs of its own.
     """
-    digest = hashlib.sha256(extra.encode())
+    digest = hashlib.sha256()
+
+    def update(data: bytes) -> None:
+        # Length-prefix every field: bare concatenation let {"ab": b"c"} and
+        # {"a": b"bc"} hash the same byte stream.
+        digest.update(len(data).to_bytes(8, "big"))
+        digest.update(data)
+
+    update(extra.encode())
     for file in sorted(iter_source_files(root, exclude=exclude)):
-        digest.update(str(file.relative_to(root)).encode())
-        digest.update(file.read_bytes())
+        update(str(file.relative_to(root)).encode())
+        update(file.read_bytes())
     return digest.hexdigest()
