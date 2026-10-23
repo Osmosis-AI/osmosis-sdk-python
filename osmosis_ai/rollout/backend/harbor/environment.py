@@ -37,6 +37,12 @@ def apply_opensandbox_defaults(kwargs: dict[str, Any]) -> None:
     # entrypoint always exports a run ID; self-hosted servers keep Harbor's default.
     if os.environ.get("OPENSANDBOX_RUN_ID"):
         kwargs.setdefault("use_server_proxy", True)
+    try:
+        request_timeout_sec = int(os.environ.get("OPENSANDBOX_REQUEST_TIMEOUT_SEC", ""))
+    except ValueError:
+        request_timeout_sec = 0
+    if request_timeout_sec > 0:
+        kwargs.setdefault("request_timeout_sec", request_timeout_sec)
 
 
 def uses_local_docker_runtime(environment_config: HarborEnvironmentConfig) -> bool:

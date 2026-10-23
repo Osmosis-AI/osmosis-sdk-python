@@ -8,6 +8,7 @@ import tempfile
 import traceback
 from collections.abc import AsyncIterator
 from contextlib import AsyncExitStack, asynccontextmanager
+from datetime import UTC, datetime
 from functools import partial
 from pathlib import Path
 from typing import Any
@@ -211,6 +212,7 @@ def create_rollout_server(
                 rollout_id=request.rollout_id,
                 status=RolloutStatus.CANCELLED,
                 err_message="cancelled",
+                agent_started_at=progress.agent_started_at,
             )
             await registry.complete(request.rollout_id, response)
             raise
@@ -378,6 +380,8 @@ async def _handle_rollout(
         )
     outcome: ExecutionOutcome | None = None
     try:
+        if not backend.reports_agent_start:
+            await rollout_ctx.mark_agent_started(datetime.now(UTC))
         with rollout_ctx:
             outcome = await backend.execute(
                 ExecutionRequest(
@@ -451,6 +455,7 @@ async def _handle_rollout(
         if result.err_message is not None
         else None,
         err_category=result.err_category,
+        agent_started_at=progress.agent_started_at if progress is not None else None,
     )
 
 

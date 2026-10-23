@@ -204,5 +204,5 @@ async def test_status_observer_failure_does_not_hold_lock_or_fail_rollout():
     await progress.set_status(RolloutStatus.RUNNING)
     assert progress.status == RolloutStatus.RUNNING
     await progress.set_status(RolloutStatus.SUCCESS)
-    assert await progress.wait_for_status_change() == RolloutStatus.SUCCESS
+    assert await progress.wait_for_change() == RolloutStatus.SUCCESS
     assert lock_states == [False, False]

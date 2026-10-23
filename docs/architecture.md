@@ -99,7 +99,7 @@ sequenceDiagram
 Anchors:
 
 - Server + endpoints: [../osmosis_ai/rollout/server/app.py](../osmosis_ai/rollout/server/app.py) (`create_rollout_server`, `POST /rollout`, `GET /rollout/{id}/result`, `GET /health`).
-- Wire types: [../osmosis_ai/rollout/types/protocol.py](../osmosis_ai/rollout/types/protocol.py) (`RolloutInitRequest`, `RolloutInitResponse`, `RolloutResultResponse`). Admission returns an opaque polling lease token; the client sends it as `X-Osmosis-Rollout-Lease` on every result request. `llm_api_key` is only the chat/proxy bearer.
+- Wire types: [../osmosis_ai/rollout/types/protocol.py](../osmosis_ai/rollout/types/protocol.py) (`RolloutInitRequest`, `RolloutInitResponse`, `RolloutResultResponse`). Admission returns an opaque polling lease token; the client sends it as `X-Osmosis-Rollout-Lease` on every result request. `llm_api_key` is only the chat/proxy bearer. `RolloutResultResponse.agent_started_at` is a UTC timestamp, null until the rollout's agent starts, carried by in-progress and final results.
 - Execution contract: [../osmosis_ai/rollout/backend/base.py](../osmosis_ai/rollout/backend/base.py) — `ExecutionBackend.execute(request) -> ExecutionOutcome`.
 - Sample/result types: [../osmosis_ai/rollout/types/sample.py](../osmosis_ai/rollout/types/sample.py) (`RolloutSample`, `RolloutStatus`, `RolloutErrorCategory`, `ExecutionRequest`, `ExecutionResult`, `ExecutionOutcome`).
 

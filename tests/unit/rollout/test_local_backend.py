@@ -10,6 +10,8 @@ from osmosis_ai.rollout.backend.local.backend import LocalBackend
 from osmosis_ai.rollout.context import (
     AgentWorkflowContext,
     GraderContext,
+    RolloutContext,
+    RolloutProgress,
     SampleSource,
 )
 from osmosis_ai.rollout.grader import Grader
@@ -718,6 +720,40 @@ class TestDeadlines:
         assert result.status == RolloutStatus.FAILURE
         assert result.err_category == RolloutErrorCategory.TIMEOUT
         assert "queued" in (result.err_message or "")
+
+    async def test_agent_start_waits_for_a_concurrency_slot(self):
+        import asyncio
+
+        backend = LocalBackend(
+            workflow=StubWorkflow,
+            workflow_config=AgentWorkflowConfig(
+                name="test", concurrency=ConcurrencyConfig(max_concurrent=1)
+            ),
+        )
+        release = asyncio.Event()
+
+        async def hog_the_only_slot():
+            async with backend.limiter.acquire():
+                await release.wait()
+
+        hog = asyncio.create_task(hog_the_only_slot())
+        await asyncio.sleep(0)
+
+        progress = RolloutProgress()
+        request = ExecutionRequest(id="r1", prompt=[{"role": "user", "content": "hi"}])
+        with RolloutContext(progress=progress):
+            execution = asyncio.create_task(backend.execute(request))
+        await asyncio.sleep(0.01)
+
+        # The server leaves the stamp to this backend, so a queued rollout that
+        # expires reads as never started and stays retryable.
+        assert backend.reports_agent_start
+        assert progress.agent_started_at is None
+
+        release.set()
+        await execution
+        await hog
+        assert progress.agent_started_at is not None
 
     async def test_grader_swallowed_cancellation_is_still_a_timeout(self):
         class CancelSwallowingGrader(Grader):
