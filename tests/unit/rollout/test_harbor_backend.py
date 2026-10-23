@@ -1983,6 +1983,7 @@ class TestConfigValidation:
 
         monkeypatch.setenv("OPENSANDBOX_DOMAIN", "https://opensandbox.example.com")
         monkeypatch.setenv("OPENSANDBOX_RUN_ID", "run-1")
+        monkeypatch.delenv("OPENSANDBOX_REQUEST_TIMEOUT_SEC", raising=False)
         caller_config = EnvironmentConfig(type="opensandbox", import_path=import_path)
         backend = self.backend_for(
             template_task, agent="oracle", environment_config=caller_config

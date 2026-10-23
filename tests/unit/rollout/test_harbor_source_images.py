@@ -225,6 +225,7 @@ def test_opensandbox_transport_matches_service_and_preserves_overrides(
 
     monkeypatch.setenv("OPENSANDBOX_DOMAIN", domain)
     monkeypatch.setenv("OPENSANDBOX_RUN_ID", "run-1")
+    monkeypatch.delenv("OPENSANDBOX_REQUEST_TIMEOUT_SEC", raising=False)
     kwargs = dict(overrides)
 
     apply_opensandbox_defaults(kwargs)
@@ -239,8 +240,51 @@ def test_self_hosted_opensandbox_keeps_harbors_direct_default(monkeypatch):
 
     monkeypatch.setenv("OPENSANDBOX_DOMAIN", "http://localhost:8080")
     monkeypatch.delenv("OPENSANDBOX_RUN_ID", raising=False)
+    monkeypatch.delenv("OPENSANDBOX_REQUEST_TIMEOUT_SEC", raising=False)
     kwargs: dict = {}
 
     apply_opensandbox_defaults(kwargs)
 
     assert kwargs == {"protocol": "http"}
+
+
+def test_request_timeout_comes_from_platform_env(monkeypatch):
+    from osmosis_ai.rollout.backend.harbor.environment import (
+        apply_opensandbox_defaults,
+    )
+
+    monkeypatch.setenv("OPENSANDBOX_DOMAIN", "https://opensandbox.example")
+    monkeypatch.setenv("OPENSANDBOX_RUN_ID", "run-1")
+    monkeypatch.setenv("OPENSANDBOX_REQUEST_TIMEOUT_SEC", "660")
+    kwargs: dict = {}
+
+    apply_opensandbox_defaults(kwargs)
+
+    assert kwargs["request_timeout_sec"] == 660
+
+
+def test_explicit_request_timeout_wins(monkeypatch):
+    from osmosis_ai.rollout.backend.harbor.environment import (
+        apply_opensandbox_defaults,
+    )
+
+    monkeypatch.setenv("OPENSANDBOX_REQUEST_TIMEOUT_SEC", "660")
+    kwargs = {"request_timeout_sec": 120}
+
+    apply_opensandbox_defaults(kwargs)
+
+    assert kwargs["request_timeout_sec"] == 120
+
+
+@pytest.mark.parametrize("raw", ["", "abc", "0", "-5", "12.5"])
+def test_unusable_request_timeout_env_is_ignored(monkeypatch, raw):
+    from osmosis_ai.rollout.backend.harbor.environment import (
+        apply_opensandbox_defaults,
+    )
+
+    monkeypatch.setenv("OPENSANDBOX_REQUEST_TIMEOUT_SEC", raw)
+    kwargs: dict = {}
+
+    apply_opensandbox_defaults(kwargs)
+
+    assert "request_timeout_sec" not in kwargs
