@@ -31,6 +31,8 @@ def test_redact_never_rebuilds_the_secret_from_the_marker() -> None:
     # Plain replacement turns "]]]" into "[REDACTED]]", which ends in the secret.
     assert redact_secret_text("]]]", "]]") == "[REDACTED]"
     assert redact_secret_value({"]]]": ["]]]"]}, "]]") == {"[REDACTED]": ["[REDACTED]"]}
+    # A secret inside the marker itself survives any marker-based replacement.
+    assert redact_secret_text("ARE", "RE") == ""
 
 
 def test_redact_secret_value_redacts_keys_containing_secret() -> None:

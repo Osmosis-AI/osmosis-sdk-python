@@ -15,9 +15,13 @@ from osmosis_ai.platform.auth.platform_client import PlatformAPIError
 
 def _redact_str(text: str, secret_value: str) -> str:
     redacted = text.replace(secret_value, "[REDACTED]")
+    if secret_value not in redacted:
+        return redacted
     # The marker can join its neighbours into the secret again ("]]]" with the
-    # secret "]]" becomes "[REDACTED]]"); then no part of the text is safe.
-    return "[REDACTED]" if secret_value in redacted else redacted
+    # secret "]]" becomes "[REDACTED]]"), or contain it outright (the secret
+    # "RE"); then no part of the text is safe, and in the second case neither
+    # is the marker.
+    return "" if secret_value in "[REDACTED]" else "[REDACTED]"
 
 
 def redact_secret_value(data: Any, secret_value: str) -> Any:
