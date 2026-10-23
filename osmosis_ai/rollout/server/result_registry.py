@@ -165,6 +165,7 @@ class RolloutFutureRegistry:
             return RolloutResultResponse(
                 rollout_id=rollout_id,
                 status=entry.progress.status,
+                agent_started_at=entry.progress.agent_started_at,
             )
 
     async def expire(self, rollout_id: str) -> None:

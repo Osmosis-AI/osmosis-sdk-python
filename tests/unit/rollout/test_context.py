@@ -1,5 +1,7 @@
 """Tests for osmosis_ai.rollout.context."""
 
+from datetime import UTC, datetime
+
 import pytest
 
 from osmosis_ai.rollout.context import (
@@ -73,6 +75,11 @@ class TestRolloutContext:
     async def test_get_sample_without_source_returns_none(self):
         ctx = RolloutContext(chat_completions_url="http://llm", rollout_id="r1")
         assert await ctx.get_sample() is None
+
+    async def test_mark_agent_started_without_progress_is_ignored(self):
+        ctx = RolloutContext(chat_completions_url="http://llm", rollout_id="r1")
+        await ctx.mark_agent_started(datetime(2026, 10, 22, 17, 30, tzinfo=UTC))
+        assert ctx.progress is None
 
     def test_set_sample_source_raises_on_second_registration(self):
         ctx = RolloutContext(chat_completions_url="http://llm", rollout_id="r1")

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -15,6 +16,8 @@ from osmosis_ai.rollout.types import (
     RolloutResultResponse,
     RolloutStatus,
 )
+
+AGENT_STARTED_AT = datetime(2026, 10, 22, 17, 30, tzinfo=UTC)
 
 
 def registry(
@@ -99,6 +102,39 @@ async def test_poll_renews_the_lease() -> None:
         result = await store.wait_for_result("r1", lease_token)
         assert result.status is RolloutStatus.RUNNING
     assert cancelled == []
+    await store.close()
+
+
+async def test_in_progress_response_carries_agent_started_at() -> None:
+    store = registry([])
+    lease = await store.register("r1")
+    progress = await store.get_progress("r1")
+    await progress.set_status(RolloutStatus.RUNNING)
+    await progress.mark_agent_started(AGENT_STARTED_AT)
+    response = await store.wait_for_result("r1", lease)
+    assert response.status is RolloutStatus.RUNNING
+    assert response.agent_started_at == AGENT_STARTED_AT
+    await store.close()
+
+
+async def test_in_progress_response_without_agent_start_is_null() -> None:
+    store = registry([])
+    lease = await store.register("r1")
+    progress = await store.get_progress("r1")
+    await progress.set_status(RolloutStatus.RUNNING)
+    response = await store.wait_for_result("r1", lease)
+    assert response.status is RolloutStatus.RUNNING
+    assert response.agent_started_at is None
+    await store.close()
+
+
+async def test_mark_agent_started_keeps_first_timestamp() -> None:
+    store = registry([])
+    await store.register("r1")
+    progress = await store.get_progress("r1")
+    await progress.mark_agent_started(AGENT_STARTED_AT)
+    await progress.mark_agent_started(AGENT_STARTED_AT + timedelta(minutes=1))
+    assert progress.agent_started_at == AGENT_STARTED_AT
     await store.close()
 
 

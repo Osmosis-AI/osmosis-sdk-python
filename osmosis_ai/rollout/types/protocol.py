@@ -1,4 +1,5 @@
 import math
+from datetime import datetime
 from typing import Any, Self
 
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -76,8 +77,9 @@ class RolloutInitResponse(BaseModel):
 class RolloutResultResponse(BaseModel):
     """Current or finished result from ``GET /rollout/{rollout_id}/result``.
 
-    In-progress requests contain only their current status. Finished requests
-    may also contain the sample and error details.
+    In-progress requests contain only their current status and agent start time.
+    Finished requests may also contain the sample and error details.
+    ``agent_started_at`` is UTC and stays ``None`` until the agent starts.
     """
 
     rollout_id: str
@@ -85,6 +87,7 @@ class RolloutResultResponse(BaseModel):
     sample: RolloutSample | None = None
     err_message: str | None = None
     err_category: RolloutErrorCategory | None = None
+    agent_started_at: datetime | None = None
 
 
 class CancelRolloutsRequest(BaseModel):

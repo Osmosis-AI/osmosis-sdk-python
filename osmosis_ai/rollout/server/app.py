@@ -211,6 +211,7 @@ def create_rollout_server(
                 rollout_id=request.rollout_id,
                 status=RolloutStatus.CANCELLED,
                 err_message="cancelled",
+                agent_started_at=progress.agent_started_at,
             )
             await registry.complete(request.rollout_id, response)
             raise
@@ -451,6 +452,7 @@ async def _handle_rollout(
         if result.err_message is not None
         else None,
         err_category=result.err_category,
+        agent_started_at=progress.agent_started_at if progress is not None else None,
     )
 
 

@@ -5,6 +5,7 @@ import json
 import time
 from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager, nullcontext
+from datetime import UTC, datetime
 from typing import Any
 
 import httpx
@@ -14,6 +15,7 @@ from fastapi.testclient import TestClient
 from httpx import ASGITransport
 
 from osmosis_ai.rollout.backend.base import ExecutionBackend
+from osmosis_ai.rollout.context import get_rollout_context
 from osmosis_ai.rollout.server import app as server_app_module
 from osmosis_ai.rollout.server import create_rollout_server
 from osmosis_ai.rollout.types import (
@@ -81,6 +83,38 @@ class BlockingBackend(StubBackend):
         raise AssertionError("unreachable")
 
 
+AGENT_STARTED_AT = datetime(2026, 10, 22, 17, 30, tzinfo=UTC)
+
+
+async def mark_agent_started() -> None:
+    ctx = get_rollout_context()
+    assert ctx is not None
+    await ctx.mark_agent_started(AGENT_STARTED_AT)
+
+
+class AgentStartedBackend(StubBackend):
+    def __init__(self, *, fail: bool = False) -> None:
+        super().__init__()
+        self.fail = fail
+
+    async def execute(self, request: ExecutionRequest) -> ExecutionOutcome:
+        await mark_agent_started()
+        if self.fail:
+            raise RuntimeError("agent crashed")
+        return await super().execute(request)
+
+
+class SetupFailureBackend(StubBackend):
+    async def execute(self, request: ExecutionRequest) -> ExecutionOutcome:
+        raise RuntimeError("sandbox create failed")
+
+
+class AgentStartedBlockingBackend(BlockingBackend):
+    async def execute(self, request: ExecutionRequest) -> ExecutionOutcome:
+        await mark_agent_started()
+        return await super().execute(request)
+
+
 def init_body() -> dict[str, Any]:
     return {
         "rollout_id": "r1",
@@ -127,6 +161,26 @@ def test_result_returns_finished_outcome() -> None:
         response = client.get("/rollout/r1/result", headers=lease_headers(admission))
     assert response.status_code == 200
     assert response.json()["status"] == "success"
+
+
+@pytest.mark.parametrize(("fail", "status"), [(False, "success"), (True, "failure")])
+def test_final_result_carries_agent_started_at(fail: bool, status: str) -> None:
+    backend = AgentStartedBackend(fail=fail)
+    with TestClient(create_rollout_server(backend=backend)) as client:
+        admission = client.post("/rollout", json=init_body())
+        response = client.get("/rollout/r1/result", headers=lease_headers(admission))
+    body = response.json()
+    assert body["status"] == status
+    assert datetime.fromisoformat(body["agent_started_at"]) == AGENT_STARTED_AT
+
+
+def test_final_result_without_agent_start_is_null() -> None:
+    with TestClient(create_rollout_server(backend=SetupFailureBackend())) as client:
+        admission = client.post("/rollout", json=init_body())
+        response = client.get("/rollout/r1/result", headers=lease_headers(admission))
+    body = response.json()
+    assert body["status"] == "failure"
+    assert body["agent_started_at"] is None
 
 
 def test_result_requires_a_polling_lease() -> None:
@@ -267,6 +321,33 @@ async def test_cancel_waits_for_cleanup_and_is_idempotent(selector) -> None:
             )
             assert result.json()["status"] == "cancelled"
             assert cleaned.is_set()
+
+
+async def cancelled_result_body(backend: BlockingBackend) -> dict[str, Any]:
+    app = create_rollout_server(backend=backend)
+    async with app.router.lifespan_context(app):
+        async with httpx.AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://rollout"
+        ) as client:
+            admission = await client.post("/rollout", json=init_body())
+            await asyncio.wait_for(backend.started.wait(), timeout=1.0)
+            await client.post("/rollout/cancel", json={"ids": ["r1"]})
+            response = await client.get(
+                "/rollout/r1/result", headers=lease_headers(admission)
+            )
+    return response.json()
+
+
+async def test_cancelled_before_agent_start_reports_null() -> None:
+    body = await cancelled_result_body(BlockingBackend())
+    assert body["status"] == "cancelled"
+    assert body["agent_started_at"] is None
+
+
+async def test_cancelled_after_agent_start_reports_the_timestamp() -> None:
+    body = await cancelled_result_body(AgentStartedBlockingBackend())
+    assert body["status"] == "cancelled"
+    assert datetime.fromisoformat(body["agent_started_at"]) == AGENT_STARTED_AT
 
 
 async def test_cancel_preserves_native_queued_disposition() -> None:

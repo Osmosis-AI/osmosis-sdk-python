@@ -5,6 +5,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable
 from contextvars import ContextVar
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -55,6 +56,7 @@ class RolloutProgress:
     status: RolloutStatus = RolloutStatus.QUEUED
     changed: asyncio.Condition = field(default_factory=asyncio.Condition)
     on_status: Callable[[RolloutStatus], None] | None = field(default=None, repr=False)
+    agent_started_at: datetime | None = None
 
     async def set_status(self, status: RolloutStatus) -> None:
         async with self.changed:
@@ -71,6 +73,12 @@ class RolloutProgress:
                 self.on_status(status)
             except Exception:
                 logger.warning("Rollout status observer failed", exc_info=False)
+
+    async def mark_agent_started(self, at: datetime) -> None:
+        async with self.changed:
+            # Multi-step trials start their agent once per step; keep the first.
+            if self.agent_started_at is None:
+                self.agent_started_at = at
 
     async def wait_for_status_change(self) -> RolloutStatus:
         async with self.changed:
@@ -146,6 +154,10 @@ class RolloutContext:
     async def set_status(self, status: RolloutStatus) -> None:
         if self.progress is not None:
             await self.progress.set_status(status)
+
+    async def mark_agent_started(self, at: datetime) -> None:
+        if self.progress is not None:
+            await self.progress.mark_agent_started(at)
 
 
 def get_rollout_context() -> RolloutContext | None:
