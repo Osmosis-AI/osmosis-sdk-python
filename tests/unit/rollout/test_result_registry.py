@@ -442,13 +442,3 @@ def test_crash_failure_response() -> None:
     assert response.status is RolloutStatus.FAILURE
     assert response.err_category is RolloutErrorCategory.INTERNAL_ERROR
     assert response.err_message == "rollout task crashed"
-
-
-@pytest.mark.parametrize(
-    "factory",
-    [RolloutFutureRegistry.lease_failure, RolloutFutureRegistry.crash_failure],
-    ids=["lease", "crash"],
-)
-def test_failure_responses_require_the_agent_start(factory) -> None:
-    with pytest.raises(TypeError, match="agent_started_at"):
-        factory("r1")

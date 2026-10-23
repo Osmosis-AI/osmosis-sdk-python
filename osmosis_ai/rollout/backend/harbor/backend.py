@@ -1539,22 +1539,8 @@ class HarborBackend(ExecutionBackend):
         if not pending:
             logger.error("No pending trial found for rollout %s", rollout_id)
             return
-        context = pending.rollout_context
-        if context is None:
-            logger.warning(
-                "Rollout %s has no rollout context; its agent start is not recorded",
-                rollout_id,
-            )
-            return
-        try:
-            await context.mark_agent_started(event.timestamp)
-        except Exception:
-            # Harbor emits AGENT_START outside the agent's try; a raise fails the trial.
-            logger.warning(
-                "Could not record agent start for rollout %s",
-                rollout_id,
-                exc_info=True,
-            )
+        if pending.rollout_context is not None:
+            await pending.rollout_context.mark_agent_started(event.timestamp)
 
     async def on_verification_start(self, event: TrialHookEvent) -> None:
         if event.config.trial_name in self.prewarm_trials:

@@ -3031,33 +3031,13 @@ class TestAgentStartHook:
 
         assert progress.agent_started_at == AGENT_STARTED_AT
 
-    @pytest.mark.parametrize("failure", ["no_context", "mark_raises"])
-    async def test_agent_start_hook_never_raises(
-        self, backend, queue, monkeypatch, caplog, failure
+    async def test_agent_start_for_a_finished_rollout_is_ignored(
+        self, backend, queue, caplog
     ):
-        """Harbor emits AGENT_START outside the agent's try; a raise fails the trial."""
-        from unittest.mock import AsyncMock
+        with caplog.at_level(logging.ERROR):
+            await queue.fire("agent-start", self.agent_start("gone"))
 
-        rollout_id = "rollout-agent-start-1"
-        progress = self.admit(backend, rollout_id)
-        pending = backend.pending[rollout_id]
-        if failure == "no_context":
-            pending.rollout_context = None
-        else:
-            monkeypatch.setattr(
-                pending.rollout_context,
-                "mark_agent_started",
-                AsyncMock(side_effect=RuntimeError("progress unavailable")),
-            )
-
-        with caplog.at_level(logging.WARNING):
-            await queue.fire("agent-start", self.agent_start(rollout_id))
-
-        assert progress.agent_started_at is None
-        assert any(
-            record.levelno == logging.WARNING and rollout_id in record.getMessage()
-            for record in caplog.records
-        )
+        assert "No pending trial found for rollout gone" in caplog.text
 
     async def test_agent_start_hook_ignores_prewarm_trials(self, backend, queue):
         progress = self.admit(backend, "prewarm-abc")
