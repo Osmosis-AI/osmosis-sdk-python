@@ -105,6 +105,11 @@ def test_a_row_without_a_label_omits_the_key() -> None:
     )
 
 
+def test_a_system_prompt_only_row_has_an_empty_prompt() -> None:
+    row = {"system_prompt": "Follow the house style", "metadata": None, "label": "y"}
+    assert _render(row) == b'{"row_index": 0, "prompt": "", "label": "y"}'
+
+
 def test_non_ascii_text_is_written_as_utf8_not_escaped() -> None:
     output = _render({"user_prompt": "héllo 世界 🙂", "ground_truth": "→ ok"})
 

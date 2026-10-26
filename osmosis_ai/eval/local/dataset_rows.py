@@ -83,9 +83,11 @@ def render_dataset_rows(rows: Iterable[EvalDatasetRow]) -> bytes:
     lines: list[str] = []
     for row in rows:
         raw = _raw_row(row)
+        # A row with only a system prompt sends no user text, so it has no prompt.
+        has_prompt = "user_prompt" in raw or "metadata" in raw
         line: dict[str, Any] = {
             "row_index": row.row_index,
-            "prompt": _dataset_row_prompt(raw),
+            "prompt": _dataset_row_prompt(raw) if has_prompt else "",
         }
         label = _dataset_row_label(raw)
         if label is not None:
