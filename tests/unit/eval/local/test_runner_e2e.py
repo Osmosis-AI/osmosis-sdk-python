@@ -19,6 +19,7 @@ import pytest
 from osmosis_ai.eval.local.dataset import select_rows
 from osmosis_ai.eval.local.runner import LocalEvalOptions, ResumeRefusedError
 from osmosis_ai.eval.local.state import TerminalJournal, TerminalRecord
+from osmosis_ai.eval.local.upload import build_eval_upload_plan
 from osmosis_ai.rollout.client import (
     RolloutAdmissionTimeoutError,
     RolloutClient,
@@ -118,6 +119,16 @@ async def test_a_full_run_produces_the_download_layout(harness: RunnerHarness) -
     # The progress display exists before the first result.
     assert hooks.progress_snapshots[0].completed == 0
     assert hooks.progress_snapshots[0].total == 4
+
+
+async def test_a_finished_run_uploads_its_dataset_rows(harness: RunnerHarness) -> None:
+    await harness.runner().run()
+    run_dir = harness.run_dir()
+
+    plan = build_eval_upload_plan(run_dir)
+
+    uploaded = next(file for file in plan.files if file.path == "dataset_rows.jsonl")
+    assert uploaded.source.read_bytes() == (run_dir / "dataset_rows.jsonl").read_bytes()
 
 
 async def test_artifacts_are_projected_when_the_workflow_writes_them(

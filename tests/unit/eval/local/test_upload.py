@@ -188,6 +188,53 @@ def test_missing_logs_txt_is_omitted_from_the_plan(tmp_path: Path) -> None:
     assert "logs.txt" not in [file.path for file in plan.files]
 
 
+def test_dataset_rows_is_in_the_import_file_list_when_the_run_has_one(
+    tmp_path: Path,
+) -> None:
+    run_dir = _run_dir(tmp_path)
+    body = b'{"row_index": 0, "prompt": "hello", "label": "world"}'
+    (run_dir / "dataset_rows.jsonl").write_bytes(body)
+
+    plan = build_eval_upload_plan(run_dir)
+
+    assert [file.path for file in plan.files] == [
+        "dataset_rows.jsonl",
+        "index.jsonl",
+        "logs.txt",
+        "progress.json",
+        f"rollout_trials/{ROLLOUT_ID}/artifacts/answer.txt",
+        f"rollout_trials/{ROLLOUT_ID}/trajectory.json",
+    ]
+    assert {
+        "path": "dataset_rows.jsonl",
+        "size": len(body),
+        "sha256": hashlib.sha256(body).hexdigest(),
+    } in plan.file_requests()
+
+
+def test_run_without_dataset_rows_uploads_without_it(tmp_path: Path) -> None:
+    run_dir = _run_dir(tmp_path)
+    assert not (run_dir / "dataset_rows.jsonl").exists()
+
+    plan = build_eval_upload_plan(run_dir)
+
+    assert "dataset_rows.jsonl" not in [file.path for file in plan.files]
+    assert "dataset_rows.jsonl" not in [
+        request["path"] for request in plan.file_requests()
+    ]
+
+
+def test_symlinked_dataset_rows_is_not_uploaded(tmp_path: Path) -> None:
+    run_dir = _run_dir(tmp_path)
+    outside = tmp_path / "outside.txt"
+    outside.write_bytes(b"outside secret")
+    (run_dir / "dataset_rows.jsonl").symlink_to(outside)
+
+    plan = build_eval_upload_plan(run_dir)
+
+    assert "dataset_rows.jsonl" not in [file.path for file in plan.files]
+
+
 def test_prepare_eval_upload_plan_scrubs_logs_before_hashing(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -180,7 +180,7 @@ Throughput knobs (`--max-in-flight`, `evaluation.batch_size`) are excluded from 
 
 ## Uploading completed results
 
-`eval upload` validates and hashes the local run under the same sibling `.locks/<run-name>.lock` used by the supervisor. `index.jsonl`, `progress.json`, the combined `logs.txt`, index-referenced canonical trajectories, and safe artifacts belonging to the selected rollout ids are sent. The immutable local manifest, journal, metrics projection, summaries, top-level projections, superseded attempts, per-trial logs, control files, and secret-bearing inputs are never uploaded. Harbor per-trial logs stay on disk; they are not the run Logs tab.
+`eval upload` validates and hashes the local run under the same sibling `.locks/<run-name>.lock` used by the supervisor. `index.jsonl`, `progress.json`, the combined `logs.txt`, `dataset_rows.jsonl` when the run has one, index-referenced canonical trajectories, and safe artifacts belonging to the selected rollout ids are sent. A run created before `dataset_rows.jsonl` existed uploads without it, and re-running its name with `eval run` writes it. The immutable local manifest, journal, metrics projection, summaries, top-level projections, superseded attempts, per-trial logs, control files, and secret-bearing inputs are never uploaded. Harbor per-trial logs stay on disk; they are not the run Logs tab.
 
 The platform owns resumability. Each retry starts the same import from `local_run_id` plus the exact manifest digest, skips files the server already has, and finalizes once all declared hashes are present; the SDK writes no local upload-state file and does not abort a session when interrupted. A run must be complete: failed and skipped samples count as terminal, but pending work does not.
 

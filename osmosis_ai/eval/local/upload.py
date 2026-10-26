@@ -19,6 +19,7 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import IO, Any, TypeGuard
 
+from osmosis_ai.eval.local.dataset_rows import DATASET_ROWS_FILENAME
 from osmosis_ai.eval.local.results import atif_rollout_identity
 from osmosis_ai.rollout.trajectory.atif import Trajectory
 
@@ -552,9 +553,10 @@ def build_eval_upload_plan(
         "index.jsonl": run_dir / "index.jsonl",
         "progress.json": run_dir / "progress.json",
     }
-    logs_path = run_dir / "logs.txt"
-    if not logs_path.is_symlink() and logs_path.is_file():
-        selected["logs.txt"] = logs_path
+    for optional in ("logs.txt", DATASET_ROWS_FILENAME):
+        optional_path = run_dir / optional
+        if not optional_path.is_symlink() and optional_path.is_file():
+            selected[optional] = optional_path
     for row in rows:
         trajectory = _trajectory_path(run_dir, row)
         if trajectory is not None:
