@@ -155,7 +155,7 @@ def _safe_relative_path(
     if any(part in {"", ".", ".."} for part in parts):
         return None
     category = path_category(path)
-    if category == "summary" and "summary" not in selected_types:
+    if path == "summary.jsonl" and "summary" not in selected_types:
         # summary.jsonl is also part of the trajectories type.
         category = "trajectories"
     if category is None or category not in selected_types:
