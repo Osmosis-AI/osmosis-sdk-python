@@ -193,6 +193,16 @@ def test_no_rows_render_to_an_empty_file() -> None:
             id="messages-skip-non-dict-entries",
         ),
         pytest.param(
+            {
+                "messages": [
+                    {"role": "user", "content": "q"},
+                    {"role": "assistant", "content": None, "tool_calls": []},
+                ]
+            },
+            "q",
+            id="messages-skip-non-text-content",
+        ),
+        pytest.param(
             {"metadata": {"b": 1, "a": "x"}}, '{"a": "x", "b": 1}', id="metadata"
         ),
         pytest.param(

@@ -67,10 +67,8 @@ def _raw_row(row: EvalDatasetRow) -> dict[str, Any]:
     """Rebuild the dataset columns a managed run reads, so both write the same line."""
     raw: dict[str, Any] = {}
     for message in row.initial_messages:
-        if message["role"] == "system":
-            raw["system_prompt"] = message["content"]
-        elif message["role"] == "user":
-            raw["user_prompt"] = message["content"]
+        column = "system_prompt" if message["role"] == "system" else "user_prompt"
+        raw[column] = message["content"]
     if row.label is not None:
         raw["ground_truth"] = row.label
     if row.metadata is not None:
