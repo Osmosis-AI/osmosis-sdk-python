@@ -221,13 +221,17 @@ def test_prompt_flattens_the_non_system_messages_of_a_row(
     ("row", "expected"),
     [
         ({"ground_truth": 4}, "4"),
+        ({"ground_truth": 0}, "0"),
+        ({"ground_truth": False}, "False"),
+        ({"ground_truth": 0, "label": "L"}, "0"),
         ({"ground_truth": "", "label": "L"}, "L"),
+        ({"ground_truth": None, "label": "L"}, "L"),
         ({"label": "only"}, "only"),
-        ({"ground_truth": 0}, None),
+        ({"ground_truth": None, "label": ""}, None),
         ({}, None),
     ],
 )
-def test_label_is_omitted_unless_truthy(
+def test_label_is_omitted_only_when_none_or_empty(
     row: dict[str, Any], expected: str | None
 ) -> None:
     assert _dataset_row_label(row) == expected

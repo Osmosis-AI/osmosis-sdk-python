@@ -59,8 +59,11 @@ def _dataset_row_prompt(row: Mapping[str, Any]) -> str:
 
 
 def _dataset_row_label(row: Mapping[str, Any]) -> str | None:
-    raw = row.get("ground_truth") or row.get("label")
-    return str(raw)[:DATASET_ROW_LABEL_MAX_CHARS] if raw else None
+    for key in ("ground_truth", "label"):
+        raw = row.get(key)
+        if raw is not None and raw != "":
+            return str(raw)[:DATASET_ROW_LABEL_MAX_CHARS]
+    return None
 
 
 def _raw_row(row: EvalDatasetRow) -> dict[str, Any]:
