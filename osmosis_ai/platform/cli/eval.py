@@ -647,13 +647,16 @@ def download(
 ) -> OperationResult:
     """Download selected eval run outputs through the manifest contract."""
     from osmosis_ai.platform.cli.run_download import (
+        EVAL_ALL_DOWNLOAD_TYPES,
         EVAL_DOWNLOAD_TYPES,
         parse_download_types,
         run_download,
         validate_rows,
     )
 
-    selected_types = parse_download_types(types, allowed=EVAL_DOWNLOAD_TYPES)
+    selected_types = parse_download_types(
+        types, allowed=EVAL_DOWNLOAD_TYPES, all_types=EVAL_ALL_DOWNLOAD_TYPES
+    )
     selected_rows = validate_rows(rows)
 
     context = require_git_workspace_directory_context()

@@ -335,14 +335,14 @@ def eval_download(
         "metrics,trajectories",
         "--type",
         help=(
-            "Comma-separated selector: metrics, trajectories, artifacts, logs, all. "
-            "Replaces the default selection."
+            "Comma-separated selector: metrics, summary, trajectories, artifacts, "
+            "logs, all. Replaces the default selection."
         ),
     ),
     rows: str | None = typer.Option(
         None,
         "--rows",
-        help='Rows for trajectories/artifacts, for example "3,7,10-20".',
+        help='Rows for summary/trajectories/artifacts, for example "3,7,10-20".',
     ),
     overwrite: bool = typer.Option(
         False,
@@ -356,7 +356,7 @@ def eval_download(
         help="Skip size confirmation.",
     ),
 ) -> CommandResult:
-    """Download evaluation metrics, trajectories, artifacts, or logs."""
+    """Download evaluation metrics, summary, trajectories, artifacts, or logs."""
     from osmosis_ai.platform.cli.eval import download as _download
 
     return _download(

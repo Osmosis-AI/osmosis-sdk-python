@@ -30,6 +30,7 @@ GIT_IDENTITY = "acme/rollouts"
 
 FILES = {
     "metrics": [RunDownloadFile("metrics.json", 10)],
+    "summary": [RunDownloadFile("summary.jsonl", 20)],
     "trajectories": [
         RunDownloadFile("summary.jsonl", 20),
         RunDownloadFile("trajectories/row_3_run_0.json", 30, token="rollout-3-0"),
@@ -111,7 +112,11 @@ def _make_fake_client(
             files = (
                 manifest_files
                 if manifest_files is not None
-                else [item for kind in types for item in FILES[kind]]
+                else list(
+                    {
+                        item.identity: item for kind in types for item in FILES[kind]
+                    }.values()
+                )
             )
             return RunDownloadManifest(
                 files=files,
@@ -178,6 +183,10 @@ def test_default_download_is_metrics_and_trajectories(monkeypatch, tmp_path, cap
     expected = tmp_path / ".osmosis" / "evals" / "my-run"
     assert resource["selected_types"] == ["metrics", "trajectories"]
     assert resource["output_path"] == str(expected)
+    assert resource["breakdown"] == {
+        "metrics": {"files": 1, "bytes": 10},
+        "trajectories": {"files": 2, "bytes": 50},
+    }
     assert fake_client.manifest_calls == [
         {"types": ("metrics", "trajectories"), "rows": None}
     ]
@@ -297,6 +306,65 @@ def test_type_selector_replaces_default_and_rows_are_forwarded(
     assert not (output / "metrics.json").exists()
 
 
+def test_summary_type_downloads_only_summary_jsonl(monkeypatch, tmp_path, capsys):
+    _stub_git_context(monkeypatch, tmp_path)
+    fake_client = _make_fake_client()
+    monkeypatch.setattr(eval_module, "OsmosisClient", fake_client)
+    _stub_download(monkeypatch)
+
+    exit_code = cli.main(
+        ["--json", "eval", "download", "my-run", "--type", "summary", "--rows", "3"]
+    )
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    resource = json.loads(captured.out)["resource"]
+    expected = tmp_path / ".osmosis" / "evals" / "my-run"
+    assert resource["selected_types"] == ["summary"]
+    assert resource["breakdown"] == {"summary": {"files": 1, "bytes": 20}}
+    assert fake_client.manifest_calls == [{"types": ("summary",), "rows": "3"}]
+    assert (expected / "summary.jsonl").is_file()
+    assert sorted(path.name for path in expected.iterdir()) == ["summary.jsonl"]
+
+
+def test_summary_requested_with_trajectories_is_reported_under_summary(
+    monkeypatch, tmp_path, capsys
+):
+    _stub_git_context(monkeypatch, tmp_path)
+    fake_client = _make_fake_client()
+    monkeypatch.setattr(eval_module, "OsmosisClient", fake_client)
+    _stub_download(monkeypatch)
+
+    exit_code = cli.main(
+        ["--json", "eval", "download", "my-run", "--type", "summary,trajectories"]
+    )
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    resource = json.loads(captured.out)["resource"]
+    assert resource["files_downloaded"] == 2
+    assert resource["breakdown"] == {
+        "summary": {"files": 1, "bytes": 20},
+        "trajectories": {"files": 1, "bytes": 30},
+    }
+
+
+def test_summary_type_surfaces_platform_validation_error(monkeypatch, tmp_path, capsys):
+    _stub_git_context(monkeypatch, tmp_path)
+    error = PlatformAPIError("Invalid types: summary", 400)
+    monkeypatch.setattr(
+        eval_module, "OsmosisClient", _make_fake_client(manifest_error=error)
+    )
+
+    exit_code = cli.main(["--json", "eval", "download", "my-run", "--type", "summary"])
+    captured = capsys.readouterr()
+
+    assert exit_code == 1
+    payload = json.loads(captured.err)["error"]
+    assert payload["code"] == "VALIDATION"
+    assert payload["message"] == "Invalid types: summary"
+
+
 def test_type_all_expands_all_eval_categories(monkeypatch, tmp_path, capsys):
     _stub_git_context(monkeypatch, tmp_path)
     fake_client = _make_fake_client()
@@ -306,13 +374,10 @@ def test_type_all_expands_all_eval_categories(monkeypatch, tmp_path, capsys):
     exit_code = cli.main(["--json", "eval", "download", "my-run", "--type", "all"])
     captured = capsys.readouterr()
 
+    all_types = ("metrics", "trajectories", "artifacts", "logs")
     assert exit_code == 0
-    assert json.loads(captured.out)["resource"]["selected_types"] == [
-        "metrics",
-        "trajectories",
-        "artifacts",
-        "logs",
-    ]
+    assert json.loads(captured.out)["resource"]["selected_types"] == list(all_types)
+    assert fake_client.manifest_calls == [{"types": all_types, "rows": None}]
 
 
 def test_manifest_pages_report_files_found_so_far(monkeypatch, tmp_path):
