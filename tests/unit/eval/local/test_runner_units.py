@@ -1913,9 +1913,8 @@ async def test_dataset_rows_are_written_before_dispatch(tmp_path: Path) -> None:
     )
 
 
-@pytest.mark.parametrize("retry_failed", [False, True])
 async def test_dataset_rows_are_rewritten_when_a_run_is_resumed(
-    tmp_path: Path, retry_failed: bool
+    tmp_path: Path,
 ) -> None:
     selection = _four_row_selection(tmp_path)
     path = tmp_path / "evals" / "run-1" / "dataset_rows.jsonl"
@@ -1925,8 +1924,49 @@ async def test_dataset_rows_are_rewritten_when_a_run_is_resumed(
     path.write_bytes(b"stale")
 
     with pytest.raises(RuntimeError, match="dispatch declined"):
-        await _declining_runner(tmp_path, selection, retry_failed=retry_failed).run()
+        await _declining_runner(tmp_path, selection).run()
 
+    assert path.read_bytes() == original
+
+
+async def test_dataset_rows_are_rewritten_when_failed_samples_are_retried(
+    tmp_path: Path,
+) -> None:
+    from osmosis_ai.eval.local.state import TerminalJournal, TerminalRecord
+
+    selection = _four_row_selection(tmp_path)
+    run_dir = tmp_path / "evals" / "run-1"
+    path = run_dir / "dataset_rows.jsonl"
+    with pytest.raises(RuntimeError, match="dispatch declined"):
+        await _declining_runner(tmp_path, selection).run()
+    original = path.read_bytes()
+    journal = TerminalJournal(run_dir / "events.jsonl")
+    journal.open_for_append(journal.replay())
+    try:
+        await journal.append(
+            TerminalRecord(
+                row_index=0,
+                run_index=0,
+                rollout_id="a" * 32,
+                status="failed",
+                error_type="rollout_failed",
+            )
+        )
+    finally:
+        journal.close()
+    path.write_bytes(b"stale")
+    pending_counts: list[int] = []
+
+    async def record_and_decline(*, pending: int, model_path: str) -> None:
+        pending_counts.append(pending)
+        raise RuntimeError("dispatch declined")
+
+    runner = _declining_runner(tmp_path, selection, retry_failed=True)
+    runner._hooks.confirm_dispatch = record_and_decline
+    with pytest.raises(RuntimeError, match="dispatch declined"):
+        await runner.run()
+
+    assert pending_counts == [4]
     assert path.read_bytes() == original
 
 
