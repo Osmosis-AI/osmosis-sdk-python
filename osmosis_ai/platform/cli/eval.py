@@ -632,6 +632,10 @@ def info(name: str, *, output: str | None) -> DetailResult:
 # ── eval download ───────────────────────────────────────────────────
 
 
+def _report_manifest_progress(files: int) -> None:
+    console.print(f"Found {files:,} files so far...", style="dim")
+
+
 def download(
     name: str,
     *,
@@ -684,6 +688,7 @@ def download(
                     detail.id,
                     types=requested_types,
                     rows=selected_rows,
+                    on_page=_report_manifest_progress,
                     credentials=credentials,
                     git_identity=git_identity,
                 )

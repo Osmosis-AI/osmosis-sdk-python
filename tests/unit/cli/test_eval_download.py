@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
+from io import StringIO
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -11,6 +13,7 @@ import pytest
 import osmosis_ai.cli.main as cli
 import osmosis_ai.platform.cli.eval as eval_module
 import osmosis_ai.platform.cli.run_download as run_download_module
+from osmosis_ai.cli.console import Console
 from osmosis_ai.platform.api.download import DownloadHTTPError
 from osmosis_ai.platform.api.models import (
     EvalRunMetrics,
@@ -77,6 +80,7 @@ def _make_fake_client(
     status: str = "finished",
     manifest_error: Exception | None = None,
     manifest_files: list[RunDownloadFile] | None = None,
+    page_file_counts: Sequence[int] = (),
 ):
     manifest_calls: list[dict[str, object]] = []
     url_calls: list[list[RunDownloadFile]] = []
@@ -93,6 +97,7 @@ def _make_fake_client(
             *,
             types,
             rows=None,
+            on_page=None,
             git_identity,
             credentials=None,
         ):
@@ -100,6 +105,9 @@ def _make_fake_client(
                 raise manifest_error
             assert run_id == "er_12345678"
             manifest_calls.append({"types": tuple(types), "rows": rows})
+            if on_page is not None:
+                for count in page_file_counts:
+                    on_page(count)
             files = (
                 manifest_files
                 if manifest_files is not None
@@ -307,6 +315,23 @@ def test_type_all_expands_all_eval_categories(monkeypatch, tmp_path, capsys):
     ]
 
 
+def test_manifest_pages_report_files_found_so_far(monkeypatch, tmp_path):
+    _stub_git_context(monkeypatch, tmp_path)
+    fake_client = _make_fake_client(page_file_counts=[2000, 4500])
+    monkeypatch.setattr(eval_module, "OsmosisClient", fake_client)
+    _stub_download(monkeypatch)
+    output = StringIO()
+    monkeypatch.setattr(
+        eval_module, "console", Console(file=output, force_terminal=False, width=200)
+    )
+
+    eval_module.download("my-run", output=None, types="metrics")
+
+    printed = output.getvalue()
+    assert "Found 2,000 files so far" in printed
+    assert "Found 4,500 files so far" in printed
+
+
 @pytest.mark.parametrize(
     ("args", "message"),
     [
@@ -460,6 +485,33 @@ def test_invalid_manifest_paths_are_reported_and_reserved_manifest_is_skipped(
         "artifacts/row_3_run_0/manifest.json",
     }
     assert not (tmp_path / "evil.json").exists()
+
+
+def test_same_path_with_different_tokens_is_reported_as_duplicate(
+    monkeypatch, tmp_path, capsys
+):
+    path = "trajectories/row_3_run_0.json"
+    files = [
+        RunDownloadFile(path, 10, token="rollout-a"),
+        RunDownloadFile(path, 10, token="rollout-b"),
+    ]
+    _stub_git_context(monkeypatch, tmp_path)
+    monkeypatch.setattr(
+        eval_module, "OsmosisClient", _make_fake_client(manifest_files=files)
+    )
+    _stub_download(monkeypatch)
+
+    exit_code = cli.main(
+        ["--json", "eval", "download", "my-run", "--type", "trajectories"]
+    )
+    captured = capsys.readouterr()
+
+    assert exit_code == 1
+    resource = json.loads(captured.out)["resource"]
+    assert resource["files_downloaded"] == 1
+    assert resource["files_failed"] == [
+        {"path": path, "error": "Manifest contains a duplicate path."}
+    ]
 
 
 def test_nested_artifact_manifest_is_downloadable(monkeypatch, tmp_path, capsys):

@@ -26,7 +26,7 @@ osmosis benchmark runs download NAME
 After resolving a run name or ID, the SDK uses two eval routes:
 
 ```text
-GET  /api/cli/eval-runs/[id]/samples/manifest?types=&rows=
+GET  /api/cli/eval-runs/[id]/samples/manifest?types=&rows=&cursor=
 POST /api/cli/eval-runs/[id]/samples/download-urls
 ```
 
@@ -37,7 +37,9 @@ GET  /api/cli/benchmark-runs/[id]/outputs/manifest?types=
 POST /api/cli/benchmark-runs/[id]/outputs/download-urls
 ```
 
-The manifest returns `{files: [{token?, path, size}], totals}`. `path` is the final path relative to the local run root, and `token` is an opaque server handle (a rollout id or an export snapshot token). URL requests contain at most 500 `{token, path}` items. The platform derives full S3 keys server-side and returns 15-minute presigned GET URLs; the SDK never accepts raw object keys.
+The manifest returns `{files: [{token?, path, size}], totals}`; the eval manifest also returns `next_cursor`. `path` is the final path relative to the local run root, and `token` is an opaque server handle (a rollout id or an export snapshot token). URL requests contain at most 500 `{token, path}` items. The platform derives full S3 keys server-side and returns 15-minute presigned GET URLs; the SDK never accepts raw object keys.
+
+Eval manifests are paged. The SDK requests `cursor=0`, follows `next_cursor` until it is `null` or absent, and hands the combined files to the transfer engine, dropping a file repeated across pages (same `path` and `token`); rich output prints a running file count between pages. A platform that predates paging ignores `cursor` and returns every file in the first response, and a `next_cursor` that does not increase fails the download. Benchmark manifests are not paged and send no `cursor`.
 
 ## Fixed local layout
 

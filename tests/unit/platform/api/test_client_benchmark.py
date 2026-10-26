@@ -472,3 +472,26 @@ def test_benchmark_logs_stop_and_output_routes(mock_request: MagicMock) -> None:
         credentials=None,
         git_identity="acme/workspace",
     )
+
+
+@patch("osmosis_ai.platform.api.client.platform_request")
+def test_benchmark_download_manifest_is_one_request_without_cursor(
+    mock_request: MagicMock,
+) -> None:
+    mock_request.return_value = {
+        "files": [{"path": "summary.csv", "size": 10, "token": "export-1"}],
+        "totals": {"files": 1, "bytes": 10},
+    }
+
+    manifest = OsmosisClient().get_benchmark_run_download_manifest(
+        "run/name",
+        types=["summary", "results"],
+        git_identity="acme/workspace",
+    )
+
+    mock_request.assert_called_once_with(
+        "/api/cli/benchmark-runs/run%2Fname/outputs/manifest?types=summary%2Cresults",
+        credentials=None,
+        git_identity="acme/workspace",
+    )
+    assert [file.path for file in manifest.files] == ["summary.csv"]
