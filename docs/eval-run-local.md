@@ -134,6 +134,7 @@ The run ends with a results table: work items by outcome, pass rate against the 
   logs.txt             # combined supervisor + rollout-server log, secrets redacted
   index.jsonl          # platform-shaped sample index
   progress.json        # {total_runs, sampled_rows, total_dataset_rows}
+  dataset_rows.jsonl   # {row_index, prompt, label?} per selected row, rewritten on every invocation
   metrics.json         # {eval_run: {...}, summary: {...}}
   summary.jsonl        # index.jsonl, verbatim
   trajectories/row_<r>_run_<n>.json
@@ -146,6 +147,8 @@ The run ends with a results table: work items by outcome, pass rate against the 
 ```
 
 `metrics.json`, `summary.jsonl`, `trajectories/`, and `artifacts/` are the same shape `osmosis eval download` produces for a cloud run, so the same tooling reads both. Everything under `rollout_trials/` is the canonical store; the top-level copies are independent, so editing them never corrupts the originals.
+
+`dataset_rows.jsonl` holds the prompt and ground truth the platform searches for each sample: one JSON line per selected row in dataset order, joined by newlines with no trailing newline. `prompt` is the row's non-system message text (its `metadata` as sorted JSON when the row has no prompt) cut at 2,000 characters, and `label` is the ground truth cut at 500 characters, omitted when the row has none. `row_index` is the row's position among the selected rows, the same index `index.jsonl` uses, not its offset in the dataset file. The file depends only on the selected rows, so resuming, `--retry-failed`, or re-running a finished run rewrites identical bytes.
 
 ## Resume, fresh, and retry
 

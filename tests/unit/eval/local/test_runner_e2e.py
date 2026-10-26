@@ -43,6 +43,7 @@ async def test_a_full_run_produces_the_download_layout(harness: RunnerHarness) -
         "events.jsonl",
         "index.jsonl",
         "progress.json",
+        "dataset_rows.jsonl",
         "summary.jsonl",
         "metrics.json",
         "logs.txt",
@@ -64,6 +65,12 @@ async def test_a_full_run_produces_the_download_layout(harness: RunnerHarness) -
     assert (run_dir / "summary.jsonl").read_text() == (
         run_dir / "index.jsonl"
     ).read_text()
+    assert (run_dir / "dataset_rows.jsonl").read_text() == (
+        '{"row_index": 0, "prompt": "say ok", "label": "ok"}\n'
+        '{"row_index": 1, "prompt": "say ok twice", "label": "ok"}\n'
+        '{"row_index": 2, "prompt": "say ok thrice", "label": "ok"}\n'
+        '{"row_index": 3, "prompt": "say ok again", "label": "ok"}'
+    )
 
     # The contract stub replies "ok" and every row's label is "ok", so a correct
     # end-to-end path yields reward 1.0 -- this is the reward-plumbing assertion.
@@ -140,6 +147,12 @@ async def test_row_index_is_the_position_in_the_selected_set(
     await harness.runner(selection=selection).run()
     rows = harness.index_rows()
     assert [row["row_index"] for row in rows] == [0, 1]
+    # dataset_rows.jsonl indexes the selected rows the same way, so its lines
+    # line up with the index entries they describe.
+    assert (harness.run_dir() / "dataset_rows.jsonl").read_text() == (
+        '{"row_index": 0, "prompt": "say ok thrice", "label": "ok"}\n'
+        '{"row_index": 1, "prompt": "say ok again", "label": "ok"}'
+    )
     # The dataset offset survives in the journal, for local UX and provenance.
     # The journal is appended in completion order, which concurrent dispatch
     # makes nondeterministic; only the set of offsets is the contract.
