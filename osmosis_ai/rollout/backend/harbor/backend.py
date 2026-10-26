@@ -295,6 +295,10 @@ def _resolve_backend_bundle(
 
 
 class HarborBackend(ExecutionBackend):
+    # on_agent_start stamps agent_started_at once the sandbox is up; a server stamp
+    # at execute() entry would land first (first write wins) and include setup.
+    reports_agent_start = True
+
     def __init__(
         self,
         *,
@@ -421,6 +425,7 @@ class HarborBackend(ExecutionBackend):
         )
 
         orchestrator.add_hook(TrialEvent.START, self.on_trial_started)
+        orchestrator.add_hook(TrialEvent.AGENT_START, self.on_agent_start)
         orchestrator.add_hook(TrialEvent.VERIFICATION_START, self.on_verification_start)
         orchestrator.add_hook(TrialEvent.END, self.on_trial_end)
 
@@ -1525,6 +1530,17 @@ class HarborBackend(ExecutionBackend):
         if result is not None and result.status == RolloutStatus.SUCCESS:
             return True, None
         return False, result.err_message if result else "Unknown error"
+
+    async def on_agent_start(self, event: TrialHookEvent) -> None:
+        if event.config.trial_name in self.prewarm_trials:
+            return
+        rollout_id = parse_rollout_id(event)
+        pending = self.pending.get(rollout_id)
+        if not pending:
+            logger.error("No pending trial found for rollout %s", rollout_id)
+            return
+        if pending.rollout_context is not None:
+            await pending.rollout_context.mark_agent_started(event.timestamp)
 
     async def on_verification_start(self, event: TrialHookEvent) -> None:
         if event.config.trial_name in self.prewarm_trials:

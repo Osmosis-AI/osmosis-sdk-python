@@ -457,6 +457,6 @@ async def publish_previews(
             return
         try:
             async with asyncio.timeout(PREVIEW_INTERVAL_SEC):
-                await progress.wait_for_status_change()
+                await progress.wait_for_change()
         except TimeoutError:
             pass

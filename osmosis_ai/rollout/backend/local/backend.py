@@ -3,6 +3,7 @@ import copy
 import logging
 import time
 import traceback
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -81,6 +82,10 @@ def _expired_after_return(
 
 
 class LocalBackend(ExecutionBackend):
+    # execute() stamps the agent start once a concurrency slot frees up; a server
+    # stamp at execute() entry would report queued rollouts as started.
+    reports_agent_start = True
+
     def __init__(
         self,
         *,
@@ -126,6 +131,8 @@ class LocalBackend(ExecutionBackend):
         # time spent queued here has to come out of the workflow's budget.
         enqueued = time.monotonic()
         async with self.limiter.acquire():
+            if rollout_ctx is not None:
+                await rollout_ctx.mark_agent_started(datetime.now(UTC))
             queued_sec = time.monotonic() - enqueued
             result = await self.run_workflow(request, queued_sec=queued_sec)
 
