@@ -158,8 +158,6 @@ async def test_row_index_is_the_position_in_the_selected_set(
     await harness.runner(selection=selection).run()
     rows = harness.index_rows()
     assert [row["row_index"] for row in rows] == [0, 1]
-    # dataset_rows.jsonl indexes the selected rows the same way, so its lines
-    # line up with the index entries they describe.
     assert (harness.run_dir() / "dataset_rows.jsonl").read_text() == (
         '{"row_index": 0, "prompt": "say ok thrice", "label": "ok"}\n'
         '{"row_index": 1, "prompt": "say ok again", "label": "ok"}'

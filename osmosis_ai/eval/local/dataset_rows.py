@@ -1,7 +1,4 @@
-"""``dataset_rows.jsonl``: the prompt and label text the platform searches per row.
-
-Line format, truncation, and encoding match what a managed evaluation writes.
-"""
+"""``dataset_rows.jsonl`` content, matching what a managed evaluation writes."""
 
 from __future__ import annotations
 
