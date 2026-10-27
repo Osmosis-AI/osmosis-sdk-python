@@ -15,6 +15,11 @@ This file records changes to `osmosis-ai`. For earlier versions, see [GitHub Rel
 - Local eval writes and uploads `dataset_rows.jsonl` for prompt and ground-truth search and ground-truth sorting in Evaluation Samples; uploads containing this file require matching platform support ([#460](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/460)).
 - `osmosis eval download` supports paged manifests with progress reporting and `--type summary` for downloading only the per-sample index; the new type requires platform support, while existing downloads remain compatible with older platforms ([#461](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/461)).
 
+### Changed
+
+- The `strands`, `openai-agents`, `harbor`, `rubric`, and `eval` extras require LiteLLM `>=1.103.1,<2.0.0` excluding `1.104.0rc1`, and filelock `>=4.2.1`, to exclude vulnerable releases; update conflicting pins, refresh lockfiles, and rebuild affected runtime images ([#464](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/464)).
+- The `strands` extra requires Strands Agents `>=1.48.0,<2.0.0`, and the `server`, `strands`, `harbor`, and `eval` extras require OpenTelemetry API `>=1.45.1,<2.0.0` for security fixes; `full` includes all updated requirements ([#464](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/464)).
+
 ### Fixed
 
 - Known credentials, including escaped and multiline values, are more consistently redacted from CLI output, platform errors, local eval logs, and provider diagnostics, including debug traces and Rich hyperlinks ([#458](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/458)).
