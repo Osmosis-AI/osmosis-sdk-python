@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import re
 import sys
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from osmosis_ai._redaction import invocation_redactor
+from osmosis_ai.cli.console import _without_known_values
 
 from .context import OutputContext, OutputFormat
 from .jsonutil import dump_cli_json
@@ -19,6 +20,9 @@ from .result import (
     OperationResult,
     SectionedListResult,
 )
+
+if TYPE_CHECKING:
+    from rich.console import Console as RichConsole
 
 _JSON_SCHEMA_VERSION = 1
 # SDK constants of an envelope; the remaining values are presentation data. Only
@@ -180,37 +184,24 @@ def _display_items(result: ListResult | ListSection) -> list[dict[str, Any]]:
     return result.display_items if result.display_items is not None else result.items
 
 
-def _rich_text(value: Any, *, style: str | None = None) -> Any:
+def _rich_text(value: Any, *, console: RichConsole, style: str | None = None) -> Any:
     from rich.text import Text
 
-    redactor = invocation_redactor()
     if isinstance(value, Text):
-        if redactor.scrub(value.plain) != value.plain:
-            value = Text(redactor.scrub(value.plain), style=value.style)
         if style is not None:
+            value = value.copy()
             value.stylize(style)
-        return value
-    text = "" if value is None else str(value)
-    # Checked after unescaping, which can rebuild a known value.
-    text = redactor.scrub(text.replace("\\[", "[").replace("\\]", "]"))
-    if style is None:
-        return Text(text)
-    return Text(text, style=style)
+    else:
+        text = "" if value is None else str(value)
+        # Checked after unescaping, which can rebuild a known value.
+        value = Text(text.replace("\\[", "[").replace("\\]", "]"), style=style or "")
+    return _without_known_values(value, console=console, markup=False)
 
 
-def _rich_markup(value: Any) -> Any:
+def _rich_markup(value: Any, *, console: RichConsole) -> Any:
     """A display value in Rich markup, checked as Rich will render it."""
     text = "" if value is None else str(value)
-    redactor = invocation_redactor()
-    if not redactor.values:
-        return text
-    from rich.text import Text
-
-    plain = Text.from_markup(text).plain
-    # Markup attributes, such as a link target, are emitted but not plain text.
-    if redactor.scrub(plain) == plain and redactor.scrub(text) == text:
-        return text
-    return Text(redactor.scrub(plain))
+    return _without_known_values(text, console=console, markup=True)
 
 
 def _display_width(value: Any) -> int:
@@ -361,10 +352,10 @@ def _print_rich_list(
         raw_item = source.items[idx] if idx < len(source.items) else {}
         table.add_row(
             *[
-                _rich_markup(item.get(column.key))
+                _rich_markup(item.get(column.key), console=console.rich)
                 if source.display_items is not None
                 and item.get(column.key) != raw_item.get(column.key)
-                else _rich_text(item.get(column.key))
+                else _rich_text(item.get(column.key), console=console.rich)
                 for column in source.columns
             ]
         )
@@ -386,34 +377,39 @@ def _render_rich(result: CommandResult, output: OutputContext) -> None:
         if result.title:
             console.separator(result.title)
         console.table(
-            [(field.label, _rich_text(field.value)) for field in result.fields]
+            [
+                (field.label, _rich_text(field.value, console=console.rich))
+                for field in result.fields
+            ]
         )
         for section in result.sections:
             if section.rich is not None:
                 console.rich.print(section.rich)
         for hint in result.display_hints:
-            console.rich.print(_rich_text(hint, style="dim"))
+            console.rich.print(_rich_text(hint, console=console.rich, style="dim"))
         return
 
     if isinstance(result, ListResult):
         _print_rich_list(console, result)
         for hint in result.display_hints:
-            console.rich.print(_rich_text(hint, style="dim"))
+            console.rich.print(_rich_text(hint, console=console.rich, style="dim"))
         return
 
     if isinstance(result, SectionedListResult):
         for section in result.sections:
             _print_rich_list(console, section, title=section.title)
         for hint in result.display_hints:
-            console.rich.print(_rich_text(hint, style="dim"))
+            console.rich.print(_rich_text(hint, console=console.rich, style="dim"))
         return
 
     if isinstance(result, OperationResult):
         if result.message:
             style = "green" if result.status == "success" else "yellow"
-            console.rich.print(_rich_text(result.message, style=style))
+            console.rich.print(
+                _rich_text(result.message, console=console.rich, style=style)
+            )
         for hint in result.display_next_steps:
-            console.rich.print(_rich_text(hint, style="dim"))
+            console.rich.print(_rich_text(hint, console=console.rich, style="dim"))
         return
 
     raise TypeError(f"Unsupported CommandResult: {type(result).__name__}")

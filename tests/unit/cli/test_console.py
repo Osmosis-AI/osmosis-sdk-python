@@ -6,6 +6,8 @@ import re
 import sys
 from io import StringIO
 
+import pytest
+
 from osmosis_ai.cli.console import Console
 
 # ── Helpers ──────────────────────────────────────────────────────────
@@ -552,9 +554,106 @@ def test_markup_cannot_rebuild_or_hide_a_known_value(monkeypatch) -> None:
         console.print_warning(f"key {secret[:9]}[bold]{secret[9:]}[/bold]", markup=True)
         # A link target is emitted to the terminal without being plain text.
         console.print(f"[link=https://example.test/{secret}]open[/link]")
-        cell = _rich_markup(f"[link=https://example.test/{secret}]open[/link]")
+        cell = _rich_markup(
+            f"[link=https://example.test/{secret}]open[/link]", console=console.rich
+        )
     assert secret not in buf.getvalue() + errors.getvalue()
     assert "[REDACTED]" in errors.getvalue()
     assert "open" in buf.getvalue()
     assert cell.plain == "open"
     assert not cell.spans
+
+
+@pytest.mark.parametrize("output", ["print", "table", "renderer"])
+@pytest.mark.parametrize(
+    "shape",
+    [
+        "base",
+        "span",
+        "base-string",
+        "span-string",
+        "base-theme",
+        "span-theme",
+        "visible-base",
+    ],
+)
+def test_text_links_do_not_emit_known_values(monkeypatch, output, shape) -> None:
+    from rich.style import Style
+    from rich.text import Text
+    from rich.theme import Theme
+
+    from osmosis_ai._redaction import invocation_redaction, register_invocation_secrets
+    from osmosis_ai.cli.output.context import OutputFormat, override_output_context
+    from osmosis_ai.cli.output.renderer import render
+    from osmosis_ai.cli.output.result import ListColumn, ListResult
+
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    monkeypatch.setenv("TERM", "xterm-256color")
+    buf = StringIO()
+    console = Console(file=buf, force_terminal=True, width=120)
+    monkeypatch.setattr("osmosis_ai.cli.console.Console", lambda: console)
+    secret = "synthetic-secret-123456"
+    url = f"https://example.test/{secret}"
+    style = (
+        f"bold link {url}" if shape.endswith("string") else Style(bold=True, link=url)
+    )
+    if shape.endswith("theme"):
+        console.rich.push_theme(Theme({"private-link": style}))
+        style = "private-link"
+    value = Text(f"open {secret}" if shape == "visible-base" else "open")
+    if shape.startswith("span"):
+        value.stylize(style)
+    else:
+        value.style = style
+    original = value.copy()
+    safe_url = "https://example.test/public"
+    safe = console.format_url(safe_url, label="public")
+
+    with (
+        invocation_redaction(),
+        override_output_context(format=OutputFormat.rich) as ctx,
+    ):
+        register_invocation_secrets([secret])
+        if output == "print":
+            console.print(value, safe)
+        elif output == "table":
+            console.table([("Private", value), ("Public", safe)])
+        else:
+            render(
+                ListResult(
+                    title="Links",
+                    items=[{"name": value}, {"name": safe}],
+                    total_count=2,
+                    has_more=False,
+                    next_offset=None,
+                    columns=[ListColumn("name", "Name")],
+                ),
+                ctx,
+            )
+
+    printed = buf.getvalue()
+    assert secret not in printed
+    assert "open" in printed and "public" in printed
+    assert safe_url in printed and "\x1b]8;" in printed
+    if shape == "visible-base":
+        assert "[REDACTED]" in printed
+    assert value == original
+
+
+def test_print_url_redacts_its_label_and_terminal_link(monkeypatch) -> None:
+    from osmosis_ai._redaction import invocation_redaction, register_invocation_secrets
+
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    monkeypatch.setenv("TERM", "xterm-256color")
+    console, buf = _rich_console()
+    secret = "synthetic-secret-123456"
+    with invocation_redaction():
+        register_invocation_secrets([secret])
+        console.print_url("View: ", f"https://example.test/{secret}")
+        console.print_url("View: ", f"https://example.test/{secret}", label="open")
+        console.print_url("View: ", "https://example.test/public", label="public")
+
+    printed = buf.getvalue()
+    assert secret not in printed
+    assert "[REDACTED]" in printed and "open" in printed
+    assert "https://example.test/public" in printed and "\x1b]8;" in printed
