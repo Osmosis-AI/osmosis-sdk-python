@@ -72,7 +72,10 @@ class SecretRedactor:
         return self._sources
 
     def extend(self, values: Iterable[str]) -> None:
-        self._sources = tuple(dict.fromkeys([*self._sources, *filter(None, values)]))
+        # A whitespace-only value cannot be redacted without erasing every
+        # space of the output it appears in.
+        known = [value for value in values if value.strip()]
+        self._sources = tuple(dict.fromkeys([*self._sources, *known]))
         sensitive = {form for value in self._sources for form in _spellings(value)}
         self._values = tuple(sorted(sensitive, key=lambda value: (-len(value), value)))
 

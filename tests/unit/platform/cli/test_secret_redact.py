@@ -15,7 +15,12 @@ from osmosis_ai.cli.output.context import (
 )
 from osmosis_ai.cli.output.error import classify_error
 from osmosis_ai.cli.output.renderer import render
-from osmosis_ai.cli.output.result import ListResult, OperationResult
+from osmosis_ai.cli.output.result import (
+    ListResult,
+    ListSection,
+    OperationResult,
+    SectionedListResult,
+)
 from osmosis_ai.platform.auth.platform_client import (
     PlatformAPIError,
     SubscriptionRequiredError,
@@ -86,6 +91,47 @@ def test_list_extras_named_like_protocol_fields_are_redacted(
         render(result, OutputContext(format=OutputFormat.json, interactive=False))
     payload = json.loads(capsys.readouterr().out)
     assert payload["status"] == payload["operation"] == "[REDACTED]"
+
+
+def test_pagination_values_keep_their_json_types(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    page = {"items": [{"n": 2}], "total_count": 2, "has_more": True, "next_offset": 2}
+    lists = [
+        ListResult(title="Runs", **page),
+        SectionedListResult(sections=[ListSection(key="runs", title="Runs", **page)]),
+    ]
+    for result in lists:
+        with invocation_redaction():
+            # A declared secret is redacted at any length, even a short number.
+            register_invocation_secrets(["2"])
+            render(result, OutputContext(format=OutputFormat.json, interactive=False))
+        payload = json.loads(capsys.readouterr().out)
+        payload = payload.get("runs", payload)
+        assert payload["items"] == [{"n": "[REDACTED]"}]
+        assert (
+            payload["total_count"],
+            payload["has_more"],
+            payload["next_offset"],
+        ) == (
+            2,
+            True,
+            2,
+        )
+
+
+def test_plain_output_redacts_before_normalizing_whitespace(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    secret = "synthetic\tkey-123456"
+    result = OperationResult(
+        operation="secret.set", status="success", message=f"value {secret} kept"
+    )
+    with invocation_redaction():
+        # A whitespace-only value is not redactable; it must not erase spaces.
+        register_invocation_secrets([secret, "  "])
+        render(result, OutputContext(format=OutputFormat.plain, interactive=False))
+    assert capsys.readouterr().out == "value [REDACTED] kept\n"
 
 
 @pytest.mark.parametrize(

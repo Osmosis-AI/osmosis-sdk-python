@@ -30,6 +30,9 @@ _JSON_SCHEMA_VERSION = 1
 # use those keys for data.
 _PROTOCOL_KEYS = frozenset({"schema_version"})
 _OPERATION_PROTOCOL_KEYS = _PROTOCOL_KEYS | {"status", "operation"}
+# A list page's pagination values are SDK numbers; a marker would change their
+# JSON type.
+_PAGE_PROTOCOL_KEYS = frozenset({"total_count", "has_more", "next_offset"})
 
 _RICH_STYLE_TAG_RE = re.compile(
     r"\[/?(?:bold|dim|italic|underline|blink|reverse|strike|"
@@ -128,12 +131,16 @@ def _build_json_envelope(result: CommandResult) -> dict[str, Any]:
 
 
 def _presented_envelope(
-    envelope: dict[str, Any], *, protocol_keys: frozenset[str]
+    envelope: dict[str, Any],
+    *,
+    protocol_keys: frozenset[str],
+    page_keys: frozenset[str] = frozenset(),
 ) -> dict[str, Any]:
     """Scrub the invocation's known values from an envelope's data.
 
     Envelope keys, protocol values, and the field names of the records directly
-    under them are SDK schema; everything below is data, keys included.
+    under them are SDK schema; everything below is data, keys included. The
+    values under *page_keys* are list pages, presented like a list envelope.
     """
     redactor = invocation_redactor()
 
@@ -142,24 +149,30 @@ def _presented_envelope(
             return {key: redactor.scrub_value(item) for key, item in value.items()}
         return redactor.scrub_value(value)
 
-    return {
-        key: value
-        if key in protocol_keys
-        else [record(item) for item in value]
-        if isinstance(value, list)
-        else record(value)
-        for key, value in envelope.items()
-    }
+    def present(key: str, value: Any) -> Any:
+        if key in protocol_keys:
+            return value
+        if key in page_keys:
+            return _presented_envelope(value, protocol_keys=_PAGE_PROTOCOL_KEYS)
+        if isinstance(value, list):
+            return [record(item) for item in value]
+        return record(value)
+
+    return {key: present(key, value) for key, value in envelope.items()}
 
 
 def _render_json(result: CommandResult, output: OutputContext) -> None:
+    page_keys: frozenset[str] = frozenset()
+    if isinstance(result, OperationResult):
+        protocol_keys = _OPERATION_PROTOCOL_KEYS
+    elif isinstance(result, ListResult):
+        protocol_keys = _PROTOCOL_KEYS | _PAGE_PROTOCOL_KEYS
+    else:
+        protocol_keys = _PROTOCOL_KEYS
+        if isinstance(result, SectionedListResult):
+            page_keys = frozenset(section.key for section in result.sections)
     envelope = _presented_envelope(
-        _build_json_envelope(result),
-        protocol_keys=(
-            _OPERATION_PROTOCOL_KEYS
-            if isinstance(result, OperationResult)
-            else _PROTOCOL_KEYS
-        ),
+        _build_json_envelope(result), protocol_keys=protocol_keys, page_keys=page_keys
     )
     sys.stdout.write(dump_cli_json(envelope))
     sys.stdout.write("\n")
@@ -167,10 +180,13 @@ def _render_json(result: CommandResult, output: OutputContext) -> None:
 
 
 def _normalise_plain_value(value: Any, *, rich_display: bool = False) -> str:
-    text = "" if value is None else str(value)
+    redactor = invocation_redactor()
+    # Scrubbed before each rewrite: removing markup, or turning a tab into a
+    # space, can respell a known value as text that no spelling of it matches.
+    text = redactor.scrub("" if value is None else str(value))
     if rich_display:
         text = _RICH_STYLE_TAG_RE.sub("", text)
-        text = text.replace("\\[", "[").replace("\\]", "]")
+        text = redactor.scrub(text.replace("\\[", "[").replace("\\]", "]"))
     return text.replace("\t", " ").replace("\n", " ").replace("\r", " ")
 
 
