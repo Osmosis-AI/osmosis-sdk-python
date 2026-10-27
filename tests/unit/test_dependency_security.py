@@ -47,22 +47,20 @@ def test_locked_fsspec_meets_security_floor() -> None:
 
 
 @pytest.mark.parametrize(
-    ("name", "extra", "floor"),
+    ("name", "requirement_path", "floor"),
     [
-        ("certifi", None, "2026.10.19"),
-        ("uv", "harbor", "0.13.4"),
-        ("uv", "eval", "0.13.4"),
+        ("certifi", ("project", "dependencies"), "2026.10.19"),
+        ("uv", ("project", "optional-dependencies", "harbor"), "0.13.4"),
+        ("uv", ("project", "optional-dependencies", "eval"), "0.13.4"),
+        ("virtualenv", ("dependency-groups", "dev"), "21.14.13"),
     ],
 )
-def test_ca_bundle_floors_allow_patched_releases(
-    name: str, extra: str | None, floor: str
+def test_declared_dependency_floors_allow_patched_releases(
+    name: str, requirement_path: tuple[str, ...], floor: str
 ) -> None:
-    project = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text())["project"]
-    requirements = (
-        project["dependencies"]
-        if extra is None
-        else project["optional-dependencies"][extra]
-    )
+    requirements = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text())
+    for key in requirement_path:
+        requirements = requirements[key]
     matches = [
         Requirement(raw) for raw in requirements if Requirement(raw).name == name
     ]
