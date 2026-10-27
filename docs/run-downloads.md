@@ -19,7 +19,7 @@ osmosis benchmark runs download NAME
   -y, --yes
 ```
 
-`--type` replaces the default selection. Eval defaults to `metrics,trajectories`; benchmark defaults to `summary,results`. Eval row selection includes every run for each selected row. Eval `summary` downloads `summary.jsonl` alone, one line per sample with its status and reward, so results can be inspected without fetching trajectories; `trajectories` and `all` include the same file.
+`--type` replaces the default selection. Eval defaults to `metrics,trajectories`; benchmark defaults to `summary,results`. Eval row selection includes every run for each selected row. Eval `summary` downloads `summary.jsonl` alone, one line per sample with its status and, once graded, its reward, so results can be inspected without fetching trajectories; `trajectories` and `all` include the same file.
 
 ## Platform routes
 
