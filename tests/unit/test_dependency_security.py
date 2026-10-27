@@ -76,13 +76,26 @@ def test_ca_bundle_floors_allow_patched_releases(
 
 
 @pytest.mark.parametrize(
-    ("name", "floor"), [("certifi", "2026.10.19"), ("uv", "0.13.4")]
+    ("name", "constraint"),
+    [
+        ("certifi", ">=2026.10.19"),
+        ("uv", ">=0.13.4"),
+        ("filelock", ">=4.2.1"),
+        ("litellm", ">=1.103.1,!=1.104.0rc1"),
+        ("opentelemetry-api", ">=1.45.1"),
+        ("strands-agents", ">=1.48.0"),
+        ("virtualenv", ">=21.14.13"),
+    ],
 )
-def test_locked_ca_bundles_meet_security_floors(name: str, floor: str) -> None:
+def test_locked_dependencies_meet_security_constraints(
+    name: str, constraint: str
+) -> None:
     lock = tomllib.loads((REPO_ROOT / "uv.lock").read_text())
     packages = [package for package in lock["package"] if package["name"] == name]
     assert packages, f"The lock must still resolve {name}"
-    assert all(Version(package["version"]) >= Version(floor) for package in packages)
+    assert all(
+        Version(package["version"]) in SpecifierSet(constraint) for package in packages
+    )
 
 
 @pytest.mark.parametrize(
@@ -97,6 +110,10 @@ def test_locked_ca_bundles_meet_security_floors(name: str, floor: str) -> None:
         ("mcp", ">=2.2.0", True),
         ("uv", ">=0.13.4,<0.14", True),
         ("uv", "~=0.13.5", True),
+        ("filelock", ">=4.2.1", True),
+        ("litellm", ">=1.103.1,!=1.104.0rc1,<2", True),
+        ("opentelemetry-api", ">=1.45.1,<2", True),
+        ("strands-agents", ">=1.48.0,<2", True),
         ("aiohttp", ">=3.14.3", False),
         ("certifi", ">=2025.11.12", False),
         ("certifi", ">=2026.10.18", False),
@@ -108,6 +125,11 @@ def test_locked_ca_bundles_meet_security_floors(name: str, floor: str) -> None:
         ("mcp", ">=1.30.0,!=2.1.*", False),
         ("uv", ">=0.9.7,<0.13", False),
         ("uv", ">=0.13.3,<0.14", False),
+        ("filelock", ">=4.2.0", False),
+        ("litellm", ">=1.100.4,<2", False),
+        ("litellm", ">=1.103.1,<2", False),
+        ("opentelemetry-api", ">=1.45.0,<2", False),
+        ("strands-agents", ">=1.43.0,<2", False),
     ],
 )
 def test_wheel_verifier_checks_allowed_versions(

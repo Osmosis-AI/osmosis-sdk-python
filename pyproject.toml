@@ -60,6 +60,8 @@ server = [
     "fastapi>=0.100.0,<1.0.0",
     "uvicorn>=0.23.0,<1.0.0",
     "opentelemetry-sdk>=1.39.1,<2.0.0",
+    # GHSA-xcq7-p3pf-p88h: bound tracestate parsing in every owning extra.
+    "opentelemetry-api>=1.45.1,<2.0.0",
     "opentelemetry-exporter-otlp-proto-http>=1.39.1,<2.0.0",
     # Requests (via the OTLP exporter) needs urllib3's proxy TLS and
     # streaming-response security fixes. Other owning extras repeat this floor.
@@ -70,17 +72,21 @@ server = [
     "click>=8.3.3",
 ]
 
-# Strands Agents adapter. LiteLLM's floor and exclusions cover the affected
-# release lines in GHSA-3cv6-jpf6-8222. 1.95.0 also lacks macOS wheels and
-# falls back to a source build requiring a newer Rust toolchain.
+# Strands >=1.48.0 fixes A2A isolation and session-file security flaws.
+# LiteLLM's floor and prerelease exclusion cover GHSA-7hp6-4w63-5g45
+# and the earlier affected release lines, including GHSA-g5ff-637f-6q2m.
 # LiteLLM's tool-call path imports orjson at runtime, although LiteLLM declares
 # it only through its much larger proxy extra. fsspec arrives via tokenizers
 # and huggingface-hub; >=2026.6.0 fixes GHSA-27vj-qcqg-25rc. Each owning
 # extra repeats the floor so published wheel installs enforce it.
+# filelock also arrives via huggingface-hub (and Harbor); >=4.2.1 fixes
+# GHSA-v4x8-3wr5-3wq8, GHSA-567q-5qvw-pf92, and GHSA-9vhv-jxww-xfm5.
 strands = [
-    "strands-agents[litellm]>=1.29.0,<2.0.0",
-    "litellm>=1.94.3,!=1.95.0.*,!=1.96.0.*,!=1.96.1.*,<2.0.0",
+    "strands-agents[litellm]>=1.48.0,<2.0.0",
+    "opentelemetry-api>=1.45.1,<2.0.0",
+    "litellm>=1.103.1,!=1.104.0rc1,<2.0.0",
     "fsspec>=2026.6.0",
+    "filelock>=4.2.1",
     "orjson>=3.11.6,<4.0",
     # GHSA-2g87-pp6c-29x5, GHSA-5wr8-gcqf-gqf3, GHSA-494j-54xm-rwp3.
     "aiohttp>=3.14.4",
@@ -103,8 +109,9 @@ strands = [
 # take effect silently once LiteLLM moves; review before crossing it.
 openai-agents = [
     "openai-agents[litellm]>=0.18.1,<0.21",
-    "litellm>=1.94.3,!=1.95.0.*,!=1.96.0.*,!=1.96.1.*,<2.0.0",
+    "litellm>=1.103.1,!=1.104.0rc1,<2.0.0",
     "fsspec>=2026.6.0",
+    "filelock>=4.2.1",
     "orjson>=3.11.6,<4.0",
     "aiohttp>=3.14.4",
     "multidict>=6.9.1",
@@ -119,6 +126,7 @@ openai-agents = [
 # deployments own their exact release or fork revision.
 harbor = [
     "harbor[daytona,opensandbox]>=0.20.0,<0.25",
+    "opentelemetry-api>=1.45.1,<2.0.0",
     "pyyaml>=6.0.2",
     # osmosis_ai.packaging builds the bundle wheel that Harbor installs in the
     # task container: toml rewrites the rollout project's pyproject.toml and
@@ -131,8 +139,9 @@ harbor = [
     "uv>=0.13.4,<0.14",
     # Harbor uses LiteLLM, which owns these runtime and security floors in
     # this feature.
-    "litellm>=1.94.3,!=1.95.0.*,!=1.96.0.*,!=1.96.1.*,<2.0.0",
+    "litellm>=1.103.1,!=1.104.0rc1,<2.0.0",
     "fsspec>=2026.6.0",
+    "filelock>=4.2.1",
     "orjson>=3.11.6,<4.0",
     "aiohttp>=3.14.4",
     "multidict>=6.9.1",
@@ -143,8 +152,9 @@ harbor = [
 
 # LLM-as-judge rubric evaluation
 rubric = [
-    "litellm>=1.94.3,!=1.95.0.*,!=1.96.0.*,!=1.96.1.*,<2.0.0",
+    "litellm>=1.103.1,!=1.104.0rc1,<2.0.0",
     "fsspec>=2026.6.0",
+    "filelock>=4.2.1",
     "orjson>=3.11.6,<4.0",
     "aiohttp>=3.14.4",
     "multidict>=6.9.1",
@@ -163,8 +173,9 @@ parquet = [
 # resolves from rollouts/<name>/pyproject.toml and launches.
 eval = [
     "osmosis-ai[server,parquet]",
-    "litellm>=1.94.3,!=1.95.0.*,!=1.96.0.*,!=1.96.1.*,<2.0.0",
+    "litellm>=1.103.1,!=1.104.0rc1,<2.0.0",
     "fsspec>=2026.6.0",
+    "filelock>=4.2.1",
     "aiohttp>=3.14.4",
     "multidict>=6.9.1",
     # Same bundled CA security floor as the Harbor build tool.
@@ -186,8 +197,9 @@ dev = [
     "pytest-timeout>=2.4.0,<3.0.0",
     "ruff==0.16.9",  # Keep in sync with pre-commit and CI
     "pre-commit>=4.6.0,<5.0.0",
-    # pre-commit's virtualenv security floor for script injection and symlinks.
-    "virtualenv>=21.14.9",
+    # pre-commit's virtualenv security floors for activators and seed links.
+    "virtualenv>=21.14.13",
+    "filelock>=4.2.1",
     "pyright[nodejs]==1.1.414",
     "pytest-xdist>=3.8.0,<4.0.0",
     "ty==0.0.84",
