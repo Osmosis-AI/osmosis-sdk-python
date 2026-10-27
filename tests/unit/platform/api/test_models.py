@@ -824,6 +824,26 @@ class TestRunDownloadModels:
         with pytest.raises(ValueError, match="files must be a list"):
             RunDownloadManifest.from_dict({"files": {"path": "metrics.json"}})
 
+    @pytest.mark.parametrize("payload", [{}, {"next_cursor": None}])
+    def test_run_download_manifest_next_cursor_defaults_to_none(
+        self, payload: dict[str, object]
+    ) -> None:
+        assert (
+            RunDownloadManifest.from_dict({"files": [], **payload}).next_cursor is None
+        )
+
+    def test_run_download_manifest_parses_next_cursor(self) -> None:
+        manifest = RunDownloadManifest.from_dict({"files": [], "next_cursor": 1000})
+
+        assert manifest.next_cursor == 1000
+
+    @pytest.mark.parametrize("next_cursor", ["1000", -1, True, 1.5])
+    def test_run_download_manifest_rejects_invalid_next_cursor(
+        self, next_cursor: object
+    ) -> None:
+        with pytest.raises(ValueError, match="next_cursor"):
+            RunDownloadManifest.from_dict({"files": [], "next_cursor": next_cursor})
+
     def test_run_download_url_rejects_missing_path(self) -> None:
         with pytest.raises(ValueError, match="path must be a non-empty string"):
             RunDownloadURL.from_dict({"url": "https://example.com/signed"})

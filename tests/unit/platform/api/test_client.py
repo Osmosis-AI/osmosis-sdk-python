@@ -9,6 +9,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from osmosis_ai.platform.api.client import OsmosisClient, _safe_path
+from osmosis_ai.platform.auth import PlatformAPIError
 
 
 class TestCreateDataset:
@@ -827,10 +828,165 @@ class TestEvaluationRuns:
 
         assert mock_request.call_args[0][0] == (
             "/api/cli/eval-runs/a%2Fb/samples/manifest?"
-            "types=metrics%2Ctrajectories&rows=3%2C7%2C10-20"
+            "types=metrics%2Ctrajectories&rows=3%2C7%2C10-20&cursor=0"
         )
         assert manifest.files[0].token == "rollout-1"
         assert manifest.totals == {"files": 1, "bytes": 12}
+
+    @staticmethod
+    def _manifest_page(index: int, next_cursor: int | None) -> dict[str, Any]:
+        size = 10 * (index + 1)
+        return {
+            "files": [
+                {
+                    "path": f"trajectories/row_{index}_run_0.json",
+                    "size": size,
+                    "token": f"rollout-{index}",
+                }
+            ],
+            "totals": {"files": 1, "bytes": size},
+            "next_cursor": next_cursor,
+        }
+
+    @patch("osmosis_ai.platform.api.client.platform_request")
+    def test_eval_run_download_manifest_follows_next_cursor(
+        self, mock_request: MagicMock
+    ) -> None:
+        mock_request.side_effect = [
+            self._manifest_page(0, 1000),
+            self._manifest_page(1, 2000),
+            self._manifest_page(2, None),
+        ]
+
+        manifest = OsmosisClient().get_eval_run_download_manifest(
+            "er-1",
+            types=["trajectories"],
+            rows="0-2",
+            git_identity="git_test",
+        )
+
+        assert [call.args[0] for call in mock_request.call_args_list] == [
+            "/api/cli/eval-runs/er-1/samples/manifest?"
+            f"types=trajectories&rows=0-2&cursor={cursor}"
+            for cursor in (0, 1000, 2000)
+        ]
+        assert [file.path for file in manifest.files] == [
+            "trajectories/row_0_run_0.json",
+            "trajectories/row_1_run_0.json",
+            "trajectories/row_2_run_0.json",
+        ]
+        assert manifest.totals == {"files": 3, "bytes": 60}
+        assert manifest.next_cursor is None
+
+    @patch("osmosis_ai.platform.api.client.platform_request")
+    def test_eval_run_download_manifest_drops_exact_repeats_across_pages(
+        self, mock_request: MagicMock
+    ) -> None:
+        file_0 = {"path": "trajectories/row_0_run_0.json", "size": 10, "token": "r0"}
+        file_1 = {"path": "trajectories/row_1_run_0.json", "size": 20, "token": "r1"}
+        file_2 = {"path": "trajectories/row_2_run_0.json", "size": 30, "token": "r2"}
+        mock_request.side_effect = [
+            {"files": [file_0, file_1], "next_cursor": 1000},
+            {"files": [file_1, file_2], "next_cursor": None},
+        ]
+
+        manifest = OsmosisClient().get_eval_run_download_manifest(
+            "er-1", types=["trajectories"], git_identity="git_test"
+        )
+
+        assert [(file.token, file.path) for file in manifest.files] == [
+            ("r0", "trajectories/row_0_run_0.json"),
+            ("r1", "trajectories/row_1_run_0.json"),
+            ("r2", "trajectories/row_2_run_0.json"),
+        ]
+        assert manifest.totals == {"files": 3, "bytes": 60}
+
+    @patch("osmosis_ai.platform.api.client.platform_request")
+    def test_eval_run_download_manifest_keeps_same_path_with_another_token(
+        self, mock_request: MagicMock
+    ) -> None:
+        path = "trajectories/row_1_run_0.json"
+        mock_request.side_effect = [
+            {
+                "files": [{"path": path, "size": 20, "token": "rollout-a"}],
+                "next_cursor": 1000,
+            },
+            {
+                "files": [{"path": path, "size": 20, "token": "rollout-b"}],
+                "next_cursor": None,
+            },
+        ]
+
+        manifest = OsmosisClient().get_eval_run_download_manifest(
+            "er-1", types=["trajectories"], git_identity="git_test"
+        )
+
+        assert [file.token for file in manifest.files] == ["rollout-a", "rollout-b"]
+
+    @patch("osmosis_ai.platform.api.client.platform_request")
+    def test_eval_run_download_manifest_reports_files_found_between_pages(
+        self, mock_request: MagicMock
+    ) -> None:
+        mock_request.side_effect = [
+            self._manifest_page(0, 1000),
+            self._manifest_page(1, 2000),
+            self._manifest_page(2, None),
+        ]
+        found: list[int] = []
+
+        OsmosisClient().get_eval_run_download_manifest(
+            "er-1",
+            types=["trajectories"],
+            on_page=found.append,
+            git_identity="git_test",
+        )
+
+        assert found == [1, 2]
+
+    @patch("osmosis_ai.platform.api.client.platform_request")
+    def test_eval_run_download_manifest_from_older_platform_is_one_request(
+        self, mock_request: MagicMock
+    ) -> None:
+        mock_request.return_value = {
+            "files": [{"path": "metrics.json", "size": 12, "token": "export-1"}],
+            "totals": {"files": 1, "bytes": 12},
+        }
+
+        manifest = OsmosisClient().get_eval_run_download_manifest(
+            "er-1", types=["metrics"], git_identity="git_test"
+        )
+
+        mock_request.assert_called_once_with(
+            "/api/cli/eval-runs/er-1/samples/manifest?types=metrics&cursor=0",
+            credentials=None,
+            git_identity="git_test",
+        )
+        assert [file.path for file in manifest.files] == ["metrics.json"]
+        assert manifest.totals == {"files": 1, "bytes": 12}
+
+    @pytest.mark.parametrize(
+        "next_cursors",
+        [
+            pytest.param([0], id="stays-at-start"),
+            pytest.param([1000, 1000], id="repeats"),
+            pytest.param([1000, 500], id="goes-backwards"),
+        ],
+    )
+    @patch("osmosis_ai.platform.api.client.platform_request")
+    def test_eval_run_download_manifest_rejects_non_advancing_cursor(
+        self, mock_request: MagicMock, next_cursors: list[int]
+    ) -> None:
+        mock_request.side_effect = [
+            self._manifest_page(index, cursor)
+            for index, cursor in enumerate(next_cursors)
+        ]
+
+        with pytest.raises(PlatformAPIError, match="cursor"):
+            OsmosisClient().get_eval_run_download_manifest(
+                "er-1", types=["trajectories"], git_identity="git_test"
+            )
+
+        assert mock_request.call_count == len(next_cursors)
 
     @patch("osmosis_ai.platform.api.client.platform_request")
     def test_eval_run_download_urls_post_bounded_items(

@@ -1720,10 +1720,11 @@ class RunDownloadFile:
 
 @dataclass(frozen=True)
 class RunDownloadManifest:
-    """Complete file manifest for an evaluation run download."""
+    """File manifest for a run download, or one page of an eval run's manifest."""
 
     files: list[RunDownloadFile]
     totals: dict[str, Any]
+    next_cursor: int | None = None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> RunDownloadManifest:
@@ -1731,9 +1732,19 @@ class RunDownloadManifest:
         if not isinstance(raw_files, list):
             raise ValueError("Download manifest files must be a list")
         totals = data.get("totals", {})
+        next_cursor = data.get("next_cursor")
+        if next_cursor is not None and (
+            isinstance(next_cursor, bool)
+            or not isinstance(next_cursor, int)
+            or next_cursor < 0
+        ):
+            raise ValueError(
+                "Download manifest next_cursor must be a nonnegative integer or null"
+            )
         return cls(
             files=[RunDownloadFile.from_dict(item) for item in raw_files],
             totals=totals if isinstance(totals, dict) else {},
+            next_cursor=next_cursor,
         )
 
 

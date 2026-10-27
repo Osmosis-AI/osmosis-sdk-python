@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING, Any
 from urllib.parse import quote, urlencode
 
-from osmosis_ai.platform.auth.platform_client import platform_request
+from osmosis_ai.platform.auth.platform_client import PlatformAPIError, platform_request
 from osmosis_ai.platform.constants import (
     DEFAULT_PAGE_SIZE,
 )
@@ -95,13 +95,16 @@ class OsmosisClient:
         *,
         types: Sequence[str],
         rows: str | None = None,
+        cursor: int | None = None,
         route: str = "samples",
         credentials: Credentials | None = None,
         git_identity: str | None,
     ) -> RunDownloadManifest:
-        params: dict[str, str] = {"types": ",".join(types)}
+        params: dict[str, str | int] = {"types": ",".join(types)}
         if rows is not None:
             params["rows"] = rows
+        if cursor is not None:
+            params["cursor"] = cursor
         data = platform_request(
             f"{resource_path}/{route}/manifest?{urlencode(params)}",
             credentials=credentials,
@@ -1025,15 +1028,46 @@ class OsmosisClient:
         *,
         types: Sequence[str],
         rows: str | None = None,
+        on_page: Callable[[int], None] | None = None,
         credentials: Credentials | None = None,
         git_identity: str | None,
     ) -> RunDownloadManifest:
-        return self._get_run_download_manifest(
-            f"/api/cli/eval-runs/{_safe_path(eval_run_id)}",
-            types=types,
-            rows=rows,
-            credentials=credentials,
-            git_identity=git_identity,
+        """Return every page combined, calling ``on_page(files_so_far)`` between pages.
+
+        Platforms that predate paging ignore ``cursor`` and send all files at once.
+        """
+        resource_path = f"/api/cli/eval-runs/{_safe_path(eval_run_id)}"
+        files: list[RunDownloadFile] = []
+        earlier_identities: set[tuple[str | None, str]] = set()
+        cursor = 0
+        while True:
+            page = self._get_run_download_manifest(
+                resource_path,
+                types=types,
+                rows=rows,
+                cursor=cursor,
+                credentials=credentials,
+                git_identity=git_identity,
+            )
+            # A live run can shift a rollout onto two pages; keep its first copy.
+            files.extend(
+                file for file in page.files if file.identity not in earlier_identities
+            )
+            earlier_identities.update(file.identity for file in page.files)
+            next_cursor = page.next_cursor
+            if next_cursor is None:
+                break
+            if next_cursor <= cursor:
+                raise PlatformAPIError(
+                    "Platform returned a download manifest cursor that did not "
+                    f"advance (requested {cursor}, received {next_cursor})."
+                )
+            cursor = next_cursor
+            if on_page is not None:
+                on_page(len(files))
+        return RunDownloadManifest(
+            files=files,
+            totals={"files": len(files), "bytes": sum(file.size for file in files)},
         )
 
     def get_eval_run_download_urls(

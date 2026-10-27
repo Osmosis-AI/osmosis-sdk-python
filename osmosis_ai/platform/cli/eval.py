@@ -632,6 +632,10 @@ def info(name: str, *, output: str | None) -> DetailResult:
 # ── eval download ───────────────────────────────────────────────────
 
 
+def _report_manifest_progress(files: int) -> None:
+    console.print(f"Found {files:,} files so far...", style="dim")
+
+
 def download(
     name: str,
     *,
@@ -643,13 +647,16 @@ def download(
 ) -> OperationResult:
     """Download selected eval run outputs through the manifest contract."""
     from osmosis_ai.platform.cli.run_download import (
+        EVAL_ALL_DOWNLOAD_TYPES,
         EVAL_DOWNLOAD_TYPES,
         parse_download_types,
         run_download,
         validate_rows,
     )
 
-    selected_types = parse_download_types(types, allowed=EVAL_DOWNLOAD_TYPES)
+    selected_types = parse_download_types(
+        types, allowed=EVAL_DOWNLOAD_TYPES, all_types=EVAL_ALL_DOWNLOAD_TYPES
+    )
     selected_rows = validate_rows(rows)
 
     context = require_git_workspace_directory_context()
@@ -684,6 +691,7 @@ def download(
                     detail.id,
                     types=requested_types,
                     rows=selected_rows,
+                    on_page=_report_manifest_progress,
                     credentials=credentials,
                     git_identity=git_identity,
                 )
