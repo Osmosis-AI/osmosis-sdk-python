@@ -21,6 +21,7 @@ from osmosis_ai.eval.local._server_bootstrap import (
 )
 from osmosis_ai.eval.local.dataset import (
     ResolvedDataset,
+    RowSelection,
     resolve_explicit_dataset_file,
     select_rows,
 )
@@ -651,6 +652,7 @@ def _runner(
     *,
     output_root: Path | None = None,
     options: LocalEvalOptions | None = None,
+    selection: RowSelection | None = None,
 ) -> Any:
     from osmosis_ai.eval.local.dataset import select_rows
     from osmosis_ai.eval.local.runner import LocalEvalRunner
@@ -685,7 +687,7 @@ def _runner(
         options=options
         or LocalEvalOptions(name="run-1", server_interpreter=sys.executable),
         dataset=_dataset(),
-        selection=select_rows(data),
+        selection=selection if selection is not None else select_rows(data),
         rollout_dir=tmp_path,
         output_root=output_root or tmp_path / "evals",
         hooks=_Hooks(),
@@ -1858,3 +1860,145 @@ async def test_unconfirmed_tunnel_stop_keeps_the_ownership_record(
     finally:
         child.kill()
         child.wait(timeout=10)
+
+
+# --------------------------------------------------------------------------- #
+# dataset_rows.jsonl
+# --------------------------------------------------------------------------- #
+
+
+def _four_row_selection(tmp_path: Path, **select: Any) -> RowSelection:
+    path = tmp_path / "rows.jsonl"
+    path.write_text(
+        "".join(
+            json.dumps({"user_prompt": f"prompt {n}", "ground_truth": f"label {n}"})
+            + "\n"
+            for n in range(4)
+        ),
+        encoding="utf-8",
+    )
+    return select_rows(path, **select)
+
+
+async def _decline_dispatch(*, pending: int, model_path: str) -> None:
+    raise RuntimeError("dispatch declined")
+
+
+def _declining_runner(
+    tmp_path: Path, selection: RowSelection, *, retry_failed: bool = False
+) -> Any:
+    runner = _runner(
+        _spec(),
+        tmp_path,
+        selection=selection,
+        options=LocalEvalOptions(
+            name="run-1", retry_failed=retry_failed, server_interpreter=sys.executable
+        ),
+    )
+    runner._hooks.confirm_dispatch = _decline_dispatch
+    return runner
+
+
+async def test_dataset_rows_are_written_before_dispatch(tmp_path: Path) -> None:
+    selection = _four_row_selection(tmp_path, row_selector=(1, 3))
+
+    with pytest.raises(RuntimeError, match="dispatch declined"):
+        await _declining_runner(tmp_path, selection).run()
+
+    written = (tmp_path / "evals" / "run-1" / "dataset_rows.jsonl").read_bytes()
+    # row_index counts the selected rows, as index.jsonl does, not file offsets.
+    assert written == (
+        b'{"row_index": 0, "prompt": "prompt 1", "label": "label 1"}\n'
+        b'{"row_index": 1, "prompt": "prompt 3", "label": "label 3"}'
+    )
+
+
+async def test_dataset_rows_are_rewritten_when_a_run_is_resumed(
+    tmp_path: Path,
+) -> None:
+    selection = _four_row_selection(tmp_path)
+    path = tmp_path / "evals" / "run-1" / "dataset_rows.jsonl"
+    with pytest.raises(RuntimeError, match="dispatch declined"):
+        await _declining_runner(tmp_path, selection).run()
+    original = path.read_bytes()
+    path.write_bytes(b"stale")
+
+    with pytest.raises(RuntimeError, match="dispatch declined"):
+        await _declining_runner(tmp_path, selection).run()
+
+    assert path.read_bytes() == original
+
+
+async def test_dataset_rows_are_rewritten_when_failed_samples_are_retried(
+    tmp_path: Path,
+) -> None:
+    from osmosis_ai.eval.local.state import TerminalJournal, TerminalRecord
+
+    selection = _four_row_selection(tmp_path)
+    run_dir = tmp_path / "evals" / "run-1"
+    path = run_dir / "dataset_rows.jsonl"
+    with pytest.raises(RuntimeError, match="dispatch declined"):
+        await _declining_runner(tmp_path, selection).run()
+    original = path.read_bytes()
+    journal = TerminalJournal(run_dir / "events.jsonl")
+    journal.open_for_append(journal.replay())
+    try:
+        await journal.append(
+            TerminalRecord(
+                row_index=0,
+                run_index=0,
+                rollout_id="a" * 32,
+                status="failed",
+                error_type="rollout_failed",
+            )
+        )
+    finally:
+        journal.close()
+    path.write_bytes(b"stale")
+    pending_counts: list[int] = []
+
+    async def record_and_decline(*, pending: int, model_path: str) -> None:
+        pending_counts.append(pending)
+        raise RuntimeError("dispatch declined")
+
+    runner = _declining_runner(tmp_path, selection, retry_failed=True)
+    runner._hooks.confirm_dispatch = record_and_decline
+    with pytest.raises(RuntimeError, match="dispatch declined"):
+        await runner.run()
+
+    assert pending_counts == [4]
+    assert path.read_bytes() == original
+
+
+async def test_rerunning_a_complete_run_writes_the_dataset_rows_it_lacks(
+    tmp_path: Path,
+) -> None:
+    from osmosis_ai.eval.local.state import TerminalJournal, TerminalRecord
+
+    selection = _four_row_selection(tmp_path, row_selector=(2,))
+    run_dir = tmp_path / "evals" / "run-1"
+    with pytest.raises(RuntimeError, match="dispatch declined"):
+        await _declining_runner(tmp_path, selection).run()
+    journal = TerminalJournal(run_dir / "events.jsonl")
+    journal.open_for_append(journal.replay())
+    try:
+        await journal.append(
+            TerminalRecord(
+                row_index=0,
+                run_index=0,
+                rollout_id="a" * 32,
+                status="success",
+                reward=1.0,
+                duration_ms=1.0,
+            )
+        )
+    finally:
+        journal.close()
+    (run_dir / "dataset_rows.jsonl").unlink()
+
+    summary = await _declining_runner(tmp_path, selection).run()
+
+    assert summary.dispatched == 0
+    assert (run_dir / "dataset_rows.jsonl").read_bytes() == (
+        b'{"row_index": 0, "prompt": "prompt 2", "label": "label 2"}'
+    )
