@@ -19,6 +19,7 @@ import pytest
 from osmosis_ai.eval.local.dataset import select_rows
 from osmosis_ai.eval.local.runner import LocalEvalOptions, ResumeRefusedError
 from osmosis_ai.eval.local.state import TerminalJournal, TerminalRecord
+from osmosis_ai.eval.local.upload import build_eval_upload_plan
 from osmosis_ai.rollout.client import (
     RolloutAdmissionTimeoutError,
     RolloutClient,
@@ -43,6 +44,7 @@ async def test_a_full_run_produces_the_download_layout(harness: RunnerHarness) -
         "events.jsonl",
         "index.jsonl",
         "progress.json",
+        "dataset_rows.jsonl",
         "summary.jsonl",
         "metrics.json",
         "logs.txt",
@@ -64,6 +66,12 @@ async def test_a_full_run_produces_the_download_layout(harness: RunnerHarness) -
     assert (run_dir / "summary.jsonl").read_text() == (
         run_dir / "index.jsonl"
     ).read_text()
+    assert (run_dir / "dataset_rows.jsonl").read_text() == (
+        '{"row_index": 0, "prompt": "say ok", "label": "ok"}\n'
+        '{"row_index": 1, "prompt": "say ok twice", "label": "ok"}\n'
+        '{"row_index": 2, "prompt": "say ok thrice", "label": "ok"}\n'
+        '{"row_index": 3, "prompt": "say ok again", "label": "ok"}'
+    )
 
     # The contract stub replies "ok" and every row's label is "ok", so a correct
     # end-to-end path yields reward 1.0 -- this is the reward-plumbing assertion.
@@ -113,6 +121,16 @@ async def test_a_full_run_produces_the_download_layout(harness: RunnerHarness) -
     assert hooks.progress_snapshots[0].total == 4
 
 
+async def test_a_finished_run_uploads_its_dataset_rows(harness: RunnerHarness) -> None:
+    await harness.runner().run()
+    run_dir = harness.run_dir()
+
+    plan = build_eval_upload_plan(run_dir)
+
+    uploaded = next(file for file in plan.files if file.path == "dataset_rows.jsonl")
+    assert uploaded.source.read_bytes() == (run_dir / "dataset_rows.jsonl").read_bytes()
+
+
 async def test_artifacts_are_projected_when_the_workflow_writes_them(
     harness: RunnerHarness, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -140,6 +158,10 @@ async def test_row_index_is_the_position_in_the_selected_set(
     await harness.runner(selection=selection).run()
     rows = harness.index_rows()
     assert [row["row_index"] for row in rows] == [0, 1]
+    assert (harness.run_dir() / "dataset_rows.jsonl").read_text() == (
+        '{"row_index": 0, "prompt": "say ok thrice", "label": "ok"}\n'
+        '{"row_index": 1, "prompt": "say ok again", "label": "ok"}'
+    )
     # The dataset offset survives in the journal, for local UX and provenance.
     # The journal is appended in completion order, which concurrent dispatch
     # makes nondeterministic; only the set of offsets is the contract.
