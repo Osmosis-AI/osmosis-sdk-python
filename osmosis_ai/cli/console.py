@@ -171,7 +171,11 @@ class Console:
             else self._rich.render_str(value, markup=markup)
         )
         plain = redactor.scrub(rendered.plain)
-        return value if plain == rendered.plain else Text(plain, style=rendered.style)
+        # Markup attributes, such as a link target, are emitted but not plain text.
+        source_safe = isinstance(value, Text) or redactor.scrub(value) == value
+        if plain == rendered.plain and source_safe:
+            return value
+        return Text(plain, style=rendered.style)
 
     def print(
         self,
@@ -263,8 +267,10 @@ class Console:
         # A live spinner owns the terminal via a Rich Live region; writing to the
         # separate stderr console mid-spin would strand the spinner line. Pause
         # it (a clean transient erase), print, then resume so it redraws below.
+        # Checked again as rendered: markup can join a value split across tags.
+        warning = self._without_known_values(f"⚠ {message}", markup=markup)
         with self._pause_active_spinner():
-            self._rich_stderr.print(f"⚠ {message}", style="yellow", **kwargs)
+            self._rich_stderr.print(warning, style="yellow", **kwargs)
 
     def separator(self, title: str = "") -> None:
         """Print a separator line with optional title.

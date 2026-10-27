@@ -725,9 +725,20 @@ class LocalEvalRunner:
         text. Other exceptions, including any raised by ``after_finalize``, pass
         through unchanged; the CLI scrubs every error it prints.
         """
+        in_after_finalize = False
+
+        def finalize(summary: RunSummary) -> None:
+            nonlocal in_after_finalize
+            in_after_finalize = True
+            if after_finalize is not None:
+                after_finalize(summary)
+            in_after_finalize = False
+
         try:
-            return await self._run(after_finalize=after_finalize)
+            return await self._run(after_finalize=finalize)
         except (LocalEvalError, LocalEvalStateError) as exc:
+            if in_after_finalize:
+                raise
             sanitized = copy.copy(exc)
             sanitized.args = (self._redactor.scrub(str(exc)),)
         # Raised outside the handler, so nothing links back to the original.

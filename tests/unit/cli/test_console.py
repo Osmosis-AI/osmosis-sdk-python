@@ -536,3 +536,25 @@ def test_text_output_is_checked_as_rich_renders_it(monkeypatch) -> None:
     assert "Uploading safe..." in buf.getvalue()
     assert "Error: rejected [REDACTED]" in errors.getvalue()
     assert "⚠ credential [REDACTED]" in errors.getvalue()
+
+
+def test_markup_cannot_rebuild_or_hide_a_known_value(monkeypatch) -> None:
+    from osmosis_ai._redaction import invocation_redaction, register_invocation_secrets
+    from osmosis_ai.cli.output.renderer import _rich_markup
+
+    secret = "synthetic-secret-123456"
+    errors = StringIO()
+    monkeypatch.setattr(sys, "stderr", errors)
+    console, buf = _rich_console()
+    with invocation_redaction():
+        register_invocation_secrets([secret])
+        # Tags split the value in the source; rendering joins it.
+        console.print_warning(f"key {secret[:9]}[bold]{secret[9:]}[/bold]", markup=True)
+        # A link target is emitted to the terminal without being plain text.
+        console.print(f"[link=https://example.test/{secret}]open[/link]")
+        cell = _rich_markup(f"[link=https://example.test/{secret}]open[/link]")
+    assert secret not in buf.getvalue() + errors.getvalue()
+    assert "[REDACTED]" in errors.getvalue()
+    assert "open" in buf.getvalue()
+    assert cell.plain == "open"
+    assert not cell.spans

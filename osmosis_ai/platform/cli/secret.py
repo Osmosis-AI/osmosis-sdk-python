@@ -1,7 +1,8 @@
 """Business logic for ``osmosis secret`` (set, list, delete).
 
 Security invariants for this module:
-  * The secret *value* travels through this process only to be POSTed once.
+  * The secret *value* is POSTed once. It stays in memory until the invocation
+    ends only as a known value of the CLI's redactor, so no output can echo it.
     It is never logged, never written to disk, and never placed in a
     ``CommandResult``, an error message, or an error ``details`` payload.
   * The value is accepted from a hidden interactive prompt or a named
@@ -231,7 +232,8 @@ def set_secret(
     """Create or update (upsert) a secret.
 
     The value is read from ``--env VARNAME`` or a hidden interactive prompt,
-    POSTed once, and immediately discarded. It never appears in the result.
+    POSTed once, and retained only by the invocation's redactor. It never
+    appears in the result.
     """
     _validate_secret_name(name)
     _validate_scope(scope)
@@ -250,6 +252,8 @@ def set_secret(
             resource=workspace_result_context(context),
             message="Cancelled.",
         )
+    # Kept until the invocation ends: the CLI error boundary and output renderers
+    # scrub every spelling of it, including from errors raised after the POST.
     register_invocation_secrets([value])
 
     client = OsmosisClient()

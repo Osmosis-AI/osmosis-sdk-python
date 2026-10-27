@@ -1760,7 +1760,14 @@ def test_secret_response_fields_are_scrubbed_before_error_formatting(
         )
 
     assert all(line.rstrip() not in str(caught.value) for line in secret.splitlines())
-    assert secret not in json.dumps(caught.value.details, ensure_ascii=False)
+    # Decoded fields, not their JSON encoding, which would escape '"' and '\'.
+    details = caught.value.details
+    assert details is not None
+    assert details[message_key] == "Rejected [REDACTED]"
+    # A 426 keeps only the status and message of its version signal.
+    if status != 426:
+        assert details["field"] == details["value"] == "[REDACTED]"
+        assert details["issues"] == [{"key": "[REDACTED]", "message": "invalid"}]
     assert "Rejected" in str(caught.value)
     assert caught.value.status_code == status
     if status == 403:

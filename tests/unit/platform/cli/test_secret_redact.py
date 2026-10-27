@@ -15,7 +15,7 @@ from osmosis_ai.cli.output.context import (
 )
 from osmosis_ai.cli.output.error import classify_error
 from osmosis_ai.cli.output.renderer import render
-from osmosis_ai.cli.output.result import OperationResult
+from osmosis_ai.cli.output.result import ListResult, OperationResult
 from osmosis_ai.platform.auth.platform_client import (
     PlatformAPIError,
     SubscriptionRequiredError,
@@ -61,6 +61,31 @@ def test_success_output_redacts_every_presentation_field_without_changing_schema
     }
     # The command's own result is untouched; only its presentation is scrubbed.
     assert original.message == SENTINEL
+    # JSON omits display_next_steps; plain output prints it.
+    with invocation_redaction():
+        register_invocation_secrets([SENTINEL])
+        render(original, OutputContext(format=OutputFormat.plain, interactive=False))
+    plain = capsys.readouterr().out
+    assert SENTINEL not in plain
+    assert plain.count("[REDACTED]") == 2
+
+
+def test_list_extras_named_like_protocol_fields_are_redacted(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    result = ListResult(
+        title="Runs",
+        items=[],
+        total_count=0,
+        has_more=False,
+        next_offset=None,
+        extra={"status": SENTINEL, "operation": SENTINEL},
+    )
+    with invocation_redaction():
+        register_invocation_secrets([SENTINEL])
+        render(result, OutputContext(format=OutputFormat.json, interactive=False))
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["status"] == payload["operation"] == "[REDACTED]"
 
 
 @pytest.mark.parametrize(

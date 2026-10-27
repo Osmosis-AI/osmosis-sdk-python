@@ -21,8 +21,11 @@ from .result import (
 )
 
 _JSON_SCHEMA_VERSION = 1
-# SDK constants of every envelope; the remaining values are presentation data.
-_PROTOCOL_KEYS = frozenset({"schema_version", "status", "operation"})
+# SDK constants of an envelope; the remaining values are presentation data. Only
+# an operation envelope sets status and operation itself: a list's extras may
+# use those keys for data.
+_PROTOCOL_KEYS = frozenset({"schema_version"})
+_OPERATION_PROTOCOL_KEYS = _PROTOCOL_KEYS | {"status", "operation"}
 
 _RICH_STYLE_TAG_RE = re.compile(
     r"\[/?(?:bold|dim|italic|underline|blink|reverse|strike|"
@@ -120,7 +123,9 @@ def _build_json_envelope(result: CommandResult) -> dict[str, Any]:
     raise TypeError(f"Unsupported CommandResult: {type(result).__name__}")
 
 
-def _presented_envelope(envelope: dict[str, Any]) -> dict[str, Any]:
+def _presented_envelope(
+    envelope: dict[str, Any], *, protocol_keys: frozenset[str]
+) -> dict[str, Any]:
     """Scrub the invocation's known values from an envelope's data.
 
     Envelope keys, protocol values, and the field names of the records directly
@@ -135,7 +140,7 @@ def _presented_envelope(envelope: dict[str, Any]) -> dict[str, Any]:
 
     return {
         key: value
-        if key in _PROTOCOL_KEYS
+        if key in protocol_keys
         else [record(item) for item in value]
         if isinstance(value, list)
         else record(value)
@@ -144,7 +149,14 @@ def _presented_envelope(envelope: dict[str, Any]) -> dict[str, Any]:
 
 
 def _render_json(result: CommandResult, output: OutputContext) -> None:
-    envelope = _presented_envelope(_build_json_envelope(result))
+    envelope = _presented_envelope(
+        _build_json_envelope(result),
+        protocol_keys=(
+            _OPERATION_PROTOCOL_KEYS
+            if isinstance(result, OperationResult)
+            else _PROTOCOL_KEYS
+        ),
+    )
     sys.stdout.write(dump_cli_json(envelope))
     sys.stdout.write("\n")
     sys.stdout.flush()
@@ -195,7 +207,10 @@ def _rich_markup(value: Any) -> Any:
     from rich.text import Text
 
     plain = Text.from_markup(text).plain
-    return text if redactor.scrub(plain) == plain else Text(redactor.scrub(plain))
+    # Markup attributes, such as a link target, are emitted but not plain text.
+    if redactor.scrub(plain) == plain and redactor.scrub(text) == text:
+        return text
+    return Text(redactor.scrub(plain))
 
 
 def _display_width(value: Any) -> int:
