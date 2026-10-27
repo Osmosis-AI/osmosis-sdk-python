@@ -69,7 +69,9 @@ class SubscriptionRequiredError(PlatformAPIError):
         details: dict[str, Any] | None = None,
         billing_required: bool = False,
     ):
-        self.billing_required = billing_required or error_code == "BILLING_REQUIRED"
+        self.billing_required: bool = (
+            billing_required or error_code == "BILLING_REQUIRED"
+        )
         super().__init__(
             message or "Active subscription required",
             status_code=403,
