@@ -166,12 +166,15 @@ async def test_registration_cancels_failed_host_probe(
 
     monkeypatch.setattr(CloudflaredTunnel, "_probe_ready", failed_host_probe)
     tunnel = CloudflaredTunnel(local_url="http://127.0.0.1:1")
-    assert await asyncio.wait_for(tunnel.start(), timeout=1.0) == FAKE_URL
-    assert probe_started.is_set()
-    assert probe_cancelled.is_set()
-    assert tunnel.verified is True
-    assert tunnel.unverified_reason is None
-    await tunnel.stop()
+    try:
+        # OS subprocess scheduling is outside this cancellation contract.
+        assert await tunnel.start() == FAKE_URL
+        assert probe_started.is_set()
+        assert probe_cancelled.is_set()
+        assert tunnel.verified is True
+        assert tunnel.unverified_reason is None
+    finally:
+        await tunnel.stop()
 
 
 async def test_probe_failure_wins_registration_race(

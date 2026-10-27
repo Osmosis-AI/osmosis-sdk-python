@@ -19,11 +19,13 @@ EXTRA_MODULES: Final[Mapping[str, frozenset[str]]] = {
         {
             "aiohttp",
             "click",
+            "filelock",
             "fsspec",
             "jwt",
             "litellm",
             "mcp",
             "multidict",
+            "opentelemetry",
             "orjson",
             "strands",
             "urllib3",
@@ -34,6 +36,7 @@ EXTRA_MODULES: Final[Mapping[str, frozenset[str]]] = {
             "agents",
             "aiohttp",
             "click",
+            "filelock",
             "fsspec",
             "jwt",
             "litellm",
@@ -47,11 +50,13 @@ EXTRA_MODULES: Final[Mapping[str, frozenset[str]]] = {
         {
             "aiohttp",
             "click",
+            "filelock",
             "fsspec",
             "harbor",
             "jwt",
             "litellm",
             "multidict",
+            "opentelemetry",
             "orjson",
             "platformdirs",
             "toml",
@@ -60,7 +65,16 @@ EXTRA_MODULES: Final[Mapping[str, frozenset[str]]] = {
         }
     ),
     "rubric": frozenset(
-        {"aiohttp", "click", "fsspec", "litellm", "multidict", "orjson", "urllib3"}
+        {
+            "aiohttp",
+            "click",
+            "filelock",
+            "fsspec",
+            "litellm",
+            "multidict",
+            "orjson",
+            "urllib3",
+        }
     ),
     "parquet": frozenset({"pyarrow"}),
     "eval": frozenset(
@@ -68,6 +82,7 @@ EXTRA_MODULES: Final[Mapping[str, frozenset[str]]] = {
             "aiohttp",
             "click",
             "fastapi",
+            "filelock",
             "fsspec",
             "litellm",
             "multidict",
