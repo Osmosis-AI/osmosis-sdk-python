@@ -46,6 +46,7 @@ EXTRA_REQUIREMENTS: dict[str, set[str]] = {
         "click",
         "fastapi",
         "uvicorn",
+        "opentelemetry-api",
         "opentelemetry-sdk",
         "opentelemetry-exporter-otlp-proto-http",
         "urllib3",
@@ -53,10 +54,12 @@ EXTRA_REQUIREMENTS: dict[str, set[str]] = {
     "strands": {
         "aiohttp",
         "click",
+        "filelock",
         "fsspec",
         "litellm",
         "mcp",
         "multidict",
+        "opentelemetry-api",
         "orjson",
         "pyjwt",
         "strands-agents",
@@ -65,6 +68,7 @@ EXTRA_REQUIREMENTS: dict[str, set[str]] = {
     "openai-agents": {
         "aiohttp",
         "click",
+        "filelock",
         "fsspec",
         "litellm",
         "mcp",
@@ -77,10 +81,12 @@ EXTRA_REQUIREMENTS: dict[str, set[str]] = {
     "harbor": {
         "aiohttp",
         "click",
+        "filelock",
         "fsspec",
         "harbor",
         "litellm",
         "multidict",
+        "opentelemetry-api",
         "orjson",
         "platformdirs",
         "pyjwt",
@@ -92,6 +98,7 @@ EXTRA_REQUIREMENTS: dict[str, set[str]] = {
     "rubric": {
         "aiohttp",
         "click",
+        "filelock",
         "fsspec",
         "litellm",
         "multidict",
@@ -101,22 +108,38 @@ EXTRA_REQUIREMENTS: dict[str, set[str]] = {
     "parquet": {"pyarrow"},
     # eval = osmosis-ai[server,parquet] self-reference + the in-process
     # LiteLLM bridge and the uv executable used to launch rollout environments.
-    "eval": {"aiohttp", "fsspec", "litellm", "multidict", "osmosis-ai", "uv"},
+    "eval": {
+        "aiohttp",
+        "filelock",
+        "fsspec",
+        "litellm",
+        "multidict",
+        "osmosis-ai",
+        "uv",
+    },
     "full": {"osmosis-ai"},
 }
 
 SECURITY_CONSTRAINTS = {
     "aiohttp": ">=3.14.4",
     "certifi": ">=2026.10.19",
+    "filelock": ">=4.2.1",
+    "litellm": ">=1.103.1,!=1.104.0rc1",
+    "opentelemetry-api": ">=1.45.1",
+    "strands-agents": ">=1.48.0",
     "mcp": ">=1.30.0,!=2.0.*,!=2.1.*",
     "multidict": ">=6.9.1",
     "uv": ">=0.13.4",
 }
 
-# shortcut: metadata probes advisory boundaries; use range intersection if requirements start excluding individual releases.
+# shortcut: metadata probes representative vulnerable versions; expand probes when advisories add affected ranges.
 VULNERABLE_VERSIONS = {
     "aiohttp": ("3.0.0", "3.14.3"),
     "certifi": ("2019.3.9", "2025.11.12", "2026.10.18"),
+    "filelock": ("3.20.4", "3.29.4", "4.2.0"),
+    "litellm": ("1.94.3", "1.100.3", "1.101.2", "1.102.1", "1.103.0", "1.104.0rc1"),
+    "opentelemetry-api": ("1.39.1", "1.45.0"),
+    "strands-agents": ("1.32.0", "1.42.0", "1.47.0"),
     "mcp": ("1.8.0", "1.29.1", "2.0.0", "2.1.0", "2.1.1"),
     "multidict": ("6.7.0", "6.9.0"),
     "uv": ("0.9.7", "0.12.3", "0.13.3"),
@@ -181,7 +204,9 @@ def _assert_dependency_metadata(
         requirement = Requirement(raw_requirement)
         name = _normalize_distribution(requirement.name)
         for vulnerable_version in VULNERABLE_VERSIONS.get(name, ()):
-            assert not requirement.specifier.contains(vulnerable_version), (
+            assert not requirement.specifier.contains(
+                vulnerable_version, prereleases=True
+            ), (
                 f"{name} requirement allows vulnerable {vulnerable_version}: "
                 f"{raw_requirement}"
             )
