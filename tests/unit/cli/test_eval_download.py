@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
+from io import StringIO
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -11,6 +13,7 @@ import pytest
 import osmosis_ai.cli.main as cli
 import osmosis_ai.platform.cli.eval as eval_module
 import osmosis_ai.platform.cli.run_download as run_download_module
+from osmosis_ai.cli.console import Console
 from osmosis_ai.platform.api.download import DownloadHTTPError
 from osmosis_ai.platform.api.models import (
     EvalRunMetrics,
@@ -27,6 +30,7 @@ GIT_IDENTITY = "acme/rollouts"
 
 FILES = {
     "metrics": [RunDownloadFile("metrics.json", 10)],
+    "summary": [RunDownloadFile("summary.jsonl", 20)],
     "trajectories": [
         RunDownloadFile("summary.jsonl", 20),
         RunDownloadFile("trajectories/row_3_run_0.json", 30, token="rollout-3-0"),
@@ -77,6 +81,7 @@ def _make_fake_client(
     status: str = "finished",
     manifest_error: Exception | None = None,
     manifest_files: list[RunDownloadFile] | None = None,
+    page_file_counts: Sequence[int] = (),
 ):
     manifest_calls: list[dict[str, object]] = []
     url_calls: list[list[RunDownloadFile]] = []
@@ -93,6 +98,7 @@ def _make_fake_client(
             *,
             types,
             rows=None,
+            on_page=None,
             git_identity,
             credentials=None,
         ):
@@ -100,10 +106,17 @@ def _make_fake_client(
                 raise manifest_error
             assert run_id == "er_12345678"
             manifest_calls.append({"types": tuple(types), "rows": rows})
+            if on_page is not None:
+                for count in page_file_counts:
+                    on_page(count)
             files = (
                 manifest_files
                 if manifest_files is not None
-                else [item for kind in types for item in FILES[kind]]
+                else list(
+                    {
+                        item.identity: item for kind in types for item in FILES[kind]
+                    }.values()
+                )
             )
             return RunDownloadManifest(
                 files=files,
@@ -170,6 +183,10 @@ def test_default_download_is_metrics_and_trajectories(monkeypatch, tmp_path, cap
     expected = tmp_path / ".osmosis" / "evals" / "my-run"
     assert resource["selected_types"] == ["metrics", "trajectories"]
     assert resource["output_path"] == str(expected)
+    assert resource["breakdown"] == {
+        "metrics": {"files": 1, "bytes": 10},
+        "trajectories": {"files": 2, "bytes": 50},
+    }
     assert fake_client.manifest_calls == [
         {"types": ("metrics", "trajectories"), "rows": None}
     ]
@@ -289,6 +306,65 @@ def test_type_selector_replaces_default_and_rows_are_forwarded(
     assert not (output / "metrics.json").exists()
 
 
+def test_summary_type_downloads_only_summary_jsonl(monkeypatch, tmp_path, capsys):
+    _stub_git_context(monkeypatch, tmp_path)
+    fake_client = _make_fake_client()
+    monkeypatch.setattr(eval_module, "OsmosisClient", fake_client)
+    _stub_download(monkeypatch)
+
+    exit_code = cli.main(
+        ["--json", "eval", "download", "my-run", "--type", "summary", "--rows", "3"]
+    )
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    resource = json.loads(captured.out)["resource"]
+    expected = tmp_path / ".osmosis" / "evals" / "my-run"
+    assert resource["selected_types"] == ["summary"]
+    assert resource["breakdown"] == {"summary": {"files": 1, "bytes": 20}}
+    assert fake_client.manifest_calls == [{"types": ("summary",), "rows": "3"}]
+    assert (expected / "summary.jsonl").is_file()
+    assert sorted(path.name for path in expected.iterdir()) == ["summary.jsonl"]
+
+
+def test_summary_requested_with_trajectories_is_reported_under_summary(
+    monkeypatch, tmp_path, capsys
+):
+    _stub_git_context(monkeypatch, tmp_path)
+    fake_client = _make_fake_client()
+    monkeypatch.setattr(eval_module, "OsmosisClient", fake_client)
+    _stub_download(monkeypatch)
+
+    exit_code = cli.main(
+        ["--json", "eval", "download", "my-run", "--type", "summary,trajectories"]
+    )
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    resource = json.loads(captured.out)["resource"]
+    assert resource["files_downloaded"] == 2
+    assert resource["breakdown"] == {
+        "summary": {"files": 1, "bytes": 20},
+        "trajectories": {"files": 1, "bytes": 30},
+    }
+
+
+def test_summary_type_surfaces_platform_validation_error(monkeypatch, tmp_path, capsys):
+    _stub_git_context(monkeypatch, tmp_path)
+    error = PlatformAPIError("Invalid types: summary", 400)
+    monkeypatch.setattr(
+        eval_module, "OsmosisClient", _make_fake_client(manifest_error=error)
+    )
+
+    exit_code = cli.main(["--json", "eval", "download", "my-run", "--type", "summary"])
+    captured = capsys.readouterr()
+
+    assert exit_code == 1
+    payload = json.loads(captured.err)["error"]
+    assert payload["code"] == "VALIDATION"
+    assert payload["message"] == "Invalid types: summary"
+
+
 def test_type_all_expands_all_eval_categories(monkeypatch, tmp_path, capsys):
     _stub_git_context(monkeypatch, tmp_path)
     fake_client = _make_fake_client()
@@ -298,13 +374,27 @@ def test_type_all_expands_all_eval_categories(monkeypatch, tmp_path, capsys):
     exit_code = cli.main(["--json", "eval", "download", "my-run", "--type", "all"])
     captured = capsys.readouterr()
 
+    all_types = ("metrics", "trajectories", "artifacts", "logs")
     assert exit_code == 0
-    assert json.loads(captured.out)["resource"]["selected_types"] == [
-        "metrics",
-        "trajectories",
-        "artifacts",
-        "logs",
-    ]
+    assert json.loads(captured.out)["resource"]["selected_types"] == list(all_types)
+    assert fake_client.manifest_calls == [{"types": all_types, "rows": None}]
+
+
+def test_manifest_pages_report_files_found_so_far(monkeypatch, tmp_path):
+    _stub_git_context(monkeypatch, tmp_path)
+    fake_client = _make_fake_client(page_file_counts=[2000, 4500])
+    monkeypatch.setattr(eval_module, "OsmosisClient", fake_client)
+    _stub_download(monkeypatch)
+    output = StringIO()
+    monkeypatch.setattr(
+        eval_module, "console", Console(file=output, force_terminal=False, width=200)
+    )
+
+    eval_module.download("my-run", output=None, types="metrics")
+
+    printed = output.getvalue()
+    assert "Found 2,000 files so far" in printed
+    assert "Found 4,500 files so far" in printed
 
 
 @pytest.mark.parametrize(
@@ -460,6 +550,33 @@ def test_invalid_manifest_paths_are_reported_and_reserved_manifest_is_skipped(
         "artifacts/row_3_run_0/manifest.json",
     }
     assert not (tmp_path / "evil.json").exists()
+
+
+def test_same_path_with_different_tokens_is_reported_as_duplicate(
+    monkeypatch, tmp_path, capsys
+):
+    path = "trajectories/row_3_run_0.json"
+    files = [
+        RunDownloadFile(path, 10, token="rollout-a"),
+        RunDownloadFile(path, 10, token="rollout-b"),
+    ]
+    _stub_git_context(monkeypatch, tmp_path)
+    monkeypatch.setattr(
+        eval_module, "OsmosisClient", _make_fake_client(manifest_files=files)
+    )
+    _stub_download(monkeypatch)
+
+    exit_code = cli.main(
+        ["--json", "eval", "download", "my-run", "--type", "trajectories"]
+    )
+    captured = capsys.readouterr()
+
+    assert exit_code == 1
+    resource = json.loads(captured.out)["resource"]
+    assert resource["files_downloaded"] == 1
+    assert resource["files_failed"] == [
+        {"path": path, "error": "Manifest contains a duplicate path."}
+    ]
 
 
 def test_nested_artifact_manifest_is_downloadable(monkeypatch, tmp_path, capsys):

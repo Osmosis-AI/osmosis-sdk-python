@@ -50,6 +50,10 @@ from osmosis_ai.eval.local.dataset import (
     RowSelection,
     format_row_selector,
 )
+from osmosis_ai.eval.local.dataset_rows import (
+    DATASET_ROWS_FILENAME,
+    render_dataset_rows,
+)
 from osmosis_ai.eval.local.results import (
     CANONICAL_TRAJECTORY_FILENAME,
     TRIALS_DIRNAME,
@@ -79,6 +83,7 @@ from osmosis_ai.eval.local.state import (
     TerminalStatus,
     WorkKey,
     archive_run_directory,
+    atomic_write_bytes,
     process_group_of,
     process_start_token,
     reap_orphan_server,
@@ -842,6 +847,11 @@ class LocalEvalRunner:
             self._resumed_keys = set(self._latest)
 
             pending = self._pending_work_items()
+            # Once per invocation: _refresh_snapshots runs after every work item.
+            atomic_write_bytes(
+                run_dir / DATASET_ROWS_FILENAME,
+                render_dataset_rows(self._selection.rows),
+            )
             self._refresh_snapshots()
             total = len(self._selection.rows) * max(1, self._spec.n)
             if not pending:

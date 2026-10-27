@@ -35,7 +35,10 @@ DOWNLOAD_CONCURRENCY = 8
 DOWNLOAD_MAX_ATTEMPTS = 3
 DOWNLOAD_RETRY_BASE_SECONDS = 0.5
 
-EVAL_DOWNLOAD_TYPES = ("metrics", "trajectories", "artifacts", "logs")
+EVAL_DOWNLOAD_TYPES = ("metrics", "summary", "trajectories", "artifacts", "logs")
+# summary.jsonl already comes with trajectories, and platforms that predate the
+# summary type reject it, so `all` leaves it out.
+EVAL_ALL_DOWNLOAD_TYPES = ("metrics", "trajectories", "artifacts", "logs")
 BENCHMARK_DOWNLOAD_TYPES = ("summary", "results", "artifacts", "logs")
 
 ManifestLoader = Callable[[Sequence[str]], RunDownloadManifest]
@@ -69,7 +72,12 @@ def _safe_error_message(error: BaseException) -> str:
     return _URL_RE.sub("<redacted URL>", str(error))
 
 
-def parse_download_types(value: str, *, allowed: Sequence[str]) -> tuple[str, ...]:
+def parse_download_types(
+    value: str,
+    *,
+    allowed: Sequence[str],
+    all_types: Sequence[str] | None = None,
+) -> tuple[str, ...]:
     """Parse a comma-separated selector, expanding the standalone ``all``."""
     requested = [part.strip().lower() for part in value.split(",")]
     if not requested or any(not part for part in requested):
@@ -77,7 +85,7 @@ def parse_download_types(value: str, *, allowed: Sequence[str]) -> tuple[str, ..
     if "all" in requested:
         if len(requested) != 1:
             raise CLIError("--type all cannot be combined with other output types.")
-        return tuple(allowed)
+        return tuple(allowed if all_types is None else all_types)
 
     unknown = sorted(set(requested) - set(allowed))
     if unknown:
@@ -112,7 +120,9 @@ def _path_category(path: str) -> str | None:
         return "metrics"
     if path == "logs.txt":
         return "logs"
-    if path == "summary.jsonl" or path.startswith("trajectories/"):
+    if path == "summary.jsonl":
+        return "summary"
+    if path.startswith("trajectories/"):
         return "trajectories"
     if path.startswith("artifacts/"):
         return "artifacts"
@@ -145,6 +155,9 @@ def _safe_relative_path(
     if any(part in {"", ".", ".."} for part in parts):
         return None
     category = path_category(path)
+    if path == "summary.jsonl" and "summary" not in selected_types:
+        # summary.jsonl is also part of the trajectories type.
+        category = "trajectories"
     if category is None or category not in selected_types:
         return None
     return Path(*parts), category
