@@ -169,6 +169,20 @@ class TestLoadRubricDataset:
         with pytest.raises(CLIError, match=expected_error):
             load_rubric_dataset(data_file)
 
+    def test_non_object_messages_are_skipped_not_fatal(self, tmp_path: Path) -> None:
+        data_file = tmp_path / "data.jsonl"
+        messages = [
+            {"role": "assistant", "content": "older answer"},
+            {"role": "user", "content": "again?"},
+            "scalar",
+            7,
+            None,
+        ]
+        data_file.write_text(json.dumps({"messages": messages}) + "\n", "utf-8")
+
+        records = load_rubric_dataset(data_file)
+        assert records[0].solution_str == "older answer"
+
     def test_whitespace_only_solution_str_raises(self, tmp_path: Path):
         data_file = tmp_path / "data.jsonl"
         record = {"solution_str": "   "}

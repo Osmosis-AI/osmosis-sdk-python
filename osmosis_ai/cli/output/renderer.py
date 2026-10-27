@@ -6,6 +6,8 @@ import re
 import sys
 from typing import Any
 
+from osmosis_ai._redaction import invocation_redactor
+
 from .context import OutputContext, OutputFormat
 from .jsonutil import dump_cli_json
 from .result import (
@@ -19,6 +21,8 @@ from .result import (
 )
 
 _JSON_SCHEMA_VERSION = 1
+# SDK constants of every envelope; the remaining values are presentation data.
+_PROTOCOL_KEYS = frozenset({"schema_version", "status", "operation"})
 
 _RICH_STYLE_TAG_RE = re.compile(
     r"\[/?(?:bold|dim|italic|underline|blink|reverse|strike|"
@@ -116,8 +120,31 @@ def _build_json_envelope(result: CommandResult) -> dict[str, Any]:
     raise TypeError(f"Unsupported CommandResult: {type(result).__name__}")
 
 
+def _presented_envelope(envelope: dict[str, Any]) -> dict[str, Any]:
+    """Scrub the invocation's known values from an envelope's data.
+
+    Envelope keys, protocol values, and the field names of the records directly
+    under them are SDK schema; everything below is data, keys included.
+    """
+    redactor = invocation_redactor()
+
+    def record(value: Any) -> Any:
+        if isinstance(value, dict):
+            return {key: redactor.scrub_value(item) for key, item in value.items()}
+        return redactor.scrub_value(value)
+
+    return {
+        key: value
+        if key in _PROTOCOL_KEYS
+        else [record(item) for item in value]
+        if isinstance(value, list)
+        else record(value)
+        for key, value in envelope.items()
+    }
+
+
 def _render_json(result: CommandResult, output: OutputContext) -> None:
-    envelope = _build_json_envelope(result)
+    envelope = _presented_envelope(_build_json_envelope(result))
     sys.stdout.write(dump_cli_json(envelope))
     sys.stdout.write("\n")
     sys.stdout.flush()
@@ -131,6 +158,12 @@ def _normalise_plain_value(value: Any, *, rich_display: bool = False) -> str:
     return text.replace("\t", " ").replace("\n", " ").replace("\r", " ")
 
 
+def _write_plain_line(text: str) -> None:
+    # Checked as written: plain normalization (a tab becoming a space) can
+    # rebuild a known value that no field held.
+    sys.stdout.write(invocation_redactor().scrub(text) + "\n")
+
+
 def _display_items(result: ListResult | ListSection) -> list[dict[str, Any]]:
     return result.display_items if result.display_items is not None else result.items
 
@@ -138,15 +171,31 @@ def _display_items(result: ListResult | ListSection) -> list[dict[str, Any]]:
 def _rich_text(value: Any, *, style: str | None = None) -> Any:
     from rich.text import Text
 
+    redactor = invocation_redactor()
     if isinstance(value, Text):
+        if redactor.scrub(value.plain) != value.plain:
+            value = Text(redactor.scrub(value.plain), style=value.style)
         if style is not None:
             value.stylize(style)
         return value
     text = "" if value is None else str(value)
-    text = text.replace("\\[", "[").replace("\\]", "]")
+    # Checked after unescaping, which can rebuild a known value.
+    text = redactor.scrub(text.replace("\\[", "[").replace("\\]", "]"))
     if style is None:
         return Text(text)
     return Text(text, style=style)
+
+
+def _rich_markup(value: Any) -> Any:
+    """A display value in Rich markup, checked as Rich will render it."""
+    text = "" if value is None else str(value)
+    redactor = invocation_redactor()
+    if not redactor.values:
+        return text
+    from rich.text import Text
+
+    plain = Text.from_markup(text).plain
+    return text if redactor.scrub(plain) == plain else Text(redactor.scrub(plain))
 
 
 def _display_width(value: Any) -> int:
@@ -223,19 +272,19 @@ def _write_plain_list_rows(source: ListResult | ListSection) -> None:
             )
             for c in cols
         )
-        sys.stdout.write(row + "\n")
+        _write_plain_line(row)
 
 
 def _render_plain(result: CommandResult, output: OutputContext) -> None:
     if isinstance(result, DetailResult):
         for field in result.fields:
             value = _normalise_plain_value(field.value, rich_display=True)
-            sys.stdout.write(f"{field.label}: {value}\n")
+            _write_plain_line(f"{field.label}: {value}")
         for section in result.sections:
             for line in section.plain_lines:
-                sys.stdout.write(_normalise_plain_value(line) + "\n")
+                _write_plain_line(_normalise_plain_value(line))
         for hint in result.display_hints:
-            sys.stdout.write(_normalise_plain_value(hint) + "\n")
+            _write_plain_line(_normalise_plain_value(hint))
         return
 
     if isinstance(result, ListResult):
@@ -244,15 +293,15 @@ def _render_plain(result: CommandResult, output: OutputContext) -> None:
 
     if isinstance(result, SectionedListResult):
         for section in result.sections:
-            sys.stdout.write(f"{_normalise_plain_value(section.title)}:\n")
+            _write_plain_line(f"{_normalise_plain_value(section.title)}:")
             _write_plain_list_rows(section)
         return
 
     if isinstance(result, OperationResult):
         line = result.message or f"{result.operation}: {result.status}"
-        sys.stdout.write(_normalise_plain_value(line) + "\n")
+        _write_plain_line(_normalise_plain_value(line))
         for hint in result.display_next_steps:
-            sys.stdout.write(_normalise_plain_value(hint) + "\n")
+            _write_plain_line(_normalise_plain_value(hint))
         return
 
     raise TypeError(f"Unsupported CommandResult: {type(result).__name__}")
@@ -297,7 +346,7 @@ def _print_rich_list(
         raw_item = source.items[idx] if idx < len(source.items) else {}
         table.add_row(
             *[
-                ("" if item.get(column.key) is None else str(item.get(column.key)))
+                _rich_markup(item.get(column.key))
                 if source.display_items is not None
                 and item.get(column.key) != raw_item.get(column.key)
                 else _rich_text(item.get(column.key))

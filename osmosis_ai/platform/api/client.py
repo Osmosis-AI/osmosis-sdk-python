@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING, Any
 from urllib.parse import quote, urlencode
 
-from osmosis_ai.platform.auth.platform_client import platform_request
+from osmosis_ai.platform.auth.platform_client import PlatformAPIError, platform_request
 from osmosis_ai.platform.constants import (
     DEFAULT_PAGE_SIZE,
 )
@@ -54,6 +54,20 @@ if TYPE_CHECKING:
 def _safe_path(segment: str) -> str:
     """URL-encode a path segment to prevent path traversal."""
     return quote(segment, safe="")
+
+
+def _parse_secret_response[T](
+    parse: Callable[[dict[str, Any]], T], data: dict[str, Any]
+) -> T:
+    """Validate response types without exposing malformed values in tracebacks."""
+    # Imported here: list commands must not load pydantic (test_lazy_loading).
+    from pydantic import TypeAdapter
+
+    try:
+        result = parse(data)
+        return TypeAdapter(type(result)).validate_python(vars(result))
+    except (KeyError, TypeError, ValueError, OverflowError):
+        raise PlatformAPIError("Invalid response from platform") from None
 
 
 class OsmosisClient:
@@ -333,8 +347,9 @@ class OsmosisClient:
             data=data,
             credentials=credentials,
             git_identity=git_identity,
+            secret_values=tuple((provided_secrets or {}).values()),
         )
-        return SubmitRunResult.from_dict(result)
+        return _parse_secret_response(SubmitRunResult.from_dict, result)
 
     def list_training_runs(
         self,
@@ -594,8 +609,9 @@ class OsmosisClient:
             data={"name": name, "value": value, "scope": scope},
             credentials=credentials,
             git_identity=git_identity,
+            secret_values=(value,),
         )
-        return EnvironmentSecretInfo.from_dict(data)
+        return _parse_secret_response(EnvironmentSecretInfo.from_dict, data)
 
     def delete_environment_secret(
         self,
@@ -669,8 +685,9 @@ class OsmosisClient:
             data=data,
             credentials=credentials,
             git_identity=git_identity,
+            secret_values=tuple((provided_secrets or {}).values()),
         )
-        return SubmitRunResult.from_dict(result)
+        return _parse_secret_response(SubmitRunResult.from_dict, result)
 
     def start_eval_run_import(
         self,
@@ -800,14 +817,18 @@ class OsmosisClient:
             data["env_config"] = env_config
         if secrets:
             data["secrets"] = secrets
+        provided = (secrets or {}).get("provided")
         result = platform_request(
             "/api/cli/benchmark-runs",
             method="POST",
             data=data,
             credentials=credentials,
             git_identity=git_identity,
+            secret_values=tuple(provided.values())
+            if isinstance(provided, dict)
+            else (),
         )
-        return SubmitBenchmarkRunResult.from_dict(result)
+        return _parse_secret_response(SubmitBenchmarkRunResult.from_dict, result)
 
     def list_benchmarks(
         self,
@@ -1070,8 +1091,9 @@ class OsmosisClient:
             data={"secrets": secrets} if secrets else {},
             credentials=credentials,
             git_identity=git_identity,
+            secret_values=tuple((secrets or {}).values()),
         )
-        return RetryEvalRunResult.from_dict(result)
+        return _parse_secret_response(RetryEvalRunResult.from_dict, result)
 
     def stop_eval_run(
         self,

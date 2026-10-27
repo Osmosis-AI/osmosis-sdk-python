@@ -17,6 +17,7 @@ from osmosis_ai.eval.local.llm_bridge import (
     LiteLLMBridge,
     create_bridge_router,
 )
+from tests.unit.secret_spelling_helpers import every_unit_escaped, recoverable
 
 ROLLOUT_ID = "a" * 32
 BRIDGE_TOKEN = "bridge-secret"
@@ -355,6 +356,134 @@ def test_error_redacts_known_secrets_when_litellm_redactor_is_unavailable(
         secret_values=("configured-secret",),
     )
     assert payload["error"]["message"] == "Provider failed: [REDACTED], [REDACTED]"
+
+
+ESCAPED_SECRET = 'synth-key-A"B\\C-é-\U0001f511-123456789'
+
+
+@pytest.mark.parametrize(
+    ("first", "spelling"),
+    [
+        ('"', "standard"),
+        ('"', "every-unit"),
+        ("0, ", "every-unit"),
+        ("true, ", "every-unit"),
+        ("null, ", "every-unit"),
+    ],
+    ids=["strings", "strings-escaped", "number-first", "true-first", "null-first"],
+)
+@pytest.mark.parametrize(
+    "tail", ["[" * 1_200 + "]" * 1_200 + "]", "[" * 5_000 + "]" * 5_000 + "]", "["]
+)
+def test_unparseable_provider_errors_never_reveal_credentials(
+    first: str, spelling: str, tail: str
+) -> None:
+    escaped = (
+        json.dumps(ESCAPED_SECRET)[1:-1]
+        if spelling == "standard"
+        else every_unit_escaped(ESCAPED_SECRET)
+    )
+    lead = "[" if first == '"' else "[" + first
+    message = f'{lead}"{escaped}", {tail}'
+    # The standard decoder recovers the credential from what the provider sent,
+    # and it sits well inside the 1000-character window that is shown.
+    assert ESCAPED_SECRET in recoverable(message)
+    assert message.index(escaped) < 100
+    status, payload = llm_bridge._bridge_error(
+        RuntimeError(message), secret_values=(ESCAPED_SECRET,)
+    )
+    assert status == 502
+    assert ESCAPED_SECRET not in recoverable(payload["error"]["message"])
+
+
+@pytest.mark.parametrize("mode", ["json", "stream", "keepalive"])
+async def test_malformed_provider_responses_fail_through_the_sanitizing_handler(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    mode: str,
+) -> None:
+    # Conversion quotes the bad field: int() of a registered value.
+    secret = "synth-created-\U0001f511-123456"
+    monkeypatch.setattr(llm_bridge, "_NON_STREAM_GRACE_SEC", 0.01)
+    provider_response = {
+        "id": "x",
+        "created": secret,
+        "choices": [
+            {
+                "index": 0,
+                "message": {"role": "assistant", "content": "ok"},
+                "finish_reason": "stop",
+            }
+        ],
+    }
+    _install(
+        monkeypatch,
+        _SlowLiteLLM(
+            delay=0.05 if mode == "keepalive" else 0, response=provider_response
+        ),
+    )
+    bridge = LiteLLMBridge(model="anthropic/claude-test", secret_values=[secret])
+    async with _client(bridge, non_stream_keepalive=mode == "keepalive") as client:
+        response = await client.post(
+            _url(), json=_body(stream=mode == "stream"), headers=_auth()
+        )
+    assert response.status_code == (502 if mode == "json" else 200)
+    if mode == "stream":
+        payload = next(
+            json.loads(line[6:])
+            for line in response.text.splitlines()
+            if line.startswith("data: {")
+        )
+    else:
+        payload = response.json()
+    assert "invalid literal for int()" in payload["error"]["message"]
+    for text in (response.text, caplog.text):
+        assert secret not in recoverable(text)
+
+
+@pytest.mark.parametrize(
+    ("secret", "body"),
+    [
+        # Decoding would split a JSON-shaped credential across fields.
+        ('{"credential":"synthetic-key-123456"}', '{"error":{"echo":SECRET}}'),
+        # Decoding would turn the literal escape into a different spelling.
+        ("synthetic-\\u0041-key-123456", '{"error":"rejected SECRET"}'),
+    ],
+    ids=["json-shaped", "decoded-escape"],
+)
+def test_provider_errors_are_scrubbed_before_decoding(secret: str, body: str) -> None:
+    _, payload = llm_bridge._bridge_error(
+        RuntimeError(body.replace("SECRET", secret)), secret_values=(secret,)
+    )
+    assert "synthetic" not in recoverable(payload["error"]["message"])
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "[Errno 61] Connection refused",
+        "litellm.APIConnectionError: [Errno 111] Connection refused at C:\\new\\dir",
+    ],
+)
+def test_bracketed_plain_text_errors_stay_readable(text: str) -> None:
+    _, payload = llm_bridge._bridge_error(
+        RuntimeError(text), secret_values=(ESCAPED_SECRET,)
+    )
+    assert payload["error"]["message"] == text
+
+
+@pytest.mark.parametrize("ensure_ascii", [True, False])
+def test_provider_text_redacts_embedded_json_escaped_credentials(
+    ensure_ascii: bool,
+) -> None:
+    escaped = json.dumps(ESCAPED_SECRET, ensure_ascii=ensure_ascii)[1:-1]
+    message = f'OpenAIException - {{"error": "rejected {escaped}"}}'
+    _, payload = llm_bridge._bridge_error(
+        RuntimeError(message), secret_values=(ESCAPED_SECRET,)
+    )
+    assert payload["error"]["message"].startswith("OpenAIException - ")
+    assert "[REDACTED]" in payload["error"]["message"]
+    assert escaped not in payload["error"]["message"]
 
 
 async def test_empty_choices_fail_loudly(
@@ -1204,11 +1333,23 @@ async def test_reasoning_replay_preserves_explicit_client_values(
 
 
 @pytest.mark.parametrize("mode", ["json", "stream", "keepalive"])
+@pytest.mark.parametrize(
+    "provider_key",
+    [
+        "local-provider-test-secret",
+        'synthetic-key-A"B\\C\nsecond-line',
+        "synth-secret-with-spaces  ",
+    ],
+)
 async def test_provider_errors_preserve_4xx_and_redact_all_response_modes(
-    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, mode: str
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    mode: str,
+    provider_key: str,
 ) -> None:
-    provider_key = "local-provider-test-secret"
     ambient_key = "ambient-provider-test-secret"
+    # A run-supplied value under a name the environment heuristic ignores.
+    run_secret = 'run-supplied-"value"-123'
     monkeypatch.setenv("OPENROUTER_API_KEY", ambient_key)
     monkeypatch.setattr(llm_bridge, "_NON_STREAM_GRACE_SEC", 0.01)
     upstream = httpx.Response(
@@ -1218,7 +1359,7 @@ async def test_provider_errors_preserve_4xx_and_redact_all_response_modes(
             "error": {
                 "message": (
                     f"custom_option is invalid: {provider_key}, {ambient_key}, "
-                    f"{BRIDGE_TOKEN}"
+                    f"{BRIDGE_TOKEN}, {run_secret}"
                 )
             }
         },
@@ -1234,7 +1375,9 @@ async def test_provider_errors_preserve_4xx_and_redact_all_response_modes(
             completion_error=failure,
         ),
     )
-    bridge = LiteLLMBridge(model="anthropic/claude-test", api_key=provider_key)
+    bridge = LiteLLMBridge(
+        model="anthropic/claude-test", api_key=provider_key, secret_values=[run_secret]
+    )
     async with _client(bridge, non_stream_keepalive=mode == "keepalive") as client:
         response = await client.post(
             _url(), json=_body(stream=mode == "stream"), headers=_auth()
@@ -1250,9 +1393,15 @@ async def test_provider_errors_preserve_4xx_and_redact_all_response_modes(
         payload = response.json()
     assert payload["error"]["code"] == 422
     assert "custom_option is invalid" in payload["error"]["message"]
-    for secret in (provider_key, ambient_key, BRIDGE_TOKEN):
+    for secret in (provider_key, ambient_key, BRIDGE_TOKEN, run_secret):
         assert secret not in response.text
         assert secret not in caplog.text
+        assert json.dumps(secret)[1:-1] not in payload["error"]["message"]
+        assert all(
+            line.rstrip() not in payload["error"]["message"]
+            for line in secret.splitlines()
+            if line
+        )
 
 
 async def test_invalid_bridge_controls_are_client_errors(

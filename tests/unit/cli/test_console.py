@@ -511,3 +511,28 @@ def test_print_url_preserves_url_without_rich_line_breaks() -> None:
     console.print_url("  View: ", url)
 
     assert output.getvalue() == f"  View: {url}\n"
+
+
+# ── known values ────────────────────────────────────────────────────
+
+
+def test_text_output_is_checked_as_rich_renders_it(monkeypatch) -> None:
+    from osmosis_ai._redaction import invocation_redaction, register_invocation_secrets
+
+    secret = "synthetic-[key]-123456"
+    errors = StringIO()
+    monkeypatch.setattr(sys, "stderr", errors)
+    console, buf = _plain_console()
+    with invocation_redaction():
+        register_invocation_secrets([secret])
+        # Escaping hides the value from the source text; markup restores it.
+        console.print(f"Uploading {console.escape(secret)}...", style="dim")
+        console.print("Uploading [bold]safe[/bold]...")
+        console.print_error(f"Error: rejected {secret}")
+        console.print_warning(f"credential {secret}")
+    printed = buf.getvalue() + errors.getvalue()
+    assert secret not in printed
+    assert "Uploading [REDACTED]..." in buf.getvalue()
+    assert "Uploading safe..." in buf.getvalue()
+    assert "Error: rejected [REDACTED]" in errors.getvalue()
+    assert "⚠ credential [REDACTED]" in errors.getvalue()

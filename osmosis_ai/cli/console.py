@@ -152,6 +152,27 @@ class Console:
             if status is not None:
                 status.start()
 
+    def _without_known_values(self, value: Any, *, markup: bool | None) -> Any:
+        """*value*, or its scrubbed text if it renders an invocation's known value.
+
+        Checked as Rich renders it: markup and its escapes are SDK formatting
+        that can rebuild a value the source text did not hold.
+        """
+        from rich.text import Text
+
+        from osmosis_ai._redaction import invocation_redactor
+
+        redactor = invocation_redactor()
+        if not redactor.values or not isinstance(value, (str, Text)):
+            return value
+        rendered = (
+            value
+            if isinstance(value, Text)
+            else self._rich.render_str(value, markup=markup)
+        )
+        plain = redactor.scrub(rendered.plain)
+        return value if plain == rendered.plain else Text(plain, style=rendered.style)
+
     def print(
         self,
         *args: Any,
@@ -169,6 +190,8 @@ class Console:
         """
         if not self._is_rich_mode():
             return
+        markup = kwargs.get("markup")
+        args = tuple(self._without_known_values(arg, markup=markup) for arg in args)
         with self._pause_active_spinner():
             self._rich.print(*args, style=style, end=end, **kwargs)
 
@@ -189,6 +212,7 @@ class Console:
         kwargs: dict[str, Any] = {"markup": markup}
         if soft_wrap is not None:
             kwargs["soft_wrap"] = soft_wrap
+        message = self._without_known_values(message, markup=markup)
         with self._pause_active_spinner():
             self._rich_stderr.print(message, style="bold red", **kwargs)
 
@@ -219,8 +243,11 @@ class Console:
             soft_wrap: Whether Rich should avoid inserting hard line breaks.
             markup: Whether to interpret Rich markup in the message.
         """
+        from osmosis_ai._redaction import invocation_redactor
         from osmosis_ai.cli.output.context import OutputFormat
 
+        # Warnings carry server and environment text into every output format.
+        message = invocation_redactor().scrub(message)
         fmt = self._output_format()
         if fmt is OutputFormat.json:
             from osmosis_ai.cli.output.error import emit_structured_warning_to_stderr

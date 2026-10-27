@@ -244,6 +244,14 @@ def _callback(
         )
     if platform is not None:
         os.environ["OSMOSIS_PLATFORM_URL"] = platform
+    from osmosis_ai._redaction import (
+        ambient_secret_values,
+        register_invocation_secrets,
+    )
+
+    # Provider and platform keys in the final environment are known to every
+    # command before it reads state or validates input that could quote one.
+    register_invocation_secrets(ambient_secret_values(os.environ))
     _refuse_insecure_platform_url()
 
 
@@ -318,10 +326,47 @@ def _handle_cli_error(
     exit_code: int = 1,
     root_command: Command | None = None,
 ) -> int:
+    from osmosis_ai.cli.errors import CLIError, CLIErrorCode
+
+    try:
+        _report_cli_error(exc, argv=argv, root_command=root_command)
+    except Exception:
+        # Raising this failure would carry the original error, and its chain,
+        # past every scrub, so only a fixed message leaves.
+        message = "An unexpected internal error occurred while reporting an error."
+        if _argv_format_prescan(argv if argv is not None else sys.argv[1:]) is (
+            OutputFormat.json
+        ):
+            emit_structured_error_to_stderr(
+                CLIError(message, code=CLIErrorCode.INTERNAL), command="<root>"
+            )
+        else:
+            sys.stderr.write(f"Error: {message}\n")
+    return exit_code
+
+
+def _report_cli_error(
+    exc: BaseException,
+    *,
+    argv: list[str] | None,
+    root_command: Command | None,
+) -> None:
+    from osmosis_ai._redaction import invocation_redactor
+    from osmosis_ai.cli.errors import CLIError
+
+    # The final error boundary: nothing printed here carries a secret that this
+    # invocation handled, whichever exception or chain produced it. Messages
+    # are scrubbed per line, so an unsafe line does not take the retry hint.
+    redactor = invocation_redactor()
     output = _output_context_for_error(exc, argv)
     classified = None
     if output.format is OutputFormat.json:
         classified = classify_error(exc)
+        classified = CLIError(
+            redactor.scrub_lines(classified.message),
+            code=classified.code,
+            details=redactor.scrub_value(classified.details),
+        )
         raw_ctx = getattr(exc, "ctx", None)
         ctx = raw_ctx if isinstance(raw_ctx, Context) else None
         if ctx is None:
@@ -334,9 +379,8 @@ def _handle_cli_error(
             ),
         )
     else:
-        _print_error(str(exc))
+        _print_error(redactor.scrub_lines(str(exc)))
     emit_internal_debug(exc, classified)
-    return exit_code
 
 
 def _register_commands() -> None:
@@ -485,8 +529,16 @@ def run_cli(
     entry point supplies its console alias. Duplicate names at any level are
     rejected before a command handler can run.
     """
+    from osmosis_ai._redaction import invocation_redaction
+
     argv = argv if argv is not None else sys.argv[1:]
     argv = hoist_format_selectors(argv)
+    # Commands register the secrets they handle; the error boundary scrubs them.
+    with invocation_redaction():
+        return _run_cli(cli_app, argv, prog_name=prog_name)
+
+
+def _run_cli(cli_app: typer.Typer, argv: list[str], *, prog_name: str | None) -> int:
     root_command: Command | None = None
     try:
         if isinstance(cli_app, typer.Typer):

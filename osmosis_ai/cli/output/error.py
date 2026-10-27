@@ -67,7 +67,7 @@ def classify_error(exc: BaseException) -> CLIError:
     if isinstance(exc, SubscriptionRequiredError):
         code = (
             CLIErrorCode.BILLING_REQUIRED
-            if exc.error_code == "BILLING_REQUIRED"
+            if exc.billing_required
             else CLIErrorCode.SUBSCRIPTION_REQUIRED
         )
         return CLIError(str(exc), code=code, details=_platform_error_details(exc))
@@ -114,8 +114,15 @@ def emit_internal_debug(exc: BaseException, classified: CLIError | None = None) 
             classified = classify_error(exc)
         if classified.code != CLIErrorCode.INTERNAL:
             return
-    sys.stderr.write(f"{type(debug_exc).__name__}: {debug_exc}\n")
-    traceback.print_exception(debug_exc, file=sys.stderr)
+    from osmosis_ai._redaction import invocation_redactor
+
+    # The stack stays; secrets this invocation handled leave every line of it.
+    trace = "".join(traceback.format_exception(debug_exc))
+    sys.stderr.write(
+        invocation_redactor().scrub_lines(
+            f"{type(debug_exc).__name__}: {debug_exc}\n{trace}"
+        )
+    )
     sys.stderr.flush()
 
 

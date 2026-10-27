@@ -9,7 +9,9 @@ These focus on the security-critical invariants:
 from __future__ import annotations
 
 import json
+from io import BytesIO
 from types import SimpleNamespace
+from urllib.error import HTTPError
 
 import pytest
 
@@ -606,6 +608,185 @@ def test_secret_set_redacted_platform_error_suppresses_original_cause(
     assert SENTINEL_VALUE not in str(exc.value)
 
 
+@pytest.mark.parametrize("output_flag", ["--json", "--plain", None])
+@pytest.mark.parametrize("debug", ["0", "1"])
+@pytest.mark.parametrize("response_kind", ["number", "escaped", "unicode", "raw"])
+def test_secret_set_redacts_http_responses_before_rendering(
+    monkeypatch, capsys, output_flag, debug, response_kind
+) -> None:
+    import osmosis_ai.platform.auth.platform_client as transport
+
+    secrets = {
+        "number": "9876543210123456789",
+        "escaped": 'synth-key-A"B\\C-123456789',
+        "unicode": "synth-key-秘密-123456789",
+        "raw": "synth-key-" + "abcdefgh" * 40,
+    }
+    secret = secrets[response_kind]
+    received = int(secret) if response_kind == "number" else secret
+    body = secret if response_kind == "raw" else json.dumps({"received": received})
+    monkeypatch.setenv("SOURCE_VAR", secret)
+    monkeypatch.setenv("OSMOSIS_DEBUG", debug)
+    monkeypatch.setattr(
+        secret_module,
+        "require_platform_workspace_context",
+        lambda: SimpleNamespace(
+            credentials=SimpleNamespace(access_token="synthetic-auth-token"),
+            git_identity=GIT_IDENTITY,
+        ),
+    )
+    monkeypatch.setattr(transport, "get_platform_url", lambda: "https://example.test")
+
+    def reject(request, **kwargs):
+        assert json.loads(request.data)["value"] == secret
+        raise HTTPError(
+            request.full_url, 400, "Bad Request", {}, BytesIO(body.encode())
+        )
+
+    monkeypatch.setattr(transport, "urlopen", reject)
+    flags = [output_flag] if output_flag else []
+    assert cli.main([*flags, "secret", "set", "MY_TOKEN", "--env", "SOURCE_VAR"]) == 1
+    captured = capsys.readouterr()
+    output = captured.out + captured.err
+    message = (
+        json.loads(captured.err)["error"]["message"]
+        if output_flag == "--json"
+        else output
+    )
+    assert secret not in output
+    assert secret[:32] not in message
+    assert json.dumps(secret)[1:-1][:32] not in message
+    assert "Traceback" not in output
+    if output_flag == "--json":
+        assert json.loads(captured.err)["error"]["code"] == "VALIDATION"
+
+
+@pytest.mark.parametrize("output_flag", ["--json", "--plain", None])
+def test_secret_success_echo_is_redacted_after_real_model_conversion(
+    monkeypatch, capsys, output_flag
+):
+    from unittest.mock import MagicMock
+
+    import osmosis_ai.platform.auth.platform_client as transport
+
+    monkeypatch.setenv("SOURCE_VAR", SENTINEL_VALUE)
+    monkeypatch.setattr(
+        secret_module,
+        "require_platform_workspace_context",
+        lambda: SimpleNamespace(
+            credentials=SimpleNamespace(access_token="synthetic-auth"),
+            git_identity=GIT_IDENTITY,
+            workspace_directory=PROJECT_ROOT,
+            repo_url=REPO_URL,
+        ),
+    )
+    response = MagicMock()
+    response.__enter__.return_value = response
+    response.status = 200
+    response.headers = {}
+    response.read.return_value = json.dumps(
+        {
+            "id": "secret-id",
+            "name": SENTINEL_VALUE,
+            "creator_name": SENTINEL_VALUE,
+            "created_at": "now",
+            "updated_at": "now",
+            "scope": "user",
+            "platform_url": "https://example.test/" + SENTINEL_VALUE,
+        }
+    ).encode()
+    monkeypatch.setattr(transport, "urlopen", lambda *args, **kwargs: response)
+    monkeypatch.setattr(transport, "get_platform_url", lambda: "https://example.test")
+    flags = [output_flag] if output_flag else []
+    assert cli.main([*flags, "secret", "set", "MY_TOKEN", "--env", "SOURCE_VAR"]) == 0
+    captured = capsys.readouterr()
+    assert SENTINEL_VALUE not in captured.out + captured.err
+    if output_flag == "--json":
+        payload = json.loads(captured.out)
+        assert payload["resource"]["id"] == "secret-id"
+        assert payload["resource"]["name"] == "[REDACTED]"
+        assert payload["platform_url"] == "https://example.test/[REDACTED]"
+
+
+@pytest.mark.parametrize(
+    ("output_flag", "value", "platform_url"),
+    [
+        # Plain output turns the tab into a space after the result was checked.
+        ("--plain", "synthetic key", "https://example.test/synthetic\tkey"),
+        # Rich output unescapes the brackets after the result was checked.
+        (
+            None,
+            "synthetic-[key]-123456",
+            "https://example.test/synthetic-\\[key\\]-123456",
+        ),
+    ],
+)
+def test_secret_success_output_is_checked_after_rendering_normalizes_it(
+    monkeypatch, capsys, output_flag, value, platform_url
+):
+    from unittest.mock import MagicMock
+
+    import osmosis_ai.platform.auth.platform_client as transport
+
+    monkeypatch.setenv("SOURCE_VAR", value)
+    monkeypatch.setenv("COLUMNS", "200")
+    monkeypatch.setattr(
+        secret_module,
+        "require_platform_workspace_context",
+        lambda: SimpleNamespace(
+            credentials=SimpleNamespace(access_token="synthetic-auth"),
+            git_identity=GIT_IDENTITY,
+            workspace_directory=PROJECT_ROOT,
+            repo_url=REPO_URL,
+        ),
+    )
+    sent: list[str] = []
+    response = MagicMock()
+    response.__enter__.return_value = response
+    response.status = 200
+    response.headers = {}
+    response.read.return_value = json.dumps(
+        {
+            "id": "secret-id",
+            "name": "MY_TOKEN",
+            "scope": "user",
+            "platform_url": platform_url,
+        }
+    ).encode()
+
+    def accept(request, **kwargs):
+        sent.append(json.loads(request.data)["value"])
+        return response
+
+    monkeypatch.setattr(transport, "urlopen", accept)
+    monkeypatch.setattr(transport, "get_platform_url", lambda: "https://example.test")
+    flags = [output_flag] if output_flag else []
+    assert cli.main([*flags, "secret", "set", "MY_TOKEN", "--env", "SOURCE_VAR"]) == 0
+    captured = capsys.readouterr()
+    assert sent == [value]
+    assert value not in captured.out + captured.err
+    assert "View secrets: " in captured.out
+    assert 'Secret "MY_TOKEN"' in captured.out
+
+
+def test_plain_output_without_a_known_value_keeps_its_normalization(
+    monkeypatch, capsys
+):
+    from osmosis_ai.cli.output import OperationResult, render
+    from osmosis_ai.cli.output.context import OutputContext
+
+    render(
+        OperationResult(
+            operation="secret.set",
+            status="success",
+            message="Saved\tsecret",
+            display_next_steps=["View: https://example.test/a\tb"],
+        ),
+        OutputContext(format=OutputFormat.plain, interactive=False),
+    )
+    assert capsys.readouterr().out == "Saved secret\nView: https://example.test/a b\n"
+
+
 # ── value resolution unit tests (incl. hidden prompt path) ────────
 
 
@@ -938,3 +1119,32 @@ def test_secret_set_rejects_legacy_names(monkeypatch, capsys) -> None:
     assert exit_code == 1
     payload = json.loads(captured.err)
     assert payload["error"]["code"] == "VALIDATION"
+
+
+@pytest.mark.parametrize("output_flag", ["--json", "--plain"])
+@pytest.mark.parametrize("debug", ["0", "1"])
+def test_secret_set_unexpected_errors_never_print_the_value(
+    monkeypatch, capsys, output_flag, debug
+) -> None:
+    monkeypatch.setenv("SOURCE_VAR", SENTINEL_VALUE)
+    monkeypatch.setenv("OSMOSIS_DEBUG", debug)
+    monkeypatch.setattr(
+        secret_module,
+        "require_platform_workspace_context",
+        lambda: SimpleNamespace(
+            credentials=SimpleNamespace(access_token="synthetic-auth"),
+            git_identity=GIT_IDENTITY,
+        ),
+    )
+
+    def explode(*_args, **_kwargs):
+        raise RuntimeError(f"client exploded near {SENTINEL_VALUE}")
+
+    monkeypatch.setattr(secret_module.OsmosisClient, "set_environment_secret", explode)
+    flags = [output_flag]
+    assert cli.main([*flags, "secret", "set", "MY_TOKEN", "--env", "SOURCE_VAR"]) == 1
+    captured = capsys.readouterr()
+    assert SENTINEL_VALUE not in captured.out + captured.err
+    if debug == "1":
+        assert "Traceback" in captured.err
+        assert "client exploded near [REDACTED]" in captured.err

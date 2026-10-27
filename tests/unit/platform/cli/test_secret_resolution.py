@@ -249,3 +249,14 @@ def test_interactive_rich_prompts_for_missing_secret(
             secrets_file=None,
             stored_names=set(),
         ) == {"A_KEY": "typed-secret"}
+
+
+def test_resolved_values_reach_the_invocation_error_boundary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from osmosis_ai._redaction import invocation_redaction
+
+    monkeypatch.setenv("RUN_TOKEN", "synth-resolved-123")
+    with invocation_redaction() as redactor:
+        resolve_run_secrets(names=["RUN_TOKEN"], secrets_file=None, stored_names=set())
+        assert redactor.values == ("synth-resolved-123",)

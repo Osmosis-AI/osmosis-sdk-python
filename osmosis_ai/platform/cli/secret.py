@@ -15,6 +15,7 @@ from __future__ import annotations
 import os
 from typing import Any
 
+from osmosis_ai._redaction import register_invocation_secrets
 from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.cli.output import (
     ListColumn,
@@ -249,6 +250,7 @@ def set_secret(
             resource=workspace_result_context(context),
             message="Cancelled.",
         )
+    register_invocation_secrets([value])
 
     client = OsmosisClient()
     from osmosis_ai.platform.auth.platform_client import PlatformAPIError
@@ -264,10 +266,6 @@ def set_secret(
             )
     except PlatformAPIError as exc:
         raise redact_secret_platform_error(exc, value) from None
-    finally:
-        # Drop the only remaining reference to the plaintext value promptly,
-        # including the failure path.
-        del value
 
     resource = serialize_environment_secret(secret)
     resource.update(workspace_result_context(context))

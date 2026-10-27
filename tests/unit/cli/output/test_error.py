@@ -400,3 +400,41 @@ def test_main_maps_click_abort_to_interrupt_exit_code(
     monkeypatch.setattr(cli_main, "app", raise_abort)
 
     assert main(["secret", "add", "OPENAI_API_KEY"]) == 130
+
+
+@pytest.mark.parametrize("output_flag", ["--json", "--plain"])
+def test_a_failure_while_reporting_an_error_never_releases_it(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    output_flag: str,
+) -> None:
+    import traceback
+
+    from osmosis_ai._redaction import register_invocation_secrets
+
+    secret = "synth-known-secret-123"
+    app = cli_main.create_app()
+
+    @app.command("fail")
+    def fail() -> None:
+        register_invocation_secrets([secret])
+        raise CLIError(f"rejected {secret}")
+
+    def broken(*_args: Any, **_kwargs: Any) -> None:
+        raise RuntimeError("reporter bug")
+
+    # Fault injection: the reporter's own failure, whatever its cause.
+    monkeypatch.setattr(cli_main, "_print_error", broken)
+    monkeypatch.setattr(cli_main, "command_path_for_error", broken)
+    try:
+        exit_code = cli_main.run_cli(app, [output_flag, "fail"])
+    except BaseException as exc:  # pragma: no cover - the regression itself
+        pytest.fail("".join(traceback.format_exception(exc)))
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert secret not in captured.out + captured.err
+    if output_flag == "--json":
+        error = json.loads(captured.err)["error"]
+        assert error["code"] == "INTERNAL"
+    else:
+        assert captured.err.startswith("Error: ")

@@ -199,6 +199,7 @@ def test_submit_benchmark_run_posts_config_sections(mock_request: MagicMock) -> 
     assert mock_request.call_args.args[0] == "/api/cli/benchmark-runs"
     assert mock_request.call_args.kwargs == {
         "method": "POST",
+        "secret_values": (),
         "data": {
             "experiment_config": {"benchmark": "HLE"},
             "tasks_config": {"task_set": "parity"},

@@ -24,6 +24,7 @@ import osmosis_ai.platform.cli.eval_run as eval_run_module
 from osmosis_ai.cli.console import Console
 from osmosis_ai.cli.errors import CLIError, CLIErrorCode
 from osmosis_ai.cli.output import OutputFormat, override_output_context
+from tests.unit.secret_spelling_helpers import every_unit_escaped, recoverable
 
 GIT_IDENTITY = "acme/rollouts"
 ROLLOUT = "echo-rollout"
@@ -1161,6 +1162,367 @@ def test_plain_output_prints_the_upload_command_after_a_complete_run(
     captured = capsys.readouterr()
     assert exit_code == 0, captured.err
     assert "Upload: osmosis eval upload run-1" in captured.out
+
+
+class _UnexpectedUploadFailure(Exception):
+    pass
+
+
+UPLOAD_SECRET = "synth-ambient-\U0001f511-provider-key-123"
+
+
+@pytest.mark.parametrize("output_flag", ["--json", "--plain"])
+@pytest.mark.parametrize("debug", ["0", "1"])
+@pytest.mark.parametrize(
+    ("failure", "code"),
+    [
+        ("validator", "VALIDATION"),
+        ("platform", "VALIDATION"),
+        ("unexpected", "INTERNAL"),
+    ],
+)
+def test_upload_failures_never_print_a_known_secret(
+    workspace: Path,
+    tmp_path: Path,
+    captured_runner: type[_CapturedRunner],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    output_flag: str,
+    debug: str,
+    failure: str,
+    code: str,
+) -> None:
+    import dataclasses
+
+    import osmosis_ai.cli.main as cli
+    import osmosis_ai.platform.cli.eval_upload as eval_upload_module
+    from osmosis_ai.platform.auth.platform_client import PlatformAPIError
+
+    secret = UPLOAD_SECRET
+    escaped = every_unit_escaped(secret)
+    monkeypatch.setenv("OPENAI_API_KEY", secret)
+    monkeypatch.setenv("OSMOSIS_DEBUG", debug)
+    original_run = _CapturedRunner.run
+
+    async def run_with_callback(self: Any, *, after_finalize: Any) -> Any:
+        summary = await original_run(self)
+        if failure == "validator":
+            # The real upload validator names the run directory it rejects.
+            run_dir = tmp_path / f"runs-{secret}" / "run-1"
+            summary = dataclasses.replace(summary, run_dir=run_dir)
+        after_finalize(summary)
+        return summary
+
+    def reject(_run_dir: Path, **_kwargs: Any) -> Any:
+        if failure == "platform":
+            raise PlatformAPIError(
+                f"upload rejected {escaped}",
+                400,
+                details={"path": f"trials/{secret}/result.json", "count": 2},
+            )
+        raise _UnexpectedUploadFailure(f"artifact trials/{secret}/result.json")
+
+    monkeypatch.setattr(_CapturedRunner, "run", run_with_callback)
+    if failure != "validator":
+        monkeypatch.setattr(eval_upload_module, "prepare_eval_upload_plan", reject)
+    monkeypatch.chdir(workspace)
+    exit_code = cli.main(
+        [
+            output_flag,
+            "eval",
+            "run",
+            "configs/eval/echo.toml",
+            "--dataset-file",
+            "data/echo.jsonl",
+            "--name",
+            "run-1",
+            "--yes",
+            "--upload",
+        ]
+    )
+    captured = capsys.readouterr()
+    printed = captured.out + captured.err
+    assert exit_code == 1
+    # Neither the literal value nor an escaped spelling a reader could decode.
+    assert secret not in recoverable(printed)
+    assert "[REDACTED]" in captured.err
+    # Diagnostics that do not carry the value survive the boundary.
+    assert "Retry with:" in captured.err or failure == "validator"
+    if failure != "platform":
+        assert "Local evaluation results are complete at" in captured.err
+    if output_flag == "--json":
+        error = json.loads(captured.err.splitlines()[0])["error"]
+        assert error["code"] == code
+        if failure == "platform":
+            assert error["details"]["path"] == "trials/[REDACTED]/result.json"
+            assert error["details"]["count"] == 2
+            assert error["details"]["status_code"] == 400
+    if failure == "unexpected" and debug == "1":
+        # The stack is kept for debugging; only the known value is removed.
+        assert "Traceback" in captured.err
+        assert ", in reject" in captured.err
+        assert "artifact trials/[REDACTED]/result.json" in captured.err
+
+
+UPLOAD_ARGV = [
+    "eval",
+    "run",
+    "configs/eval/echo.toml",
+    "--dataset-file",
+    "data/echo.jsonl",
+    "--name",
+    "run-1",
+    "--yes",
+    "--upload",
+]
+FINALIZED_IMPORT = {
+    "status": "finalized",
+    "session_id": "session-1",
+    "expected_files": 0,
+    "uploaded_files": 0,
+    "files": [],
+    "eval_run_id": "eval-1",
+    "eval_run_name": "uploaded-run",
+    "platform_url": "https://platform.example.test/evals/eval-1",
+}
+
+
+def _platform_response(payload: dict[str, Any], headers: dict[str, str]) -> Any:
+    from unittest.mock import MagicMock
+
+    response = MagicMock()
+    response.__enter__.return_value = response
+    response.status = 200
+    response.headers = headers
+    response.read.return_value = json.dumps(payload).encode()
+    return response
+
+
+def _upload_through_the_platform_client(
+    monkeypatch: pytest.MonkeyPatch, respond: Any
+) -> None:
+    """Upload with the real client, models, and transport; only urlopen is fake.
+
+    The plan is an empty valid one: building it from local files is not on the
+    path from a platform response to the printed output.
+    """
+    import osmosis_ai.platform.auth.platform_client as transport
+    import osmosis_ai.platform.cli.eval_upload as eval_upload_module
+    from osmosis_ai.eval.local.upload import EvalUploadPlan
+
+    original_run = _CapturedRunner.run
+
+    async def run_with_callback(self: Any, *, after_finalize: Any) -> Any:
+        summary = await original_run(self)
+        # The real hooks resolve the configured [secrets], as the runner does.
+        self.kwargs["hooks"].resolve_secrets(list(self.kwargs["spec"].secret_names))
+        after_finalize(summary)
+        return summary
+
+    monkeypatch.setattr(_CapturedRunner, "run", run_with_callback)
+    monkeypatch.setattr(
+        eval_upload_module,
+        "prepare_eval_upload_plan",
+        lambda run_dir, **_kwargs: EvalUploadPlan(
+            run_dir=run_dir,
+            local_run_id="a" * 32,
+            manifest_digest="b" * 64,
+            run={},
+            schema_versions={},
+            provenance={},
+            files=(),
+        ),
+    )
+    monkeypatch.setattr(transport, "urlopen", respond)
+    monkeypatch.setattr(transport, "_version_signal_warned", set())
+    # A console bound to this test's captured streams, for rich warnings.
+    monkeypatch.setattr(transport, "console", Console())
+    monkeypatch.setenv("OSMOSIS_PLATFORM_URL", "https://platform.example.test")
+    monkeypatch.setenv("OSMOSIS_DEBUG", "0")
+    monkeypatch.setenv("COLUMNS", "200")
+    monkeypatch.setenv("MY_TOKEN", "workflow-token-value")
+
+
+@pytest.mark.parametrize("output_flag", ["--json", "--plain", None])
+def test_upload_success_and_its_warning_never_print_a_known_secret(
+    workspace: Path,
+    captured_runner: type[_CapturedRunner],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    output_flag: str | None,
+) -> None:
+    import osmosis_ai.cli.main as cli
+
+    secret = "synth-import-secret-12345"
+    monkeypatch.setenv("OPENAI_API_KEY", secret)
+    paths: list[str] = []
+
+    def respond(request: Any, **_kwargs: Any) -> Any:
+        paths.append(request.full_url.removeprefix("https://platform.example.test"))
+        return _platform_response(
+            {
+                **FINALIZED_IMPORT,
+                "eval_run_name": secret,
+                "platform_url": f"https://platform.example.test/evals/{secret}",
+            },
+            {
+                "X-Osmosis-Version-Status": "deprecated",
+                "X-Osmosis-Version-Message": f"credential {secret} is deprecated",
+            },
+        )
+
+    _upload_through_the_platform_client(monkeypatch, respond)
+    flags = [output_flag] if output_flag else []
+    exit_code = cli.main([*flags, *UPLOAD_ARGV])
+    captured = capsys.readouterr()
+    assert exit_code == 0, captured.err
+    assert paths == [
+        "/api/cli/eval-runs/imports",
+        "/api/cli/eval-runs/imports/session-1/finalize",
+    ]
+    assert secret not in captured.out + captured.err
+    if output_flag == "--json":
+        resource = json.loads(captured.out)["resource"]
+        assert resource["upload"] == {
+            "session_id": "session-1",
+            "eval_run_id": "eval-1",
+            "eval_run_name": "[REDACTED]",
+            "status": "finalized",
+            "expected_files": 0,
+            "uploaded_files": 0,
+        }
+        assert (
+            resource["platform_url"] == "https://platform.example.test/evals/[REDACTED]"
+        )
+        warnings = [
+            json.loads(line)["warning"]
+            for line in captured.err.splitlines()
+            if line.startswith('{"schema_version"') and '"warning"' in line
+        ]
+        assert warnings == [
+            {"code": "DEPRECATED", "message": "credential [REDACTED] is deprecated"}
+        ]
+    else:
+        assert "View: https://platform.example.test/evals/[REDACTED]" in captured.out
+        assert "credential [REDACTED] is deprecated" in captured.err
+
+
+MULTILINE_SYMBOL_SECRET = "!@#$%^&*()[]{}<>?\n?<>}{][)(*&^%$#@!"
+DEEP = 5000
+
+
+def _python_literals(text: str) -> list[object]:
+    import ast
+    import re
+
+    found: list[object] = []
+    for match in re.finditer(r"'(?:[^'\\]|\\.)*'", text):
+        try:
+            found.append(ast.literal_eval(match.group()))
+        except (ValueError, SyntaxError):
+            continue
+    return found
+
+
+@pytest.mark.parametrize("output_flag", ["--json", "--plain"])
+@pytest.mark.parametrize(
+    ("case", "env_name", "secret"),
+    [
+        # The import parser quotes the status with repr, escaping the bell.
+        ("status", "OPENAI_API_KEY", "synth\x07import-12345"),
+        # A [secrets] value whose lines carry no letter or digit.
+        ("multiline", "MY_TOKEN", MULTILINE_SYMBOL_SECRET),
+        # Error details nested beyond the recursion limit, as the parser allows.
+        ("deep", "OPENAI_API_KEY", "synth-ambient-provider-key-123"),
+    ],
+)
+def test_upload_import_errors_never_print_a_known_secret(
+    workspace: Path,
+    captured_runner: type[_CapturedRunner],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    output_flag: str,
+    case: str,
+    env_name: str,
+    secret: str,
+) -> None:
+    from io import BytesIO
+    from urllib.error import HTTPError
+
+    import osmosis_ai.cli.main as cli
+
+    def respond(request: Any, **_kwargs: Any) -> Any:
+        assert request.full_url.endswith("/api/cli/eval-runs/imports")
+        if case == "status":
+            return _platform_response({**FINALIZED_IMPORT, "status": secret}, {})
+        body = (
+            json.dumps({"message": "upload rejected\n" + secret})
+            if case == "multiline"
+            else '{"message": "upload rejected '
+            + secret
+            + '", "nested": '
+            + "[" * DEEP
+            + "]" * DEEP
+            + "}"
+        )
+        raise HTTPError(
+            request.full_url, 400, "Bad Request", {}, BytesIO(body.encode())
+        )
+
+    _upload_through_the_platform_client(monkeypatch, respond)
+    monkeypatch.setenv(env_name, secret)
+    exit_code = cli.main([output_flag, *UPLOAD_ARGV])
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert secret not in captured.out + captured.err
+    message = (
+        json.loads(captured.err.splitlines()[-1])["error"]["message"]
+        if output_flag == "--json"
+        else captured.err
+    )
+    assert secret not in _python_literals(message)
+    assert "Local evaluation results are complete at" in message
+    assert "Retry with: osmosis eval upload run-1" in message
+    assert (
+        "Unknown eval import status" if case == "status" else "upload rejected"
+    ) in (message)
+    if output_flag == "--json":
+        error = json.loads(captured.err.splitlines()[-1])["error"]
+        assert error["code"] == "VALIDATION"
+        if case != "status":
+            assert error["details"]["status_code"] == 400
+
+
+@pytest.mark.parametrize("output_flag", ["--json", "--plain"])
+def test_config_errors_before_the_run_never_print_an_ambient_key(
+    workspace: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    output_flag: str,
+) -> None:
+    import osmosis_ai.cli.main as cli
+
+    secret = "synth-ambient-provider-key-123"
+    config = workspace / "configs" / "eval" / "echo.toml"
+    config.write_text(
+        config.read_text().replace("n = 2", f'n = "{secret}"'), encoding="utf-8"
+    )
+    monkeypatch.setenv("OPENAI_API_KEY", secret)
+    exit_code = cli.main(
+        [
+            output_flag,
+            "eval",
+            "run",
+            "configs/eval/echo.toml",
+            "--dataset-file",
+            "data/echo.jsonl",
+            "--yes",
+        ]
+    )
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert secret not in captured.out + captured.err
+    assert "evaluation.n must be an integer" in captured.err
 
 
 def test_the_command_is_registered_under_the_eval_group() -> None:

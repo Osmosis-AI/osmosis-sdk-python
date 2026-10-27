@@ -2,12 +2,20 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
 
-from osmosis_ai.cli.output.context import OutputFormat, override_output_context
+from osmosis_ai._redaction import invocation_redaction, register_invocation_secrets
+from osmosis_ai.cli.output.context import (
+    OutputContext,
+    OutputFormat,
+    override_output_context,
+)
 from osmosis_ai.cli.output.error import classify_error
+from osmosis_ai.cli.output.renderer import render
+from osmosis_ai.cli.output.result import OperationResult
 from osmosis_ai.platform.auth.platform_client import (
     PlatformAPIError,
     SubscriptionRequiredError,
@@ -20,6 +28,55 @@ from osmosis_ai.platform.cli.secret_redact import (
 from osmosis_ai.platform.cli.shared_submit import confirm_remote_fetch_and_post
 
 SENTINEL = "super-secret-value-xyz"
+
+
+def test_success_output_redacts_every_presentation_field_without_changing_schema(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    original = OperationResult(
+        operation="eval.retry",
+        status="success",
+        resource={"id": "id", "retryable_samples": 1, "nested": {SENTINEL: SENTINEL}},
+        message=SENTINEL,
+        display_next_steps=[SENTINEL],
+        next_steps_structured=[{"action": "open_url", "url": SENTINEL}],
+        extra={"url": SENTINEL},
+    )
+    with invocation_redaction():
+        register_invocation_secrets([SENTINEL, "id", "1"])
+        render(original, OutputContext(format=OutputFormat.json, interactive=False))
+    payload = json.loads(capsys.readouterr().out)
+    assert payload == {
+        "schema_version": 1,
+        "status": "success",
+        "operation": "eval.retry",
+        "resource": {
+            "id": "[REDACTED]",
+            "retryable_samples": "[REDACTED]",
+            "nested": {"[REDACTED]": "[REDACTED]"},
+        },
+        "message": "[REDACTED]",
+        "next_steps_structured": [{"action": "open_url", "url": "[REDACTED]"}],
+        "url": "[REDACTED]",
+    }
+    # The command's own result is untouched; only its presentation is scrubbed.
+    assert original.message == SENTINEL
+
+
+@pytest.mark.parametrize(
+    "value", [9876543210123456789, 987654321.125, True, False, None]
+)
+def test_redaction_covers_json_scalar_leaves(value) -> None:
+    secret = json.dumps(value)
+    details = {"received": [value, {"nested": value}], "safe": "context"}
+    original = PlatformAPIError("Rejected input", details=details)
+
+    redacted = redact_provided_secrets(original, [secret])
+
+    assert secret not in json.dumps(redacted.details)
+    assert redacted.details["safe"] == "context"
+    assert original.details == details
+    assert original.details["received"][0] is value
 
 
 def test_redact_empty_secret_leaves_input_unchanged() -> None:
