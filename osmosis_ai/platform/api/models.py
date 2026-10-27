@@ -1720,11 +1720,7 @@ class RunDownloadFile:
 
 @dataclass(frozen=True)
 class RunDownloadManifest:
-    """File manifest for a run download, or one page of an eval run's manifest.
-
-    ``next_cursor`` starts the next page; ``None`` means the last page, or a
-    platform that does not page.
-    """
+    """File manifest for a run download, or one page of an eval run's manifest."""
 
     files: list[RunDownloadFile]
     totals: dict[str, Any]
