@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import copy
+import hashlib
 import json
 import os
 import sys
@@ -86,6 +88,65 @@ def test_source_digest_is_a_full_sha256(tmp_path: Path) -> None:
     digest = compute_source_digest(project)
     assert len(digest) == 64
     assert all(char in "0123456789abcdef" for char in digest)
+
+
+def test_source_digest_separates_paths_from_contents(tmp_path: Path) -> None:
+    # Unframed, both trees hash the byte stream "abc".
+    first, second = tmp_path / "first", tmp_path / "second"
+    first.mkdir()
+    second.mkdir()
+    (first / "ab").write_bytes(b"c")
+    (second / "a").write_bytes(b"bc")
+    assert compute_source_digest(first) != compute_source_digest(second)
+
+
+@pytest.mark.parametrize("retry_failed", [False, True])
+def test_legacy_source_digest_refuses_resume_and_fresh_preserves_results(
+    tmp_path: Path,
+    retry_failed: bool,
+) -> None:
+    from osmosis_ai.eval.local.runner import ResumeRefusedError
+    from osmosis_ai.eval.local.state import RunManifest
+
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "main.py").write_bytes(b"print(1)")
+    runner = _runner(
+        _spec(),
+        tmp_path,
+        options=LocalEvalOptions(name="run-1", retry_failed=retry_failed),
+    )
+    runner._rollout_dir = source
+    inputs = runner._build_inputs()
+    legacy = copy.deepcopy(inputs)
+    # Frozen pre-framing format: path bytes directly followed by file bytes.
+    legacy["rollout"]["source_digest"] = hashlib.sha256(b"main.pyprint(1)").hexdigest()
+    run_dir = tmp_path / "evals" / "run-1"
+    run_dir.mkdir(parents=True)
+    manifest_path = run_dir / "manifest.json"
+    RunManifest.create(
+        local_run_id="legacy-run",
+        run_name="run-1",
+        inputs=legacy,
+        provenance={"sdk_version": "0.3.8"},
+    ).write(manifest_path)
+    journal = b'{"preserve":"existing results"}\n'
+    (run_dir / "events.jsonl").write_bytes(journal)
+    manifest = manifest_path.read_bytes()
+
+    with pytest.raises(ResumeRefusedError, match="Changed: rollout"):
+        runner._open_or_create_run(run_dir, inputs=inputs, run_name="run-1")
+    assert manifest_path.read_bytes() == manifest
+    assert (run_dir / "events.jsonl").read_bytes() == journal
+    assert not list(run_dir.parent.glob("run-1.archive-*"))
+
+    runner._options = LocalEvalOptions(name="run-1", fresh=True)
+    created = runner._open_or_create_run(run_dir, inputs=inputs, run_name="run-1")
+    (archive,) = run_dir.parent.glob("run-1.archive-*")
+    assert (archive / "manifest.json").read_bytes() == manifest
+    assert (archive / "events.jsonl").read_bytes() == journal
+    assert created.inputs == inputs
+    assert created.local_run_id != "legacy-run"
 
 
 def test_source_digest_excludes_a_nested_output_dir(tmp_path: Path) -> None:
@@ -803,8 +864,15 @@ def test_the_redactor_prefers_the_longest_overlapping_value() -> None:
 
 
 def test_ambient_secret_values_skip_short_and_empty() -> None:
-    from osmosis_ai.eval.local.runner import ambient_secret_values
+    # Still importable from the runner, where they lived before the CLI shared them.
+    from osmosis_ai.eval.local.runner import (
+        AMBIENT_SECRET_ENV_NAMES,
+        MIN_AMBIENT_SECRET_LEN,
+        ambient_secret_values,
+    )
 
+    assert "OPENAI_API_KEY" in AMBIENT_SECRET_ENV_NAMES
+    assert MIN_AMBIENT_SECRET_LEN == 8
     assert ambient_secret_values(
         {
             "OPENAI_API_KEY": "sk-live-abcdef123456",
@@ -813,6 +881,70 @@ def test_ambient_secret_values_skip_short_and_empty() -> None:
             "NOT_A_SECRET": "sk-live-abcdef123456",
         }
     ) == ["sk-live-abcdef123456"]
+
+
+def test_replayed_diagnostics_leave_new_projections_scrubbed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from osmosis_ai.eval.local.state import RunManifest
+
+    secret = "synth-replay-secret-12345"
+    monkeypatch.setenv("OPENAI_API_KEY", secret)
+    (tmp_path / "main.py").write_text("print(1)\n")
+    runner = _runner(_spec(), tmp_path)
+    run_dir = tmp_path / "evals" / "run-1"
+    (run_dir / "rollout_trials").mkdir(parents=True)
+    # A current run, recorded before this key was known to it.
+    RunManifest.create(
+        local_run_id="b" * 32,
+        run_name="run-1",
+        inputs=runner._build_inputs(),
+        provenance={},
+    ).write(run_dir / "manifest.json")
+    record = {
+        "row_index": 0,
+        "run_index": 0,
+        "rollout_id": "a" * 32,
+        "status": "failed",
+        "duration_ms": 1.0,
+        "error_type": f"provider rejected {secret}",
+    }
+    (run_dir / "events.jsonl").write_text(json.dumps(record) + "\n")
+    history = {
+        name: (run_dir / name).read_bytes()
+        for name in ("manifest.json", "events.jsonl")
+    }
+
+    summary = asyncio.run(runner.run())
+
+    assert summary.dispatched == 0
+    assert [failure.error_type for failure in summary.failures] == [
+        "provider rejected [REDACTED]"
+    ]
+    for name in ("index.jsonl", "summary.jsonl"):
+        text = (run_dir / name).read_text()
+        assert secret not in text
+    assert "provider rejected [REDACTED]" in (run_dir / "index.jsonl").read_text()
+    # History keeps its bytes; only what this invocation built is scrubbed.
+    for name, original in history.items():
+        assert (run_dir / name).read_bytes() == original
+
+
+def test_a_corrupt_manifest_error_never_quotes_an_ambient_key(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from osmosis_ai.eval.local.state import LocalEvalStateError
+
+    secret = "synth-runner-secret-12345"
+    monkeypatch.setenv("OPENAI_API_KEY", secret)
+    runner = _runner(_spec(), tmp_path)
+    run_dir = tmp_path / "evals" / "run-1"
+    run_dir.mkdir(parents=True)
+    (run_dir / "manifest.json").write_text(json.dumps({"schema_version": secret}))
+    with pytest.raises(LocalEvalStateError) as raised:
+        asyncio.run(runner.run())
+    assert secret not in str(raised.value)
+    assert "state schema version '[REDACTED]'" in str(raised.value)
 
 
 def test_scrub_logs_file_redacts_ambient_env_keys(
@@ -865,6 +997,128 @@ def test_scrub_logs_file_leaves_unchanged_logs_untouched(
     assert path.stat().st_mode & 0o777 == 0o644
 
 
+def test_scrub_logs_file_limits_unsafe_matches_to_their_line(tmp_path: Path) -> None:
+    from osmosis_ai.eval.local.runner import LOGS_FILENAME, scrub_logs_file
+
+    path = tmp_path / LOGS_FILENAME
+    path.write_text(
+        "kept before\nold token=[REDACTED]\nusing sk-live-abcdef123456\nkept after\n",
+        encoding="utf-8",
+    )
+
+    # A placeholder equal to the marker makes every marker-bearing line unsafe.
+    scrub_logs_file(
+        path,
+        env={"HF_TOKEN": "[REDACTED]", "OPENAI_API_KEY": "sk-live-abcdef123456"},
+    )
+
+    assert path.read_text(encoding="utf-8") == "kept before\n\n\nkept after\n"
+
+
+@pytest.mark.parametrize("shape", ["json-body", "display-cut"])
+async def test_model_preflight_failure_is_sanitized_before_display(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, shape: str
+) -> None:
+    import traceback
+
+    from osmosis_ai.eval.local.runner import LocalEvalError
+
+    # No KEY/TOKEN-style name, and both JSON and repr escape it.
+    configured = "synth-run-'x\"\\y-123456"
+    ambient = "synth-custom-provider-key-456"
+    monkeypatch.setenv("CUSTOM_PROVIDER_API_KEY", ambient)
+    message = (
+        json.dumps({"error": f"rejected {configured} and {ambient}"})
+        if shape == "json-body"
+        # Straddles the 1000-character cut of the displayed detail.
+        else "x" * 990 + configured
+    )
+
+    class _Bridge:
+        async def preflight_check(self) -> None:
+            raise RuntimeError(message)
+
+    # The model path is part of the final message as well as the provider detail.
+    runner = _runner(_spec(model_path=f"openai/{configured}"), tmp_path)
+    runner._redactor.extend([configured])
+    with pytest.raises(LocalEvalError, match="model preflight failed") as caught:
+        await runner._model_preflight(_Bridge())
+
+    assert "RuntimeError: " in str(caught.value)
+    assert "[REDACTED]" in str(caught.value)
+    rendered = "".join(traceback.format_exception(caught.value))
+    # Every spelling of either value starts with this prefix.
+    assert "synth-run-" not in rendered
+    assert "synth-custom-" not in rendered
+
+
+async def test_wait_for_health_scrubs_a_foreign_instance_id_before_repr(
+    tmp_path: Path,
+) -> None:
+    from osmosis_ai.eval.local.runner import LocalEvalError
+
+    foreign = "synth-foreign-'x\"\\y-123456"
+
+    class _LiveChild:
+        returncode = None
+
+    server = await _serve_health({"status": "ok", "instance_id": foreign})
+    port = int(server.sockets[0].getsockname()[1])
+    runner = _runner(_spec(), tmp_path)
+    runner._redactor.extend([foreign])
+    try:
+        async with httpx.AsyncClient() as http_client:
+            with pytest.raises(LocalEvalError, match="another process") as caught:
+                await runner._wait_for_health(
+                    http_client,
+                    f"http://127.0.0.1:{port}",
+                    instance_id="owned",
+                    child=_LiveChild(),
+                )
+    finally:
+        server.close()
+        await server.wait_closed()
+
+    assert "synth-foreign-" not in str(caught.value)
+
+
+@pytest.mark.parametrize(
+    "error_type", ["LocalEvalError", "ResumeRefusedError", "state"]
+)
+async def test_run_sanitizes_runner_errors_and_drops_their_chain(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, error_type: str
+) -> None:
+    import traceback
+
+    from osmosis_ai.eval.local import runner as runner_module
+    from osmosis_ai.eval.local.state import LocalEvalStateError
+
+    error_class = (
+        LocalEvalStateError
+        if error_type == "state"
+        else getattr(runner_module, error_type)
+    )
+    secret = "synth-exit-secret-123456"
+    runner = _runner(_spec(), tmp_path)
+    runner._redactor.extend([secret])
+
+    async def fail(*, after_finalize: Any) -> None:
+        try:
+            raise RuntimeError(f"child printed {secret}")
+        except RuntimeError as cause:
+            raise error_class(f"startup failed near {secret}") from cause
+
+    monkeypatch.setattr(runner, "_run", fail)
+    with pytest.raises(error_class) as caught:
+        await runner.run()
+
+    assert type(caught.value) is error_class
+    assert str(caught.value) == "startup failed near [REDACTED]"
+    assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None
+    assert secret not in "".join(traceback.format_exception(caught.value))
+
+
 def test_scrub_logs_file_does_not_follow_a_symlink(tmp_path: Path) -> None:
     from osmosis_ai.eval.local.runner import LOGS_FILENAME, scrub_logs_file
 
@@ -890,11 +1144,13 @@ async def test_execute_temporarily_overrides_and_restores_secret_environment(
     monkeypatch.setenv(existing_name, "from-parent")
     monkeypatch.delenv(added_name, raising=False)
     observed: dict[str, str | None] = {}
+    bridge_secret_values: list[tuple[str, ...]] = []
 
     class _Bridge:
-        def __init__(self, *, model: str) -> None:
+        def __init__(self, *, model: str, secret_values: tuple[str, ...]) -> None:
             observed[existing_name] = os.environ.get(existing_name)
             observed[added_name] = os.environ.get(added_name)
+            bridge_secret_values.append(secret_values)
             if error_at == "bridge":
                 raise RuntimeError("bridge exploded")
 
@@ -919,6 +1175,8 @@ async def test_execute_temporarily_overrides_and_restores_secret_environment(
         existing_name: "from-secrets-file",
         added_name: "new-from-secrets-file",
     }
+    # The bridge holds every registered secret before it can format an error.
+    assert bridge_secret_values == [runner._redactor.values]
     assert os.environ[existing_name] == "from-parent"
     assert added_name not in os.environ
 
@@ -1057,7 +1315,7 @@ def test_the_run_log_redacts_and_is_owner_only(tmp_path: Path) -> None:
     from osmosis_ai.eval.local.runner import RunLog, SecretRedactor
 
     redactor = SecretRedactor(["sk-live-abcdef123456"])
-    log = RunLog(tmp_path / "logs.txt", redact=redactor.scrub)
+    log = RunLog(tmp_path / "logs.txt", redact=redactor)
     try:
         log.write("info", "rollout-server", "boom sk-live-abcdef123456")
         log.write("info", "dispatch", "detail", token="sk-live-abcdef123456")
@@ -1067,6 +1325,64 @@ def test_the_run_log_redacts_and_is_owner_only(tmp_path: Path) -> None:
     assert "sk-live-abcdef123456" not in text
     assert text.count("[REDACTED]") == 2
     assert (tmp_path / "logs.txt").stat().st_mode & 0o077 == 0
+
+
+@pytest.mark.parametrize(
+    "secret",
+    [
+        'synth-key-A"B\\C-123456789',
+        "first-secret-line\nsecond-secret-line  ",
+        "synth-secret-with-spaces  ",
+    ],
+)
+async def test_child_and_structured_logs_redact_before_transforming(
+    tmp_path: Path, secret: str
+) -> None:
+    from osmosis_ai.eval.local.runner import RunLog
+
+    runner = _runner(_spec(), tmp_path)
+    runner._redactor.extend([secret])
+    echoed: list[str] = []
+    path = tmp_path / "logs.txt"
+    runner._log = RunLog(path, echo=echoed.append, redact=runner._redactor)
+    try:
+        await runner._tee_child_output(
+            _ExitedChild(0, f"before\n{secret}\nafter\n".encode())
+        )
+        runner._log.write(
+            "info", "dispatch", "context", received={"nested": [secret, (secret,)]}
+        )
+    finally:
+        runner._log.close()
+
+    from osmosis_ai.eval.local.state import TerminalJournal, TerminalRecord
+
+    runner._log = None
+    runner._hooks.note = echoed.append
+    runner._hooks.warning = echoed.append
+    runner._stage("server", secret)
+    label = public_chat_endpoint_environment(
+        {"chat_endpoint": {"requires_public_url": True, "environment": secret}},
+        redactor=runner._redactor,
+    )
+    assert label == "[REDACTED]"
+    runner._warn_sdk_mismatch(secret)
+    runner._write_log("error", "server", secret)
+    runner._journal = TerminalJournal(tmp_path / "events.jsonl")
+    runner._journal.open_for_append(runner._journal.replay())
+    await runner._append_record(
+        TerminalRecord(0, 0, "rollout-id", "failed", error_type=secret)
+    )
+    runner._journal.close()
+    output = (
+        path.read_text()
+        + runner._journal.path.read_text()
+        + "\n".join([*echoed, *runner._hooks.stages])
+    )
+    for line in secret.splitlines():
+        assert line.rstrip() not in output
+        assert json.dumps(line)[1:-1] not in output
+    assert "before" in output and "after" in output and "context" in output
 
 
 # --------------------------------------------------------------------------- #

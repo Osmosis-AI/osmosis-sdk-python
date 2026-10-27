@@ -2,12 +2,25 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
 
-from osmosis_ai.cli.output.context import OutputFormat, override_output_context
+from osmosis_ai._redaction import invocation_redaction, register_invocation_secrets
+from osmosis_ai.cli.output.context import (
+    OutputContext,
+    OutputFormat,
+    override_output_context,
+)
 from osmosis_ai.cli.output.error import classify_error
+from osmosis_ai.cli.output.renderer import render
+from osmosis_ai.cli.output.result import (
+    ListResult,
+    ListSection,
+    OperationResult,
+    SectionedListResult,
+)
 from osmosis_ai.platform.auth.platform_client import (
     PlatformAPIError,
     SubscriptionRequiredError,
@@ -22,9 +35,136 @@ from osmosis_ai.platform.cli.shared_submit import confirm_remote_fetch_and_post
 SENTINEL = "super-secret-value-xyz"
 
 
+def test_success_output_redacts_every_presentation_field_without_changing_schema(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    original = OperationResult(
+        operation="eval.retry",
+        status="success",
+        resource={"id": "id", "retryable_samples": 1, "nested": {SENTINEL: SENTINEL}},
+        message=SENTINEL,
+        display_next_steps=[SENTINEL],
+        next_steps_structured=[{"action": "open_url", "url": SENTINEL}],
+        extra={"url": SENTINEL},
+    )
+    with invocation_redaction():
+        register_invocation_secrets([SENTINEL, "id", "1"])
+        render(original, OutputContext(format=OutputFormat.json, interactive=False))
+    payload = json.loads(capsys.readouterr().out)
+    assert payload == {
+        "schema_version": 1,
+        "status": "success",
+        "operation": "eval.retry",
+        "resource": {
+            "id": "[REDACTED]",
+            "retryable_samples": "[REDACTED]",
+            "nested": {"[REDACTED]": "[REDACTED]"},
+        },
+        "message": "[REDACTED]",
+        "next_steps_structured": [{"action": "open_url", "url": "[REDACTED]"}],
+        "url": "[REDACTED]",
+    }
+    # The command's own result is untouched; only its presentation is scrubbed.
+    assert original.message == SENTINEL
+    # JSON omits display_next_steps; plain output prints it.
+    with invocation_redaction():
+        register_invocation_secrets([SENTINEL])
+        render(original, OutputContext(format=OutputFormat.plain, interactive=False))
+    plain = capsys.readouterr().out
+    assert SENTINEL not in plain
+    assert plain.count("[REDACTED]") == 2
+
+
+def test_list_extras_named_like_protocol_fields_are_redacted(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    result = ListResult(
+        title="Runs",
+        items=[],
+        total_count=0,
+        has_more=False,
+        next_offset=None,
+        extra={"status": SENTINEL, "operation": SENTINEL},
+    )
+    with invocation_redaction():
+        register_invocation_secrets([SENTINEL])
+        render(result, OutputContext(format=OutputFormat.json, interactive=False))
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["status"] == payload["operation"] == "[REDACTED]"
+
+
+def test_pagination_values_keep_their_json_types(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    page = {"items": [{"n": 2}], "total_count": 2, "has_more": True, "next_offset": 2}
+    lists = [
+        ListResult(title="Runs", **page),
+        SectionedListResult(sections=[ListSection(key="runs", title="Runs", **page)]),
+    ]
+    for result in lists:
+        with invocation_redaction():
+            # A declared secret is redacted at any length, even a short number.
+            register_invocation_secrets(["2"])
+            render(result, OutputContext(format=OutputFormat.json, interactive=False))
+        payload = json.loads(capsys.readouterr().out)
+        payload = payload.get("runs", payload)
+        assert payload["items"] == [{"n": "[REDACTED]"}]
+        assert (
+            payload["total_count"],
+            payload["has_more"],
+            payload["next_offset"],
+        ) == (
+            2,
+            True,
+            2,
+        )
+
+
+def test_plain_output_redacts_before_normalizing_whitespace(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    secret = "synthetic\tkey-123456"
+    result = OperationResult(
+        operation="secret.set", status="success", message=f"value {secret} kept"
+    )
+    with invocation_redaction():
+        # A whitespace-only value is not redactable; it must not erase spaces.
+        register_invocation_secrets([secret, "  "])
+        render(result, OutputContext(format=OutputFormat.plain, interactive=False))
+    assert capsys.readouterr().out == "value [REDACTED] kept\n"
+
+
+@pytest.mark.parametrize(
+    "value", [9876543210123456789, 987654321.125, True, False, None]
+)
+def test_redaction_covers_json_scalar_leaves(value) -> None:
+    secret = json.dumps(value)
+    details = {"received": [value, {"nested": value}], "safe": "context"}
+    original = PlatformAPIError("Rejected input", details=details)
+
+    redacted = redact_provided_secrets(original, [secret])
+
+    assert secret not in json.dumps(redacted.details)
+    assert redacted.details["safe"] == "context"
+    assert original.details == details
+    assert original.details["received"][0] is value
+
+
 def test_redact_empty_secret_leaves_input_unchanged() -> None:
     assert redact_secret_value("ab", "") == "ab"
     assert redact_secret_text("ab", "") == "ab"
+
+
+def test_redact_never_rebuilds_the_secret_from_the_marker() -> None:
+    # Plain replacement turns "]]]" into "[REDACTED]]", which ends in the secret.
+    assert redact_secret_text("]]]", "]]") == "[REDACTED]"
+    assert redact_secret_value({"]]]": ["]]]"]}, "]]") == {"[REDACTED]": ["[REDACTED]"]}
+    # A secret inside the marker itself survives any marker-based replacement.
+    assert redact_secret_text("ARE", "RE") == ""
+    assert redact_secret_value({"value": "x"}, "RE") == {"value": ""}
+    # Redacting "y" one secret at a time turned "yx" into "[REDACTED]x".
+    redacted = redact_provided_secrets(PlatformAPIError("yx"), ["]x", "y"])
+    assert str(redacted) == "[REDACTED]"
 
 
 def test_redact_secret_value_redacts_keys_containing_secret() -> None:

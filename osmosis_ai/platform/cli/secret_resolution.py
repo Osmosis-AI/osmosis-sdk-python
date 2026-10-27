@@ -7,6 +7,7 @@ import sys
 from getpass import getpass
 from pathlib import Path
 
+from osmosis_ai._redaction import register_invocation_secrets
 from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.cli.output.context import get_output_context
 
@@ -94,6 +95,7 @@ def resolve_run_secrets(
             continue
         missing.append(name)
 
+    register_invocation_secrets(resolved.values())
     if missing:
         remediation = "Export them or pass --secrets-file"
         if suggest_secret_store:

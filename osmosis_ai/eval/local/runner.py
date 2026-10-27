@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import copy
 import logging
 import os
 import signal
@@ -25,6 +26,14 @@ from typing import Any, Protocol
 
 import httpx
 
+# The ambient names and length floor moved to the shared redactor; kept here.
+from osmosis_ai._redaction import (
+    AMBIENT_SECRET_ENV_NAMES as AMBIENT_SECRET_ENV_NAMES,
+)
+from osmosis_ai._redaction import (
+    MIN_AMBIENT_SECRET_LEN as MIN_AMBIENT_SECRET_LEN,
+)
+from osmosis_ai._redaction import SecretRedactor, ambient_secret_values
 from osmosis_ai._uv import _uv_executable
 from osmosis_ai.consts import PACKAGE_VERSION
 from osmosis_ai.eval.local import (
@@ -64,6 +73,7 @@ from osmosis_ai.eval.local.state import (
     ROLLOUT_PROTOCOL_VERSION,
     SERVER_STATE_FILENAME,
     TUNNEL_STATE_FILENAME,
+    LocalEvalStateError,
     RunLock,
     RunLockedError,
     RunManifest,
@@ -82,7 +92,6 @@ from osmosis_ai.eval.local.state import (
     validate_run_name,
 )
 from osmosis_ai.eval.local.tunnel import CloudflaredTunnel, TunnelError
-from osmosis_ai.rollout.backend.harbor.diagnostics import REDACTED
 from osmosis_ai.rollout.client import (
     RolloutAdmissionTimeoutError,
     RolloutClient,
@@ -394,77 +403,6 @@ def changed_input_keys(
 # --------------------------------------------------------------------------- #
 
 
-class SecretRedactor:
-    """Replaces known secret values in text bound for the run log (§7.4).
-
-    Substring replacement rather than dropping the whole line: a redacted line
-    still carries its stack frame or status code, which is the reason the line
-    exists. Every non-empty configured value is sensitive, including short
-    values; treating placeholders specially could leak a real short secret.
-    """
-
-    def __init__(self, values: Sequence[str] = ()) -> None:
-        self._values: list[str] = []
-        self.extend(values)
-
-    def extend(self, values: Sequence[str]) -> None:
-        for value in values:
-            if value and value not in self._values:
-                self._values.append(value)
-        # Longest first, so a value containing another is redacted whole.
-        self._values.sort(key=len, reverse=True)
-
-    def scrub(self, text: str) -> str:
-        for value in self._values:
-            text = text.replace(value, REDACTED)
-        return text
-
-
-# Provider and platform keys that often live in the process environment
-# without being listed in [secrets]. Skip GOOGLE_APPLICATION_CREDENTIALS:
-# that value is a filesystem path, not the credential.
-AMBIENT_SECRET_ENV_NAMES: frozenset[str] = frozenset(
-    {
-        "OPENAI_API_KEY",
-        "ANTHROPIC_API_KEY",
-        "XAI_API_KEY",
-        "GEMINI_API_KEY",
-        "GOOGLE_API_KEY",
-        "OPENROUTER_API_KEY",
-        "CEREBRAS_API_KEY",
-        "AZURE_API_KEY",
-        "TOGETHER_API_KEY",
-        "FIREWORKS_API_KEY",
-        "GROQ_API_KEY",
-        "MISTRAL_API_KEY",
-        "COHERE_API_KEY",
-        "DEEPSEEK_API_KEY",
-        "HUGGINGFACE_API_KEY",
-        "HF_TOKEN",
-        "WANDB_API_KEY",
-        "AWS_ACCESS_KEY_ID",
-        "AWS_SECRET_ACCESS_KEY",
-        "AWS_SESSION_TOKEN",
-        "OSMOSIS_TOKEN",
-        "OSMOSIS_API_KEY",
-        "DAYTONA_API_KEY",
-        "CURSOR_API_KEY",
-        "MSWEA_API_KEY",
-    }
-)
-MIN_AMBIENT_SECRET_LEN = 8
-
-
-def ambient_secret_values(env: Mapping[str, str]) -> list[str]:
-    """Non-empty ambient env values long enough to redact without collateral."""
-    values: list[str] = []
-    for name in AMBIENT_SECRET_ENV_NAMES:
-        value = env.get(name)
-        if value and len(value) >= MIN_AMBIENT_SECRET_LEN:
-            values.append(value)
-    return values
-
-
 def scrub_logs_file(path: Path, *, env: Mapping[str, str]) -> None:
     """Rewrite *path* when ambient env secrets appear in it.
 
@@ -477,7 +415,8 @@ def scrub_logs_file(path: Path, *, env: Mapping[str, str]) -> None:
     if not values:
         return
     text = path.read_text(encoding="utf-8")
-    scrubbed = SecretRedactor(values).scrub(text)
+    # Per line, like RunLog: an unsafe match then loses one line, not the file.
+    scrubbed = SecretRedactor(values).scrub_lines(text)
     if scrubbed == text:
         return
     path.write_text(scrubbed, encoding="utf-8")
@@ -497,7 +436,7 @@ class RunLog:
         path: Path,
         *,
         echo: Callable[[str], None] | None = None,
-        redact: Callable[[str], str] | None = None,
+        redact: SecretRedactor | None = None,
     ) -> None:
         self._path = path
         self._echo = echo
@@ -513,9 +452,12 @@ class RunLog:
         if details:
             from osmosis_ai.eval.local.state import canonical_json
 
-            line = f"{line} {canonical_json(details)}"
+            safe_details = (
+                self._redact.scrub_value(details) if self._redact else details
+            )
+            line = f"{line} {canonical_json(safe_details)}"
         if self._redact is not None:
-            line = self._redact(line)
+            line = self._redact.scrub(line)
         self._handle.write(line + "\n")
         self._handle.flush()
         if self._echo is not None:
@@ -679,7 +621,9 @@ def health_capacity(health: Mapping[str, Any]) -> int | None:
     return None
 
 
-def public_chat_endpoint_environment(health: Mapping[str, Any]) -> str | None:
+def public_chat_endpoint_environment(
+    health: Mapping[str, Any], *, redactor: SecretRedactor | None = None
+) -> str | None:
     """Return the sandbox label when it requires a non-loopback chat URL.
 
     This is capability detection, not backend-name inference: old SDKs and
@@ -692,6 +636,8 @@ def public_chat_endpoint_environment(health: Mapping[str, Any]) -> str | None:
     if endpoint.get("requires_public_url") is not True:
         return None
     environment = endpoint.get("environment")
+    if redactor is not None and isinstance(environment, str):
+        environment = redactor.scrub(environment)
     if isinstance(environment, str) and environment.strip():
         return environment.strip()
     return "remote"
@@ -771,7 +717,36 @@ class LocalEvalRunner:
     async def run(
         self, *, after_finalize: Callable[[RunSummary], None] | None = None
     ) -> RunSummary:
-        """Execute, finalize, then optionally act while still holding the lock."""
+        """Execute, finalize, then optionally act while still holding the lock.
+
+        The runner's own errors (``LocalEvalError``, ``LocalEvalStateError``)
+        leave with their complete message scrubbed by the run's redactor and
+        without the exception chain, which can carry provider or child-process
+        text. Other exceptions, including any raised by ``after_finalize``, pass
+        through unchanged; the CLI scrubs every error it prints.
+        """
+        in_after_finalize = False
+
+        def finalize(summary: RunSummary) -> None:
+            nonlocal in_after_finalize
+            in_after_finalize = True
+            if after_finalize is not None:
+                after_finalize(summary)
+            in_after_finalize = False
+
+        try:
+            return await self._run(after_finalize=finalize)
+        except (LocalEvalError, LocalEvalStateError) as exc:
+            if in_after_finalize:
+                raise
+            sanitized = copy.copy(exc)
+            sanitized.args = (self._redactor.scrub(str(exc)),)
+        # Raised outside the handler, so nothing links back to the original.
+        raise sanitized
+
+    async def _run(
+        self, *, after_finalize: Callable[[RunSummary], None] | None
+    ) -> RunSummary:
         await self._reap_orphan_runs()
         run_name = self._options.name or _available_generated_run_name(
             self._output_root
@@ -781,7 +756,7 @@ class LocalEvalRunner:
             return await self._run_named(run_name, after_finalize=after_finalize)
         except _NewRunRequested:
             new_name = _available_generated_run_name(self._output_root)
-            self._hooks.note(
+            self._note(
                 f"{run_name} is complete and stays untouched; "
                 f"starting new run {new_name!r}"
             )
@@ -836,6 +811,8 @@ class LocalEvalRunner:
         return cached
 
     async def _run_locked(self, *, run_name: str) -> RunSummary:
+        # Known before any state is read: a corrupt manifest's error can quote one.
+        self._redactor.extend(ambient_secret_values(os.environ))
         run_dir = self._output_root / run_name
         if run_dir.is_symlink():
             raise LocalEvalError(
@@ -846,11 +823,10 @@ class LocalEvalRunner:
         await self._reap_orphan_server(run_dir)
         inputs = self._build_inputs()
         manifest = self._open_or_create_run(run_dir, inputs=inputs, run_name=run_name)
-        self._redactor.extend(ambient_secret_values(os.environ))
         self._log = RunLog(
             run_dir / LOGS_FILENAME,
-            echo=self._hooks.note if self._options.verbose else None,
-            redact=self._redactor.scrub,
+            echo=self._note if self._options.verbose else None,
+            redact=self._redactor,
         )
         self._identity = RunIdentity(
             local_run_id=manifest.local_run_id,
@@ -874,7 +850,11 @@ class LocalEvalRunner:
                 )
             journal.open_for_append(replay)
             self._journal = journal
-            self._latest = replay.latest
+            # Diagnostics recorded before a value was known leave through every
+            # projection and summary built from here; the journal keeps its bytes.
+            self._latest = {
+                key: self._scrubbed(record) for key, record in replay.latest.items()
+            }
             self._resumed_keys = set(self._latest)
 
             pending = self._pending_work_items()
@@ -922,7 +902,7 @@ class LocalEvalRunner:
         manifest_path = run_dir / MANIFEST_FILENAME
         if manifest_path.is_file() and self._options.fresh:
             archived = archive_run_directory(run_dir)
-            self._hooks.note(f"archived previous results to {archived}")
+            self._note(f"archived previous results to {archived}")
         elif manifest_path.is_file():
             existing = RunManifest.read(manifest_path)
             changed = changed_input_keys(existing.inputs, inputs)
@@ -987,7 +967,9 @@ class LocalEvalRunner:
         try:
             os.environ.update(secrets)
             self._redactor.extend(ambient_secret_values(os.environ))
-            bridge = LiteLLMBridge(model=self._spec.model_path)
+            bridge = LiteLLMBridge(
+                model=self._spec.model_path, secret_values=self._redactor.values
+            )
             self._bridge = bridge
             self._stage("preflight", f"checking model {self._spec.model_path}")
             await self._model_preflight(bridge)
@@ -998,7 +980,7 @@ class LocalEvalRunner:
                 auto_tunnel_environment = None
                 if self._options.tunnel is None and advertise_url is None:
                     auto_tunnel_environment = public_chat_endpoint_environment(
-                        self._rollout_health
+                        self._rollout_health, redactor=self._redactor
                     )
                 use_managed_tunnel = (
                     self._options.tunnel is not None
@@ -1108,7 +1090,7 @@ class LocalEvalRunner:
         # exited — an unconfirmed child keeps its record for the next reap.
         self._tunnel = tunnel
         try:
-            with self._hooks.status(status_message):
+            with self._hooks.status(self._redactor.scrub(status_message)):
                 public_url = await tunnel.start()
         except TunnelError as exc:
             raise LocalEvalError(str(exc)) from exc
@@ -1177,10 +1159,17 @@ class LocalEvalRunner:
         try:
             await bridge.preflight_check()
         except Exception as exc:
+            from osmosis_ai.eval.local.llm_bridge import _bridge_error
+
+            # Fatal provider errors reach the terminal. The run's secrets join the
+            # bridge's own before the message is decoded, re-encoded, or truncated.
+            _, error = _bridge_error(exc, secret_values=self._redactor.values)
+            # Scrubbed before repr, whose escaping could re-spell a known value.
+            model_path = self._redactor.scrub(self._spec.model_path)
             raise LocalEvalError(
-                f"model preflight failed for {self._spec.model_path!r}: "
-                f"{type(exc).__name__}: {exc}"
-            ) from exc
+                f"model preflight failed for {model_path!r}: "
+                f"{type(exc).__name__}: {error['detail']}"
+            ) from None
         self._write_log("info", "preflight", "model preflight passed")
 
     def _halt_dispatch(self, reason: str, **details: Any) -> None:
@@ -1198,7 +1187,7 @@ class LocalEvalRunner:
         self._write_log(
             "error", "dispatch", "halting dispatch", reason=reason, **details
         )
-        self._hooks.note(f"stopping dispatch: {reason}")
+        self._note(f"stopping dispatch: {reason}")
 
     def _item_deadline(self) -> float:
         agent = self._spec.agent_timeout_sec
@@ -1329,14 +1318,14 @@ class LocalEvalRunner:
         if self._cancelled.is_set():
             if self._force_exit:
                 raise KeyboardInterrupt
-            self._hooks.note("second interrupt: exiting now")
+            self._note("second interrupt: exiting now")
             self._force_exit = True
             if self._shutdown_signals:
                 self._cut_server_termination_short()
                 return
             raise KeyboardInterrupt
         self._cancelled.set()
-        self._hooks.note(
+        self._note(
             "interrupted: cancelling in-flight rollouts, press Ctrl-C again to exit now"
         )
         self._write_log("warning", "cancel", "supervisor cancellation requested")
@@ -1503,8 +1492,14 @@ class LocalEvalRunner:
         )
         await self._append_record(record)
 
+    def _scrubbed(self, record: TerminalRecord) -> TerminalRecord:
+        if record.error_type is None:
+            return record
+        return replace(record, error_type=self._redactor.scrub(record.error_type))
+
     async def _append_record(self, record: TerminalRecord) -> None:
         assert self._journal is not None
+        record = self._scrubbed(record)
         await self._journal.append(record)
         self._latest[record.key] = record
         # This result was produced now, so it is no longer a carried-forward one:
@@ -1644,7 +1639,7 @@ class LocalEvalRunner:
                 continue
             if reaped is not None:
                 # The run log is not open yet, so the note is the record of this.
-                self._hooks.note(
+                self._note(
                     f"terminated an orphaned {label} from a previous "
                     f"invocation (pid {reaped.pid}, port {reaped.port})"
                 )
@@ -1784,7 +1779,7 @@ class LocalEvalRunner:
                     await child.wait()
         if returncode != 0:
             return None
-        sdk_version = output.decode(errors="replace").strip()
+        sdk_version = self._redactor.scrub(output.decode(errors="replace")).strip()
         return sdk_version or None
 
     def _warn_sdk_mismatch(self, sdk_version: str | None) -> None:
@@ -1809,7 +1804,7 @@ class LocalEvalRunner:
             server_sdk_version=sdk_version,
             cli_sdk_version=PACKAGE_VERSION,
         )
-        self._hooks.warning(message)
+        self._hooks.warning(self._redactor.scrub(message))
 
     async def _start_rollout_server(
         self, *, secrets: Mapping[str, str], http_client: httpx.AsyncClient
@@ -1926,9 +1921,11 @@ class LocalEvalRunner:
                 # servers can still prove ownership through the body fallback.
                 reported = health.instance_id or health.payload.get("instance_id")
                 if reported != instance_id:
+                    # Scrubbed before repr, whose escaping could re-spell a value.
+                    shown = self._redactor.scrub_value(reported)
                     raise LocalEvalError(
                         f"another process is already listening on {base_url} "
-                        f"and its /health reports instance_id={reported!r} "
+                        f"and its /health reports instance_id={shown!r} "
                         f"instead of this run's; stop it, or choose a "
                         f"different --rollout-port"
                     )
@@ -1957,9 +1954,9 @@ class LocalEvalRunner:
                 raise
             if not raw:
                 return
-            text = raw.decode(errors="replace").rstrip()
+            text = self._redactor.scrub(raw.decode(errors="replace")).rstrip()
             if text:
-                self._last_child_output = self._redactor.scrub(text)
+                self._last_child_output = text
             # RunLog redacts every line it writes, so a secret echoed by the
             # workflow or an HTTP debug log never lands in logs.txt (§7.4).
             self._write_log("info", step, text)
@@ -2134,6 +2131,9 @@ class LocalEvalRunner:
                 return path.relative_to(self._display_root)
         return path
 
+    def _note(self, message: str) -> None:
+        self._hooks.note(self._redactor.scrub(message))
+
     def _stage(self, step: str, message: str, **details: Any) -> None:
         """Log a milestone and surface it to the CLI.
 
@@ -2142,13 +2142,13 @@ class LocalEvalRunner:
         """
         self._write_log("info", step, message, **details)
         with contextlib.suppress(Exception):
-            self._hooks.stage(message)
+            self._hooks.stage(self._redactor.scrub(message))
 
     def _write_log(self, level: str, step: str, message: str, **details: Any) -> None:
         if self._log is not None:
             self._log.write(level, step, message, **details)
         elif level in ("warning", "error"):
-            self._hooks.note(message)
+            self._note(message)
 
 
 def _classify_outcome(

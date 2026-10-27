@@ -15,18 +15,20 @@ accumulated for the run index and read once with
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import re
 import secrets
 import time
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterable
 from contextlib import suppress
 from typing import Any
 
 import httpx
 
 from osmosis_ai._imports import raise_optional_dependency_error
+from osmosis_ai._redaction import SecretRedactor
 from osmosis_ai.eval.local.openai_responses import (
     _compact_json,
     build_responses_kwargs,
@@ -123,8 +125,14 @@ def _bridge_error(
         if re.search(r"KEY|TOKEN|SECRET|PASSWORD", name) and len(value) >= 8
     }
     values.update(value for value in secret_values if value)
-    for secret in sorted(values, key=len, reverse=True):
-        message = message.replace(secret, "[REDACTED]")
+    redactor = SecretRedactor(values)
+    # Known values are replaced in the text as received: decoding could split a
+    # JSON-shaped credential across fields or re-space it before matching.
+    message = redactor.scrub(message)
+    # A body that parses is also walked value by value; text that does not
+    # (plain, malformed, or too deep) stays as scrubbed above.
+    with suppress(ValueError, RecursionError):
+        message = json.dumps(redactor.scrub_value(json.loads(message)))
     try:
         from litellm.litellm_core_utils.secret_redaction import redact_string
     except ImportError:
@@ -133,6 +141,9 @@ def _bridge_error(
     else:
         message = redact_string(message)
     message = " ".join(message.split())[:1000]
+    # Encodable everywhere it goes: a lone surrogate fails a UTF-8 log handler,
+    # whose error report would chain to the provider error being handled.
+    message = redactor.scrub(message.encode("utf-8", "backslashreplace").decode())
     agent_status = status if isinstance(status, int) and 400 <= status < 500 else 502
     return agent_status, {
         "error": {
@@ -283,11 +294,18 @@ class LiteLLMBridge:
     """Convert OpenAI-format chat requests to any litellm provider in-process."""
 
     def __init__(
-        self, *, model: str, api_key: str | None = None, api_base: str | None = None
+        self,
+        *,
+        model: str,
+        api_key: str | None = None,
+        api_base: str | None = None,
+        secret_values: Iterable[str] = (),
     ) -> None:
         self.model = model
         self._api_key = api_key
         self._api_base = api_base
+        # Every value an error may echo, known before any error is re-encoded.
+        self._secret_values = (api_key, api_base, *secret_values)
         self._tokens: dict[str, int] = {}
         self._reasoning: dict[str, dict[str, dict[str, Any]]] = {}
 
@@ -355,7 +373,7 @@ class LiteLLMBridge:
         try:
             litellm.get_llm_provider(model=self.model, api_base=self._api_base)
         except Exception as exc:
-            _, error = _bridge_error(exc, secret_values=(self._api_key, self._api_base))
+            _, error = _bridge_error(exc, secret_values=self._secret_values)
             raise RuntimeError(
                 "Invalid LiteLLM model format. Use 'provider/model' "
                 "(e.g. openai/gpt-5-mini, anthropic/claude-sonnet-4-6). "
@@ -375,7 +393,7 @@ class LiteLLMBridge:
                 return
             if ename in _PREFLIGHT_FATAL_EXCEPTIONS:
                 raise
-            _, error = _bridge_error(exc, secret_values=(self._api_key, self._api_base))
+            _, error = _bridge_error(exc, secret_values=self._secret_values)
             logger.warning("Preflight non-fatal error: %s", error["detail"])
 
     async def complete(self, body: dict[str, Any], *, rollout_id: str) -> Any:
@@ -404,7 +422,6 @@ class LiteLLMBridge:
 async def _trickle_json_response(
     task: asyncio.Task[Any],
     *,
-    request_model: str,
     secret_values: tuple[str | None, ...] = (),
 ) -> AsyncIterator[str]:
     """Body of an already-committed 200 while the provider is still in flight.
@@ -432,17 +449,13 @@ async def _trickle_json_response(
                 yield " "
                 continue
             try:
-                response = task.result()
+                body = _compact_json(task.result())
             except Exception as exc:
                 _, error = _bridge_error(exc, secret_values=secret_values)
                 logger.warning("LLM bridge error: %s", error["detail"])
                 yield _compact_json(error)
                 return
-            yield _compact_json(
-                _model_response_to_payload(
-                    response, request_model=request_model, stream=False
-                )
-            )
+            yield body
             return
     finally:
         await _cancel_task(task)
@@ -469,7 +482,7 @@ def create_bridge_router(
         raise ValueError("bridge auth_token must be a non-empty string")
 
     router = APIRouter()
-    secret_values = (bridge._api_key, bridge._api_base, auth_token)
+    secret_values = (*bridge._secret_values, auth_token)
 
     async def require_auth(request: Request) -> None:
         header = request.headers.get("Authorization")
@@ -480,8 +493,15 @@ def create_bridge_router(
             raise HTTPException(status_code=401, detail="Unauthorized")
 
     async def _serve_completion(
-        body: dict[str, Any], rollout_id: str
+        body: dict[str, Any], rollout_id: str, *, request_model: str, stream: bool
     ) -> dict[str, Any]:
+        """Provider call through payload conversion.
+
+        A malformed response field fails conversion with a message that can
+        quote it, so conversion runs here: every caller then routes the failure,
+        and its own serialization, through the sanitizing error handler rather
+        than the web server's traceback log.
+        """
         response = await bridge.complete(body, rollout_id=rollout_id)
         # The bridge is non-streaming, so a healthy response always has >=1
         # choice; an empty stream wrapper would silently emit an empty delta.
@@ -489,7 +509,9 @@ def create_bridge_router(
             raise RuntimeError(
                 "LLM response carried no choices; refusing to emit an empty completion"
             )
-        return response
+        return _model_response_to_payload(
+            response, request_model=request_model, stream=stream
+        )
 
     @router.post(
         "/v1/rollouts/{rollout_id}/chat/completions",
@@ -509,7 +531,11 @@ def create_bridge_router(
         request_model = str(body.get("model") or bridge.model)
 
         if not is_stream:
-            task = asyncio.create_task(_serve_completion(body, rollout_id))
+            task = asyncio.create_task(
+                _serve_completion(
+                    body, rollout_id, request_model=request_model, stream=False
+                )
+            )
             try:
                 # asyncio.wait, never wait_for: a provider raising
                 # TimeoutError must be a clean 502 below, not read as the
@@ -525,28 +551,26 @@ def create_bridge_router(
             if not done:
                 # Still in flight: commit 200 now and keep the connection warm.
                 return StreamingResponse(
-                    _trickle_json_response(
-                        task, request_model=request_model, secret_values=secret_values
-                    ),
+                    _trickle_json_response(task, secret_values=secret_values),
                     media_type="application/json",
                     background=BackgroundTask(_cancel_task, task),
                 )
             try:
-                response = task.result()
+                # JSONResponse serializes on construction, inside this guard.
+                return JSONResponse(task.result())
             except Exception as exc:
                 # No byte committed yet, so errors keep their clean status code.
                 status, error = _bridge_error(exc, secret_values=secret_values)
                 logger.warning("LLM bridge error: %s", error["detail"])
                 return JSONResponse(error, status_code=status)
-            return JSONResponse(
-                _model_response_to_payload(
-                    response, request_model=request_model, stream=False
-                )
-            )
 
         async def stream_events() -> AsyncIterator[str]:
             yield ": ping\n\n"
-            task = asyncio.create_task(_serve_completion(body, rollout_id))
+            task = asyncio.create_task(
+                _serve_completion(
+                    body, rollout_id, request_model=request_model, stream=True
+                )
+            )
             try:
                 while not task.done():
                     try:
@@ -559,17 +583,14 @@ def create_bridge_router(
                     except Exception:
                         break
                 try:
-                    response = await task
+                    data = _compact_json(await task)
                 except Exception as exc:
                     _, error = _bridge_error(exc, secret_values=secret_values)
                     logger.warning("LLM bridge error: %s", error["detail"])
                     yield f"event: error\ndata: {_compact_json(error)}\n\n"
                     yield "data: [DONE]\n\n"
                     return
-                payload = _model_response_to_payload(
-                    response, request_model=request_model, stream=True
-                )
-                yield f"data: {_compact_json(payload)}\n\n"
+                yield f"data: {data}\n\n"
                 yield "data: [DONE]\n\n"
             finally:
                 await _cancel_task(task)

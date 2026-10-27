@@ -19,6 +19,7 @@ from osmosis_ai.platform.auth.credentials import (
     UserInfo,
 )
 from osmosis_ai.platform.auth.platform_client import (
+    UPGRADE_REQUIRED_FALLBACK_MESSAGE,
     AuthenticationExpiredError,
     PlatformAPIError,
     SubscriptionRequiredError,
@@ -1718,3 +1719,264 @@ def test_connect_timeout_wrapped_in_url_error_gets_retry_guidance(
                 platform_request(
                     "/api/test", credentials=_make_credentials(), require_git_repo=False
                 )
+
+
+@pytest.mark.parametrize(
+    "status,message_key",
+    [(400, "message"), (400, "error"), (403, "message"), (426, "message")],
+)
+@pytest.mark.parametrize(
+    "secret",
+    [
+        'synth-key-A"B\\C-123456789',
+        "first-secret-line\nsecond-secret-line  ",
+        "synth-secret-with-spaces  ",
+    ],
+)
+def test_secret_response_fields_are_scrubbed_before_error_formatting(
+    monkeypatch, status, message_key, secret
+):
+    import osmosis_ai.platform.auth.platform_client as transport
+
+    body = {
+        "status": "unsupported",
+        message_key: f"Rejected {secret}",
+        "code": "BILLING_REQUIRED" if status == 403 else "INVALID_INPUT",
+        "field": secret,
+        "issues": [{"key": secret, "message": "invalid"}],
+        "value": "unrecognized-sensitive-value",
+    }
+    monkeypatch.setattr(
+        transport,
+        "urlopen",
+        MagicMock(side_effect=_make_http_error(status, json.dumps(body))),
+    )
+    with pytest.raises(PlatformAPIError) as caught:
+        platform_request(
+            "/api/test",
+            credentials=_make_credentials(),
+            git_identity="acme/repo",
+            secret_values=[secret],
+        )
+
+    assert all(line.rstrip() not in str(caught.value) for line in secret.splitlines())
+    # Decoded fields, not their JSON encoding, which would escape '"' and '\'.
+    details = caught.value.details
+    assert details is not None
+    assert details[message_key] == "Rejected [REDACTED]"
+    # A 426 keeps only the status and message of its version signal.
+    if status != 426:
+        assert details["field"] == details["value"] == "[REDACTED]"
+        assert details["issues"] == [{"key": "[REDACTED]", "message": "invalid"}]
+    assert "Rejected" in str(caught.value)
+    assert caught.value.status_code == status
+    if status == 403:
+        assert isinstance(caught.value, SubscriptionRequiredError)
+        assert caught.value.error_code == "BILLING_REQUIRED"
+    if status == 426:
+        assert isinstance(caught.value, UpgradeRequiredError)
+
+
+@pytest.mark.parametrize(
+    ("secret", "template"),
+    [
+        # Decoding would split a JSON-shaped credential across fields.
+        ('{"credential":"synthetic-key-123456"}', '"echo":SECRET'),
+        # Decoding would turn the literal escape into a different spelling.
+        ("synthetic-\\u0041-key-123456", '"echo":"rejected SECRET"'),
+    ],
+    ids=["json-shaped", "decoded-escape"],
+)
+def test_secret_error_details_are_decoded_only_after_scrubbing(
+    monkeypatch, secret, template
+):
+    import osmosis_ai.platform.auth.platform_client as transport
+
+    echo = template.replace("SECRET", secret)
+    body = f'{{"code":"BILLING_REQUIRED","error":"Rejected",{echo}}}'
+    monkeypatch.setattr(
+        transport, "urlopen", MagicMock(side_effect=_make_http_error(403, body))
+    )
+    with pytest.raises(SubscriptionRequiredError) as caught:
+        platform_request(
+            "/api/test",
+            credentials=_make_credentials(),
+            git_identity="acme/repo",
+            secret_values=[secret],
+        )
+
+    # Classification still comes from the body as received.
+    assert caught.value.billing_required
+    rendered = str(caught.value) + json.dumps(caught.value.details)
+    assert "synthetic" not in rendered
+
+
+def test_version_warning_is_clean_while_success_data_retains_protocol_types(
+    monkeypatch, capsys
+):
+    import osmosis_ai.platform.auth.platform_client as transport
+    from osmosis_ai.cli.output import OutputFormat, override_output_context
+
+    secret = "9876543210123456789"
+    response = _make_http_response({"received": int(secret), "safe": [42, True, None]})
+    response.headers = {
+        "X-Osmosis-Version-Status": "deprecated",
+        "X-Osmosis-Version-Message": f"Upgrade: {secret}",
+    }
+    monkeypatch.setattr(transport, "urlopen", MagicMock(return_value=response))
+    monkeypatch.setattr(transport, "_version_signal_warned", set())
+    with override_output_context(format=OutputFormat.json):
+        result = platform_request(
+            "/api/test",
+            credentials=_make_credentials(),
+            git_identity="acme/repo",
+            secret_values=[secret],
+        )
+
+    assert result == {"received": int(secret), "safe": [42, True, None]}
+    warning = capsys.readouterr().err
+    assert secret not in warning
+    assert json.loads(warning)["warning"]["message"] == "Upgrade: [REDACTED]"
+
+
+@pytest.mark.parametrize(
+    "secret,body",
+    [
+        (
+            "SUBSCRIPTION",
+            {"code": "SUBSCRIPTION_REQUIRED", "message": "Payment needed"},
+        ),
+        ("RE", {"code": "BILLING_REQUIRED", "message": "Payment needed"}),
+        ("subscription", {"error": "Subscription required"}),
+    ],
+)
+def test_secret_redaction_keeps_error_classification_before_scrubbing(
+    monkeypatch, secret, body
+):
+    import osmosis_ai.platform.auth.platform_client as transport
+    from osmosis_ai.cli.output.error import classify_error
+    from osmosis_ai.platform.cli.secret_redact import redact_provided_secrets
+
+    response_error = HTTPError(
+        "https://example.test", 403, "Forbidden", {}, BytesIO(json.dumps(body).encode())
+    )
+    monkeypatch.setattr(transport, "urlopen", MagicMock(side_effect=response_error))
+    with pytest.raises(SubscriptionRequiredError) as caught:
+        platform_request(
+            "/api/test",
+            credentials=_make_credentials(),
+            git_identity="acme/repo",
+            secret_values=[secret],
+        )
+    assert secret not in str(caught.value.details)
+    redacted = redact_provided_secrets(caught.value, [secret])
+    expected = (
+        "BILLING_REQUIRED"
+        if body.get("code") == "BILLING_REQUIRED"
+        else "SUBSCRIPTION_REQUIRED"
+    )
+    assert classify_error(redacted).code == expected
+
+
+@pytest.mark.parametrize(
+    "failure", ["network", "auth", "upgrade", "validation", "invalid-json"]
+)
+def test_secret_transport_errors_do_not_render_raw_exception_chains(
+    monkeypatch, failure
+):
+    import traceback
+
+    import osmosis_ai.platform.auth.platform_client as transport
+
+    secret = "synthetic-sensitive-response"
+    if failure == "invalid-json":
+        response = _make_http_response({})
+        response.read.return_value = secret.encode() + b"\xff"
+        monkeypatch.setattr(transport, "urlopen", MagicMock(return_value=response))
+    else:
+        error = (
+            URLError(secret)
+            if failure == "network"
+            else HTTPError(
+                "https://example.test",
+                {"auth": 401, "upgrade": 426, "validation": 400}[failure],
+                secret,
+                {},
+                BytesIO(b"{}"),
+            )
+        )
+        monkeypatch.setattr(transport, "urlopen", MagicMock(side_effect=error))
+    with pytest.raises((PlatformAPIError, AuthenticationExpiredError)) as caught:
+        platform_request(
+            "/api/test",
+            credentials=_make_credentials(),
+            git_identity="acme/repo",
+            secret_values=[secret],
+        )
+    assert secret not in "".join(traceback.format_exception(caught.value))
+
+
+@pytest.mark.parametrize("status", [[], {}, 7])
+def test_malformed_upgrade_status_keeps_secret_errors_classified_and_unchained(
+    monkeypatch, status
+):
+    import traceback
+
+    import osmosis_ai.platform.auth.platform_client as transport
+    from osmosis_ai.platform.api.client import OsmosisClient
+
+    secret = "synthetic-sensitive-response"
+    body = json.dumps({"status": status}).encode()
+
+    def reject(request, **_kwargs):
+        # The reason echoes the supplied value, as a misbehaving proxy could.
+        raise HTTPError(request.full_url, 426, secret, {}, BytesIO(body))
+
+    monkeypatch.setattr(transport, "urlopen", reject)
+    monkeypatch.setattr(transport, "get_platform_url", lambda: "https://example.test")
+    with pytest.raises(UpgradeRequiredError) as caught:
+        OsmosisClient().set_environment_secret(
+            "AUDIT_SECRET",
+            secret,
+            scope="workspace",
+            credentials=_make_credentials(),
+            git_identity="acme/repo",
+        )
+    assert str(caught.value) == UPGRADE_REQUIRED_FALLBACK_MESSAGE
+    assert caught.value.error_code == "UPGRADE_REQUIRED"
+    assert secret not in "".join(traceback.format_exception(caught.value))
+
+
+def test_a_failure_while_translating_a_secret_error_does_not_chain_to_it(
+    monkeypatch,
+):
+    import traceback
+
+    import osmosis_ai.platform.auth.platform_client as transport
+
+    secret = "synthetic-sensitive-response"
+
+    def fail(*_args, **_kwargs):
+        raise TypeError("translation bug")
+
+    def reject(request, **_kwargs):
+        raise HTTPError(request.full_url, 400, secret, {}, BytesIO(b'{"error": "no"}'))
+
+    # Fault injection: any translator failure, whatever its cause.
+    monkeypatch.setattr(transport, "platform_error_code", fail)
+    monkeypatch.setattr(transport, "urlopen", reject)
+    with pytest.raises(PlatformAPIError) as caught:
+        platform_request(
+            "/api/test",
+            credentials=_make_credentials(),
+            git_identity="acme/repo",
+            secret_values=[secret],
+        )
+    assert caught.value.status_code == 400
+    assert str(caught.value) == "API error: HTTP 400."
+    assert secret not in "".join(traceback.format_exception(caught.value))
+    # Without supplied values the same failure keeps its diagnostics.
+    with pytest.raises(TypeError, match="translation bug"):
+        platform_request(
+            "/api/test", credentials=_make_credentials(), git_identity="acme/repo"
+        )

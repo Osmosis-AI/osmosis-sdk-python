@@ -2,6 +2,25 @@
 
 This file records changes to `osmosis-ai`. For earlier versions, see [GitHub Releases](https://github.com/Osmosis-AI/osmosis-sdk-python/releases).
 
+## Unreleased
+
+### Breaking Changes
+
+- Source digests now encode field lengths to prevent ambiguous file-name/content concatenation. Existing bundle caches rebuild once. Named local eval runs created with the previous digest format, including SDK 0.3.8, refuse resume and `--retry-failed` after upgrading even if their source is unchanged. Finish those runs with the SDK version that created them, or use `--fresh` to archive their results and start again; see [local eval upgrade guidance](docs/eval-run-local.md#source-digest-upgrades). Existing manifests and results are not migrated or deleted automatically ([#458](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/458)).
+
+### Changed
+
+- Before any command runs, the CLI registers the ambient provider and platform keys of its final environment (after `--env-file`; values of at least 8 characters), alongside the run secrets and `secret set` value it resolves; `--version` exits before this and prints only the version. All CLI output is scrubbed with them: JSON, plain, and rich success output (checked after plain normalization and rich unescaping), warnings in every format, rich console text after markup, every printed error with its details, and `OSMOSIS_DEBUG` traces. This covers `eval upload` and early `eval run` validation errors, and `eval run --upload` import results and version warnings. Output of any command that contained such a key now shows `[REDACTED]`; command results returned to Python callers are unchanged. If reporting an error fails, the CLI prints a fixed `INTERNAL` message rather than a traceback ([#458](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/458)).
+
+### Fixed
+
+- Secret-bearing platform requests sanitize decoded diagnostics before error formatting and warnings, including numeric JSON values, while preserving protocol parsing and error classification. Sensitive errors omit opaque response bodies and raw exception chains, and a failure while translating one becomes a generic `API error: HTTP <status>.` without its chain ([#458](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/458)).
+- A 426 response with a non-string `status` now yields the standard upgrade message instead of a `TypeError` ([#458](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/458)).
+- Platform CLI output and local eval diagnostics share marker-safe redaction: known values are also matched when whitespace-trimmed, JSON-escaped, or quoted with Python `repr`; multiline credentials also redact component lines that contain a letter or digit, and line-oriented output checks the rejoined text for a complete multiline value; structured details are sanitized before JSON encoding, and data nested more than 100 levels deep keeps its outer shape with a marker. Secret-bearing platform errors and local eval provider errors replace known values in the received text before decoding it, so a JSON-shaped credential cannot be split across fields, and text whose JSON escapes, including surrogate pairs, decode to a known value is redacted whole ([#458](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/458)).
+- The local eval LLM bridge converts provider responses inside its sanitizing error handler and makes its error text UTF-8 encodable, so neither a malformed field nor a lone surrogate can reach the web server's or a log handler's traceback ([#458](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/458)).
+- `LocalEvalRunner.run` scrubs the runner's own errors and drops their exception chain (an `after_finalize` callback's errors pass through unchanged), knows ambient provider keys before reading run state, and scrubs replayed error labels in the index, summary, and failure rows it rebuilds while leaving the journal unchanged; the `eval upload` log pass confines an unsafe match to its own line instead of rewriting the whole `logs.txt` ([#458](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/458)).
+- Rubric dataset loading skips non-object message entries and reports a normal line-numbered CLI error when no usable assistant response remains ([#458](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/458)).
+
 ## 0.3.8 - 2026-10-21
 
 ### Breaking Changes

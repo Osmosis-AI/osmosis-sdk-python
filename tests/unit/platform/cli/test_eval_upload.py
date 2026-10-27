@@ -479,3 +479,62 @@ def test_conflict_without_replace_keeps_platform_details_and_quotes_the_path(
     assert err.details["platform_code"] == "EVAL_IMPORT_EXISTS"
     assert err.details["local_run_id"] == "abc"
     assert "osmosis eval upload 'my run' --replace" in str(err)
+
+
+@pytest.mark.parametrize("output_flag", ["--json", "--plain"])
+def test_standalone_upload_errors_never_print_an_ambient_key(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    output_flag: str,
+) -> None:
+    import json
+
+    import osmosis_ai.cli.main as cli
+    import osmosis_ai.platform.cli.eval_upload as eval_upload_module
+
+    secret = "synth-upload-secret-12345"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    run_dir = tmp_path / "run-1"
+    run_dir.mkdir()
+    (run_dir / "logs.txt").write_text(f"before {secret} after\n", encoding="utf-8")
+    # A run name copied from the key: the mismatch error quotes it.
+    manifest = json.dumps(
+        {"schema_version": 1, "local_run_id": "a" * 32, "run_name": secret}
+    ).encode()
+    (run_dir / "manifest.json").write_bytes(manifest)
+    env_file = tmp_path / "empty.env"
+    env_file.write_text("", encoding="utf-8")
+    monkeypatch.setenv("OPENAI_API_KEY", secret)
+    monkeypatch.setattr(
+        eval_upload_module,
+        "require_git_workspace_directory_context",
+        lambda: SimpleNamespace(
+            workspace_directory=workspace,
+            git_identity="example/fixture",
+            repo_url="https://github.com/example/fixture.git",
+            credentials=SimpleNamespace(access_token="synthetic-auth"),
+        ),
+    )
+
+    def refuse(*_args: Any, **_kwargs: Any) -> None:
+        raise AssertionError("validation must fail before any upload")
+
+    monkeypatch.setattr(eval_upload_module, "upload_plan", refuse)
+    monkeypatch.chdir(workspace)
+
+    exit_code = cli.main(
+        ["--env-file", str(env_file), output_flag, "eval", "upload", str(run_dir)]
+    )
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    # The command really read the key: its log pass removed it.
+    assert (run_dir / "logs.txt").read_text() == "before [REDACTED] after\n"
+    assert (run_dir / "manifest.json").read_bytes() == manifest
+    assert secret not in captured.out + captured.err
+    assert "does not match directory name 'run-1'" in captured.err
+    if output_flag == "--json":
+        assert json.loads(captured.err.splitlines()[-1])["error"]["code"] == (
+            "VALIDATION"
+        )

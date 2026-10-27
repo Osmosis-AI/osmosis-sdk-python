@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import re
 import sys
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+from osmosis_ai._redaction import invocation_redactor
+from osmosis_ai.cli.console import _without_known_values
 
 from .context import OutputContext, OutputFormat
 from .jsonutil import dump_cli_json
@@ -18,7 +21,18 @@ from .result import (
     SectionedListResult,
 )
 
+if TYPE_CHECKING:
+    from rich.console import Console as RichConsole
+
 _JSON_SCHEMA_VERSION = 1
+# SDK constants of an envelope; the remaining values are presentation data. Only
+# an operation envelope sets status and operation itself: a list's extras may
+# use those keys for data.
+_PROTOCOL_KEYS = frozenset({"schema_version"})
+_OPERATION_PROTOCOL_KEYS = _PROTOCOL_KEYS | {"status", "operation"}
+# A list page's pagination values are SDK numbers; a marker would change their
+# JSON type.
+_PAGE_PROTOCOL_KEYS = frozenset({"total_count", "has_more", "next_offset"})
 
 _RICH_STYLE_TAG_RE = re.compile(
     r"\[/?(?:bold|dim|italic|underline|blink|reverse|strike|"
@@ -116,37 +130,94 @@ def _build_json_envelope(result: CommandResult) -> dict[str, Any]:
     raise TypeError(f"Unsupported CommandResult: {type(result).__name__}")
 
 
+def _presented_envelope(
+    envelope: dict[str, Any],
+    *,
+    protocol_keys: frozenset[str],
+    page_keys: frozenset[str] = frozenset(),
+) -> dict[str, Any]:
+    """Scrub the invocation's known values from an envelope's data.
+
+    Envelope keys, protocol values, and the field names of the records directly
+    under them are SDK schema; everything below is data, keys included. The
+    values under *page_keys* are list pages, presented like a list envelope.
+    """
+    redactor = invocation_redactor()
+
+    def record(value: Any) -> Any:
+        if isinstance(value, dict):
+            return {key: redactor.scrub_value(item) for key, item in value.items()}
+        return redactor.scrub_value(value)
+
+    def present(key: str, value: Any) -> Any:
+        if key in protocol_keys:
+            return value
+        if key in page_keys:
+            return _presented_envelope(value, protocol_keys=_PAGE_PROTOCOL_KEYS)
+        if isinstance(value, list):
+            return [record(item) for item in value]
+        return record(value)
+
+    return {key: present(key, value) for key, value in envelope.items()}
+
+
 def _render_json(result: CommandResult, output: OutputContext) -> None:
-    envelope = _build_json_envelope(result)
+    page_keys: frozenset[str] = frozenset()
+    if isinstance(result, OperationResult):
+        protocol_keys = _OPERATION_PROTOCOL_KEYS
+    elif isinstance(result, ListResult):
+        protocol_keys = _PROTOCOL_KEYS | _PAGE_PROTOCOL_KEYS
+    else:
+        protocol_keys = _PROTOCOL_KEYS
+        if isinstance(result, SectionedListResult):
+            page_keys = frozenset(section.key for section in result.sections)
+    envelope = _presented_envelope(
+        _build_json_envelope(result), protocol_keys=protocol_keys, page_keys=page_keys
+    )
     sys.stdout.write(dump_cli_json(envelope))
     sys.stdout.write("\n")
     sys.stdout.flush()
 
 
 def _normalise_plain_value(value: Any, *, rich_display: bool = False) -> str:
-    text = "" if value is None else str(value)
+    redactor = invocation_redactor()
+    # Scrubbed before each rewrite: removing markup, or turning a tab into a
+    # space, can respell a known value as text that no spelling of it matches.
+    text = redactor.scrub("" if value is None else str(value))
     if rich_display:
         text = _RICH_STYLE_TAG_RE.sub("", text)
-        text = text.replace("\\[", "[").replace("\\]", "]")
+        text = redactor.scrub(text.replace("\\[", "[").replace("\\]", "]"))
     return text.replace("\t", " ").replace("\n", " ").replace("\r", " ")
+
+
+def _write_plain_line(text: str) -> None:
+    # Checked as written: plain normalization (a tab becoming a space) can
+    # rebuild a known value that no field held.
+    sys.stdout.write(invocation_redactor().scrub(text) + "\n")
 
 
 def _display_items(result: ListResult | ListSection) -> list[dict[str, Any]]:
     return result.display_items if result.display_items is not None else result.items
 
 
-def _rich_text(value: Any, *, style: str | None = None) -> Any:
+def _rich_text(value: Any, *, console: RichConsole, style: str | None = None) -> Any:
     from rich.text import Text
 
     if isinstance(value, Text):
         if style is not None:
+            value = value.copy()
             value.stylize(style)
-        return value
+    else:
+        text = "" if value is None else str(value)
+        # Checked after unescaping, which can rebuild a known value.
+        value = Text(text.replace("\\[", "[").replace("\\]", "]"), style=style or "")
+    return _without_known_values(value, console=console, markup=False)
+
+
+def _rich_markup(value: Any, *, console: RichConsole) -> Any:
+    """A display value in Rich markup, checked as Rich will render it."""
     text = "" if value is None else str(value)
-    text = text.replace("\\[", "[").replace("\\]", "]")
-    if style is None:
-        return Text(text)
-    return Text(text, style=style)
+    return _without_known_values(text, console=console, markup=True)
 
 
 def _display_width(value: Any) -> int:
@@ -223,19 +294,19 @@ def _write_plain_list_rows(source: ListResult | ListSection) -> None:
             )
             for c in cols
         )
-        sys.stdout.write(row + "\n")
+        _write_plain_line(row)
 
 
 def _render_plain(result: CommandResult, output: OutputContext) -> None:
     if isinstance(result, DetailResult):
         for field in result.fields:
             value = _normalise_plain_value(field.value, rich_display=True)
-            sys.stdout.write(f"{field.label}: {value}\n")
+            _write_plain_line(f"{field.label}: {value}")
         for section in result.sections:
             for line in section.plain_lines:
-                sys.stdout.write(_normalise_plain_value(line) + "\n")
+                _write_plain_line(_normalise_plain_value(line))
         for hint in result.display_hints:
-            sys.stdout.write(_normalise_plain_value(hint) + "\n")
+            _write_plain_line(_normalise_plain_value(hint))
         return
 
     if isinstance(result, ListResult):
@@ -244,15 +315,15 @@ def _render_plain(result: CommandResult, output: OutputContext) -> None:
 
     if isinstance(result, SectionedListResult):
         for section in result.sections:
-            sys.stdout.write(f"{_normalise_plain_value(section.title)}:\n")
+            _write_plain_line(f"{_normalise_plain_value(section.title)}:")
             _write_plain_list_rows(section)
         return
 
     if isinstance(result, OperationResult):
         line = result.message or f"{result.operation}: {result.status}"
-        sys.stdout.write(_normalise_plain_value(line) + "\n")
+        _write_plain_line(_normalise_plain_value(line))
         for hint in result.display_next_steps:
-            sys.stdout.write(_normalise_plain_value(hint) + "\n")
+            _write_plain_line(_normalise_plain_value(hint))
         return
 
     raise TypeError(f"Unsupported CommandResult: {type(result).__name__}")
@@ -297,10 +368,10 @@ def _print_rich_list(
         raw_item = source.items[idx] if idx < len(source.items) else {}
         table.add_row(
             *[
-                ("" if item.get(column.key) is None else str(item.get(column.key)))
+                _rich_markup(item.get(column.key), console=console.rich)
                 if source.display_items is not None
                 and item.get(column.key) != raw_item.get(column.key)
-                else _rich_text(item.get(column.key))
+                else _rich_text(item.get(column.key), console=console.rich)
                 for column in source.columns
             ]
         )
@@ -322,34 +393,39 @@ def _render_rich(result: CommandResult, output: OutputContext) -> None:
         if result.title:
             console.separator(result.title)
         console.table(
-            [(field.label, _rich_text(field.value)) for field in result.fields]
+            [
+                (field.label, _rich_text(field.value, console=console.rich))
+                for field in result.fields
+            ]
         )
         for section in result.sections:
             if section.rich is not None:
                 console.rich.print(section.rich)
         for hint in result.display_hints:
-            console.rich.print(_rich_text(hint, style="dim"))
+            console.rich.print(_rich_text(hint, console=console.rich, style="dim"))
         return
 
     if isinstance(result, ListResult):
         _print_rich_list(console, result)
         for hint in result.display_hints:
-            console.rich.print(_rich_text(hint, style="dim"))
+            console.rich.print(_rich_text(hint, console=console.rich, style="dim"))
         return
 
     if isinstance(result, SectionedListResult):
         for section in result.sections:
             _print_rich_list(console, section, title=section.title)
         for hint in result.display_hints:
-            console.rich.print(_rich_text(hint, style="dim"))
+            console.rich.print(_rich_text(hint, console=console.rich, style="dim"))
         return
 
     if isinstance(result, OperationResult):
         if result.message:
             style = "green" if result.status == "success" else "yellow"
-            console.rich.print(_rich_text(result.message, style=style))
+            console.rich.print(
+                _rich_text(result.message, console=console.rich, style=style)
+            )
         for hint in result.display_next_steps:
-            console.rich.print(_rich_text(hint, style="dim"))
+            console.rich.print(_rich_text(hint, console=console.rich, style="dim"))
         return
 
     raise TypeError(f"Unsupported CommandResult: {type(result).__name__}")

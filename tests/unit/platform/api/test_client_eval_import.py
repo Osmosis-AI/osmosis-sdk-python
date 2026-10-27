@@ -130,6 +130,7 @@ def test_retry_posts_to_the_run_retry_route(mock_request) -> None:
         "/api/cli/eval-runs/brave-otter/retry",
         method="POST",
         data={},
+        secret_values=(),
         credentials=None,
         git_identity="acme/repo",
     )

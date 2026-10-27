@@ -1,7 +1,8 @@
 """Business logic for ``osmosis secret`` (set, list, delete).
 
 Security invariants for this module:
-  * The secret *value* travels through this process only to be POSTed once.
+  * The secret *value* is POSTed once. It stays in memory until the invocation
+    ends only as a known value of the CLI's redactor, so no output can echo it.
     It is never logged, never written to disk, and never placed in a
     ``CommandResult``, an error message, or an error ``details`` payload.
   * The value is accepted from a hidden interactive prompt or a named
@@ -15,6 +16,7 @@ from __future__ import annotations
 import os
 from typing import Any
 
+from osmosis_ai._redaction import register_invocation_secrets
 from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.cli.output import (
     ListColumn,
@@ -230,7 +232,8 @@ def set_secret(
     """Create or update (upsert) a secret.
 
     The value is read from ``--env VARNAME`` or a hidden interactive prompt,
-    POSTed once, and immediately discarded. It never appears in the result.
+    POSTed once, and retained only by the invocation's redactor. It never
+    appears in the result.
     """
     _validate_secret_name(name)
     _validate_scope(scope)
@@ -249,6 +252,9 @@ def set_secret(
             resource=workspace_result_context(context),
             message="Cancelled.",
         )
+    # Kept until the invocation ends: the CLI error boundary and output renderers
+    # scrub every spelling of it, including from errors raised after the POST.
+    register_invocation_secrets([value])
 
     client = OsmosisClient()
     from osmosis_ai.platform.auth.platform_client import PlatformAPIError
@@ -264,10 +270,6 @@ def set_secret(
             )
     except PlatformAPIError as exc:
         raise redact_secret_platform_error(exc, value) from None
-    finally:
-        # Drop the only remaining reference to the plaintext value promptly,
-        # including the failure path.
-        del value
 
     resource = serialize_environment_secret(secret)
     resource.update(workspace_result_context(context))

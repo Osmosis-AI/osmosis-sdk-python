@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from collections.abc import AsyncIterator
+from types import SimpleNamespace
 from typing import Any
 
 import httpx
@@ -339,3 +341,139 @@ async def test_provider_rejection_surfaces_without_retry_or_credentials(
     assert "reject_custom is unsupported" in payload["error"]["message"]
     assert "wire-test-secret" not in response.text
     assert "wire-test-secret" not in caplog.text
+
+
+@pytest.fixture
+async def responses_upstream(
+    monkeypatch: pytest.MonkeyPatch,
+) -> AsyncIterator[SimpleNamespace]:
+    """The official OpenAI Responses route: real LiteLLM, in-memory wire bytes."""
+    monkeypatch.setenv("LITELLM_LOCAL_MODEL_COST_MAP", "True")
+    monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
+    monkeypatch.delenv("OPENAI_API_BASE", raising=False)
+    litellm = pytest.importorskip("litellm")
+    from litellm.llms.custom_httpx.http_handler import AsyncHTTPHandler
+
+    upstream = SimpleNamespace(requests=[], content=b"", delay=0.0)
+
+    async def respond(request: httpx.Request) -> httpx.Response:
+        assert request.method == "POST"
+        assert str(request.url) == "https://api.openai.com/v1/responses"
+        upstream.requests.append(request)
+        await asyncio.sleep(upstream.delay)
+        return httpx.Response(
+            200, headers={"content-type": "application/json"}, content=upstream.content
+        )
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(respond))
+    monkeypatch.setattr(AsyncHTTPHandler, "create_client", lambda self, **kw: client)
+    handler = AsyncHTTPHandler()
+    original = litellm.aresponses
+
+    async def respond_with_handler(**kwargs: Any) -> Any:
+        return await original(**kwargs, client=handler)
+
+    monkeypatch.setattr(litellm, "aresponses", respond_with_handler)
+    try:
+        yield upstream
+    finally:
+        await handler.close()
+
+
+# Both quotes and a backslash: Python repr escapes them unlike JSON.
+REPR_SECRET = "synth'\"\\audit-123456"
+SURROGATE_SECRET = "dummy-known-secret-123"
+
+
+def _python_literals(text: str) -> list[object]:
+    import ast
+    import re
+
+    found: list[object] = []
+    for match in re.finditer(r"'(?:[^'\\]|\\.)*'", text):
+        try:
+            found.append(ast.literal_eval(match.group()))
+        except (ValueError, SyntaxError):
+            continue
+    return found
+
+
+@pytest.mark.parametrize("mode", ["json", "sse", "keepalive", "keepalive-delayed"])
+@pytest.mark.parametrize("case", ["status-repr", "lone-surrogate"])
+async def test_unsuccessful_responses_never_reach_output_or_server_logs(
+    responses_upstream: SimpleNamespace,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    mode: str,
+    case: str,
+) -> None:
+    import osmosis_ai.eval.local.llm_bridge as bridge_module
+
+    if case == "status-repr":
+        secret = REPR_SECRET
+        body = json.dumps(
+            {
+                "id": "resp-audit",
+                "created_at": 1700000000,
+                "model": "gpt-5-mini",
+                "object": "response",
+                "output": [],
+                "status": secret,
+            }
+        ).encode()
+        bridge = LiteLLMBridge(
+            model="openai/gpt-5-mini", api_key="wire-test-key", secret_values=(secret,)
+        )
+    else:
+        secret = SURROGATE_SECRET
+        # A JSON escape for a lone surrogate, as ASCII wire bytes.
+        body = (
+            b'{"id":"resp_surrogate","created_at":1700000000,"model":"gpt-5-mini",'
+            b'"object":"response","output":[],"status":"failed","error":'
+            b'{"code":"invalid_prompt","message":"' + secret.encode() + b'\\ud800"}}'
+        )
+        bridge = LiteLLMBridge(model="openai/gpt-5-mini", api_key=secret)
+    responses_upstream.content = body
+    responses_upstream.delay = 0.2 if mode == "keepalive-delayed" else 0.0
+    if mode == "keepalive-delayed":
+        monkeypatch.setattr(bridge_module, "_NON_STREAM_GRACE_SEC", 0.01)
+    app = FastAPI()
+    app.include_router(
+        create_bridge_router(
+            bridge,
+            auth_token="test-bearer",
+            non_stream_keepalive=mode.startswith("keepalive"),
+        )
+    )
+    # ASGITransport raises whatever escapes the app, which a server would log.
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://bridge"
+    ) as client:
+        response = await client.post(
+            "/v1/rollouts/test/chat/completions",
+            headers={"Authorization": "Bearer test-bearer"},
+            json={
+                "messages": [{"role": "user", "content": "hi"}],
+                "stream": mode == "sse",
+            },
+        )
+    assert len(responses_upstream.requests) == 1
+    if mode == "sse":
+        assert response.status_code == 200
+        assert "event: error\n" in response.text
+        assert response.text.rstrip().endswith("data: [DONE]")
+        line = next(
+            line for line in response.text.splitlines() if line.startswith("data: {")
+        )
+        payload = json.loads(line.removeprefix("data: "))
+    else:
+        expected = 200 if mode == "keepalive-delayed" else 502
+        assert response.status_code == expected
+        payload = json.loads(response.content)
+    assert payload["error"]["code"] == 502
+    message = payload["error"]["message"]
+    assert message.startswith("OpenAI Responses API returned unsuccessful status")
+    for text in (message, response.text, caplog.text):
+        assert secret not in text
+        assert secret not in _python_literals(text)
+    assert "LLM bridge error" in caplog.text

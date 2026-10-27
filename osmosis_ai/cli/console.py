@@ -40,6 +40,38 @@ def _url_link_text(
     return Text(label or url, style=link_style)
 
 
+def _without_known_values(
+    value: Any, *, console: RichConsole, markup: bool | None
+) -> Any:
+    """Scrub visible text and hyperlink styles using the output console's theme."""
+    from rich.text import Text
+
+    from osmosis_ai._redaction import invocation_redactor
+
+    redactor = invocation_redactor()
+    if not redactor.values or not isinstance(value, (str, Text)):
+        return value
+    rendered = (
+        value if isinstance(value, Text) else console.render_str(value, markup=markup)
+    )
+    plain = redactor.scrub(rendered.plain)
+    source_safe = isinstance(value, Text) or redactor.scrub(value) == value
+    # A link can live in the base style, a span, or a named console theme style.
+    for style in (rendered.style, *(span.style for span in rendered.spans)):
+        link = console.get_style(style, default="").link
+        if link and redactor.scrub(link) != link:
+            source_safe = False
+            break
+    if plain == rendered.plain and source_safe:
+        return value
+    # Retaining the original base style would keep a hidden link after scrubbing.
+    safe = rendered.copy()
+    safe.plain = plain
+    safe.style = ""
+    safe.spans = []
+    return safe
+
+
 class Console:
     """Console output using Rich with automatic TTY-aware rendering.
 
@@ -169,6 +201,11 @@ class Console:
         """
         if not self._is_rich_mode():
             return
+        markup = kwargs.get("markup")
+        args = tuple(
+            _without_known_values(arg, console=self._rich, markup=markup)
+            for arg in args
+        )
         with self._pause_active_spinner():
             self._rich.print(*args, style=style, end=end, **kwargs)
 
@@ -189,6 +226,9 @@ class Console:
         kwargs: dict[str, Any] = {"markup": markup}
         if soft_wrap is not None:
             kwargs["soft_wrap"] = soft_wrap
+        message = _without_known_values(
+            message, console=self._rich_stderr, markup=markup
+        )
         with self._pause_active_spinner():
             self._rich_stderr.print(message, style="bold red", **kwargs)
 
@@ -219,8 +259,11 @@ class Console:
             soft_wrap: Whether Rich should avoid inserting hard line breaks.
             markup: Whether to interpret Rich markup in the message.
         """
+        from osmosis_ai._redaction import invocation_redactor
         from osmosis_ai.cli.output.context import OutputFormat
 
+        # Warnings carry server and environment text into every output format.
+        message = invocation_redactor().scrub(message)
         fmt = self._output_format()
         if fmt is OutputFormat.json:
             from osmosis_ai.cli.output.error import emit_structured_warning_to_stderr
@@ -236,8 +279,12 @@ class Console:
         # A live spinner owns the terminal via a Rich Live region; writing to the
         # separate stderr console mid-spin would strand the spinner line. Pause
         # it (a clean transient erase), print, then resume so it redraws below.
+        # Checked again as rendered: markup can join a value split across tags.
+        warning = _without_known_values(
+            f"⚠ {message}", console=self._rich_stderr, markup=markup
+        )
         with self._pause_active_spinner():
-            self._rich_stderr.print(f"⚠ {message}", style="yellow", **kwargs)
+            self._rich_stderr.print(warning, style="yellow", **kwargs)
 
     def separator(self, title: str = "") -> None:
         """Print a separator line with optional title.
@@ -307,7 +354,10 @@ class Console:
             table.add_column("", style="cyan")
             table.add_column("")
         for key, value in rows:
-            table.add_row(key, value)
+            table.add_row(
+                _without_known_values(key, console=self._rich, markup=None),
+                _without_known_values(value, console=self._rich, markup=None),
+            )
         with self._pause_active_spinner():
             self._rich.print(table)
 
@@ -377,13 +427,12 @@ class Console:
         """Print a URL without inserting hard line breaks into the link target."""
         if not self._is_rich_mode():
             return
-        with self._pause_active_spinner():
-            self._rich.print(
-                self.format_text(prefix),
-                self.format_url(url, label=label, style=style),
-                sep="",
-                soft_wrap=True,
-            )
+        self.print(
+            self.format_text(prefix),
+            self.format_url(url, label=label, style=style),
+            sep="",
+            soft_wrap=True,
+        )
 
     @contextmanager
     def track_spinner(self, status: Any) -> Generator[None, None, None]:

@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any, NoReturn
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
+from osmosis_ai._redaction import SECRET_FIELDS, SecretRedactor
 from osmosis_ai.cli.console import console
 from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.consts import PACKAGE_VERSION
@@ -66,7 +67,11 @@ class SubscriptionRequiredError(PlatformAPIError):
         error_code: str | None = None,
         field: str | None = None,
         details: dict[str, Any] | None = None,
+        billing_required: bool = False,
     ):
+        self.billing_required: bool = (
+            billing_required or error_code == "BILLING_REQUIRED"
+        )
         super().__init__(
             message or "Active subscription required",
             status_code=403,
@@ -124,7 +129,9 @@ def surface_version_signal(status: Any, message: Any) -> None:
     console.print_warning(message, code=_VERSION_WARNING_CODES[status])
 
 
-def surface_response_version_signal(response: Any) -> None:
+def surface_response_version_signal(
+    response: Any, *, redactor: SecretRedactor | None = None
+) -> None:
     """Surface the version signal carried on a successful response's headers.
 
     Thin wrapper over :func:`surface_version_signal` for the standard
@@ -132,9 +139,12 @@ def surface_response_version_signal(response: Any) -> None:
     one way of reading the atomic version headers.
     """
     headers = response.headers
+    message = headers.get(VERSION_MESSAGE_HEADER)
+    if redactor is not None and isinstance(message, str):
+        message = redactor.scrub(message)
     surface_version_signal(
         headers.get(VERSION_STATUS_HEADER),
-        headers.get(VERSION_MESSAGE_HEADER),
+        message,
     )
 
 
@@ -147,7 +157,7 @@ def parse_version_signal(body: Any) -> dict[str, Any] | None:
     if not isinstance(body, dict):
         return None
     status = body.get("status")
-    if status not in _VERSION_STATUSES:
+    if not isinstance(status, str) or status not in _VERSION_STATUSES:
         return None
     message = body.get("message")
     if message is not None and not isinstance(message, str):
@@ -208,16 +218,36 @@ def _credentials_match_env_token(credentials: Credentials | None) -> bool:
     )
 
 
-def _read_error_body(e: HTTPError) -> dict[str, Any]:
+def _read_error_text(e: HTTPError) -> str:
     try:
         raw = e.read()
-        text = raw.decode("utf-8", errors="replace").strip() if raw else ""
-        if not text:
-            return {}
-        parsed = json.loads(text)
-        return parsed if isinstance(parsed, dict) else {}
     except Exception:
+        return ""
+    return raw.decode("utf-8", errors="replace").strip() if raw else ""
+
+
+def _json_object(text: str) -> dict[str, Any]:
+    try:
+        parsed = json.loads(text)
+    except (ValueError, RecursionError):
         return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _read_error_body(e: HTTPError) -> dict[str, Any]:
+    return _json_object(_read_error_text(e))
+
+
+def _presented_error_body(text: str, redactor: SecretRedactor) -> dict[str, Any]:
+    """Decode an error body for display only after known values left its text.
+
+    Decoding first could split a JSON-shaped credential across fields, re-space
+    it, or unescape it into a different spelling. A body that a replacement
+    leaves unparseable yields no details rather than an opaque echo.
+    """
+    return redactor.scrub_value(
+        _json_object(redactor.scrub(text)), sensitive_keys=SECRET_FIELDS
+    )
 
 
 def _auth_error_message(error_code: str | None, *, using_env_token: bool) -> str:
@@ -448,20 +478,25 @@ def platform_error_code(body: dict[str, Any]) -> str | None:
     return "deployment_conflict" if _is_deployment_conflict(body) else None
 
 
-def _response_error_message(body: dict[str, Any]) -> str | None:
+def _response_error_message(
+    body: dict[str, Any], *, deployment_conflict: bool | None = None
+) -> str | None:
     """Prefer a human-readable message over a legacy error string or code.
 
     A ``deployment_conflict`` body gets CLI retry guidance unless the server
     message is usable and not written for a browser: the reload prompt means
     nothing in a terminal and its exact wording is not stable, so any mention
-    of reloading is treated as browser copy.
+    of reloading is treated as browser copy. Pass ``deployment_conflict`` from
+    the raw body when *body* is a sanitized presentation copy.
     """
     message = None
     for value in (body.get("message"), body.get("error")):
         if isinstance(value, str) and value.strip():
             message = value.strip()
             break
-    if _is_deployment_conflict(body) and (
+    if deployment_conflict is None:
+        deployment_conflict = _is_deployment_conflict(body)
+    if deployment_conflict and (
         message is None
         or message == "deployment_conflict"
         or "reload" in message.lower()
@@ -491,6 +526,7 @@ def _raise_for_http_error(
     *,
     using_env_token: bool,
     git_identity: str | None,
+    redactor: SecretRedactor | None = None,
 ) -> NoReturn:
     """Translate a platform ``HTTPError`` into the appropriate SDK exception.
 
@@ -504,43 +540,60 @@ def _raise_for_http_error(
         error_code = error_body.get("code")
         if not isinstance(error_code, str):
             error_code = None
+        message = _auth_error_message(error_code, using_env_token=using_env_token)
         raise AuthenticationExpiredError(
-            _auth_error_message(error_code, using_env_token=using_env_token),
-            code=error_code,
-        ) from e
+            redactor.scrub(message) if redactor else message,
+            code=redactor.scrub(error_code) if redactor and error_code else error_code,
+        ) from (None if redactor else e)
 
     if e.code == 426:
-        error_body = _read_error_body(e)
+        text = _read_error_text(e)
+        error_body = (
+            _presented_error_body(text, redactor)
+            if redactor is not None
+            else _json_object(text)
+        )
         message, version_signal = upgrade_required_message(error_body)
         raise UpgradeRequiredError(
             message,
             e.code,
             error_code="UPGRADE_REQUIRED",
             details=version_signal or error_body or None,
-        ) from e
+        ) from (None if redactor else e)
 
     # Best-effort capture of structured error message from response body
     detail = ""
     error_body: dict[str, Any] = {}
     field: str | None = None
     platform_message: str | None = None
+    classification_code: str | None = None
+    subscription_required = False
+    error_msg: str | None = None
     try:
-        raw = e.read()
-        text = raw.decode("utf-8", errors="replace").strip() if raw else ""
+        text = _read_error_text(e)
+        # Only a JSON object is treated as an error body.
+        parsed = _json_object(text)
+        # Classify protocol fields before sanitizing presentation data.
+        classification_code = platform_error_code(parsed)
+        legacy_error = parsed.get("error")
+        subscription_required = isinstance(legacy_error, str) and (
+            "subscription" in legacy_error.lower()
+        )
+        error_body = (
+            _presented_error_body(text, redactor) if redactor is not None else parsed
+        )
+        error_msg = _response_error_message(
+            error_body, deployment_conflict=_is_deployment_conflict(parsed)
+        )
+        if isinstance(error_body.get("field"), str):
+            field = error_body["field"]
         if text:
-            with contextlib.suppress(json.JSONDecodeError, ValueError):
-                parsed = json.loads(text)
-                # Only treat as error_body if it's actually a dict
-                if isinstance(parsed, dict):
-                    error_body = parsed
-                    if isinstance(error_body.get("field"), str):
-                        field = error_body["field"]
             # Prefer a usable explanation over an error code or raw response body.
-            error_msg = _response_error_message(error_body)
             if error_msg:
                 issues_detail = _format_response_issues(error_body)
                 platform_message = f"{error_msg}{issues_detail or ''}"
-            elif text:
+            elif text and redactor is None:
+                # Secret-bearing requests must not echo opaque or truncated bodies.
                 if len(text) > 200:
                     text = text[:200] + "...(truncated)"
                 detail = f" Response: {text}"
@@ -548,16 +601,17 @@ def _raise_for_http_error(
         pass
     error_code = platform_error_code(error_body)
 
-    if error_code in _REPO_SCOPE_ERROR_MESSAGES:
+    if classification_code in _REPO_SCOPE_ERROR_MESSAGES:
+        message = _repo_scope_error_message(classification_code, git_identity)
         raise PlatformAPIError(
-            _repo_scope_error_message(error_code, git_identity),
+            redactor.scrub(message) if redactor else message,
             e.code,
             error_code=error_code,
             field=field,
             details=error_body or None,
-        ) from e
+        ) from (None if redactor else e)
 
-    if e.code == 403 and error_code in {
+    if e.code == 403 and classification_code in {
         "SUBSCRIPTION_REQUIRED",
         "BILLING_REQUIRED",
     }:
@@ -566,18 +620,17 @@ def _raise_for_http_error(
             error_code=error_code,
             field=field,
             details=error_body or None,
-        ) from e
+            billing_required=classification_code == "BILLING_REQUIRED",
+        ) from (None if redactor else e)
 
     # Detect subscription-required responses (403 with subscription message)
-    if e.code == 403 and isinstance(error_body, dict):
-        error_msg = error_body.get("error", "")
-        if isinstance(error_msg, str) and "subscription" in error_msg.lower():
-            raise SubscriptionRequiredError(
-                platform_message,
-                error_code=error_code,
-                field=field,
-                details=error_body or None,
-            ) from e
+    if e.code == 403 and subscription_required:
+        raise SubscriptionRequiredError(
+            platform_message,
+            error_code=error_code,
+            field=field,
+            details=error_body or None,
+        ) from (None if redactor else e)
 
     raise PlatformAPIError(
         platform_message or f"API error: HTTP {e.code}.{detail}",
@@ -585,7 +638,7 @@ def _raise_for_http_error(
         error_code=error_code,
         field=field,
         details=error_body or None,
-    ) from e
+    ) from (None if redactor else e)
 
 
 def _prepare_platform_request(
@@ -640,6 +693,7 @@ def platform_request(
     credentials: Credentials | None = None,
     git_identity: str | None = None,
     require_git_repo: bool = True,
+    secret_values: Iterable[str] = (),
 ) -> dict[str, Any]:
     """Make an authenticated request to the Osmosis Platform API.
 
@@ -656,6 +710,9 @@ def platform_request(
             X-Osmosis-Workspace instead.
         require_git_repo: If True, requires Git identity or an explicit workspace
             selection and adds exactly one scope header. If False, omits scope.
+        secret_values: Plaintext values sent by this operation. Diagnostic values
+            are scrubbed before warnings or error formatting. Successful response
+            data retains its protocol types; callers sanitize it for presentation.
     Returns:
         Parsed JSON response
 
@@ -663,6 +720,8 @@ def platform_request(
         AuthenticationExpiredError: If 401 received
         PlatformAPIError: For other API errors
     """
+    values = tuple(value for value in secret_values if value)
+    redactor = SecretRedactor(values) if values else None
     request, using_env_token = _prepare_platform_request(
         endpoint,
         method=method,
@@ -675,7 +734,7 @@ def platform_request(
 
     try:
         with urlopen(request, timeout=timeout) as response:
-            surface_response_version_signal(response)
+            surface_response_version_signal(response, redactor=redactor)
             if response.status == 204:
                 return {}
             raw = response.read()
@@ -683,15 +742,29 @@ def platform_request(
                 return {}
             parsed = json.loads(raw)
     except HTTPError as e:
-        _raise_for_http_error(
-            e,
-            using_env_token=using_env_token,
-            git_identity=git_identity,
-        )
+        try:
+            _raise_for_http_error(
+                e,
+                using_env_token=using_env_token,
+                git_identity=git_identity,
+                redactor=redactor,
+            )
+        except (AuthenticationExpiredError, PlatformAPIError):
+            raise
+        except Exception:
+            if redactor is None:
+                raise
+            # Translation failed; its error would chain to the raw response.
+            raise PlatformAPIError(f"API error: HTTP {e.code}.", e.code) from None
     except (URLError, TimeoutError) as e:
-        raise PlatformAPIError(connection_error_message(e)) from e
+        message = connection_error_message(e)
+        raise PlatformAPIError(redactor.scrub(message) if redactor else message) from (
+            None if redactor else e
+        )
     except (json.JSONDecodeError, UnicodeDecodeError) as e:
-        raise PlatformAPIError("Invalid JSON response from platform") from e
+        raise PlatformAPIError("Invalid JSON response from platform") from (
+            None if redactor else e
+        )
     if not isinstance(parsed, dict):
         raise PlatformAPIError("Invalid JSON response from platform")
     return parsed
