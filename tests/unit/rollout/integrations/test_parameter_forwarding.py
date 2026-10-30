@@ -177,6 +177,50 @@ async def test_agents_response_methods_forward_parameters_over_streaming_transpo
     assert body["tools"][0]["function"]["strict"] is True
 
 
+async def test_strands_sends_reasoning_back_to_gateway(
+    rollout_context, captured_requests, caplog
+):
+    agent = OsmosisStrandsAgent(model=OsmosisRolloutModel(), callback_handler=None)
+    history = [
+        {"role": "user", "content": [{"text": "2 * 3?"}]},
+        {
+            "role": "assistant",
+            "content": [
+                {"reasoningContent": {"reasoningText": {"text": "Use the tool."}}},
+                {
+                    "toolUse": {
+                        "toolUseId": "t1",
+                        "name": "multiply",
+                        "input": {"a": 2, "b": 3},
+                    }
+                },
+            ],
+        },
+        {
+            "role": "user",
+            "content": [
+                {
+                    "toolResult": {
+                        "toolUseId": "t1",
+                        "status": "success",
+                        "content": [{"text": "6"}],
+                    }
+                }
+            ],
+        },
+    ]
+
+    caplog.set_level("WARNING")
+    _ = [event async for event in agent.model.stream(history)]
+
+    assert "reasoningContent is not supported" not in caplog.text
+    assert len(captured_requests) == 1
+    assistant = captured_requests[0]["messages"][1]
+    assert assistant["reasoning_content"] == "Use the tool."
+    assert assistant["tool_calls"][0]["id"] == "t1"
+    assert captured_requests[0]["messages"][2]["role"] == "tool"
+
+
 @pytest.mark.parametrize("stream", [False, True])
 async def test_strands_forward_parameters_to_gateway(
     rollout_context, captured_requests, stream

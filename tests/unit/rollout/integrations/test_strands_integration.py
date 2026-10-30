@@ -123,7 +123,8 @@ async def test_preview_formats_reasoning_and_media_without_warnings(caplog):
     assert preview.messages == messages
     encoded = repr(preview.trajectory_messages)
     assert "[image omitted from preview]" in encoded
-    assert "base64" not in encoded and "hmm" not in encoded
+    assert "base64" not in encoded
+    assert preview.trajectory_messages[1]["reasoning_content"] == "hmm"
     assert preview.trajectory_messages[-2:] == [
         {
             "role": "tool",
@@ -220,6 +221,80 @@ async def test_sample_source_preserves_native_and_converts_messages() -> None:
     assert sample.trajectory_messages == [
         {"role": "user", "content": [{"text": "hello", "type": "text"}]}
     ]
+
+
+async def test_sample_trajectory_records_reasoning_as_atif_reasoning_content(caplog):
+    from osmosis_ai.rollout.integrations.agents.strands import (
+        StrandsAgentSampleSource,
+    )
+    from osmosis_ai.rollout.trajectory.converter import convert_sample_to_trajectory
+
+    def reasoning(text):
+        return {"reasoningContent": {"reasoningText": {"text": text}}}
+
+    messages = [
+        {"role": "user", "content": [{"text": "2 * 3?"}]},
+        {
+            "role": "assistant",
+            "content": [
+                reasoning("Use the "),
+                reasoning("tool."),
+                {"toolUse": {"toolUseId": "t1", "name": "multiply", "input": {}}},
+            ],
+        },
+        {
+            "role": "user",
+            "content": [
+                {
+                    "toolResult": {
+                        "toolUseId": "t1",
+                        "status": "success",
+                        "content": [{"text": "6"}],
+                    }
+                }
+            ],
+        },
+        {"role": "assistant", "content": [reasoning("Thinking only.")]},
+        {"role": "user", "content": [{"text": "Answer now."}]},
+        {"role": "assistant", "content": [reasoning("Report it."), {"text": "6"}]},
+    ]
+    source = StrandsAgentSampleSource(SimpleNamespace(messages=messages))
+
+    caplog.set_level("WARNING")
+    sample = await source.get_sample()
+
+    assert not caplog.records
+    assert sample.messages == messages
+    assistants = [m for m in sample.trajectory_messages if m["role"] == "assistant"]
+    assert [m["reasoning_content"] for m in assistants] == [
+        "Use the tool.",
+        "Report it.",
+    ]
+    assert assistants[0]["tool_calls"][0]["function"]["name"] == "multiply"
+    assert [m["role"] for m in sample.trajectory_messages] == [
+        "user",
+        "assistant",
+        "tool",
+        "user",
+        "assistant",
+    ]
+    trajectory = convert_sample_to_trajectory(sample, rollout_id="r1")
+    assert [
+        step.reasoning_content for step in trajectory.steps if step.source == "agent"
+    ] == ["Use the tool.", "Report it."]
+
+
+def test_redacted_only_reasoning_adds_no_turn():
+    from osmosis_ai.rollout.integrations.agents.strands import _ReasoningLiteLLMModel
+
+    redacted = {"reasoningContent": {"redactedContent": b"opaque"}}
+
+    assert (
+        _ReasoningLiteLLMModel.format_request_messages(
+            [{"role": "assistant", "content": [redacted]}]
+        )
+        == []
+    )
 
 
 @pytest.mark.parametrize("preview", [False, True])

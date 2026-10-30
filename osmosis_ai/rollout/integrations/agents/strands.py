@@ -53,14 +53,12 @@ def _content_block_messages(messages: list[dict[str, Any]]) -> list[dict[str, An
 def _preview_blocks(blocks: list[Any]) -> list[Any]:
     """Preview formatter input without blocks that warn on every capture.
 
-    The formatter drops reasoning and location-sourced media anyway, and other
-    media would only reach a preview as clipped base64.
+    The formatter drops location-sourced media anyway, and other media would
+    only reach a preview as clipped base64.
     """
     result = []
     for block in blocks:
         if isinstance(block, dict):
-            if "reasoningContent" in block:
-                continue
             media = next((kind for kind in _MEDIA_BLOCKS if kind in block), None)
             tool_result = block.get("toolResult")
             if media is not None:
@@ -105,6 +103,46 @@ def _preview_messages(messages: Sequence[Mapping[str, Any]]) -> list[Mapping[str
     return result
 
 
+def _reasoning_text(message: Mapping[str, Any]) -> str | None:
+    texts = []
+    for block in message.get("content") or []:
+        if isinstance(block, dict) and "reasoningContent" in block:
+            text = block["reasoningContent"].get("reasoningText", {}).get("text")
+            if isinstance(text, str):
+                texts.append(text)
+    return "".join(texts) if texts else None
+
+
+class _ReasoningLiteLLMModel(LiteLLMModel):
+    """Replays reasoning, which Strands drops from history, as ``reasoning_content``.
+
+    Training gateways match each turn's reasoning against what they sampled.
+    """
+
+    @classmethod
+    def format_request_messages(
+        cls, messages: Messages, *args: Any, **kwargs: Any
+    ) -> list[dict[str, Any]]:
+        formatted = super().format_request_messages([], *args, **kwargs)
+        for message in messages:
+            reasoning = (
+                _reasoning_text(message) if message["role"] == "assistant" else None
+            )
+            if reasoning is None:
+                formatted.extend(super().format_request_messages([message]))
+                continue
+            content = [
+                block for block in message["content"] if "reasoningContent" not in block
+            ]
+            turn = super().format_request_messages(
+                cast(Messages, [{**message, "content": content}])
+            )
+            if turn:
+                turn[0]["reasoning_content"] = reasoning
+            formatted.extend(turn)
+        return formatted
+
+
 class StrandsAgentSampleSource(SampleSource):
     """Produces the rollout sample from a Strands agent's ``messages`` field.
 
@@ -121,7 +159,9 @@ class StrandsAgentSampleSource(SampleSource):
         self, messages: Sequence[Mapping[str, Any]], *, log_errors: bool = True
     ) -> Sequence[Mapping[str, Any]] | None:
         try:
-            return LiteLLMModel.format_request_messages(cast(Any, list(messages)))
+            return _ReasoningLiteLLMModel.format_request_messages(
+                cast(Any, list(messages))
+            )
         except Exception:
             if log_errors:
                 logger.warning(
@@ -205,7 +245,7 @@ class OsmosisStrandsAgent(StrandsAgent):
                     "Ensure the execution backend sets up the context before "
                     "running the workflow."
                 )
-            litellm_model: Model = LiteLLMModel(
+            litellm_model: Model = _ReasoningLiteLLMModel(
                 client_args={
                     "api_base": rollout_ctx.chat_completions_url,
                     "api_key": rollout_ctx.api_key,
