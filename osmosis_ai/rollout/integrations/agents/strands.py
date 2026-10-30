@@ -114,10 +114,9 @@ def _reasoning_text(message: Mapping[str, Any]) -> str | None:
 
 
 class _ReasoningLiteLLMModel(LiteLLMModel):
-    """``LiteLLMModel`` that sends each assistant turn's reasoning back as ``reasoning_content``.
+    """Replays reasoning, which Strands drops from history, as ``reasoning_content``.
 
-    Strands drops it from Chat Completions history; without it a training gateway
-    can't match the turn to what it sampled, and the model loses its earlier thinking.
+    Training gateways match each turn's reasoning against what they sampled.
     """
 
     @classmethod
