@@ -1,0 +1,28 @@
+osmosis_ai/rollout/integrations/agents/strands.py
+  s_49decdefcc7bff::t_4ccd930504b659 118-119
+  s_49decdefcc7bff::t_097422e88f4159 115-117
+  s_49decdefcc7bff::t_2583b7f53c9ee0 120-122
+  s_49decdefcc7bff::t_a1b8cf8d7056ef 56-57,106-114,123-146,163-165,249
+docs/rollout-sdk.md
+  s_49decdefcc7bff::t_05b9d45e1a42f7 322
+tests/unit/rollout/integrations/test_parameter_forwarding.py
+  s_49decdefcc7bff::t_22c42730619e5c 180-223
+tests/unit/rollout/integrations/test_strands_integration.py
+  s_49decdefcc7bff::t_06c2a4aa259056 126-127,226-289
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "c8956989320cca1a1d31cb5464fa8db4d21fb463",
+  "prompts": {},
+  "sessions": {
+    "s_49decdefcc7bff": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "bfca6ecc-e83f-4052-8d24-7da7a0023420",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Allen Lin <allen@osmosis.ai>"
+    }
+  }
+}
