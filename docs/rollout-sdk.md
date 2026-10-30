@@ -319,7 +319,7 @@ There is no `osmosis rollout serve` command. Scaffold a server with `osmosis rol
 
 [../osmosis_ai/rollout/integrations/agents/](../osmosis_ai/rollout/integrations/agents/)
 
-- **Strands** — with `pip install "osmosis-ai[strands]"`, import `OsmosisStrandsAgent` and `OsmosisRolloutModel` from `osmosis_ai.rollout.integrations.agents.strands`. `OsmosisStrandsAgent` is a drop-in for `strands.Agent`: it swaps in the rollout model from the active `RolloutContext` and auto-registers a sample source.
+- **Strands** — with `pip install "osmosis-ai[strands]"`, import `OsmosisStrandsAgent` and `OsmosisRolloutModel` from `osmosis_ai.rollout.integrations.agents.strands`. `OsmosisStrandsAgent` is a drop-in for `strands.Agent`: it swaps in the rollout model from the active `RolloutContext` and auto-registers a sample source. Unlike plain Strands, which drops reasoning from Chat Completions history, the rollout model sends each earlier assistant turn's reasoning back as `reasoning_content`, and trajectories record it as the ATIF step's `reasoning_content`.
 - **OpenAI Agents** — with `pip install "osmosis-ai[openai-agents]"`, import `OsmosisAgent` from the canonical integration module:
 
   ```python
