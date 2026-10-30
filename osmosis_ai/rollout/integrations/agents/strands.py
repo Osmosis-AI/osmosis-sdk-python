@@ -104,11 +104,12 @@ def _preview_messages(messages: Sequence[Mapping[str, Any]]) -> list[Mapping[str
 
 
 def _reasoning_text(message: Mapping[str, Any]) -> str | None:
-    texts = [
-        block["reasoningContent"].get("reasoningText", {}).get("text", "")
-        for block in message.get("content") or []
-        if isinstance(block, dict) and "reasoningContent" in block
-    ]
+    texts = []
+    for block in message.get("content") or []:
+        if isinstance(block, dict) and "reasoningContent" in block:
+            text = block["reasoningContent"].get("reasoningText", {}).get("text")
+            if isinstance(text, str):
+                texts.append(text)
     return "".join(texts) if texts else None
 
 
@@ -137,9 +138,8 @@ class _ReasoningLiteLLMModel(LiteLLMModel):
             turn = super().format_request_messages(
                 cast(Messages, [{**message, "content": content}])
             )
-            if not turn:
-                turn = [{"role": "assistant", "content": ""}]
-            turn[0]["reasoning_content"] = reasoning
+            if turn:
+                turn[0]["reasoning_content"] = reasoning
             formatted.extend(turn)
         return formatted
 

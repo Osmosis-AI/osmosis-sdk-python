@@ -268,23 +268,33 @@ async def test_sample_trajectory_records_reasoning_as_atif_reasoning_content(cap
     assistants = [m for m in sample.trajectory_messages if m["role"] == "assistant"]
     assert [m["reasoning_content"] for m in assistants] == [
         "Use the tool.",
-        "Thinking only.",
         "Report it.",
     ]
     assert assistants[0]["tool_calls"][0]["function"]["name"] == "multiply"
-    assert assistants[1]["content"] == ""
     assert [m["role"] for m in sample.trajectory_messages] == [
         "user",
         "assistant",
         "tool",
-        "assistant",
         "user",
         "assistant",
     ]
     trajectory = convert_sample_to_trajectory(sample, rollout_id="r1")
     assert [
         step.reasoning_content for step in trajectory.steps if step.source == "agent"
-    ] == ["Use the tool.", "Thinking only.", "Report it."]
+    ] == ["Use the tool.", "Report it."]
+
+
+def test_redacted_only_reasoning_adds_no_turn():
+    from osmosis_ai.rollout.integrations.agents.strands import _ReasoningLiteLLMModel
+
+    redacted = {"reasoningContent": {"redactedContent": b"opaque"}}
+
+    assert (
+        _ReasoningLiteLLMModel.format_request_messages(
+            [{"role": "assistant", "content": [redacted]}]
+        )
+        == []
+    )
 
 
 @pytest.mark.parametrize("preview", [False, True])
