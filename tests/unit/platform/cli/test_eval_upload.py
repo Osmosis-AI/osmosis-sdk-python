@@ -682,6 +682,45 @@ def test_conflict_without_replace_keeps_platform_details_and_quotes_the_path(
     assert "osmosis eval upload 'my run' --replace" in str(err)
 
 
+def test_other_conflicts_do_not_suggest_replace(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from osmosis_ai.platform.auth.platform_client import PlatformAPIError
+    from osmosis_ai.platform.cli.eval_upload import upload as upload_run
+
+    monkeypatch.setattr(
+        "osmosis_ai.platform.cli.eval_upload.require_git_workspace_directory_context",
+        lambda: SimpleNamespace(
+            workspace_directory=tmp_path,
+            credentials=None,
+            git_identity="acme/repo",
+        ),
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.platform.cli.eval_upload.prepare_eval_upload_plan",
+        lambda _run_dir: SimpleNamespace(),
+    )
+    message = (
+        "This local run ID has an unfinished upload started by a different CLI "
+        "version. Finish it with that version or let it expire before uploading again"
+    )
+
+    def _upload_plan(*_args: Any, **_kwargs: Any) -> None:
+        raise PlatformAPIError(
+            message, status_code=409, error_code="EVAL_IMPORT_UPLOAD_MODE_DIFFERS"
+        )
+
+    monkeypatch.setattr(
+        "osmosis_ai.platform.cli.eval_upload.upload_plan",
+        _upload_plan,
+    )
+
+    with pytest.raises(PlatformAPIError) as excinfo:
+        upload_run(Path("my run"), replace=False)
+
+    assert str(excinfo.value) == message
+
+
 @pytest.mark.parametrize("output_flag", ["--json", "--plain"])
 def test_standalone_upload_errors_never_print_an_ambient_key(
     tmp_path: Path,

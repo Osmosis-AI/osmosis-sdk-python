@@ -373,7 +373,9 @@ def upload(run_dir: Path, *, replace: bool = False) -> OperationResult:
     except LocalEvalUploadError as exc:
         raise CLIError(str(exc)) from exc
     except PlatformAPIError as exc:
-        if exc.status_code == 409 and not replace:
+        # Only an already-imported run can be republished with --replace; the
+        # platform's other conflicts carry their own remedy.
+        if exc.error_code == "EVAL_IMPORT_EXISTS" and not replace:
             classified = classify_error(exc)
             command = f"osmosis eval upload {quote(str(run_dir))} --replace"
             raise CLIError(
