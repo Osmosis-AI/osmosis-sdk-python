@@ -90,9 +90,6 @@ class EvalUploadPlan:
     provenance: dict[str, Any]
     files: tuple[EvalUploadFile, ...]
 
-    def file_requests(self) -> list[dict[str, Any]]:
-        return [file.to_request() for file in self.files]
-
 
 def _is_int(value: Any) -> TypeGuard[int]:
     return isinstance(value, int) and not isinstance(value, bool)

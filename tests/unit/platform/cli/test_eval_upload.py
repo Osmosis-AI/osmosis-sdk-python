@@ -508,7 +508,8 @@ def test_failed_extraction_reason_reaches_the_cli_error(
 
     assert str(excinfo.value) == (
         "Local evaluation upload failed: The platform could not extract the "
-        "uploaded files: index.jsonl:3 is not valid JSON"
+        "uploaded files: index.jsonl:3 is not valid JSON. Re-run the upload to "
+        "try again"
     )
 
 

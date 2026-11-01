@@ -232,7 +232,8 @@ def _wait_for_extraction(
             )
     if state.status == "failed":
         raise RuntimeError(
-            f"The platform could not extract the uploaded files: {state.reason}"
+            f"The platform could not extract the uploaded files: {state.reason}. "
+            "Re-run the upload to try again"
         )
     if (
         state.file_count != archive.layout.entry_count
