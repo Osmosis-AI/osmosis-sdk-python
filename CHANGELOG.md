@@ -2,6 +2,24 @@
 
 This file records changes to `osmosis-ai`. For earlier versions, see [GitHub Releases](https://github.com/Osmosis-AI/osmosis-sdk-python/releases).
 
+## 0.3.10 - 2026-11-01
+
+### Breaking Changes
+
+- `osmosis eval upload` and `eval run --upload` require platform archive-import support; upgrade the platform before the SDK because there is no per-file upload fallback ([#466](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/466)).
+- Direct eval-import integrations must replace `files=` with `archive=` in `OsmosisClient.start_eval_run_import()`, upload `files.jsonl` and `run.zip`, and wait for extraction to reach `ready` using `start_eval_run_import_extraction()` and `get_eval_run_import_extraction()` before finalizing ([#466](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/466)).
+- Eval-import results require `upload_mode`, list upload slots in `files` for archive imports, and allow slot `sha256` values to be `None`; update model constructors and result handling accordingly ([#466](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/466)).
+
+### Changed
+
+- Local eval uploads stream a ZIP64 archive one part at a time without writing a temporary archive to disk, replacing per-file requests and skipping completed upload slots on retry ([#466](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/466)).
+
+### Fixed
+
+- Strands rollouts preserve earlier assistant reasoning in follow-up requests, live previews, and ATIF trajectories instead of dropping `reasoning_content` ([#465](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/465)).
+
+[Full changelog](https://github.com/Osmosis-AI/osmosis-sdk-python/compare/v0.3.9...v0.3.10)
+
 ## 0.3.9 - 2026-10-27
 
 ### Breaking Changes
