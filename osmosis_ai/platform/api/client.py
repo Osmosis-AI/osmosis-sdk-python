@@ -18,6 +18,7 @@ from .models import (
     DatasetDownloadInfo,
     DatasetFile,
     EnvironmentSecretInfo,
+    EvalRunImportExtraction,
     EvalRunImportResult,
     EvalRunImportUploads,
     EvalRunMetrics,
@@ -700,13 +701,14 @@ class OsmosisClient:
         run: dict[str, Any],
         schema_versions: dict[str, Any],
         provenance: dict[str, Any],
-        files: Sequence[dict[str, Any]],
+        archive: dict[str, Any],
         reimport: bool = False,
         credentials: Credentials | None = None,
         git_identity: str,
     ) -> EvalRunImportResult:
         """Start or resume the server-authoritative import for a local eval.
 
+        ``archive`` describes the run's ``run.zip`` and ``files.jsonl`` uploads.
         ``reimport`` replaces the results this local run already imported
         instead of conflicting, for a run re-run with ``--retry-failed``.
         """
@@ -720,7 +722,7 @@ class OsmosisClient:
                 "run": run,
                 "schema_versions": schema_versions,
                 "provenance": provenance,
-                "files": list(files),
+                "archive": archive,
                 "reimport": reimport,
             },
             credentials=credentials,
@@ -736,7 +738,7 @@ class OsmosisClient:
         credentials: Credentials | None = None,
         git_identity: str,
     ) -> EvalRunImportUploads:
-        """Return upload instructions for up to 100 files still missing."""
+        """Return upload instructions for up to 100 slots still missing."""
         if not 1 <= len(paths) <= 100:
             raise ValueError("Eval import upload batches must contain 1 to 100 paths")
         result = platform_request(
@@ -776,6 +778,41 @@ class OsmosisClient:
             credentials=credentials,
             git_identity=git_identity,
         )
+
+    def start_eval_run_import_extraction(
+        self,
+        session_id: str,
+        *,
+        credentials: Credentials | None = None,
+        git_identity: str,
+    ) -> EvalRunImportExtraction:
+        """Start extracting the uploaded archive unless an extraction is running.
+
+        A failed or expired extraction restarts; a pending or ready one is
+        returned as is.
+        """
+        result = platform_request(
+            f"/api/cli/eval-runs/imports/{_safe_path(session_id)}/extraction",
+            method="POST",
+            data={},
+            credentials=credentials,
+            git_identity=git_identity,
+        )
+        return EvalRunImportExtraction.from_dict(result)
+
+    def get_eval_run_import_extraction(
+        self,
+        session_id: str,
+        *,
+        credentials: Credentials | None = None,
+        git_identity: str,
+    ) -> EvalRunImportExtraction:
+        result = platform_request(
+            f"/api/cli/eval-runs/imports/{_safe_path(session_id)}/extraction",
+            credentials=credentials,
+            git_identity=git_identity,
+        )
+        return EvalRunImportExtraction.from_dict(result)
 
     def finalize_eval_run_import(
         self,

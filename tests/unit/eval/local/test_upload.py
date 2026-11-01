@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import zlib
 from pathlib import Path
 from typing import Any
 
@@ -175,6 +176,7 @@ def test_build_plan_selects_only_canonical_upload_files(tmp_path: Path) -> None:
     ]
     assert all(
         file.sha256 == hashlib.sha256(file.source.read_bytes()).hexdigest()
+        and file.crc32 == zlib.crc32(file.source.read_bytes())
         for file in plan.files
     )
 
@@ -529,6 +531,7 @@ def test_artifact_files_with_unsafe_characters_fail_closed(
         "rollout_trials/a/artifacts//name.txt",
         "rollout_trials/a/artifacts/./name.txt",
         "rollout_trials/a/artifacts/../name.txt",
+        "rollout_trials/a/artifacts/undecodable-\udcff.txt",
     ],
 )
 def test_artifact_upload_paths_reject_unsafe_characters_and_segments(

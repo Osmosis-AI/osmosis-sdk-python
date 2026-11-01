@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import io
 import os
+import time
+from collections.abc import Iterator
+from contextlib import nullcontext
 from pathlib import Path
 from shlex import quote
-from typing import TYPE_CHECKING, Any
+from typing import IO, TYPE_CHECKING, Any
 
 from osmosis_ai.cli.console import console
 from osmosis_ai.cli.errors import CLIError
@@ -19,15 +23,24 @@ from osmosis_ai.eval.local.state import (
     validate_run_name,
 )
 from osmosis_ai.eval.local.upload import (
-    EvalUploadFile,
     EvalUploadPlan,
     LocalEvalUploadError,
     build_eval_upload_plan,
 )
+from osmosis_ai.eval.local.upload_archive import (
+    ARCHIVE_PATH,
+    FILE_LIST_PATH,
+    RunArchive,
+    RunFileReader,
+    build_run_archive,
+)
 from osmosis_ai.platform.api.client import OsmosisClient
-from osmosis_ai.platform.api.models import EvalRunImportResult
+from osmosis_ai.platform.api.models import EvalRunImportResult, UploadInfo
 from osmosis_ai.platform.auth.platform_client import PlatformAPIError
-from osmosis_ai.platform.cli.utils import require_git_workspace_directory_context
+from osmosis_ai.platform.cli.utils import (
+    format_size,
+    require_git_workspace_directory_context,
+)
 from osmosis_ai.platform.cli.workspace_directory_context import git_result_context
 
 if TYPE_CHECKING:
@@ -35,79 +48,197 @@ if TYPE_CHECKING:
         GitWorkspaceDirectoryContext,
     )
 
+_EXTRACTION_POLL_SECONDS = 5.0
+# The platform reports an extraction as failed 17 minutes after starting it.
+_EXTRACTION_TIMEOUT_SECONDS = 20 * 60.0
 
-def _file_map(plan: EvalUploadPlan) -> dict[str, EvalUploadFile]:
-    return {file.path: file for file in plan.files}
+
+def _expected_slots(archive: RunArchive) -> dict[str, tuple[int, str | None]]:
+    return {
+        FILE_LIST_PATH: (len(archive.file_list), archive.file_list_sha256),
+        ARCHIVE_PATH: (archive.layout.size, None),
+    }
 
 
-def _validate_result_files(
-    result: EvalRunImportResult, files: dict[str, EvalUploadFile]
+def _check_slot(path: str, size: int, sha256: str | None, archive: RunArchive) -> None:
+    expected = _expected_slots(archive).get(path)
+    if expected is None:
+        raise RuntimeError(f"Server returned unknown eval import slot {path!r}")
+    if (size, sha256) != expected:
+        raise RuntimeError(f"Server returned mismatched size or sha256 for {path!r}")
+
+
+def _validate_session(
+    result: EvalRunImportResult, plan: EvalUploadPlan, archive: RunArchive
 ) -> None:
-    returned = {file.path: file for file in result.files}
-    if set(returned) != set(files):
-        missing = sorted(set(files) - set(returned))
-        unknown = sorted(set(returned) - set(files))
-        detail = []
-        if missing:
-            detail.append(f"missing {missing[:5]}")
-        if unknown:
-            detail.append(f"unknown {unknown[:5]}")
+    if result.upload_mode != "archive":
         raise RuntimeError(
-            "Server returned a different eval import file set"
-            + (f": {'; '.join(detail)}" if detail else "")
+            f"Server returned an eval import in {result.upload_mode!r} upload "
+            "mode; expected 'archive'"
         )
-    for path, returned_file in returned.items():
-        local = files[path]
-        if returned_file.size != local.size or returned_file.sha256 != local.sha256:
-            raise RuntimeError(
-                f"Server returned mismatched size or sha256 for {path!r}"
-            )
-    uploaded = sum(file.state == "uploaded" for file in result.files)
-    if result.expected_files != len(files) or result.uploaded_files != uploaded:
+    slots = {file.path for file in result.files}
+    if slots != set(_expected_slots(archive)):
+        raise RuntimeError(
+            f"Server returned unexpected eval import slots {sorted(slots)[:5]}"
+        )
+    for slot in result.files:
+        _check_slot(slot.path, slot.size, slot.sha256, archive)
+    if result.expected_files != len(plan.files) or (
+        result.status == "uploading" and result.uploaded_files != 0
+    ):
         raise RuntimeError("Server returned inconsistent eval import file counts")
 
 
-def _validate_finalized(result: EvalRunImportResult) -> None:
+def _validate_finalized(
+    result: EvalRunImportResult, plan: EvalUploadPlan, archive: RunArchive
+) -> None:
+    _validate_session(result, plan, archive)
     if result.status != "finalized":
         raise RuntimeError(
             f"Server did not finalize the eval import (status {result.status!r})"
         )
     if not result.eval_run_id or not result.eval_run_name or not result.platform_url:
         raise RuntimeError("Finalized eval import response is missing run details")
-    if (
-        result.uploaded_files != result.expected_files
-        or len(result.files) != result.expected_files
-        or any(file.state != "uploaded" for file in result.files)
+    if result.uploaded_files != result.expected_files or any(
+        file.state != "uploaded" for file in result.files
     ):
         raise RuntimeError("Finalized eval import response has incomplete files")
 
 
-def _upload_one(
-    *,
-    client: OsmosisClient,
-    session_id: str,
-    file: EvalUploadFile,
-    upload: Any,
-    context: GitWorkspaceDirectoryContext,
-) -> None:
+def _buffered_part(chunks: Iterator[bytes]) -> nullcontext[IO[bytes]]:
+    part = io.BytesIO()
+    for chunk in chunks:
+        part.write(chunk)
+    part.seek(0)
+    return nullcontext(part)
+
+
+def _upload_file_list(
+    archive: RunArchive, upload: UploadInfo
+) -> list[dict[str, Any]] | None:
     from osmosis_ai.platform.api.upload import (
         _upload_fileobj_multipart,
         _upload_fileobj_simple,
     )
 
-    with file.open_verified() as handle:
-        if upload.method == "multipart":
-            parts = _upload_fileobj_multipart(handle, file.size, upload)
-        else:
-            _upload_fileobj_simple(handle, file.size, upload)
-            parts = None
-    client.complete_eval_run_import_upload(
+    handle = io.BytesIO(archive.file_list)
+    if upload.method == "multipart":
+        return _upload_fileobj_multipart(handle, len(archive.file_list), upload)
+    _upload_fileobj_simple(handle, len(archive.file_list), upload)
+    return None
+
+
+def _upload_archive(
+    plan: EvalUploadPlan, archive: RunArchive, upload: UploadInfo
+) -> list[dict[str, Any]]:
+    """Stream ``run.zip`` one part at a time, verifying each file as it is read."""
+    from osmosis_ai.platform.api.upload import (
+        _upload_multipart_parts,
+        make_progress_bar,
+    )
+
+    if upload.method != "multipart":
+        raise RuntimeError(f"Server returned a simple upload for {ARCHIVE_PATH}")
+    layout = archive.layout
+    console.print(
+        f"Uploading {len(plan.files):,} files as {ARCHIVE_PATH} "
+        f"({format_size(layout.size)})...",
+        style="dim",
+    )
+    progress, on_progress = make_progress_bar(
+        layout.size, description=f"Uploading {ARCHIVE_PATH}"
+    )
+    with RunFileReader(plan.files) as reader, progress:
+        parts = _upload_multipart_parts(
+            layout.size,
+            upload,
+            lambda offset, size: _buffered_part(
+                layout.iter_bytes(offset, offset + size, reader.read)
+            ),
+            on_progress,
+        )
+        reader.finish()
+    return parts
+
+
+def _upload_slots(
+    client: OsmosisClient,
+    session_id: str,
+    paths: list[str],
+    *,
+    plan: EvalUploadPlan,
+    archive: RunArchive,
+    context: GitWorkspaceDirectoryContext,
+) -> None:
+    response = client.get_eval_run_import_uploads(
         session_id,
-        path=file.path,
-        parts=parts,
+        paths=paths,
         credentials=context.credentials,
         git_identity=context.git_identity,
     )
+    instructions = {}
+    for instruction in response.files:
+        if instruction.path not in paths:
+            raise RuntimeError(
+                f"Server returned upload instructions for unknown path "
+                f"{instruction.path!r}"
+            )
+        _check_slot(instruction.path, instruction.size, instruction.sha256, archive)
+        instructions[instruction.path] = instruction
+    for path in (FILE_LIST_PATH, ARCHIVE_PATH):
+        instruction = instructions.get(path)
+        if instruction is None:
+            continue
+        parts = (
+            _upload_file_list(archive, instruction.upload)
+            if path == FILE_LIST_PATH
+            else _upload_archive(plan, archive, instruction.upload)
+        )
+        client.complete_eval_run_import_upload(
+            session_id,
+            path=path,
+            parts=parts,
+            credentials=context.credentials,
+            git_identity=context.git_identity,
+        )
+
+
+def _wait_for_extraction(
+    client: OsmosisClient,
+    session_id: str,
+    *,
+    archive: RunArchive,
+    context: GitWorkspaceDirectoryContext,
+) -> None:
+    with get_output_context().status("Extracting uploaded files on the platform..."):
+        state = client.start_eval_run_import_extraction(
+            session_id,
+            credentials=context.credentials,
+            git_identity=context.git_identity,
+        )
+        deadline = time.monotonic() + _EXTRACTION_TIMEOUT_SECONDS
+        while state.status == "pending":
+            if time.monotonic() >= deadline:
+                raise RuntimeError(
+                    "The platform did not finish extracting the uploaded files "
+                    f"within {_EXTRACTION_TIMEOUT_SECONDS / 60:.0f} minutes; "
+                    "re-run the upload to retry"
+                )
+            time.sleep(_EXTRACTION_POLL_SECONDS)
+            state = client.get_eval_run_import_extraction(
+                session_id,
+                credentials=context.credentials,
+                git_identity=context.git_identity,
+            )
+    if state.status == "failed":
+        raise RuntimeError(
+            f"The platform could not extract the uploaded files: {state.reason}"
+        )
+    if (
+        state.file_count != archive.layout.entry_count
+        or state.total_bytes != archive.total_bytes
+    ):
+        raise RuntimeError("Server extracted a different set of files than uploaded")
 
 
 def prepare_eval_upload_plan(
@@ -127,11 +258,15 @@ def upload_plan(
 ) -> EvalRunImportResult:
     """Upload a validated plan. The caller must hold the run's ``RunLock``.
 
+    The run travels as ``files.jsonl`` plus a streamed ``run.zip`` that the
+    platform extracts before finalizing. Re-running resumes the same session:
+    uploaded slots are skipped and a failed extraction restarts.
+
     ``replace`` opts into overwriting results this run already imported, which
     is what a ``--retry-failed`` attempt of an uploaded run needs.
     """
     client = client or OsmosisClient()
-    files = _file_map(plan)
+    archive = build_run_archive(plan.files)
     with get_output_context().status("Starting local evaluation upload..."):
         result = client.start_eval_run_import(
             local_run_id=plan.local_run_id,
@@ -139,44 +274,26 @@ def upload_plan(
             run=plan.run,
             schema_versions=plan.schema_versions,
             provenance=plan.provenance,
-            files=plan.file_requests(),
+            archive=archive.to_request(),
             reimport=replace,
             credentials=context.credentials,
             git_identity=context.git_identity,
         )
-    _validate_result_files(result, files)
+    _validate_session(result, plan, archive)
     if result.status != "finalized":
-        for offset in range(0, len(plan.files), 100):
-            batch = plan.files[offset : offset + 100]
-            requested = {file.path for file in batch}
-            response = client.get_eval_run_import_uploads(
+        pending = [file.path for file in result.files if file.state == "pending"]
+        if pending:
+            _upload_slots(
+                client,
                 result.session_id,
-                paths=[file.path for file in batch],
-                credentials=context.credentials,
-                git_identity=context.git_identity,
+                pending,
+                plan=plan,
+                archive=archive,
+                context=context,
             )
-            for instruction in response.files:
-                if instruction.path not in requested or instruction.path not in files:
-                    raise RuntimeError(
-                        f"Server returned upload instructions for unknown path "
-                        f"{instruction.path!r}"
-                    )
-                local = files[instruction.path]
-                if instruction.size != local.size or instruction.sha256 != local.sha256:
-                    raise RuntimeError(
-                        f"Server returned mismatched size or sha256 for "
-                        f"{instruction.path!r}"
-                    )
-                console.print(
-                    f"Uploading {console.escape(instruction.path)}...", style="dim"
-                )
-                _upload_one(
-                    client=client,
-                    session_id=result.session_id,
-                    file=local,
-                    upload=instruction.upload,
-                    context=context,
-                )
+        _wait_for_extraction(
+            client, result.session_id, archive=archive, context=context
+        )
 
     with get_output_context().status("Finalizing local evaluation upload..."):
         finalized = client.finalize_eval_run_import(
@@ -184,8 +301,7 @@ def upload_plan(
             credentials=context.credentials,
             git_identity=context.git_identity,
         )
-    _validate_result_files(finalized, files)
-    _validate_finalized(finalized)
+    _validate_finalized(finalized, plan, archive)
     return finalized
 
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import subprocess
 import tomllib
@@ -1278,9 +1279,19 @@ UPLOAD_ARGV = [
 FINALIZED_IMPORT = {
     "status": "finalized",
     "session_id": "session-1",
+    "upload_mode": "archive",
     "expected_files": 0,
     "uploaded_files": 0,
-    "files": [],
+    # The empty plan's slots: an empty file list and a trailer-only archive.
+    "files": [
+        {
+            "path": "files.jsonl",
+            "size": 0,
+            "sha256": hashlib.sha256(b"").hexdigest(),
+            "state": "uploaded",
+        },
+        {"path": "run.zip", "size": 98, "sha256": None, "state": "uploaded"},
+    ],
     "eval_run_id": "eval-1",
     "eval_run_name": "uploaded-run",
     "platform_url": "https://platform.example.test/evals/eval-1",

@@ -35,10 +35,14 @@ def _eval_import_nonnegative_int(data: dict[str, Any], key: str) -> int:
     return value
 
 
-def _eval_import_sha256(data: dict[str, Any]) -> str:
+def _eval_import_optional_sha256(data: dict[str, Any]) -> str | None:
     value = data.get("sha256")
-    if not isinstance(value, str) or _SHA256_HEX.fullmatch(value) is None:
-        raise ValueError("Eval import sha256 must be 64 lowercase hex characters")
+    if value is not None and (
+        not isinstance(value, str) or _SHA256_HEX.fullmatch(value) is None
+    ):
+        raise ValueError(
+            "Eval import sha256 must be 64 lowercase hex characters or null"
+        )
     return value
 
 
@@ -86,11 +90,11 @@ class UploadInfo:
 
 @dataclass(frozen=True)
 class EvalRunImportUploadInstruction:
-    """One local-eval file and the presigned upload instructions for it."""
+    """One import slot and the presigned upload instructions for it."""
 
     path: str
     size: int
-    sha256: str
+    sha256: str | None
     upload: UploadInfo
 
     @classmethod
@@ -101,7 +105,7 @@ class EvalRunImportUploadInstruction:
         return cls(
             path=_eval_import_string(data, "path"),
             size=_eval_import_nonnegative_int(data, "size"),
-            sha256=_eval_import_sha256(data),
+            sha256=_eval_import_optional_sha256(data),
             upload=UploadInfo.from_dict(upload),
         )
 
@@ -136,11 +140,11 @@ class EvalRunImportUploads:
 
 @dataclass(frozen=True)
 class EvalRunImportFileStatus:
-    """Server state for one file declared in an eval import."""
+    """Server state for one upload slot declared in an eval import."""
 
     path: str
     size: int
-    sha256: str
+    sha256: str | None
     state: Literal["pending", "uploaded"]
 
     @classmethod
@@ -151,17 +155,22 @@ class EvalRunImportFileStatus:
         return cls(
             path=_eval_import_string(data, "path"),
             size=_eval_import_nonnegative_int(data, "size"),
-            sha256=_eval_import_sha256(data),
+            sha256=_eval_import_optional_sha256(data),
             state=state,
         )
 
 
 @dataclass(frozen=True)
 class EvalRunImportResult:
-    """State returned while starting or finalizing a local-eval import."""
+    """State returned while starting or finalizing a local-eval import.
+
+    In archive mode, ``files`` lists the upload slots while ``expected_files``
+    and ``uploaded_files`` count the run's files.
+    """
 
     session_id: str
     status: str
+    upload_mode: Literal["files", "archive"]
     expected_files: int
     uploaded_files: int
     files: list[EvalRunImportFileStatus] = field(default_factory=list)
@@ -175,6 +184,9 @@ class EvalRunImportResult:
         status = data.get("status")
         if status not in ("uploading", "finalized"):
             raise ValueError(f"Unknown eval import status {status!r}")
+        upload_mode = data.get("upload_mode")
+        if upload_mode not in ("files", "archive"):
+            raise ValueError(f"Unknown eval import upload mode {upload_mode!r}")
         raw_files = data.get("files")
         if not isinstance(raw_files, list):
             raise ValueError("Eval import files must be a list")
@@ -195,6 +207,7 @@ class EvalRunImportResult:
         return cls(
             session_id=_eval_import_string(data, "session_id"),
             status=status,
+            upload_mode=upload_mode,
             expected_files=expected_files,
             uploaded_files=uploaded_files,
             files=files,
@@ -203,6 +216,31 @@ class EvalRunImportResult:
             eval_run_name=_eval_import_optional_string(data, "eval_run_name"),
             platform_url=_eval_import_optional_string(data, "platform_url"),
         )
+
+
+@dataclass(frozen=True)
+class EvalRunImportExtraction:
+    """Server-side extraction of an archive-mode import's uploaded run files."""
+
+    status: Literal["pending", "ready", "failed"]
+    file_count: int | None = None
+    total_bytes: int | None = None
+    reason: str | None = None
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> EvalRunImportExtraction:
+        status = data.get("status")
+        if status == "pending":
+            return cls(status="pending")
+        if status == "ready":
+            return cls(
+                status="ready",
+                file_count=_eval_import_nonnegative_int(data, "file_count"),
+                total_bytes=_eval_import_nonnegative_int(data, "total_bytes"),
+            )
+        if status == "failed":
+            return cls(status="failed", reason=_eval_import_string(data, "reason"))
+        raise ValueError(f"Unknown eval import extraction status {status!r}")
 
 
 @dataclass
