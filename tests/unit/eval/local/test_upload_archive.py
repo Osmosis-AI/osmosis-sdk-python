@@ -223,3 +223,34 @@ def test_finish_requires_every_file_to_be_verified_in_order(tmp_path: Path) -> N
             pass
         with pytest.raises(LocalEvalUploadError, match="did not verify every"):
             reader.finish()
+
+
+def test_layout_rejects_a_name_too_long_for_a_zip_header() -> None:
+    with pytest.raises(ValueError, match="name is too long"):
+        ArchiveLayout([_Entry("a" * 0x10000, 0, 0)])
+
+
+def test_iter_bytes_rejects_a_range_outside_the_archive() -> None:
+    source = _MemorySource([("index.jsonl", b"{}")])
+    layout = ArchiveLayout(source.entries)
+
+    with pytest.raises(ValueError, match="out of bounds"):
+        list(layout.iter_bytes(0, layout.size + 1, source.read))
+
+
+def test_iter_bytes_fails_when_an_entry_reads_short() -> None:
+    source = _MemorySource([("index.jsonl", b"{}\n")])
+    layout = ArchiveLayout(source.entries)
+
+    with pytest.raises(RuntimeError, match="returned 1 bytes; expected 3"):
+        list(layout.iter_bytes(0, layout.size, lambda _index, _offset, _len: b"x"))
+
+
+def test_reader_rejects_a_read_past_the_end_of_a_planned_file(
+    tmp_path: Path,
+) -> None:
+    files = _planned(tmp_path, [("index.jsonl", b"{}\n")])
+
+    with RunFileReader(files) as reader:
+        with pytest.raises(LocalEvalUploadError, match="changed after"):
+            reader.read(0, 2, 2)
