@@ -9,16 +9,19 @@ from osmosis_ai.platform.api.client import OsmosisClient
 IMPORT_RESPONSE = {
     "session_id": "session-1",
     "status": "uploading",
-    "expected_files": 1,
+    "upload_mode": "archive",
+    "expected_files": 2,
     "uploaded_files": 0,
     "files": [
-        {
-            "path": "index.jsonl",
-            "size": 10,
-            "sha256": "a" * 64,
-            "state": "pending",
-        }
+        {"path": "files.jsonl", "size": 10, "sha256": "a" * 64, "state": "pending"},
+        {"path": "run.zip", "size": 4096, "sha256": None, "state": "pending"},
     ],
+}
+ARCHIVE = {
+    "size": 4096,
+    "file_count": 2,
+    "total_bytes": 3000,
+    "file_list": {"size": 10, "sha256": "a" * 64},
 }
 
 
@@ -38,7 +41,7 @@ def test_start_uses_the_run_metadata_wrapper(mock_request) -> None:
         },
         schema_versions={"state_schema": 1},
         provenance={"sdk_version": "0.3.0"},
-        files=[{"path": "index.jsonl", "size": 10, "sha256": "a" * 64}],
+        archive=ARCHIVE,
         git_identity="acme/repo",
     )
 
@@ -58,7 +61,7 @@ def test_start_uses_the_run_metadata_wrapper(mock_request) -> None:
             },
             "schema_versions": {"state_schema": 1},
             "provenance": {"sdk_version": "0.3.0"},
-            "files": [{"path": "index.jsonl", "size": 10, "sha256": "a" * 64}],
+            "archive": ARCHIVE,
             "reimport": False,
         },
         credentials=None,
@@ -75,7 +78,7 @@ def test_start_forwards_the_reimport_opt_in(mock_request) -> None:
         run={},
         schema_versions={},
         provenance={},
-        files=[{"path": "index.jsonl", "size": 10, "sha256": "a" * 64}],
+        archive=ARCHIVE,
         reimport=True,
         git_identity="acme/repo",
     )
@@ -109,6 +112,38 @@ def test_complete_multipart_normalizes_upload_helper_parts(mock_request) -> None
         credentials=None,
         git_identity="acme/repo",
     )
+
+
+@patch("osmosis_ai.platform.api.client.platform_request")
+def test_extraction_start_posts_an_empty_body(mock_request) -> None:
+    mock_request.return_value = {"status": "pending"}
+    state = OsmosisClient().start_eval_run_import_extraction(
+        "session-1", git_identity="acme/repo"
+    )
+
+    mock_request.assert_called_once_with(
+        "/api/cli/eval-runs/imports/session-1/extraction",
+        method="POST",
+        data={},
+        credentials=None,
+        git_identity="acme/repo",
+    )
+    assert state.status == "pending"
+
+
+@patch("osmosis_ai.platform.api.client.platform_request")
+def test_extraction_poll_reads_the_failure_reason(mock_request) -> None:
+    mock_request.return_value = {"status": "failed", "reason": "bad entry"}
+    state = OsmosisClient().get_eval_run_import_extraction(
+        "session-1", git_identity="acme/repo"
+    )
+
+    mock_request.assert_called_once_with(
+        "/api/cli/eval-runs/imports/session-1/extraction",
+        credentials=None,
+        git_identity="acme/repo",
+    )
+    assert (state.status, state.reason) == ("failed", "bad entry")
 
 
 RETRY_RESPONSE = {

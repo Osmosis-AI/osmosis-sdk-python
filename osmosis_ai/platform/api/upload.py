@@ -341,6 +341,25 @@ def _upload_fileobj_multipart(
     progress_callback: ProgressCallback | None = None,
 ) -> list[dict[str, Any]]:
     """Upload an already-open file without reopening its filesystem path."""
+    return _upload_multipart_parts(
+        file_size,
+        upload_info,
+        lambda offset, size: SliceFileObj(fileobj, seek_from=offset, read_limit=size),
+        progress_callback,
+    )
+
+
+def _upload_multipart_parts(
+    file_size: int,
+    upload_info: UploadInfo,
+    open_part: Callable[[int, int], AbstractContextManager[Any]],
+    progress_callback: ProgressCallback | None = None,
+) -> list[dict[str, Any]]:
+    """Upload *file_size* bytes in the server's parts, one part at a time.
+
+    ``open_part(offset, size)`` returns a context manager yielding a seekable
+    body of exactly that part, opened only when the part is uploaded.
+    """
     info = upload_info
     if not info.presigned_urls or not info.total_parts:
         raise RuntimeError("UploadInfo missing multipart fields")
@@ -427,10 +446,10 @@ def _upload_fileobj_multipart(
                     f"but the local part is {size} bytes"
                 )
 
-            with SliceFileObj(fileobj, seek_from=offset, read_limit=size) as slice_obj:
+            with open_part(offset, size) as part:
                 resp = _http_put_with_backoff(
                     url,
-                    data=slice_obj,
+                    data=part,
                     headers={"Content-Length": str(size)},
                     timeout=PART_UPLOAD_TIMEOUT,
                     client=client,

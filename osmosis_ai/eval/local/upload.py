@@ -13,6 +13,7 @@ import math
 import os
 import re
 import stat
+import zlib
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -51,6 +52,7 @@ class EvalUploadFile:
     source: Path
     size: int
     sha256: str
+    crc32: int
     device: int
     inode: int
     modified_ns: int
@@ -87,9 +89,6 @@ class EvalUploadPlan:
     schema_versions: dict[str, Any]
     provenance: dict[str, Any]
     files: tuple[EvalUploadFile, ...]
-
-    def file_requests(self) -> list[dict[str, Any]]:
-        return [file.to_request() for file in self.files]
 
 
 def _is_int(value: Any) -> TypeGuard[int]:
@@ -186,10 +185,12 @@ def _json_object(path: Path, *, where: str) -> dict[str, Any]:
 
 def _hash_file(path: Path, *, relative: str) -> EvalUploadFile:
     digest = hashlib.sha256()
+    crc32 = 0
     try:
         with _open_regular_file(path, where=relative) as (handle, opened):
             while chunk := handle.read(_HASH_CHUNK_SIZE):
                 digest.update(chunk)
+                crc32 = zlib.crc32(chunk, crc32)
     except OSError as exc:
         raise LocalEvalUploadError(f"{relative} is unreadable: {exc}") from exc
     return EvalUploadFile(
@@ -197,6 +198,7 @@ def _hash_file(path: Path, *, relative: str) -> EvalUploadFile:
         source=path,
         size=opened.st_size,
         sha256=digest.hexdigest(),
+        crc32=crc32,
         device=opened.st_dev,
         inode=opened.st_ino,
         modified_ns=opened.st_mtime_ns,
@@ -211,6 +213,10 @@ def _validate_upload_path(path: str, *, where: str) -> None:
         )
     if "\\" in path or any(ord(char) < 32 or ord(char) == 127 for char in path):
         raise LocalEvalUploadError(f"{where} contains a backslash or control character")
+    try:
+        path.encode("utf-8")
+    except UnicodeEncodeError:
+        raise LocalEvalUploadError(f"{where} is not valid UTF-8") from None
     parts = path.split("/")
     if (
         not path

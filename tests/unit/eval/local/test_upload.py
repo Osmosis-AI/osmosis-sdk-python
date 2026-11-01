@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import zlib
 from pathlib import Path
 from typing import Any
 
@@ -175,6 +176,7 @@ def test_build_plan_selects_only_canonical_upload_files(tmp_path: Path) -> None:
     ]
     assert all(
         file.sha256 == hashlib.sha256(file.source.read_bytes()).hexdigest()
+        and file.crc32 == zlib.crc32(file.source.read_bytes())
         for file in plan.files
     )
 
@@ -209,7 +211,7 @@ def test_dataset_rows_is_in_the_import_file_list_when_the_run_has_one(
         "path": "dataset_rows.jsonl",
         "size": len(body),
         "sha256": hashlib.sha256(body).hexdigest(),
-    } in plan.file_requests()
+    } in [file.to_request() for file in plan.files]
 
 
 def test_run_without_dataset_rows_uploads_without_it(tmp_path: Path) -> None:
@@ -219,9 +221,6 @@ def test_run_without_dataset_rows_uploads_without_it(tmp_path: Path) -> None:
     plan = build_eval_upload_plan(run_dir)
 
     assert "dataset_rows.jsonl" not in [file.path for file in plan.files]
-    assert "dataset_rows.jsonl" not in [
-        request["path"] for request in plan.file_requests()
-    ]
 
 
 def test_symlinked_dataset_rows_is_not_uploaded(tmp_path: Path) -> None:
@@ -529,6 +528,7 @@ def test_artifact_files_with_unsafe_characters_fail_closed(
         "rollout_trials/a/artifacts//name.txt",
         "rollout_trials/a/artifacts/./name.txt",
         "rollout_trials/a/artifacts/../name.txt",
+        "rollout_trials/a/artifacts/undecodable-\udcff.txt",
     ],
 )
 def test_artifact_upload_paths_reject_unsafe_characters_and_segments(
