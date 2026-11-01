@@ -282,6 +282,7 @@ class FakeStorage:
     def __init__(self, events: list[tuple[str, str]]) -> None:
         self.events = events
         self.bodies: dict[str, bytes] = {}
+        self.streams: dict[str, Any] = {}
         self.fail_url: str | None = None
 
     def put(self, url: str, *, data: Any, **_kwargs: Any) -> SimpleNamespace:
@@ -289,6 +290,7 @@ class FakeStorage:
             raise RuntimeError("Upload failed: HTTP 403")
         self.events.append(("put", url))
         self.bodies[url] = data.read()
+        self.streams[url] = data
         return SimpleNamespace(headers={"etag": f'"etag-{len(self.bodies)}"'})
 
     def archive_parts(self) -> list[bytes]:
@@ -378,6 +380,9 @@ def test_upload_streams_the_archive_one_part_at_a_time(
     # file is read, and no part exceeds the server's part size.
     assert len(parts) == -(-len(archive_bytes) // 4096) > 2
     assert max(len(part) for part in parts) == 4096
+    assert all(
+        stream.closed for url, stream in storage.streams.items() if "/run.zip/" in url
+    )
     first_put = events.index(("put", "https://uploads.example/run.zip/1"))
     last_open = events.index(("open", "rollout_trials/r/artifacts/c.bin"))
     assert first_put < last_open

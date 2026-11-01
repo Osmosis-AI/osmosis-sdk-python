@@ -6,10 +6,10 @@ import io
 import os
 import time
 from collections.abc import Iterator
-from contextlib import nullcontext
+from contextlib import closing
 from pathlib import Path
 from shlex import quote
-from typing import IO, TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any
 
 from osmosis_ai.cli.console import console
 from osmosis_ai.cli.errors import CLIError
@@ -105,12 +105,13 @@ def _validate_finalized(
         raise RuntimeError("Finalized eval import response has incomplete files")
 
 
-def _buffered_part(chunks: Iterator[bytes]) -> nullcontext[IO[bytes]]:
+def _buffered_part(chunks: Iterator[bytes]) -> closing[io.BytesIO]:
+    # Closing frees the buffer after its PUT, before the next part is built.
     part = io.BytesIO()
     for chunk in chunks:
         part.write(chunk)
     part.seek(0)
-    return nullcontext(part)
+    return closing(part)
 
 
 def _upload_file_list(
