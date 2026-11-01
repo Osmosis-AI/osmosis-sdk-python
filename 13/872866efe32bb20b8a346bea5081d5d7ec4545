@@ -1,0 +1,36 @@
+osmosis_ai/rollout/types/sample.py
+  s_843a3455670d9b::t_de6d9009b056c0 23,25-27,29-30,34,36
+  s_843a3455670d9b::t_c67fc4e9c7006b 4,18-19,22,24,32-33,35,39,41-44,46-47,50-68,71,76,84-88,90-92
+  s_843a3455670d9b::t_f94e7063420f58 70,72-75,77-83
+  s_843a3455670d9b::t_963a829f3614c6 203-213
+  s_843a3455670d9b::t_2ce95eec098eed 139-140,144-149,151,153-154,156-157,160-166
+osmosis_ai/rollout/server/app.py
+  s_843a3455670d9b::t_585566eb0be2a0 26
+  s_843a3455670d9b::t_e7b68dec9e7ed6 180-189,200-203,205-206,209-241
+  s_843a3455670d9b::t_5e1064bb088892 190-199
+tests/unit/rollout/test_sample_validation.py
+  s_843a3455670d9b::t_4e6173ec584f0e 75-76,79,82-83,87,90,93,96-98,106,117,125,130,144-177,180-183,185-210,212-215
+  s_843a3455670d9b::t_a16aa15f823386 184
+  s_843a3455670d9b::t_5b460bc79402f8 178-179
+  s_843a3455670d9b::t_ec02a70ed7758b 68-74,77-78,80-81,84-86,88-89,91-92,94-95
+  s_843a3455670d9b::t_1c7dfd7a7ba24c 10
+tests/unit/rollout/test_server_app_callbacks.py
+  s_843a3455670d9b::t_4ce7933e551176 212-304
+  s_843a3455670d9b::t_4cebc6b3b03950 305-329
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "13872866efe32bb20b8a346bea5081d5d7ec4545",
+  "prompts": {},
+  "sessions": {
+    "s_843a3455670d9b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e6d65603-3dd6-4d7e-9c6d-44d9d261cbd7",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}

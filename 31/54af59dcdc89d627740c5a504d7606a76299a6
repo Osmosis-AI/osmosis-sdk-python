@@ -1,0 +1,25 @@
+tests/unit/eval/local/test_runner_e2e.py
+  s_346ba7efe627df::t_93c108ddba7b50 20-24
+  s_346ba7efe627df::t_cefcdcdce6bff2 562-581,583-587,589
+tests/unit/rollout/test_http_driver.py
+  s_346ba7efe627df::t_3c95b2abbf1a74 211
+osmosis_ai/eval/local/runner.py
+  s_346ba7efe627df::t_21319dbbd4d942 78-82
+  s_346ba7efe627df::t_f8d2da736d9614 1134-1139
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "3154af59dcdc89d627740c5a504d7606a76299a6",
+  "prompts": {},
+  "sessions": {
+    "s_346ba7efe627df": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "cd2d5c07-e354-458c-afc9-92a94fddc427",
+        "model": "claude-fable-5"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}

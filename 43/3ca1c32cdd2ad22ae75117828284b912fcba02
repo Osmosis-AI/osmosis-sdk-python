@@ -1,0 +1,40 @@
+osmosis_ai/cli/commands/rollout.py
+  73b81951963df9ac 308,440
+osmosis_ai/rollout_v2/server/api_key.py
+  73b81951963df9ac 1-51
+codecov.yml
+  c7e85918d6c0e274 19-20
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.5",
+  "base_commit_sha": "433ca1c32cdd2ad22ae75117828284b912fcba02",
+  "prompts": {
+    "73b81951963df9ac": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "762fa397-96c3-4712-8836-37d8ce0615fa",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "JoyboyBrian",
+      "messages": [],
+      "total_additions": 53,
+      "total_deletions": 2,
+      "accepted_lines": 53,
+      "overriden_lines": 0
+    },
+    "c7e85918d6c0e274": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "294a2ac6-4a29-42b4-ba64-295d0807e810",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "JoyboyBrian",
+      "messages": [],
+      "total_additions": 2,
+      "total_deletions": 10,
+      "accepted_lines": 2,
+      "overriden_lines": 0
+    }
+  }
+}

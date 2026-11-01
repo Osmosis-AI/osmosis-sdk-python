@@ -1,0 +1,24 @@
+.github/scripts/verify-wheel-install.py
+  s_6af85c58f85f36::t_921f400c3d8d48 72-73
+  s_6af85c58f85f36::t_0bbd544d7ceb50 368
+  s_6af85c58f85f36::t_82e08c149c378e 346
+tests/unit/cli/test_console.py
+  s_6af85c58f85f36::t_557ef1c3cf10ce 143-146
+  s_6af85c58f85f36::t_c1e47e8ce54180 5
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "63f069e45e5fc16c45f1e0b5eabe7400f2f61d1a",
+  "prompts": {},
+  "sessions": {
+    "s_6af85c58f85f36": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "907f3386-dc5e-4eca-8d2d-a0547ca6409a",
+        "model": "grok-4.6"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}

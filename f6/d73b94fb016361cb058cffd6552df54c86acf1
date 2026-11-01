@@ -1,0 +1,29 @@
+tests/unit/rollout/test_local_backend.py
+  s_76eaedeaa9e4c9::t_696bf5f7a69640 572-574
+  s_76eaedeaa9e4c9::t_20eddb097dbc35 527-571,575-594,596-667
+  s_76eaedeaa9e4c9::t_779f7a35d2bf66 595
+osmosis_ai/rollout/backend/local/backend.py
+  s_76eaedeaa9e4c9::t_e6c39eade20dbf 187-190,192
+  s_76eaedeaa9e4c9::t_408cffad63bc69 38-52
+  s_76eaedeaa9e4c9::t_915c6bff171eb6 1
+  s_76eaedeaa9e4c9::t_2d4736f7dc6316 137-140
+  s_76eaedeaa9e4c9::t_5eaa8163085133 144-156,162-164
+  s_76eaedeaa9e4c9::t_786612aaed04a0 133-136,141,143
+  s_76eaedeaa9e4c9::t_1034cdf1691345 193-195,205-207
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "f6d73b94fb016361cb058cffd6552df54c86acf1",
+  "prompts": {},
+  "sessions": {
+    "s_76eaedeaa9e4c9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6132497e-a813-46fc-bc17-c955b1601538",
+        "model": "claude-opus-5"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}

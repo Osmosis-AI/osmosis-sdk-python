@@ -1,0 +1,21 @@
+docs/rollout-sdk.md
+  s_00c3865caf2bbb::t_dee5f754ff5ff0 29
+docs/architecture.md
+  s_00c3865caf2bbb::t_dee5f754ff5ff0 25,65,70
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "1860e3c76e050d26c00d75a7b2fb6333fb4dc52a",
+  "prompts": {},
+  "sessions": {
+    "s_00c3865caf2bbb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "00de36f5-6bb1-45b7-828d-f57951616464",
+        "model": "claude-fable-5"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}

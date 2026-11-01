@@ -1,0 +1,19 @@
+osmosis_ai/rollout/server/app.py
+  s_00c3865caf2bbb::t_893db43da8539b 69,106,113,166-167
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "81900ab4e4d3b02a6525744fb6c71f9f84cff50a",
+  "prompts": {},
+  "sessions": {
+    "s_00c3865caf2bbb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "00de36f5-6bb1-45b7-828d-f57951616464",
+        "model": "claude-fable-5"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}

@@ -1,0 +1,89 @@
+osmosis_ai/cli/commands/template.py
+  s_f7676f8c9e2a95::t_3e8303fed7aa93 13-14
+  s_f7676f8c9e2a95::t_31dc9d2424f59d 29
+  s_f7676f8c9e2a95::t_1d58bdf8af1526 52
+osmosis_ai/cli/commands/secret.py
+  s_f7676f8c9e2a95::t_9a5d4dbf76d65f 70
+  s_f7676f8c9e2a95::t_b447a1f4538d8c 49
+  s_f7676f8c9e2a95::t_5a270cd2932ddf 42-43
+  s_f7676f8c9e2a95::t_e79820ed7fcff5 88
+  s_f7676f8c9e2a95::t_06f35ef414d2bd 25-26
+osmosis_ai/platform/cli/dataset.py
+  s_f7676f8c9e2a95::t_ba8c642fba262d 104
+tests/unit/cli/test_options.py
+  s_f7676f8c9e2a95::t_504384dbc4ceab 1-28
+tests/unit/cli/test_lazy_loading.py
+  s_f7676f8c9e2a95::t_619780472c3aa9 197,204-233
+osmosis_ai/platform/cli/eval.py
+  s_f7676f8c9e2a95::t_d613d6d0670708 737,739,741-748,750,752
+osmosis_ai/platform/cli/dev_server.py
+  s_f7676f8c9e2a95::t_dfcda91f276ead 163
+  s_f7676f8c9e2a95::t_5ed41c8d58e6a4 6
+osmosis_ai/cli/commands/benchmark.py
+  ai_agent 9-13
+  s_f7676f8c9e2a95::t_2ece2b41822f47 15,30-32,42-44,71,80-82,92,102-104,115,150
+osmosis_ai/cli/options.py
+  s_f7676f8c9e2a95::t_6f0dbc96ff3868 1-38
+osmosis_ai/cli/commands/dataset.py
+  ai_agent 7-11
+  s_f7676f8c9e2a95::t_cd2b358d5ebc99 13,30,51,60-62,72,82-84,95,105
+osmosis_ai/platform/cli/train.py
+  s_f7676f8c9e2a95::t_69e79e4999d76d 491,493,495-502,504,506
+osmosis_ai/platform/cli/stop_run.py
+  s_f7676f8c9e2a95::t_c0e36552760a42 1-45
+osmosis_ai/cli/commands/dev/server.py
+  s_f7676f8c9e2a95::t_421069b6e4fb0c 5-7,23,33,57,66-68
+  s_f7676f8c9e2a95::t_99f7aaf99b3ff5 61
+tests/unit/cli/test_command_groups.py
+  s_f7676f8c9e2a95::t_54a54436ded7ae 25-26
+docs/cli.md
+  s_f7676f8c9e2a95::t_9fa83843e91416 77
+  s_f7676f8c9e2a95::t_104b80bc862956 10
+tests/unit/platform/cli/test_benchmark_runs.py
+  s_f7676f8c9e2a95::t_286171c3cdebbe 407
+  s_f7676f8c9e2a95::t_f2f5748c2d7823 353
+osmosis_ai/cli/commands/train.py
+  ai_agent 9-13
+  s_f7676f8c9e2a95::t_9ed80aa2668fc9 15,22-24,44,54-56,83,94
+osmosis_ai/cli/commands/rollout.py
+  s_f7676f8c9e2a95::t_1e0009a8561c12 5,9-10,33,47-48,53
+osmosis_ai/cli/commands/quickstart.py
+  s_f7676f8c9e2a95::t_68be0c3a9e68cd 13
+  s_f7676f8c9e2a95::t_cfa71392989da1 28
+osmosis_ai/cli/commands/workspace.py
+  s_f7676f8c9e2a95::t_9aa2a9beef4910 9
+  s_f7676f8c9e2a95::t_97ec6fc7474dc7 26
+osmosis_ai/cli/commands/model.py
+  s_f7676f8c9e2a95::t_2b1d48c0663e4d 34
+  s_f7676f8c9e2a95::t_0739ea24db884b 27-28
+  s_f7676f8c9e2a95::t_b76e1524781938 46,58,70
+  s_f7676f8c9e2a95::t_74a4c91c214846 16-17
+osmosis_ai/platform/cli/__init__.py
+  s_f7676f8c9e2a95::t_979c72ce6d5b05 1
+osmosis_ai/cli/commands/eval.py
+  ai_agent 9-13
+  s_f7676f8c9e2a95::t_1f30cc16060f63 202
+  s_f7676f8c9e2a95::t_69a85f4c071349 114-116
+  s_f7676f8c9e2a95::t_2109fa460201ad 126-128
+  s_f7676f8c9e2a95::t_f2d485d74a9e90 144
+  s_f7676f8c9e2a95::t_9cda3dbcb6b39e 184
+  s_f7676f8c9e2a95::t_70106a9f1fe8c8 105
+osmosis_ai/platform/cli/benchmark.py
+  s_f7676f8c9e2a95::t_ea148ca5dd95e6 1048-1049,1059-1062,1064-1067,1071
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "12a61af22467aaf7623dfed8d357717c5eb2520b",
+  "prompts": {},
+  "sessions": {
+    "s_f7676f8c9e2a95": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "4a3d781a-b43d-46fe-8360-ad27c8585a43",
+        "model": "grok-4.6"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}

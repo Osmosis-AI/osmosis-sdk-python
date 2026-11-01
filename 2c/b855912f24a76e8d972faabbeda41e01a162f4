@@ -1,0 +1,38 @@
+osmosis_ai/cli/main.py
+  55fa0437680d236b 46
+osmosis_ai/cli/commands/workspace.py
+  ae7046f8437dc0bc 92-93,96-97,108,112-113
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.19",
+  "base_commit_sha": "2cb855912f24a76e8d972faabbeda41e01a162f4",
+  "prompts": {
+    "55fa0437680d236b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "452e6b4a-db49-41c1-95fd-2dd466976739",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>",
+      "messages": [],
+      "total_additions": 1,
+      "total_deletions": 0,
+      "accepted_lines": 1,
+      "overriden_lines": 0
+    },
+    "ae7046f8437dc0bc": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "b9b8972b-caa2-46cd-8bee-2051265289f1",
+        "model": "gpt-5.4-xhigh"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>",
+      "messages": [],
+      "total_additions": 7,
+      "total_deletions": 8,
+      "accepted_lines": 7,
+      "overriden_lines": 0
+    }
+  }
+}

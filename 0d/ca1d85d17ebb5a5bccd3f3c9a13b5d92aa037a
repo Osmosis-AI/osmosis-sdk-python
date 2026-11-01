@@ -1,0 +1,23 @@
+osmosis_ai/rollout/http_driver.py
+  s_00c3865caf2bbb::t_0698af1d774945 71-74
+docs/rollout-sdk.md
+  s_00c3865caf2bbb::t_775e8747851605 210
+tests/unit/rollout/test_http_driver.py
+  s_00c3865caf2bbb::t_b7f7340eeaa6ff 320-336
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "0dca1d85d17ebb5a5bccd3f3c9a13b5d92aa037a",
+  "prompts": {},
+  "sessions": {
+    "s_00c3865caf2bbb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "00de36f5-6bb1-45b7-828d-f57951616464",
+        "model": "claude-fable-5"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}

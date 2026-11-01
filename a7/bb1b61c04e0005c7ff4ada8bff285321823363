@@ -1,0 +1,33 @@
+osmosis_ai/cli/output/error.py
+  s_7f5482fc4bb307::t_90eeb9479b1e3d 206-211
+osmosis_ai/cli/commands/dev/server.py
+  s_7f5482fc4bb307::t_36e7c55edee8a2 59,63
+  s_7f5482fc4bb307::t_f6dc536d0726a5 3-4
+osmosis_ai/cli/upgrade.py
+  s_7f5482fc4bb307::t_788d4b6cf9834a 69-77
+  s_7f5482fc4bb307::t_6f0136b6771e18 203
+  s_7f5482fc4bb307::t_6c6e2adcf0149f 214
+  s_7f5482fc4bb307::t_be064a2cc93918 228
+  s_7f5482fc4bb307::t_c8c9ad4e1c0f24 190
+tests/unit/cli/output/test_error.py
+  s_7f5482fc4bb307::t_faf99b09bc5b02 53-66
+tests/unit/cli/test_upgrade_json.py
+  s_7f5482fc4bb307::t_13208545668dd3 124-148
+  s_7f5482fc4bb307::t_c43bcaa5de13e7 88-90
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "a7bb1b61c04e0005c7ff4ada8bff285321823363",
+  "prompts": {},
+  "sessions": {
+    "s_7f5482fc4bb307": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "eacc7248-cc31-4c80-b593-befa518e63bf",
+        "model": "grok-4.6"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}

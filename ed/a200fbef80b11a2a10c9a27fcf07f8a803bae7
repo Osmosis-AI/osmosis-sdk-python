@@ -1,0 +1,19 @@
+osmosis_ai/rollout/trajectory/save.py
+  s_62a7180e61afb8::t_8a52457bcd5807 60,62,66-68,76-137
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "eda200fbef80b11a2a10c9a27fcf07f8a803bae7",
+  "prompts": {},
+  "sessions": {
+    "s_62a7180e61afb8": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a04eac-3369-78a1-88bd-2025284d04d4",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}

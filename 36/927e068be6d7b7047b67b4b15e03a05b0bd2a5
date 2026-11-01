@@ -1,0 +1,29 @@
+tests/unit/rollout/test_server_admission.py
+  s_b8b8cd2bb0577b::t_13d2e185578a93 302-318,321-324,331,333,337,339-351,353-357,360-362
+tests/unit/rollout/controller/test_proxy_client.py
+  s_b8b8cd2bb0577b::t_cc64bde86c0da3 191-220
+tests/unit/rollout/test_shared_wire_compatibility.py
+  s_b8b8cd2bb0577b::t_1ca14471cbf7b3 76,82-86
+osmosis_ai/rollout/server/app.py
+  s_b8b8cd2bb0577b::t_b595d67db08b87 105-116
+tests/unit/rollout/integrations/test_eval_proxy_contract.py
+  s_b8b8cd2bb0577b::t_de178c8cd35cd9 95-96
+osmosis_ai/rollout/controller/proxy_client.py
+  s_b8b8cd2bb0577b::t_c1857f59691861 275-280
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "36927e068be6d7b7047b67b4b15e03a05b0bd2a5",
+  "prompts": {},
+  "sessions": {
+    "s_b8b8cd2bb0577b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "14ec33d4-08f7-44b5-85cd-b6b109b2c545",
+        "model": "claude-fable-5"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}

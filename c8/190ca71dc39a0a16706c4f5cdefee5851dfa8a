@@ -1,0 +1,27 @@
+tests/unit/cli/test_deploy_commands.py
+  310156b5477e4baa 84-92,98-131
+osmosis_ai/platform/constants.py
+  310156b5477e4baa 3-4,15-20
+osmosis_ai/cli/commands/deploy.py
+  310156b5477e4baa 61-100,201-214
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.2",
+  "base_commit_sha": "c8190ca71dc39a0a16706c4f5cdefee5851dfa8a",
+  "prompts": {
+    "310156b5477e4baa": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "ed08b1a4-695d-4d2e-b659-00510f8290a8",
+        "model": "claude-opus-4-7-thinking-xhigh"
+      },
+      "human_author": "JoyboyBrian",
+      "messages": [],
+      "total_additions": 107,
+      "total_deletions": 3,
+      "accepted_lines": 105,
+      "overriden_lines": 0
+    }
+  }
+}

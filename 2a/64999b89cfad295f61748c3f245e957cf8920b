@@ -1,0 +1,27 @@
+osmosis_ai/rollout/integrations/agents/openai_agents.py
+  baf60cceeab36cdd 3-8,30,94-98,100,145-150
+tests/unit/rollout/integrations/test_openai_agents.py
+  baf60cceeab36cdd 5-11,15-16,20-23,36-162,172,177,179-182,216,227-228,230-231,241,245-247,254-257,259,272,274-278,280-282,285,287,298-300,314-317,336-339,350,355,369,371-373,375-377,382-539
+pyproject.toml
+  baf60cceeab36cdd 59
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.2",
+  "base_commit_sha": "2a64999b89cfad295f61748c3f245e957cf8920b",
+  "prompts": {
+    "baf60cceeab36cdd": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "addaa35a-444b-480b-afcd-67d780cb0af5",
+        "model": "gpt-5.4-xhigh-fast"
+      },
+      "human_author": "JoyboyBrian",
+      "messages": [],
+      "total_additions": 382,
+      "total_deletions": 931,
+      "accepted_lines": 373,
+      "overriden_lines": 1
+    }
+  }
+}

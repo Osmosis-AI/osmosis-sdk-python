@@ -1,0 +1,21 @@
+osmosis_ai/platform/cli/scaffold.py
+  s_0d0a0e597c2fe2::t_c0a164b9177a03 34
+tests/unit/platform/cli/test_workspace_directory_setup.py
+  s_0d0a0e597c2fe2::t_7e953cdabad8e6 60
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.10",
+  "base_commit_sha": "cd9c3913628833937bde50fb59d8644cef0dea74",
+  "prompts": {},
+  "sessions": {
+    "s_0d0a0e597c2fe2": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "8b57d420-a63f-4fb5-bece-a7584f837cf4",
+        "model": "gpt-5.5"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}

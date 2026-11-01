@@ -1,0 +1,59 @@
+osmosis_ai/cli/commands/project.py
+  s_486c47884a47ff::t_81016cbff77d1a 38,53-65
+tests/unit/cli/test_project_doctor.py
+  s_486c47884a47ff::t_c9d741f99727bb 26,41,43,83,98-129
+osmosis_ai/cli/commands/template.py
+  s_486c47884a47ff::t_9545755abb95ba 14
+  s_486c47884a47ff::t_89fad216ca1060 21,42
+osmosis_ai/templates/catalog.py
+  s_486c47884a47ff::t_df9e8b36a24ff8 1-308
+osmosis_ai/templates/__init__.py
+  s_486c47884a47ff::t_40e9e635dc4479 9,16
+  s_486c47884a47ff::t_39194eaddffde5 1
+osmosis_ai/templates/cli.py
+  s_486c47884a47ff::t_388d65e02dffb7 5,25,27,56,84-89,115-120,138,145-161,163,165-169,171-191
+  s_486c47884a47ff::t_9b21b5043be71c 45,63,197
+  s_486c47884a47ff::t_8be519ed91a53d 29,144
+  s_486c47884a47ff::t_0ba30178c92624 3-4,170
+osmosis_ai/platform/cli/project.py
+  s_486c47884a47ff::t_d28501f41df261 81,84,88,93,96,100-106,113,117-133,468
+  s_486c47884a47ff::t_cf903520949c5b 138,140,142
+osmosis_ai/templates/registry.py
+  s_486c47884a47ff::t_8a732f910302c9 1,9-10,20-22,26,30-32,35-37,40,42-45,80
+  s_486c47884a47ff::t_f21f529e865fa7 7-8,27,33,38-39,41,48-66,68-75,79,81
+  s_486c47884a47ff::t_0b79f27e822872 89
+tests/unit/platform/cli/test_project_setup.py
+  s_486c47884a47ff::t_cae4ee4f16d6eb 8-9,25,27,49,51,74
+  s_486c47884a47ff::t_21378742bef0b1 1,10-15,26,35,40,50,72-73,94,118-151
+osmosis_ai/platform/cli/scaffold.py
+  s_486c47884a47ff::t_2c133e34543374 1,13-19,35-36,52-53,58,62-64,66,68-81,85,87-89,91-92,95,98-135,141-142
+  s_486c47884a47ff::t_bca2f3f263e384 37-43,48-51,54-57,59-61,65,67,93,140
+  s_486c47884a47ff::t_b0830ba98ad661 44-47
+tests/unit/cli/test_template_cmd.py
+  s_486c47884a47ff::t_966b9db6f7b47c 8-9,13-40,65,73,78-80,86,89,102,107,115,117-125,131,136,140,146,153,158,163,171
+osmosis_ai/templates/source.py
+  s_486c47884a47ff::t_f6f0ec31dce692 3-6,115
+  s_486c47884a47ff::t_145135bdc0f25b 1-2,7-45,51-97,100-114,116-124
+  s_486c47884a47ff::t_13cfd9a8ccc255 46-50,98-99
+tests/unit/templates/test_cli.py
+  s_486c47884a47ff::t_7230f98e9ffac7 15-43,57,62,67,82,89,91,96-99,108,110-113,116-118,120-121,124,128-130,134,143,146,152-154,158,164,171-173,177,182,186,189-212,223,229,232-234
+tests/unit/templates/test_registry.py
+  s_486c47884a47ff::t_31e7508f4051ae 1,17,45,48-49,74
+  s_486c47884a47ff::t_8291d74ddf2c97 16,18-44,47,53,62-64,66,69,71,75-77,80-84
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "fbe67c7c84ab9758fb2e1bc14d12ab4a5404bcc7",
+  "prompts": {},
+  "sessions": {
+    "s_486c47884a47ff": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "7835f124-f508-4346-b8ae-4379e1140f96",
+        "model": "gpt-5.5-extra-high"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}

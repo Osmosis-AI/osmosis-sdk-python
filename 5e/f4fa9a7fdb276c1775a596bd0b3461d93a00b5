@@ -1,0 +1,88 @@
+tests/unit/cli/test_workspace_json.py
+  s_f7676f8c9e2a95::t_99804aeaceea06 83-87
+osmosis_ai/platform/cli/dataset.py
+  s_f7676f8c9e2a95::t_f61d7a3daec2e2 349
+  s_f7676f8c9e2a95::t_d29442ec50d4b7 318
+osmosis_ai/cli/commands/auth.py
+  s_f7676f8c9e2a95::t_44b26453755b42 7,22,24,26,34,36,38,42,44,46
+osmosis_ai/cli/commands/eval.py
+  s_f7676f8c9e2a95::t_2c0d6b8996c3da 10
+  s_f7676f8c9e2a95::t_cfe95c52cb87a3 54,58
+osmosis_ai/templates/cli.py
+  s_f7676f8c9e2a95::t_f4c4903df42e21 13
+  s_f7676f8c9e2a95::t_b4b27167accc34 215
+  s_f7676f8c9e2a95::t_c2c5f9e0375bee 49
+osmosis_ai/templates/init.py
+  s_f7676f8c9e2a95::t_ede5e8353dad05 151
+  s_f7676f8c9e2a95::t_8259aa083c7118 18
+osmosis_ai/cli/upgrade.py
+  s_f7676f8c9e2a95::t_2234e7e18479a0 127
+  s_f7676f8c9e2a95::t_19658efd1c1de8 114,133-138,152,167,169,178,180-191,193-202,204-214,216-229
+docs/cli.md
+  s_f7676f8c9e2a95::t_e472ff3889ac32 54-55
+osmosis_ai/platform/cli/dev_server.py
+  s_f7676f8c9e2a95::t_1c81cdf1e87d03 189
+tests/unit/cli/test_auth_login_json.py
+  s_f7676f8c9e2a95::t_d96e156c74b9a9 418
+  s_f7676f8c9e2a95::t_feb5b1fb3ad73b 557
+  s_f7676f8c9e2a95::t_c1eeda17acd771 13
+  s_f7676f8c9e2a95::t_21691bad7278a8 532-533
+tests/unit/cli/test_upgrade_json.py
+  s_f7676f8c9e2a95::t_5de14c23153410 84-87
+tests/unit/platform/cli/test_dataset_upload.py
+  s_f7676f8c9e2a95::t_839c2fd0c1eb21 244
+  s_f7676f8c9e2a95::t_193099c4e2b280 282
+tests/unit/cli/test_dev_server_commands.py
+  s_f7676f8c9e2a95::t_8d23fc0c36468b 730
+osmosis_ai/eval/rubric/cli.py
+  s_f7676f8c9e2a95::t_9dff2315b5b9d8 49
+  s_f7676f8c9e2a95::t_d78103741e5e68 102-107,109-118
+tests/unit/cli/test_workspace_doctor.py
+  s_f7676f8c9e2a95::t_56fa387f31aea8 204-205
+  s_f7676f8c9e2a95::t_c05ef01b1a18ec 317,320
+  s_f7676f8c9e2a95::t_941c86c727333d 63-71
+  s_f7676f8c9e2a95::t_b876a13f83f239 37-42
+  s_f7676f8c9e2a95::t_a14e6a34a066cc 164-166
+  s_f7676f8c9e2a95::t_e72235cb6a0183 43-44
+  s_f7676f8c9e2a95::t_1349ffd45749ce 147,149-151
+  s_f7676f8c9e2a95::t_a33d04976aaf4d 376,378
+  s_f7676f8c9e2a95::t_c7a7e537bd54b2 353
+  s_f7676f8c9e2a95::t_d69506f38c3bdf 178
+  s_f7676f8c9e2a95::t_f45c4d8e37d860 398,400
+tests/unit/cli/test_eval_rubric_json.py
+  s_f7676f8c9e2a95::t_837a8616ed99a8 214-251
+osmosis_ai/platform/cli/workspace_directory.py
+  s_f7676f8c9e2a95::t_991cbc4ccc150a 74-99,102-105
+tests/unit/platform/cli/test_login.py
+  s_f7676f8c9e2a95::t_0aa9827f771681 38-41
+  s_f7676f8c9e2a95::t_a0367183f2133b 9,11-12
+  s_f7676f8c9e2a95::t_2234e7e18479a0 283-285
+  s_f7676f8c9e2a95::t_c7f82c0ab09f49 264,280,282,286-292,295,309-326,328-329,332-333,354,356-362
+  s_f7676f8c9e2a95::t_48734958851095 42-43
+tests/unit/templates/test_cli.py
+  s_f7676f8c9e2a95::t_3e3736e5bf6ef6 96,100-103
+osmosis_ai/platform/cli/auth.py
+  s_f7676f8c9e2a95::t_9861916c60efcb 42
+  s_f7676f8c9e2a95::t_ebae6f9c4591e2 1,10-15
+  s_f7676f8c9e2a95::t_0257532c5f1930 43
+  s_f7676f8c9e2a95::t_b98f972e662d30 248
+  s_f7676f8c9e2a95::t_9b91b58b5dd4f6 280-550
+  s_f7676f8c9e2a95::t_fb39dd443909e1 194
+  s_f7676f8c9e2a95::t_b7500dc0cd1101 2-9,16-41,44-193,195-247,249-279
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "5ef4fa9a7fdb276c1775a596bd0b3461d93a00b5",
+  "prompts": {},
+  "sessions": {
+    "s_f7676f8c9e2a95": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "4a3d781a-b43d-46fe-8360-ad27c8585a43",
+        "model": "grok-4.6"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}

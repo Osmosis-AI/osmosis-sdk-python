@@ -1,0 +1,14 @@
+osmosis_ai/rollout/backend/harbor/backend.py
+  h_5979ffe3601239 204-230,974-991,1026-1027,1030-1032,1045-1046,1054,1064,1069,1072,1074,1085,1087,1098,1107,1112,1116-1118,1132-1143,1147,1158-1159,1174,1179,1192,1196-1198,1200,1210
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "c74885f7d6e6d49e8308e038c37e0c906c8b1da6",
+  "prompts": {},
+  "humans": {
+    "h_5979ffe3601239": {
+      "author": "Allen Lin <allen@osmosis.ai>"
+    }
+  }
+}

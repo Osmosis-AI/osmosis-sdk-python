@@ -1,0 +1,24 @@
+docs/troubleshooting.md
+  s_76eaedeaa9e4c9::t_a8f0573acfb629 7-11
+docs/rollout-sdk.md
+  s_76eaedeaa9e4c9::t_931eff963cdc30 135-136
+  s_76eaedeaa9e4c9::t_2dc747f30dc20c 65
+CHANGELOG.md
+  s_76eaedeaa9e4c9::t_420804670ebf14 7-10,14-17,22
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "42609413e011b840cf290753436488d1d87d4c28",
+  "prompts": {},
+  "sessions": {
+    "s_76eaedeaa9e4c9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6132497e-a813-46fc-bc17-c955b1601538",
+        "model": "claude-opus-5"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}

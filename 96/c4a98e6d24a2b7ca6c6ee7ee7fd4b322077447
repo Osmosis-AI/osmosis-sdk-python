@@ -1,0 +1,52 @@
+docs/README.md
+  s_011aa8ebfd9818::t_d74a8a83a8539b 26
+osmosis_ai/consts.py
+  s_011aa8ebfd9818::t_29d246c5cbbb92 3
+tests/unit/test_public_api_imports.py
+  s_011aa8ebfd9818::t_ef9c2ab3acfa2c 229,251,356,362,368,374,435,440,469
+osmosis_ai/cli/commands/eval.py
+  s_011aa8ebfd9818::t_a789b20d72f44b 168-171
+pyproject.toml
+  s_011aa8ebfd9818::t_ef9c2ab3acfa2c 129,133,141
+osmosis_ai/rollout/controller/listener.py
+  s_011aa8ebfd9818::t_ef9c2ab3acfa2c 30
+osmosis_ai/rollout/controller/llm_bridge.py
+  s_011aa8ebfd9818::t_ef9c2ab3acfa2c 40,81
+osmosis_ai/rollout/controller/__init__.py
+  s_011aa8ebfd9818::t_ef9c2ab3acfa2c 4,51
+.github/scripts/verify-wheel-install.py
+  s_011aa8ebfd9818::t_ef9c2ab3acfa2c 72,74,232,357,368,465
+.github/workflows/tests.yml
+  s_011aa8ebfd9818::t_ef9c2ab3acfa2c 184-185
+docs/rollout-sdk.md
+  s_011aa8ebfd9818::t_ef9c2ab3acfa2c 29
+CHANGELOG.md
+  s_011aa8ebfd9818::t_29d246c5cbbb92 5,11-14,16,21,25-28
+  s_011aa8ebfd9818::t_ef9c2ab3acfa2c 10,15,20
+tests/unit/platform/cli/test_eval_run.py
+  s_011aa8ebfd9818::t_ef9c2ab3acfa2c 323,326,336
+osmosis_ai/_imports.py
+  s_011aa8ebfd9818::t_ef9c2ab3acfa2c 36
+docs/architecture.md
+  s_011aa8ebfd9818::t_ef9c2ab3acfa2c 25,70
+osmosis_ai/platform/cli/eval_run.py
+  s_011aa8ebfd9818::t_ef9c2ab3acfa2c 185,187
+docs/eval-run-local.md
+  s_011aa8ebfd9818::t_ef9c2ab3acfa2c 8,13
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "96c4a98e6d24a2b7ca6c6ee7ee7fd4b322077447",
+  "prompts": {},
+  "sessions": {
+    "s_011aa8ebfd9818": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a03610-7dd7-7933-943b-9c84d79bf4f8",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}

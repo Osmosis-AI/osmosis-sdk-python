@@ -1,0 +1,23 @@
+osmosis_ai/rollout_v2/backend/local/backend.py
+  97034826ecaa6f4c 77-79,81,87-90
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.0",
+  "base_commit_sha": "fcc50bcf05dfd1d51e66f8b980423a4cb5140577",
+  "prompts": {
+    "97034826ecaa6f4c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f1f41f2c-d165-48e5-aa3b-aa5d5579847f",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jacob Trock",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 8,
+      "overriden_lines": 0
+    }
+  }
+}

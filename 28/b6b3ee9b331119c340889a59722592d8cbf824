@@ -1,0 +1,55 @@
+osmosis_ai/cli/commands/train.py
+  s_98a82c78920297::t_3f1c61e45217cd 637-638,653-654
+docs/cli.md
+  s_98a82c78920297::t_df22ddcdb6caf7 152-174
+tests/unit/cli/test_dataset_commands_json.py
+  s_98a82c78920297::t_f94b9a648b68fb 364-402,405-487
+  s_98a82c78920297::t_37b6fbff171b42 18,340-357,359-361
+  s_98a82c78920297::t_d2e767a781e510 403-404
+  s_98a82c78920297::t_70e2d544fa2c8d 336-339,358
+tests/unit/platform/api/test_models.py
+  s_98a82c78920297::t_75f30801ca472d 212,219
+osmosis_ai/platform/api/client.py
+  s_98a82c78920297::t_452a308caf0e69 51,55-62,66
+tests/unit/platform/cli/test_training_config.py
+  s_98a82c78920297::t_47f74baffce022 62-68
+tests/unit/cli/test_command_result_migration_train_model_deployment_rollout.py
+  s_98a82c78920297::t_3d14910cc1cd96 241
+tests/unit/cli/test_train_commands.py
+  s_98a82c78920297::t_bdbea4783c4b83 745-746
+  s_98a82c78920297::t_fef5ab20eab88e 711-712
+osmosis_ai/platform/cli/dataset.py
+  s_98a82c78920297::t_45e9225591f372 186-225,227-244,257,274-281,368,399
+  s_98a82c78920297::t_83022aadeb3024 369,386
+  s_98a82c78920297::t_5f8ba77f0627c9 226
+tests/unit/platform/cli/test_dataset_upload.py
+  s_98a82c78920297::t_bbdea01e539e0a 287-288
+  s_98a82c78920297::t_276ce25e3d3220 246-286,289-407
+  s_98a82c78920297::t_a420895a873871 415-417
+  s_98a82c78920297::t_53b595245eb6e4 9,408-414,418-454
+docs/datasets.md
+  s_98a82c78920297::t_54819b9bae937c 64-66
+  s_98a82c78920297::t_4acaf547e8e2d6 56-63,67-78
+tests/unit/platform/api/test_client.py
+  s_98a82c78920297::t_ae1c47fc4d7333 36-81
+  s_98a82c78920297::t_4fe7012a71212d 366
+osmosis_ai/cli/commands/dataset.py
+  s_98a82c78920297::t_9045fb76ae08f7 20-24
+  s_98a82c78920297::t_081dddc9930257 25,30
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.10",
+  "base_commit_sha": "28b6b3ee9b331119c340889a59722592d8cbf824",
+  "prompts": {},
+  "sessions": {
+    "s_98a82c78920297": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "9956e001-314b-4552-9ebc-a833309966fb",
+        "model": "gpt-5.5"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}

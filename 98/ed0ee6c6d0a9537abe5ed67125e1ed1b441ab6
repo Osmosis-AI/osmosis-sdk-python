@@ -1,0 +1,23 @@
+osmosis_ai/cli/commands/model.py
+  3b5c35f6f882ac3e 20-21,30,45-65,95-96,98-99,104-107,109,114-115,125-126,136-137,179-180,182
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.3",
+  "base_commit_sha": "98ed0ee6c6d0a9537abe5ed67125e1ed1b441ab6",
+  "prompts": {
+    "3b5c35f6f882ac3e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "30f5fc8b-8e28-468b-a6ed-f1a6d100ca07",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "JoyboyBrian",
+      "messages": [],
+      "total_additions": 47,
+      "total_deletions": 57,
+      "accepted_lines": 43,
+      "overriden_lines": 0
+    }
+  }
+}

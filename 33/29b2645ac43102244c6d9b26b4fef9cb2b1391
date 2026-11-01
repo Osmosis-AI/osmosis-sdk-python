@@ -1,0 +1,66 @@
+osmosis_ai/cli/commands/train.py
+  b5bca5e92e024f8c 154
+tests/unit/cli/test_train_commands.py
+  b5bca5e92e024f8c 319
+osmosis_ai/platform/api/client.py
+  b5bca5e92e024f8c 250,260,264-271
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.0",
+  "base_commit_sha": "3329b2645ac43102244c6d9b26b4fef9cb2b1391",
+  "prompts": {
+    "3fe8be6aa3fb72bc": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4c380542-070c-40cd-b949-22bfe3fcdda2",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jacob Trock",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 0,
+      "overriden_lines": 0
+    },
+    "97034826ecaa6f4c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f1f41f2c-d165-48e5-aa3b-aa5d5579847f",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jacob Trock",
+      "messages": [],
+      "total_additions": 65,
+      "total_deletions": 27,
+      "accepted_lines": 37,
+      "overriden_lines": 0
+    },
+    "b5bca5e92e024f8c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c370aa53-cf16-4650-9418-9f9f460c9a17",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jacob Trock",
+      "messages": [],
+      "total_additions": 12,
+      "total_deletions": 4,
+      "accepted_lines": 12,
+      "overriden_lines": 0
+    },
+    "c2139f99eece8929": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f8031deb-924a-429d-964c-4360c32c95c5",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jacob Trock",
+      "messages": [],
+      "total_additions": 203,
+      "total_deletions": 2,
+      "accepted_lines": 4,
+      "overriden_lines": 0
+    }
+  }
+}

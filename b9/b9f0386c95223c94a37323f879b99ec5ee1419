@@ -1,0 +1,25 @@
+docs/benchmark.md
+  s_45f416cea1facd::t_aa3d57f885176d 91
+osmosis_ai/platform/cli/benchmark_config.py
+  s_45f416cea1facd::t_aa3d57f885176d 24-27,246-247,249,276-285
+tests/unit/platform/cli/test_benchmark_config.py
+  s_45f416cea1facd::t_577868df180a6f 710
+  s_45f416cea1facd::t_aa3d57f885176d 629,696-703,706,719,727-783
+  s_45f416cea1facd::t_fc4bc42044d00a 684-686,692
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "b9b9f0386c95223c94a37323f879b99ec5ee1419",
+  "prompts": {},
+  "sessions": {
+    "s_45f416cea1facd": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019ffd9b-3bb2-7ad3-88d1-68d060a35908",
+        "model": "azure-openai/gpt-5.6-sol"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}

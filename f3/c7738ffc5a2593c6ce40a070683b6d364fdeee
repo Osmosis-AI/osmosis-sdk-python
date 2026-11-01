@@ -1,0 +1,33 @@
+docs/README.md
+  s_77bbd348a8bbed::t_c1d2fe617d7f7b 16
+docs/troubleshooting.md
+  s_77bbd348a8bbed::t_197452c271cbac 57
+tests/unit/cli/test_train_commands.py
+  s_77bbd348a8bbed::t_b507b754281935 71
+tests/unit/eval/controller/test_process.py
+  s_77bbd348a8bbed::t_1e2d0214157c6f 92
+docs/cli.md
+  s_77bbd348a8bbed::t_def3e11a4646df 48
+tests/unit/cli/test_command_result_migration_train_model_deployment_rollout.py
+  s_77bbd348a8bbed::t_900883dbe30b9b 259
+tests/unit/test_cli.py
+  s_77bbd348a8bbed::t_ee56d2df48d5d9 28
+README.md
+  s_77bbd348a8bbed::t_cd1d711f0070c4 68
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.10",
+  "base_commit_sha": "f3c7738ffc5a2593c6ce40a070683b6d364fdeee",
+  "prompts": {},
+  "sessions": {
+    "s_77bbd348a8bbed": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "d7eb55e4-c3a5-470c-9df6-0cf227a1f145",
+        "model": "gpt-5.5"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}

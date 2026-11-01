@@ -1,0 +1,21 @@
+tests/unit/eval/local/test_runner_units.py
+  s_e400aa9b4bcde5::t_3a9b749627d570 490
+osmosis_ai/eval/local/runner.py
+  s_e400aa9b4bcde5::t_3a9b749627d570 1766
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "9bb43d0a4be94ea9150a22b4b17e009e479d321b",
+  "prompts": {},
+  "sessions": {
+    "s_e400aa9b4bcde5": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a04985-4420-7b21-b20d-a662777b59d8",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}

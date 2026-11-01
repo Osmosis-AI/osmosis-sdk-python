@@ -1,0 +1,25 @@
+osmosis_ai/eval/config.py
+  6a3a74d795075b8b 9,15-16,27-28,35-36,42-43,50-51,59-60
+osmosis_ai/platform/cli/serve_config.py
+  6a3a74d795075b8b 9,17-18,24-25,32-33
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8",
+  "base_commit_sha": "b290ff81e00716fcd1597e2e72b142f52ae4758a",
+  "prompts": {
+    "6a3a74d795075b8b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7b348ee3-304f-46db-942f-9d3e0c221d32",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "JoyboyBrian",
+      "messages": [],
+      "total_additions": 42,
+      "total_deletions": 24,
+      "accepted_lines": 20,
+      "overriden_lines": 0
+    }
+  }
+}

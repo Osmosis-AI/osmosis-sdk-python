@@ -1,0 +1,16 @@
+osmosis_ai/rollout/backend/harbor/evidence.py
+  h_2ae8077fa5063a 28-30,32,35-40
+tests/unit/rollout/test_evidence_redaction_patterns.py
+  h_2ae8077fa5063a 1-143
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "3160298fe4e806e9d6db3b264c04abb65186ac66",
+  "prompts": {},
+  "humans": {
+    "h_2ae8077fa5063a": {
+      "author": "Jacob Trock <jgh@geocrypt.me>"
+    }
+  }
+}

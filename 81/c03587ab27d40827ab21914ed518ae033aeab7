@@ -1,0 +1,58 @@
+tests/unit/eval/local/test_runner_e2e.py
+  s_c80b3fb770a70f::t_6c04024301353a 548,550-612
+  s_c80b3fb770a70f::t_ce5aa0daed5353 549
+osmosis_ai/rollout/http_driver.py
+  s_c80b3fb770a70f::t_d3f9641471fce6 66-74
+  s_c80b3fb770a70f::t_f5b7b537340298 248-249
+osmosis_ai/platform/cli/eval_run.py
+  s_c80b3fb770a70f::t_613caecd0f31cb 11
+  s_c80b3fb770a70f::t_42e611273efa72 110-111
+  s_c80b3fb770a70f::t_1058f817fee4cd 196
+  s_c80b3fb770a70f::t_b01d1ff23d6a56 186-188
+tests/unit/platform/cli/test_eval_run.py
+  s_c80b3fb770a70f::t_820c436db00fd5 378
+  s_c80b3fb770a70f::t_d268df3ff8760b 356-377,379-381
+osmosis_ai/eval/local/results.py
+  s_c80b3fb770a70f::t_f0ea2b702813ba 430,432-433
+osmosis_ai/eval/local/dataset.py
+  s_c80b3fb770a70f::t_0e99c4ec825e49 508-510,522-525
+tests/unit/eval/local/test_results.py
+  s_c80b3fb770a70f::t_6d5ae3b28416c2 687
+tests/unit/eval/local/test_runner_units.py
+  s_c80b3fb770a70f::t_c27979044d21fc 489
+  s_c80b3fb770a70f::t_17bdda642f2654 21,36-37
+  s_c80b3fb770a70f::t_681cfe41bc3176 391-393
+  s_c80b3fb770a70f::t_b71589bff618d8 488,490-565
+  s_c80b3fb770a70f::t_d0cb49598abc05 414
+  s_c80b3fb770a70f::t_6b508a3fda90f4 435-460
+tests/unit/eval/local/test_dataset.py
+  s_c80b3fb770a70f::t_dfdd6614db81e1 369-371,374
+tests/unit/rollout/test_http_driver.py
+  s_c80b3fb770a70f::t_333ed2aeff4972 389,392-394
+osmosis_ai/eval/local/runner.py
+  s_c80b3fb770a70f::t_07fed5e556e2ec 832-834,836-840
+  s_c80b3fb770a70f::t_ffacf83afd6b2d 897-899
+  s_c80b3fb770a70f::t_ac370fdd92200a 1459-1460,1462
+  s_c80b3fb770a70f::t_5766d391faf3b7 953-967
+  s_c80b3fb770a70f::t_6120af75848b0f 1089-1092
+  s_c80b3fb770a70f::t_10cb1bf7442315 588-593
+  s_c80b3fb770a70f::t_f3225503def612 101-104
+  s_c80b3fb770a70f::t_02273390f3c39b 881,889-896
+  s_c80b3fb770a70f::t_9e99526520b847 1461,1465-1467
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "81c03587ab27d40827ab21914ed518ae033aeab7",
+  "prompts": {},
+  "sessions": {
+    "s_c80b3fb770a70f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "bacf190c-93e0-4d73-b25f-4ed0f5ef4be5",
+        "model": "claude-fable-5"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}

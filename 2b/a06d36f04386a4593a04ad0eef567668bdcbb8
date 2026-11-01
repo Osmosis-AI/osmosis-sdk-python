@@ -1,0 +1,44 @@
+osmosis_ai/platform/cli/templates/configs/training/default.toml.tpl
+  09aca576aeb3c04d 1-32
+osmosis_ai/platform/cli/init.py
+  09aca576aeb3c04d 67
+tests/unit/platform/cli/test_workspace_setup.py
+  09aca576aeb3c04d 189-190
+osmosis_ai/platform/cli/templates/skills/submit-training/SKILL.md.tpl
+  09aca576aeb3c04d 10-15,17-56,60
+osmosis_ai/platform/cli/templates/configs/AGENTS.md.tpl
+  09aca576aeb3c04d 7,9-11,13,15,18-21,24-29,32-33,35-37,57-58
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.20",
+  "base_commit_sha": "2ba06d36f04386a4593a04ad0eef567668bdcbb8",
+  "prompts": {
+    "09aca576aeb3c04d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "50d28a16-a1c2-4be5-9109-1faedfb2bda3",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>",
+      "messages": [],
+      "total_additions": 153,
+      "total_deletions": 78,
+      "accepted_lines": 115,
+      "overriden_lines": 0
+    },
+    "e7a5fc52e630e1ae": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1f1a3931-fef0-446b-9af2-a614f2ebe16c",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>",
+      "messages": [],
+      "total_additions": 14,
+      "total_deletions": 22,
+      "accepted_lines": 14,
+      "overriden_lines": 0
+    }
+  }
+}

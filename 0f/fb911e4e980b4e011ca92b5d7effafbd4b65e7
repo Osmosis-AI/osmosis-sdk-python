@@ -1,0 +1,25 @@
+uv.lock
+  ai_agent 27,39-122,454,459-499,746,752,754,820,822,824,1736-1739,1745
+pyproject.toml
+  s_71997b9e020c0d::t_f968f0e5bdf713 72
+  s_71997b9e020c0d::t_5a48285fed2e4d 83
+  s_71997b9e020c0d::t_97dfbd30cfae34 33-35
+  s_71997b9e020c0d::t_c0fbd8767506a7 111
+  s_71997b9e020c0d::t_621dda6b63b938 120
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "0ffb911e4e980b4e011ca92b5d7effafbd4b65e7",
+  "prompts": {},
+  "sessions": {
+    "s_71997b9e020c0d": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "f09cf5e1-503f-4af1-a769-cd997496063e",
+        "model": "grok-4.6"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}

@@ -1,0 +1,27 @@
+osmosis_ai/platform/auth/platform_client.py
+  b7f71faa77f22ac6 94,112-115,122,166-171
+tests/unit/auth/test_platform_client.py
+  b7f71faa77f22ac6 320,323,325,329,332-346
+osmosis_ai/platform/cli/login.py
+  b7f71faa77f22ac6 44
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.15",
+  "base_commit_sha": "5ceb6329c2abd1309270105c8e7535b9efc73773",
+  "prompts": {
+    "b7f71faa77f22ac6": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c0dc3ee0-716e-421a-b59e-d64f75bc842a",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>",
+      "messages": [],
+      "total_additions": 35,
+      "total_deletions": 36,
+      "accepted_lines": 32,
+      "overriden_lines": 0
+    }
+  }
+}

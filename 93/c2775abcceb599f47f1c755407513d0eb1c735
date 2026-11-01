@@ -1,0 +1,22 @@
+docs/rollout-lifecycle.md
+  h_3805a2b1124b31 67,69,73-74
+osmosis_ai/rollout/backend/harbor/backend.py
+  h_3805a2b1124b31 285-286,555-556,563-564,672-677,899-900,902-905,912-913
+osmosis_ai/rollout/server/app.py
+  h_3805a2b1124b31 143-148,159-162
+tests/unit/rollout/test_harbor_contract.py
+  h_3805a2b1124b31 5,199,201,206,209,211-223,232-234,239,245,252-256
+tests/unit/rollout/test_server_admission.py
+  h_3805a2b1124b31 7,435-442,444-452,456-459,468-469,476-488,491
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "93c2775abcceb599f47f1c755407513d0eb1c735",
+  "prompts": {},
+  "humans": {
+    "h_3805a2b1124b31": {
+      "author": "Mathew Han <mathewjhan@gmail.com>"
+    }
+  }
+}

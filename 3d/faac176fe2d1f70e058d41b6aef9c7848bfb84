@@ -1,0 +1,25 @@
+osmosis_ai/eval/evaluation/cli.py
+  3017cba899ee5fb7 471,482
+osmosis_ai/eval/llm_proxy.py
+  3017cba899ee5fb7 160,197
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8",
+  "base_commit_sha": "3dfaac176fe2d1f70e058d41b6aef9c7848bfb84",
+  "prompts": {
+    "3017cba899ee5fb7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e6077b2c-7b0f-407f-b4c5-a85294bc5a44",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "JoyboyBrian",
+      "messages": [],
+      "total_additions": 4,
+      "total_deletions": 4,
+      "accepted_lines": 4,
+      "overriden_lines": 0
+    }
+  }
+}

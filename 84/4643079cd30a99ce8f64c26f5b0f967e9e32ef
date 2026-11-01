@@ -1,0 +1,31 @@
+tests/unit/eval/evaluation/test_orchestrator.py
+  32f2ca6dc1d9c299 606,627,651,703,709,1194
+osmosis_ai/rollout_v2/driver.py
+  32f2ca6dc1d9c299 36,137,140
+tests/unit/rollout_v2/test_driver.py
+  32f2ca6dc1d9c299 18,114,160-161
+tests/unit/eval/evaluation/test_eval_cache_integration.py
+  32f2ca6dc1d9c299 55
+osmosis_ai/eval/evaluation/orchestrator.py
+  32f2ca6dc1d9c299 432,521
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8",
+  "base_commit_sha": "844643079cd30a99ce8f64c26f5b0f967e9e32ef",
+  "prompts": {
+    "32f2ca6dc1d9c299": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "0390c74d-9b47-41b5-ae70-5391591ed711",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "JoyboyBrian",
+      "messages": [],
+      "total_additions": 16,
+      "total_deletions": 16,
+      "accepted_lines": 16,
+      "overriden_lines": 0
+    }
+  }
+}

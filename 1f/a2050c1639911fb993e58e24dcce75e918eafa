@@ -1,0 +1,24 @@
+docs/README.md
+  h_3805a2b1124b31 48
+docs/rollout-lifecycle.md
+  h_3805a2b1124b31 3,11,39,43,107,116-117,119,122,133
+osmosis_ai/rollout/backend/harbor/backend.py
+  h_3805a2b1124b31 119-120
+osmosis_ai/rollout/server/app.py
+  h_3805a2b1124b31 10,248
+tests/unit/rollout/test_native_evidence.py
+  h_3805a2b1124b31 501
+tests/unit/rollout/test_server_lifecycle.py
+  h_3805a2b1124b31 56,78,93,95-98,102,118,140-141,183
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "1fa2050c1639911fb993e58e24dcce75e918eafa",
+  "prompts": {},
+  "humans": {
+    "h_3805a2b1124b31": {
+      "author": "Mathew Han <mathewjhan@gmail.com>"
+    }
+  }
+}

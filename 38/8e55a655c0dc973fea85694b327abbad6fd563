@@ -1,0 +1,24 @@
+tests/unit/platform/cli/test_workspace_directory_context.py
+  s_c0bac972986ea4::t_4bfc0a2360bd2f 45-53,56,58-72
+  s_c0bac972986ea4::t_bba565f44ea47b 138,142
+osmosis_ai/platform/cli/workspace_directory_context.py
+  s_c0bac972986ea4::t_150f92994b95a8 82
+tests/unit/platform/api/test_models.py
+  s_c0bac972986ea4::t_366a7bf74c89b4 611
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "388e55a655c0dc973fea85694b327abbad6fd563",
+  "prompts": {},
+  "sessions": {
+    "s_c0bac972986ea4": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e66f8de0-71e1-462d-9fa1-63d4c26e8292",
+        "model": "claude-fable-5"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}

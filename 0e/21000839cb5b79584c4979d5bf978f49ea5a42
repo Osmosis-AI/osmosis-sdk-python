@@ -1,0 +1,48 @@
+osmosis_ai/rollout/backend/harbor/backend.py
+  s_76eaedeaa9e4c9::t_3e37904970e03a 875-880,882,884
+tests/unit/rollout/test_server_app_trajectory.py
+  s_76eaedeaa9e4c9::t_dd048577272f3a 180-183
+  s_76eaedeaa9e4c9::t_684dd00051ff09 47
+  s_76eaedeaa9e4c9::t_6fad2481b2c7cd 63-66
+  s_76eaedeaa9e4c9::t_683619356d3130 201
+  s_76eaedeaa9e4c9::t_247b489dde1fbc 310-311,314
+tests/unit/rollout/test_sample_validation.py
+  s_76eaedeaa9e4c9::t_7def5de4938d62 1-59,63-112
+  s_76eaedeaa9e4c9::t_c58a23cc2f0a51 60-62
+osmosis_ai/rollout/server/app.py
+  s_76eaedeaa9e4c9::t_d1b35f11a6dac6 223-229,231-247
+  s_76eaedeaa9e4c9::t_f86ec74df4585d 134-138
+  s_76eaedeaa9e4c9::t_effe437bb0caa1 186-190,196
+  s_76eaedeaa9e4c9::t_d716fe62383e23 164
+  s_76eaedeaa9e4c9::t_c038e2ea976fa3 148,160
+osmosis_ai/rollout/types/sample.py
+  s_76eaedeaa9e4c9::t_1f01a2f869389e 31-32,40
+  s_76eaedeaa9e4c9::t_a8ce227f85fe80 55-64
+  s_76eaedeaa9e4c9::t_2afd4636c8a840 3,6,8,20-21,24,38-39,41-42
+  s_76eaedeaa9e4c9::t_31a284536b79cb 98,104-109
+  s_76eaedeaa9e4c9::t_b27a3bffafd069 18-19,22
+  s_76eaedeaa9e4c9::t_999973af8ce169 89-97,99-103,110
+tests/unit/rollout/test_harbor_backend.py
+  s_76eaedeaa9e4c9::t_197f5dff77649a 1860
+  s_76eaedeaa9e4c9::t_df92fa683e518a 30
+  s_76eaedeaa9e4c9::t_5693f3e06224d3 1835-1859,1861-1865
+tests/unit/rollout/test_server_app_callbacks.py
+  s_76eaedeaa9e4c9::t_029311ec9feab6 1-172,174-211
+  s_76eaedeaa9e4c9::t_c58a23cc2f0a51 173
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "0e21000839cb5b79584c4979d5bf978f49ea5a42",
+  "prompts": {},
+  "sessions": {
+    "s_76eaedeaa9e4c9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6132497e-a813-46fc-bc17-c955b1601538",
+        "model": "claude-opus-5"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}

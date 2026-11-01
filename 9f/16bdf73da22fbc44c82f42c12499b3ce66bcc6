@@ -1,0 +1,19 @@
+docs/superpowers/specs/2026-05-13-cli-list-output-design.md
+  s_5a6994042f7f30::t_dfbb31f7178a57 1-192
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "9f16bdf73da22fbc44c82f42c12499b3ce66bcc6",
+  "prompts": {},
+  "sessions": {
+    "s_5a6994042f7f30": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019e2288-c5ee-7d21-92cf-0615946f671c",
+        "model": "gpt-5.5"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}

@@ -1,0 +1,31 @@
+tests/unit/eval/controller/test_process.py
+  s_9477fa0c8717da::t_53bba678bad74a 4,86-89,91-98
+tests/integration/test_cli_subprocess_contract.py
+  s_9477fa0c8717da::t_da854887b80e9a 15-19
+  s_9477fa0c8717da::t_056c82f5ee137c 54-57,63
+tests/unit/test_cli.py
+  s_9477fa0c8717da::t_ce8ae42c9be8a0 21-40,205-207,209,220,225,235,237-238
+  s_9477fa0c8717da::t_c3e84ee8749f10 2
+tests/unit/cli/test_train_commands.py
+  s_9477fa0c8717da::t_f02fd60bcac08e 6,58-62
+tests/unit/cli/test_whoami.py
+  s_9477fa0c8717da::t_e4bd52bff713f0 6,60-64
+tests/unit/cli/test_command_result_migration_train_model_deployment_rollout.py
+  s_9477fa0c8717da::t_2c97abc572f330 6,81-85,246-258
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "f17e5a2eaade521367ee9dedf06ca0d4ed0294e5",
+  "prompts": {},
+  "sessions": {
+    "s_9477fa0c8717da": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "a15c2361-d4d8-4e57-b365-2161f14671da",
+        "model": "gpt-5.5-extra-high"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}

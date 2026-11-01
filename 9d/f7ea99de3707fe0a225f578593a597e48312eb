@@ -1,0 +1,21 @@
+osmosis_ai/rollout/backend/harbor/backend.py
+  s_160aa7e4d8afdb::t_d278bc4ab21e16 506-510,519,526-527,534-539,541-545,547-560
+tests/unit/rollout/test_harbor_backend.py
+  s_160aa7e4d8afdb::t_d278bc4ab21e16 5,1490-1560
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "9df7ea99de3707fe0a225f578593a597e48312eb",
+  "prompts": {},
+  "sessions": {
+    "s_160aa7e4d8afdb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "fa8c482d-b071-4f0e-87a8-033869d9bb71",
+        "model": "claude-fable-5"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}

@@ -1,0 +1,24 @@
+osmosis_ai/rollout/backend/harbor/backend.py
+  h_5979ffe3601239 22,25,27-28,70-71,95,97-98,170-204,260-261,269-274,332,418-422,636-649,928-963,969-986,988-1014,1016-1017,1019-1064,1066-1067,1069-1098,1100-1114,1116-1157,1159-1180,1183-1211,1213-1222,1224-1225,1244-1246,1248-1249,1256-1258,1271-1273,1281-1284,1290
+osmosis_ai/rollout/backend/harbor/diagnostics.py
+  h_5979ffe3601239 120-170
+osmosis_ai/rollout/backend/harbor/source.py
+  h_5979ffe3601239 129-134,222
+osmosis_ai/rollout/backend/harbor/tasks.py
+  h_5979ffe3601239 16,218-282
+osmosis_ai/rollout/types/harbor.py
+  h_5979ffe3601239 3,7-8,31
+tests/unit/rollout/test_harbor_backend.py
+  h_5979ffe3601239 1660-1834
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "8cfbd19b5eacff79289a6555f5d94b68be5ad81a",
+  "prompts": {},
+  "humans": {
+    "h_5979ffe3601239": {
+      "author": "Allen Lin <allen@osmosis.ai>"
+    }
+  }
+}

@@ -1,0 +1,191 @@
+README.md
+  607c270601d19654 37-52
+tests/unit/cli/test_init_json.py
+  607c270601d19654 1-77
+osmosis_ai/eval/rubric/cli.py
+  607c270601d19654 6,9,39,75-77,79,86-89,92-103,106-138,169-173
+osmosis_ai/cli/upgrade.py
+  607c270601d19654 10,15-16,92-116,119-120,127-130,138-144,160-161,168-173,175-188,192-207,210-223,226-240,243-256
+osmosis_ai/cli/output/error.py
+  b7c65647a4031293 1-133
+osmosis_ai/cli/commands/rollout.py
+  607c270601d19654 88-91,113-116,119-136,150,152,173,175-180,183,193-228
+tests/unit/cli/test_command_result_migration_train_model_deployment_rollout.py
+  607c270601d19654 1-332
+tests/golden/cli_output/list_envelope.json
+  607c270601d19654 1-10
+osmosis_ai/platform/cli/init.py
+  607c270601d19654 273,285,348-350,436,543-558,560-561,563-634,638,643-645,678-681,706-734
+tests/unit/cli/test_model_commands.py
+  607c270601d19654 13,48-54,72-77,94-99,117-118,120-124
+tests/unit/cli/output/test_progress.py
+  607c270601d19654 1-45
+osmosis_ai/cli/output/serializers.py
+  b7c65647a4031293 1-122
+tests/golden/cli_output/rollout_serializer.json
+  607c270601d19654 1-11
+tests/unit/cli/output/test_context.py
+  607c270601d19654 1-165
+tests/unit/cli/output/test_result.py
+  607c270601d19654 1-86
+osmosis_ai/cli/commands/auth.py
+  607c270601d19654 149-301,324-326,328,339-342,433-465,471,473,479,483-491,494-498,507,509-510,515-535,538,544,548,550-555,558-559,562,564-565,569-572,574-582,584-608,610-623,625,627-641,643
+osmosis_ai/cli/commands/init.py
+  607c270601d19654 5-6,19,23
+tests/golden/cli_output/operation_envelope.json
+  607c270601d19654 1-7
+osmosis_ai/cli/output/__init__.py
+  b7c65647a4031293 1-67
+tests/unit/cli/test_whoami.py
+  607c270601d19654 1-253
+tests/unit/cli/output/test_console_facade.py
+  607c270601d19654 1-78
+osmosis_ai/cli/commands/train.py
+  607c270601d19654 7,18-47,54,56-61,64,74-109,115,117-123,136-138,152,156-157,159,164-175,177-196,202,204,219,221,261,266-268,276,279-304,384,389-395,406,408-409,421,423-428,456-457,466,475,477-490,493-495,498-528,541,543-544,552,554-561,569,571-572,580,584-591
+tests/golden/cli_output/training_run_serializer.json
+  607c270601d19654 1-20
+osmosis_ai/cli/console.py
+  b7c65647a4031293 1,55,108-118,134-135,163-164,185-186,204-205,274-275,292-303,313-318
+tests/unit/cli/output/test_serializers.py
+  607c270601d19654 1-178
+tests/unit/cli/test_deployment_commands.py
+  607c270601d19654 14-20,59-65,90,96-99,125,130-134,151,153-156,176,181-189,212-216,220,234,236-239,260,265-273,296-300,304-322,344,350-359,374-381,397,402-406
+tests/unit/platform/cli/test_status_formatting.py
+  607c270601d19654 30,63,65-66
+tests/golden/cli_output/model_serializer.json
+  607c270601d19654 1-12
+tests/unit/cli/test_errors.py
+  607c270601d19654 1-42
+osmosis_ai/platform/cli/dataset.py
+  607c270601d19654 13-23,25,78-82,141-145,180-184,250,269,275,280,284,305,308-312,322-335,339,342,354-396,401,414-418,424,438,440-456,461-469,471-487,505,553-559,566,568-574,593-605,636-640,646,651,656-672,676-688,757
+tests/unit/platform/cli/test_dataset_workspace_context.py
+  607c270601d19654 45,50,140,147-151,220,232-234
+osmosis_ai/cli/errors.py
+  607c270601d19654 30-34,36
+  b7c65647a4031293 3-5,10-22
+tests/golden/cli_output/eval_cache_entry_serializer.json
+  607c270601d19654 1-11
+tests/golden/cli_output/error_envelope.json
+  607c270601d19654 1-4
+tests/unit/cli/test_eval_run_json.py
+  607c270601d19654 1-156
+osmosis_ai/cli/commands/model.py
+  607c270601d19654 22-46,93,95-100,103,113-115,117-124,127,131-147,155,158,161,165,168-171,176-187,203-210
+tests/unit/cli/test_upgrade_json.py
+  607c270601d19654 1-120
+tests/unit/cli/test_train_metrics_cmd.py
+  607c270601d19654 11,15,93-106,125,130-133,156,161-165,197,202-204,271,276-278,280,443,448-449,475,480-481,504,509-511
+tests/unit/cli/output/test_safety.py
+  607c270601d19654 1-83
+tests/unit/cli/output/test_root_callback.py
+  607c270601d19654 1-41
+tests/golden/cli_output/deployment_serializer.json
+  607c270601d19654 1-14
+tests/unit/cli/test_workspace_json.py
+  607c270601d19654 1-168
+osmosis_ai/cli/commands/dataset.py
+  607c270601d19654 5-6,20,24,41,45,54,58,64,68,75,79,85,89,96,100
+tests/unit/cli/output/test_renderer_rich.py
+  607c270601d19654 1-74
+tests/integration/test_cli_subprocess_contract.py
+  607c270601d19654 1-59
+tests/unit/cli/output/test_renderer_json.py
+  607c270601d19654 1-138
+tests/golden/cli_output/workspace_serializer.json
+  607c270601d19654 1-4
+osmosis_ai/cli/commands/workspace.py
+  607c270601d19654 6,21-22,25-32,37,41,52,54,56,63,65-67,73,77,90,92-94
+tests/unit/cli/test_dataset_commands_json.py
+  607c270601d19654 1-353
+osmosis_ai/eval/evaluation/cli.py
+  607c270601d19654 11,18-29,41-56,60-66,111,126-142,202,208,210,227-231,238-242,284-290,293,398-466,470,493,505,513,536,554,567,579,591,594,622,652-653,667,745-747,752-753,772-778,785,791-794,819,824,832,855,858-869,881-892,896,916-927,941,954-964
+tests/unit/cli/test_auth_login_json.py
+  607c270601d19654 1-255
+osmosis_ai/cli/main.py
+  607c270601d19654 13-27,63,77-95,97-102,107-118,131-170,237-238,246-248,250,252,256
+osmosis_ai/cli/output/result.py
+  b7c65647a4031293 1-38,40-52,55-67,69-76
+  607c270601d19654 39,53-54,68,77
+tests/unit/cli/test_train_info_checkpoints.py
+  607c270601d19654 13,92-107,125-129,155-161,176-181,198-204
+osmosis_ai/platform/cli/workspace.py
+  607c270601d19654 408-424,426-434,451-461,465-485,493-505,507-515,517-652,654-661,685-693,695-747,753-758
+tests/golden/cli_output/detail_envelope.json
+  607c270601d19654 1-4
+tests/golden/cli_output/checkpoint_serializer.json
+  607c270601d19654 1-10
+tests/unit/cli/test_eval_rubric_json.py
+  607c270601d19654 1-137
+osmosis_ai/cli/commands/eval.py
+  607c270601d19654 5,40,42,46,58-62,93,95,98,109-113,117,119,122-127,141,143,146,151-155,174,176,179,187-191
+osmosis_ai/cli/output/renderer.py
+  b7c65647a4031293 1-5,7-18,25-92,94,98-100,105-107,110-113,127-160,162-208,214-258
+  607c270601d19654 6,19-24,93,95-97,101-104,108-109,114-126,161,209-213
+tests/golden/cli_output/dataset_serializer.json
+  607c270601d19654 1-14
+tests/unit/cli/output/test_error.py
+  607c270601d19654 1-35,37-71,73-115
+  4503288603f8f61e 36,72
+tests/conftest.py
+  607c270601d19654 1-17
+tests/integration/test_cli_no_direct_stdout_writes.py
+  607c270601d19654 1-52,54-55,57-62
+osmosis_ai/cli/output/context.py
+  607c270601d19654 10,15
+  b7c65647a4031293 1-9,11-14,16-166
+tests/unit/cli/output/test_renderer_plain.py
+  607c270601d19654 1-167
+osmosis_ai/platform/api/upload.py
+  607c270601d19654 432,477
+  b7c65647a4031293 414,416-419,421-431,433-437,440,461-463,472,474-476,478-480,482
+osmosis_ai/cli/commands/deployment.py
+  607c270601d19654 24-25,37-75,108,110-115,119,127-162,170,172-176,178,183-185,203-207,214,216,218,222-243,251,253,255,259-280,292,294,296,300,302-303,305,307-308,310-322,331,333,335,339,345-352
+tests/unit/cli/test_train_commands.py
+  607c270601d19654 15,59-65,86-91,109-113,131-136,160-165,192-203,286-296,311,318-321,337,343-351,381,384-386,476-482
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "d0cd2641bec24ca21b3a9f4ab792413e6a319067",
+  "prompts": {
+    "4503288603f8f61e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "06ba9487-491d-46cd-81b8-7bf30d34fe58",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "JoyboyBrian",
+      "messages": [],
+      "total_additions": 25,
+      "total_deletions": 54,
+      "accepted_lines": 7,
+      "overriden_lines": 20
+    },
+    "607c270601d19654": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "fae047a0-b6c2-48ac-90e0-df57a00f9110",
+        "model": "gpt-5.5-extra-high"
+      },
+      "human_author": "JoyboyBrian",
+      "messages": [],
+      "total_additions": 5963,
+      "total_deletions": 1022,
+      "accepted_lines": 5870,
+      "overriden_lines": 5
+    },
+    "b7c65647a4031293": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "19fe8b61-73bf-4d03-9b8e-6e787d1928eb",
+        "model": "claude-opus-4-7-thinking-max"
+      },
+      "human_author": "JoyboyBrian",
+      "messages": [],
+      "total_additions": 886,
+      "total_deletions": 22,
+      "accepted_lines": 877,
+      "overriden_lines": 0
+    }
+  }
+}

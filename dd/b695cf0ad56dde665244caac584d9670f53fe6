@@ -1,0 +1,73 @@
+docs/troubleshooting.md
+  s_8032c779241d68::t_3ca1e2db6f7996 42
+  s_8032c779241d68::t_a7e76a558f860e 47,63,69,71
+  s_8032c779241d68::t_6888d71798be6e 65
+tests/unit/cli/test_deployment_commands.py
+  s_8032c779241d68::t_601d099fb725ff 124
+tests/unit/cli/test_model_commands.py
+  s_8032c779241d68::t_e1eee0705fd4a4 68
+tests/unit/cli/test_eval_run_json.py
+  s_8032c779241d68::t_f57963d745a712 157,166
+  s_8032c779241d68::t_3dbc628081627b 174
+osmosis_ai/platform/auth/platform_client.py
+  s_8032c779241d68::t_d1f0a4e760861f 115,117,119,123,127-128,131-133,136-139
+  s_8032c779241d68::t_069a94df608061 114,116,120,124
+tests/unit/test_cli.py
+  s_8032c779241d68::t_391c6d4a71819f 220
+tests/unit/auth/test_platform_client.py
+  s_8032c779241d68::t_cbc777f6b1bbe0 419,424
+  s_8032c779241d68::t_51e9c009ea01cc 429,434,439,444,449
+docs/cli.md
+  s_8032c779241d68::t_85cb5eb3a019d2 38,54,73,166
+  s_8032c779241d68::t_3e4ac2c08ce213 56
+README.md
+  s_8032c779241d68::t_d3af3e84e43278 58,74
+  s_8032c779241d68::t_5b84a7ee0a5744 22,31,76
+osmosis_ai/platform/cli/workspace_directory_contract.py
+  s_8032c779241d68::t_648a58022f14a0 1,59,66
+  s_8032c779241d68::t_a01a04ff9c6e34 39
+tests/unit/cli/test_dataset_commands_json.py
+  s_8032c779241d68::t_2f1aa765adf3b1 65
+tests/unit/cli/test_template_cmd.py
+  s_8032c779241d68::t_1c8e904185159a 291
+tests/unit/platform/cli/test_workspace_directory_contract.py
+  s_8032c779241d68::t_26fc641be4dd9b 81,117-119,131
+  s_8032c779241d68::t_de909e99e75ded 73
+tests/unit/eval/evaluation/test_cache.py
+  s_8032c779241d68::t_7f960c0796db67 494,503
+  s_8032c779241d68::t_2fa08e7a11d8df 511
+osmosis_ai/platform/cli/scaffold.py
+  s_8032c779241d68::t_80cb2e0a650a46 4
+tests/unit/cli/test_workspace_commands.py
+  s_8032c779241d68::t_e4d4e6e5cdc434 25
+tests/unit/cli/test_rollout_init.py
+  s_8032c779241d68::t_4c070dcb76514c 326
+docs/README.md
+  s_8032c779241d68::t_e7b0f10d398967 6,22
+  s_8032c779241d68::t_6327a65b26288f 24
+tests/unit/cli/output/test_error.py
+  s_8032c779241d68::t_62314667aa6f53 161-163
+tests/unit/auth/test_error_messages.py
+  s_8032c779241d68::t_5162c19d2fc6ad 163,165
+  s_8032c779241d68::t_75ef0ad3c56fc1 164,170
+tests/unit/cli/test_workspace_doctor.py
+  s_8032c779241d68::t_2397a205a5ba87 241
+tests/unit/cli/test_init_json.py
+  s_8032c779241d68::t_f5372e4769d95f 1,10,24
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "ddb695cf0ad56dde665244caac584d9670f53fe6",
+  "prompts": {},
+  "sessions": {
+    "s_8032c779241d68": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "148eded6-63fc-4951-aae0-99a7b7a0df70",
+        "model": "gpt-5.5-extra-high"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}

@@ -1,0 +1,23 @@
+osmosis_ai/rollout/types/sample.py
+  95d4875df28ddbf2 6
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.2",
+  "base_commit_sha": "36c06c64c0d5a79647356a03d04a8a1b098e2eed",
+  "prompts": {
+    "95d4875df28ddbf2": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "e5bd3dc8-5648-491e-a751-3b4d3a1475ba",
+        "model": "claude-4.6-sonnet-medium-thinking"
+      },
+      "human_author": "Jacob Trock",
+      "messages": [],
+      "total_additions": 1,
+      "total_deletions": 1,
+      "accepted_lines": 1,
+      "overriden_lines": 0
+    }
+  }
+}

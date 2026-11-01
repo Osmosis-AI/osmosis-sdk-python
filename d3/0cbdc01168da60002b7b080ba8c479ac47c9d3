@@ -1,0 +1,26 @@
+osmosis_ai/rollout/backend/harbor/environment.py
+  s_00c3865caf2bbb::t_68af2864d3714e 22
+  s_00c3865caf2bbb::t_b8c8a71963cd0b 81
+  s_00c3865caf2bbb::t_8651f9b61a7b9b 97,101,104-113,121-129,131
+osmosis_ai/rollout/backend/harbor/backend.py
+  s_00c3865caf2bbb::t_ee886716677390 68,404
+tests/unit/rollout/test_harbor_egress.py
+  s_00c3865caf2bbb::t_ee886716677390 21,65,149,162
+  s_00c3865caf2bbb::t_86d77495dbc861 1,3-6,26,61,82-83,102-103,147,153,155,166,168,178,229-230,249,251,272-273,284,286,292-294,298
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "d30cbdc01168da60002b7b080ba8c479ac47c9d3",
+  "prompts": {},
+  "sessions": {
+    "s_00c3865caf2bbb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "00de36f5-6bb1-45b7-828d-f57951616464",
+        "model": "claude-fable-5"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}

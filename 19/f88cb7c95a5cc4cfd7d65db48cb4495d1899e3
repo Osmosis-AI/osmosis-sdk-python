@@ -1,0 +1,19 @@
+osmosis_ai/templates/_scaffolds/rollout/training.toml.tpl
+  s_765c6830d8674a::t_b2911f1a0ff190 47
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.10",
+  "base_commit_sha": "19f88cb7c95a5cc4cfd7d65db48cb4495d1899e3",
+  "prompts": {},
+  "sessions": {
+    "s_765c6830d8674a": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "c9fd8e8e-f1bc-48f3-821f-0f82ba56ea98",
+        "model": "gpt-5.5"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}

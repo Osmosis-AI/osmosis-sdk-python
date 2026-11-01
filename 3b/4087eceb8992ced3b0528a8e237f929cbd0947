@@ -1,0 +1,26 @@
+tests/unit/rollout/test_harbor_backend.py
+  s_d7dff9bd3bb453::t_d3183ee0db1dc4 1,3,5,8-27,29-30,37-80,82-227
+osmosis_ai/rollout/backend/harbor/backend.py
+  s_d7dff9bd3bb453::t_9d1b67a2a4ea60 52
+  s_d7dff9bd3bb453::t_21ab0bc77bee82 11,46-49,82-87,112,141-146,366-369,413-417,419
+osmosis_ai/rollout/backend/harbor/workflow_runner.py
+  s_d7dff9bd3bb453::t_f718ed1eed0be9 1-72
+examples/rollout/harbor_rollout_server_example.py
+  s_d7dff9bd3bb453::t_f2cfe4015efdc0 45
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "3b4087eceb8992ced3b0528a8e237f929cbd0947",
+  "prompts": {},
+  "sessions": {
+    "s_d7dff9bd3bb453": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019e24b0-9f2f-7200-9fc2-96c78f551889",
+        "model": "gpt-5.5"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}

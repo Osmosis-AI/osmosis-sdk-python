@@ -1,0 +1,23 @@
+.github/workflows/auto-label-pr.yml
+  db1253a0acf598aa 9
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.15",
+  "base_commit_sha": "c1e5555ea554b3c0a87cb86826bd8ef9f0fea40b",
+  "prompts": {
+    "db1253a0acf598aa": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7e6ece94-b2a6-4001-bd83-c6772fb0e1bf",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>",
+      "messages": [],
+      "total_additions": 1,
+      "total_deletions": 1,
+      "accepted_lines": 1,
+      "overriden_lines": 0
+    }
+  }
+}

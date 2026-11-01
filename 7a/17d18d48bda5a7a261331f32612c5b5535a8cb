@@ -1,0 +1,19 @@
+docs/superpowers/specs/2026-05-11-cli-command-removal-design.md
+  s_0b017d89d2930d::t_24b9c27fe12a7a 13,15,33-36,40,69-70,83-85,97,101-103,110,158,165
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "7a17d18d48bda5a7a261331f32612c5b5535a8cb",
+  "prompts": {},
+  "sessions": {
+    "s_0b017d89d2930d": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "810cf756-5842-4b31-b61e-05f0aafa106d",
+        "model": "gpt-5.5-extra-high"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}

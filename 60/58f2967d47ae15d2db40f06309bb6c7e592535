@@ -1,0 +1,31 @@
+osmosis_ai/platform/api/models.py
+  s_1125dfc1f77224::t_2301ccc8826ab6 165-171
+  s_1125dfc1f77224::t_ed86cc33663b99 619-715
+osmosis_ai/cli/output/__init__.py
+  s_1125dfc1f77224::t_ba8d956e47ee54 33
+  s_1125dfc1f77224::t_3f230319b42d42 64
+osmosis_ai/platform/api/client.py
+  s_1125dfc1f77224::t_eced66340da7de 12,18,23
+  s_1125dfc1f77224::t_5e04f9180589c9 408-482
+osmosis_ai/cli/commands/eval.py
+  s_1125dfc1f77224::t_9bd9a5c3a9e964 5,10-12,14,130-536
+osmosis_ai/cli/output/serializers.py
+  s_1125dfc1f77224::t_a5777348a9831b 111-125
+  s_1125dfc1f77224::t_190f978fccfff7 9
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.1",
+  "base_commit_sha": "6058f2967d47ae15d2db40f06309bb6c7e592535",
+  "prompts": {},
+  "sessions": {
+    "s_1125dfc1f77224": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "9e9eedbd-1e69-4307-bf54-704074104d7c",
+        "model": "claude-4.6-opus-high-thinking"
+      },
+      "human_author": "Jacob Trock <jgh@geocrypt.me>"
+    }
+  }
+}

@@ -1,0 +1,23 @@
+osmosis_ai/rollout/eval/rubric/engine.py
+  5442afeb8337650a 409
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.3",
+  "base_commit_sha": "140182e833ee59408c32d83b308187ffb56e175c",
+  "prompts": {
+    "5442afeb8337650a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8096af77-32f5-4a3d-a61a-85c15b37c099",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "JoyboyBrian",
+      "messages": [],
+      "total_additions": 1,
+      "total_deletions": 4,
+      "accepted_lines": 1,
+      "overriden_lines": 0
+    }
+  }
+}

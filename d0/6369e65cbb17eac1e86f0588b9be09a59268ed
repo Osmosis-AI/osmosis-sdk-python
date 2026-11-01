@@ -1,0 +1,18 @@
+docs/rollout-sdk.md
+  h_5979ffe3601239 286
+pyproject.toml
+  h_5979ffe3601239 114
+uv.lock
+  h_5979ffe3601239 2112,3143-3144
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "d06369e65cbb17eac1e86f0588b9be09a59268ed",
+  "prompts": {},
+  "humans": {
+    "h_5979ffe3601239": {
+      "author": "Allen Lin <allen@osmosis.ai>"
+    }
+  }
+}

@@ -1,0 +1,27 @@
+docs/troubleshooting.md
+  s_9477fa0c8717da::t_296d33a7a69ff8 54-60
+README.md
+  s_9477fa0c8717da::t_abda9decda2c02 65-71,83
+docs/cli.md
+  s_9477fa0c8717da::t_0afc239d11f59a 45-51,62
+docs/README.md
+  s_9477fa0c8717da::t_383dd6f60a2765 13-19
+osmosis_ai/platform/cli/templates/README.md.tpl
+  s_9477fa0c8717da::t_00862e80cf4460 24-25,28-34
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "2b99121c2e62bddac9abec3acefad478f39ee45a",
+  "prompts": {},
+  "sessions": {
+    "s_9477fa0c8717da": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "a15c2361-d4d8-4e57-b365-2161f14671da",
+        "model": "gpt-5.5-extra-high"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}

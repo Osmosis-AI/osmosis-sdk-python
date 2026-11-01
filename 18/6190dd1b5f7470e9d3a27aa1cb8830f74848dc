@@ -1,0 +1,27 @@
+osmosis_ai/platform/api/models.py
+  s_c4ae36f1f07f27::t_4450a0f000624c 173,194,232
+tests/unit/cli/output/test_serializers.py
+  s_c4ae36f1f07f27::t_2d8eefc42250cc 78,93
+osmosis_ai/cli/output/serializers.py
+  s_c4ae36f1f07f27::t_4450a0f000624c 41
+tests/golden/cli_output/training_run_serializer.json
+  s_c4ae36f1f07f27::t_4450a0f000624c 10
+tests/unit/platform/api/test_models.py
+  s_c4ae36f1f07f27::t_2d8eefc42250cc 220-244
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "186190dd1b5f7470e9d3a27aa1cb8830f74848dc",
+  "prompts": {},
+  "sessions": {
+    "s_c4ae36f1f07f27": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019e22aa-4848-72d3-93ef-77ce721c0c9c",
+        "model": "gpt-5.5"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}

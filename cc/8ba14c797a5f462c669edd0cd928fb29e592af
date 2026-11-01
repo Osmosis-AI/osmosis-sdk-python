@@ -1,0 +1,47 @@
+tests/unit/cli/test_command_groups.py
+  f6776a37c6c07cd1 21,41,67
+tests/unit/platform/cli/test_workspace_setup.py
+  f6776a37c6c07cd1 185,197,200,208,288,304
+osmosis_ai/platform/cli/templates/skills/submit-training/SKILL.md.tpl
+  f6776a37c6c07cd1 8-9,11,25,28,60
+osmosis_ai/cli/main.py
+  f6776a37c6c07cd1 96
+osmosis_ai/platform/cli/templates/configs/training/default.toml.tpl
+  f6776a37c6c07cd1 11
+osmosis_ai/platform/cli/templates/AGENTS.md.tpl
+  f6776a37c6c07cd1 5,9,11-13,20,22
+osmosis_ai/platform/cli/templates/configs/AGENTS.md.tpl
+  f6776a37c6c07cd1 3,19,43
+osmosis_ai/platform/cli/templates/pyproject.toml.tpl
+  f6776a37c6c07cd1 3
+osmosis_ai/cli/commands/rollout.py
+  f6776a37c6c07cd1 1,12,169-171
+osmosis_ai/platform/cli/init.py
+  f6776a37c6c07cd1 55,69-70,73-74,208
+osmosis_ai/platform/cli/templates/skills/create-rollout/SKILL.md.tpl
+  f6776a37c6c07cd1 1,4,9-10,14,17,19,21,23,44
+osmosis_ai/platform/cli/templates/skills/evaluate-rollout/SKILL.md.tpl
+  f6776a37c6c07cd1 1,4,8-9
+tests/unit/test_cli.py
+  f6776a37c6c07cd1 523
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.20",
+  "base_commit_sha": "cc8ba14c797a5f462c669edd0cd928fb29e592af",
+  "prompts": {
+    "f6776a37c6c07cd1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f5a2d3e2-25fa-4e3e-a8fc-381c8a817874",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>",
+      "messages": [],
+      "total_additions": 55,
+      "total_deletions": 55,
+      "accepted_lines": 54,
+      "overriden_lines": 0
+    }
+  }
+}

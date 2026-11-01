@@ -1,0 +1,9 @@
+tests/unit/platform/cli/test_training_config.py
+  a5f097a3689abe88 292,294-300,303-308,310-311
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "a353067d30726d9eec97175fceb8a86b2f7f9f48",
+  "prompts": {}
+}

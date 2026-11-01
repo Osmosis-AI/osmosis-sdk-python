@@ -1,0 +1,35 @@
+osmosis_ai/platform/auth/credentials.py
+  05badbf9ec7cbce5 63-65
+osmosis_ai/platform/auth/flow.py
+  05badbf9ec7cbce5 374-377,385-386
+osmosis_ai/platform/auth/local_config.py
+  05badbf9ec7cbce5 296-297
+osmosis_ai/platform/api/client.py
+  05badbf9ec7cbce5 85,92
+osmosis_ai/platform/cli/whoami.py
+  05badbf9ec7cbce5 18,20,22,24
+osmosis_ai/platform/cli/project.py
+  05badbf9ec7cbce5 132,138-139,143,161,165,176,207
+osmosis_ai/platform/cli/login.py
+  05badbf9ec7cbce5 137-138,143
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.17",
+  "base_commit_sha": "8308efe7e295f814a5c0d8eb8c1bd6f0154a93ed",
+  "prompts": {
+    "05badbf9ec7cbce5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "951df0b9-ffc0-45ef-92cf-4da22880b127",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>",
+      "messages": [],
+      "total_additions": 35,
+      "total_deletions": 14,
+      "accepted_lines": 29,
+      "overriden_lines": 0
+    }
+  }
+}

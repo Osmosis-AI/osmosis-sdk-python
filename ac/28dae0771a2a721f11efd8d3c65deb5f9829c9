@@ -1,0 +1,36 @@
+osmosis_ai/rollout_v2/utils/http.py
+  c2139f99eece8929 61,63,66-67
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.0",
+  "base_commit_sha": "ac28dae0771a2a721f11efd8d3c65deb5f9829c9",
+  "prompts": {
+    "97034826ecaa6f4c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f1f41f2c-d165-48e5-aa3b-aa5d5579847f",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jacob Trock",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 2,
+      "overriden_lines": 0
+    },
+    "c2139f99eece8929": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f8031deb-924a-429d-964c-4360c32c95c5",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jacob Trock",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 4,
+      "overriden_lines": 0
+    }
+  }
+}

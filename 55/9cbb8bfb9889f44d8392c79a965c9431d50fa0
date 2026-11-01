@@ -1,0 +1,23 @@
+tests/unit/eval/local/test_runner_units.py
+  s_6af85c58f85f36::t_67ca93a7339a8b 349-353,362-365,368-372
+  s_6af85c58f85f36::t_cdf53342d08c59 421-484
+tests/unit/eval/local/test_server_bootstrap.py
+  s_6af85c58f85f36::t_18d13305b4aa23 1-14,16-64,69-92,100-107,109-159,161-170
+  s_6af85c58f85f36::t_ffafcde48108a0 15,65-68,93-99,108,160
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "559cbb8bfb9889f44d8392c79a965c9431d50fa0",
+  "prompts": {},
+  "sessions": {
+    "s_6af85c58f85f36": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "907f3386-dc5e-4eca-8d2d-a0547ca6409a",
+        "model": "grok-4.6"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}

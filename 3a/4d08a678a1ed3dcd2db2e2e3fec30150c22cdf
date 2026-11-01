@@ -1,0 +1,19 @@
+CHANGELOG.md
+  s_2774afed05ba92::t_78296b72f453f3 21
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "3a4d08a678a1ed3dcd2db2e2e3fec30150c22cdf",
+  "prompts": {},
+  "sessions": {
+    "s_2774afed05ba92": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f17c10dd-ceb0-4912-b669-1e683251b529",
+        "model": "claude-fable-5"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}

@@ -1,0 +1,25 @@
+pyproject.toml
+  60a62cce33c55e17 102
+osmosis_ai/platform/cli/init.py
+  60a62cce33c55e17 134
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.21",
+  "base_commit_sha": "1e1916ba5e60a497e2fef8af13cedf18e1b738cd",
+  "prompts": {
+    "60a62cce33c55e17": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8d23d571-3e19-4724-9567-57e86feb93c3",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>",
+      "messages": [],
+      "total_additions": 3,
+      "total_deletions": 3,
+      "accepted_lines": 2,
+      "overriden_lines": 0
+    }
+  }
+}

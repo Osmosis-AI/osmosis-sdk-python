@@ -1,0 +1,26 @@
+CHANGELOG.md
+  s_76eaedeaa9e4c9::t_24eac85f4e5027 13-14
+  s_76eaedeaa9e4c9::t_0c007ba08102d1 19
+osmosis_ai/platform/cli/secret_resolution.py
+  s_76eaedeaa9e4c9::t_f8f753715ed306 13-24,26-32,34,36,41-47
+tests/unit/platform/cli/test_secret_resolution.py
+  s_76eaedeaa9e4c9::t_e787ed5c414b38 142
+  s_76eaedeaa9e4c9::t_fe43cbb273564b 87-91
+  s_76eaedeaa9e4c9::t_5064b591a8dfdf 77-86,92-141,143-156
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "de70a6307ed2bbc2ab5d121b541efa41481aa058",
+  "prompts": {},
+  "sessions": {
+    "s_76eaedeaa9e4c9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6132497e-a813-46fc-bc17-c955b1601538",
+        "model": "claude-opus-5"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}

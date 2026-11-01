@@ -1,0 +1,21 @@
+tests/unit/eval/local/conftest.py
+  s_c80b3fb770a70f::t_514978f81b44ac 237
+tests/unit/rollout/eval_proxy_stub.py
+  s_c80b3fb770a70f::t_2670f6f380590f 12-216
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "dc4ae3fabc3d337757343d264b5eb8129967703f",
+  "prompts": {},
+  "sessions": {
+    "s_c80b3fb770a70f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "bacf190c-93e0-4d73-b25f-4ed0f5ef4be5",
+        "model": "claude-fable-5"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}

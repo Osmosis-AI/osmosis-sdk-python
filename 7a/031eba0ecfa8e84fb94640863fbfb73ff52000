@@ -1,0 +1,105 @@
+pyproject.toml
+  ea43754721086654 27-28,30,35-63,68,79
+osmosis_ai/cli/commands/model.py
+  ea43754721086654 120
+osmosis_ai/eval/rubric/cli.py
+  ea43754721086654 8
+osmosis_ai/platform/auth/flow.py
+  ea43754721086654 333-334
+osmosis_ai/cli/main.py
+  ea43754721086654 13
+osmosis_ai/errors.py
+  ea43754721086654 1-5
+tests/unit/cli/test_train_metrics_cmd.py
+  ea43754721086654 404,439
+osmosis_ai/platform/cli/training_config.py
+  ea43754721086654 11
+osmosis_ai/platform/cli/utils.py
+  ea43754721086654 10
+osmosis_ai/platform/cli/workspace.py
+  ea43754721086654 19
+osmosis_ai/eval/llm_proxy.py
+  ea43754721086654 107,301
+osmosis_ai/platform/cli/workspace_contract.py
+  ea43754721086654 8
+osmosis_ai/__init__.py
+  ea43754721086654 44-50
+osmosis_ai/eval/evaluation/cli.py
+  ea43754721086654 237,331
+osmosis_ai/cli/commands/workspace.py
+  ea43754721086654 66
+tests/unit/platform/cli/test_workspace_setup.py
+  ea43754721086654 10
+osmosis_ai/cli/commands/rollout.py
+  ea43754721086654 10
+tests/unit/platform/cli/test_workspace_upload.py
+  ea43754721086654 196,227
+tests/unit/test_rubric_cli_command.py
+  ea43754721086654 12
+osmosis_ai/eval/common/cli.py
+  ea43754721086654 14
+tests/unit/cli/test_model_commands.py
+  ea43754721086654 139
+osmosis_ai/platform/cli/init.py
+  ea43754721086654 19
+tests/unit/auth/test_platform_client.py
+  ea43754721086654 15
+osmosis_ai/eval/rubric/dataset.py
+  ea43754721086654 8
+tests/unit/eval/test_config.py
+  ea43754721086654 99,106,114,125,140,155,170,203,223,243
+osmosis_ai/rollout/__init__.py
+  ea43754721086654 3-4,15,33-59
+tests/unit/platform/cli/test_dataset_workspace_context.py
+  ea43754721086654 15
+osmosis_ai/platform/cli/dataset.py
+  ea43754721086654 14
+osmosis_ai/eval/config.py
+  ea43754721086654 11
+osmosis_ai/cli/commands/train.py
+  ea43754721086654 11-12
+osmosis_ai/cli/commands/auth.py
+  ea43754721086654 13
+osmosis_ai/cli/prompts.py
+  ea43754721086654 391
+tests/unit/eval/common/test_grader_resolution.py
+  ea43754721086654 6
+osmosis_ai/consts.py
+  ea43754721086654 3
+tests/unit/platform/cli/test_training_config.py
+  ea43754721086654 9
+tests/unit/cli/test_train_commands.py
+  ea43754721086654 14
+tests/unit/eval/common/test_multi_candidate.py
+  ea43754721086654 10
+tests/unit/eval/test_llm_proxy.py
+  ea43754721086654 55,79
+osmosis_ai/platform/auth/platform_client.py
+  ea43754721086654 13
+osmosis_ai/cli/__init__.py
+  ea43754721086654 1,5
+tests/unit/auth/test_error_messages.py
+  ea43754721086654 15
+tests/unit/platform/cli/test_utils.py
+  ea43754721086654 11
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "7a031eba0ecfa8e84fb94640863fbfb73ff52000",
+  "prompts": {
+    "ea43754721086654": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4217dc30-3535-4ac9-a67a-116e24276b45",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Jacob Trock",
+      "messages": [],
+      "total_additions": 146,
+      "total_deletions": 116,
+      "accepted_lines": 133,
+      "overriden_lines": 0
+    }
+  }
+}

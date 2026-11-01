@@ -1,0 +1,14 @@
+osmosis_ai/consts.py
+  h_f2a968af532970 3
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "8b6351735fa474063d31ce3f7b61b029a71dc101",
+  "prompts": {},
+  "humans": {
+    "h_f2a968af532970": {
+      "author": "Jacob Trock"
+    }
+  }
+}

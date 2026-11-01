@@ -1,0 +1,36 @@
+osmosis_ai/eval/evaluation/cli.py
+  607c270601d19654 597-598,606-618,625,633,656-676,717
+tests/unit/eval/evaluation/test_cli.py
+  9bd21126f82148e5 172,176
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "8ef79d2721f6adc600fa4f6b96838f07befeab85",
+  "prompts": {
+    "607c270601d19654": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "fae047a0-b6c2-48ac-90e0-df57a00f9110",
+        "model": "gpt-5.5-extra-high"
+      },
+      "human_author": "JoyboyBrian",
+      "total_additions": 145,
+      "total_deletions": 12,
+      "accepted_lines": 227,
+      "overriden_lines": 0
+    },
+    "9bd21126f82148e5": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "0e1f97b0-fe3d-41ca-aa6d-5dc989e3cab4",
+        "model": "default"
+      },
+      "human_author": "JoyboyBrian",
+      "total_additions": 1041,
+      "total_deletions": 1425,
+      "accepted_lines": 14,
+      "overriden_lines": 0
+    }
+  }
+}

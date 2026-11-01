@@ -1,0 +1,22 @@
+osmosis_ai/platform/cli/eval_run.py
+  s_63849cb681b9c2::t_39a30af77d6b58 264-266,272
+tests/unit/platform/cli/test_eval_run.py
+  s_63849cb681b9c2::t_c82ff63f465cfc 380
+  s_63849cb681b9c2::t_39a30af77d6b58 375-379,381-384
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "e2d8a6ac76d226abb355379345a8f86048774c63",
+  "prompts": {},
+  "sessions": {
+    "s_63849cb681b9c2": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a01ce2-3390-7571-bdba-b85368ae1a9d",
+        "model": "azure-openai/gpt-5.6-sol"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}

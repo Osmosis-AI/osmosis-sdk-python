@@ -1,0 +1,77 @@
+osmosis_ai/platform/auth/platform_client.py
+  22c0ea42facb5f69 14
+osmosis_ai/cli/commands/model.py
+  22c0ea42facb5f69 12
+  d0d339aaad8d255a 72
+osmosis_ai/cli/main.py
+  22c0ea42facb5f69 18
+osmosis_ai/platform/cli/dataset.py
+  22c0ea42facb5f69 18
+  d0d339aaad8d255a 279
+osmosis_ai/platform/cli/workspace.py
+  22c0ea42facb5f69 33,35
+osmosis_ai/cli/commands/auth.py
+  22c0ea42facb5f69 237
+osmosis_ai/cli/commands/train.py
+  22c0ea42facb5f69 13
+  d0d339aaad8d255a 24
+tests/unit/platform/cli/test_utils.py
+  d0d339aaad8d255a 294-295,300
+osmosis_ai/platform/cli/utils.py
+  d0d339aaad8d255a 300,365
+  22c0ea42facb5f69 21,29
+osmosis_ai/cli/commands/dataset.py
+  22c0ea42facb5f69 7
+  d0d339aaad8d255a 28
+osmosis_ai/platform/constants.py
+  22c0ea42facb5f69 1-12
+osmosis_ai/platform/api/client.py
+  22c0ea42facb5f69 10
+  d0d339aaad8d255a 130,248,300,379,391,441
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.3",
+  "base_commit_sha": "3161ebdfc6889d9a7c40db5e3099a25e7bbda94a",
+  "prompts": {
+    "004d36efbe435183": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "855fd24a-0495-4de9-b0f7-92ca4af98787",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "JoyboyBrian",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 2,
+      "accepted_lines": 0,
+      "overriden_lines": 0
+    },
+    "22c0ea42facb5f69": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "743897a8-1cf0-44fe-a398-9b820c4a9b19",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "JoyboyBrian",
+      "messages": [],
+      "total_additions": 28,
+      "total_deletions": 23,
+      "accepted_lines": 25,
+      "overriden_lines": 0
+    },
+    "d0d339aaad8d255a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "450b4ca2-5cfe-4974-a6b3-a840d956fe1b",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "JoyboyBrian",
+      "messages": [],
+      "total_additions": 44,
+      "total_deletions": 41,
+      "accepted_lines": 15,
+      "overriden_lines": 0
+    }
+  }
+}

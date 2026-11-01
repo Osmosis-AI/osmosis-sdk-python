@@ -1,0 +1,25 @@
+osmosis_ai/rollout_v2/backend/harbor/agent_adapter.py
+  62aa41882afcd51c 1-60
+osmosis_ai/rollout_v2/backend/harbor/backend.py
+  62aa41882afcd51c 46
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8",
+  "base_commit_sha": "72b0c0a375faeee26627c6f4a5a3d094f4636257",
+  "prompts": {
+    "62aa41882afcd51c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d9021412-d88d-481b-8bbd-43b669a4022e",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "JoyboyBrian",
+      "messages": [],
+      "total_additions": 137,
+      "total_deletions": 13,
+      "accepted_lines": 63,
+      "overriden_lines": 0
+    }
+  }
+}

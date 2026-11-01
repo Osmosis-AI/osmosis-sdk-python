@@ -1,0 +1,106 @@
+tests/unit/cli/test_train_metrics_cmd.py
+  90e57adb47e902eb 325,328,452-453,457,485,492,498
+  b6f000910df11e43 313
+osmosis_ai/platform/cli/templates/AGENTS.md.tpl
+  90e57adb47e902eb 1,3,6,9,30,46,65
+osmosis_ai/platform/cli/project.py
+  90e57adb47e902eb 1-62
+osmosis_ai/cli/commands/init.py
+  90e57adb47e902eb 12,20
+osmosis_ai/eval/evaluation/cli.py
+  90e57adb47e902eb 482-485,496-498,500,576
+tests/unit/cli/test_workspace_json.py
+  90e57adb47e902eb 1
+osmosis_ai/cli/output/error.py
+  90e57adb47e902eb 108
+osmosis_ai/cli/main.py
+  90e57adb47e902eb 185,193
+osmosis_ai/platform/cli/templates/configs/eval/default.toml.tpl
+  90e57adb47e902eb 7
+osmosis_ai/platform/cli/templates/research/program.md.tpl
+  90e57adb47e902eb 13
+osmosis_ai/platform/cli/templates/pyproject.toml.tpl
+  90e57adb47e902eb 3
+osmosis_ai/cli/commands/model.py
+  90e57adb47e902eb 55
+tests/unit/cli/test_command_groups.py
+  90e57adb47e902eb 18,73
+osmosis_ai/platform/cli/project_contract.py
+  90e57adb47e902eb 1-6,25,28-29,35,40-41,43-44,46-47,49,52-54,59,61-62,69,72,76,78,83,85,108,115,124,165-168
+osmosis_ai/platform/cli/templates/CLAUDE.md.tpl
+  90e57adb47e902eb 1,3
+docs/eval.md
+  90e57adb47e902eb 8
+tests/unit/cli/test_eval_run_json.py
+  90e57adb47e902eb 96,100-101,104
+osmosis_ai/platform/cli/templates/README.md.tpl
+  90e57adb47e902eb 3,14-15,22
+osmosis_ai/platform/cli/templates/configs/AGENTS.md.tpl
+  90e57adb47e902eb 3,50
+tests/unit/platform/cli/test_project_setup.py
+  90e57adb47e902eb 545
+  b6f000910df11e43 22,25,28,31,36,42,45,54,60-61,67,71,76,95,99,119,137,160,162,189,213,222,224,269,280,282,324,326,362,374,392,418,420,423,446,458,461,465,467,469,474,477,499,501,512,514,521-522,525,527,530-531,538,541,560,562,564,584,586,597,610,612,625,633-634,637,639,641-642,644,646,667,669,694,696,709,712,714,716,718-721,728,730,735-737,739-740,742,744,799,820,822,840,842,881,883,920,943,967,969,991,993,996,1015,1034-1035,1051
+osmosis_ai/platform/cli/templates/project.toml.tpl
+  90e57adb47e902eb 1,4
+osmosis_ai/cli/commands/rollout.py
+  90e57adb47e902eb 23-26,28,30-31,34-35,42,44,51,63,65,72,87,91,99,157
+tests/unit/cli/test_command_result_migration_train_model_deployment_rollout.py
+  90e57adb47e902eb 313-314
+osmosis_ai/cli/commands/deployment.py
+  90e57adb47e902eb 109
+osmosis_ai/rollout/context.py
+  90e57adb47e902eb 70
+tests/unit/cli/test_project_json.py
+  90e57adb47e902eb 1-2,5,8,11,20,24-25,27,30-33
+osmosis_ai/platform/cli/init.py
+  90e57adb47e902eb 1,6-9,51,75,80,97-98,132,144,166,171-172,178,180-181,189-190,193,223,244,256,367,401,428,445,472,577,584-586,629,632,647,656,662-663,684,688,700,705,732,734
+tests/unit/cli/test_rollout_validate_command.py
+  90e57adb47e902eb 10,20-21
+osmosis_ai/eval/common/cli.py
+  90e57adb47e902eb 51,54-55,144,150,193,213,260,273
+tests/unit/eval/evaluation/test_cli.py
+  90e57adb47e902eb 70,74-75,78
+osmosis_ai/cli/commands/train.py
+  90e57adb47e902eb 55,222-227,234-236,238,244,359-360,362
+tests/unit/cli/test_init_json.py
+  90e57adb47e902eb 76
+osmosis_ai/cli/commands/workspace.py
+  90e57adb47e902eb 1,10,18,37,52,63,73
+osmosis_ai/cli/commands/project.py
+  90e57adb47e902eb 1-34
+docs/cli.md
+  90e57adb47e902eb 35,43-58,74,81,96
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "29e0a3abd79a19e4e6f8127741112852cfbe52ae",
+  "prompts": {
+    "90e57adb47e902eb": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "8e82f7dc-12cb-4b4b-9c79-a05a5466ab60",
+        "model": "claude-opus-4-7-thinking-high"
+      },
+      "human_author": "JoyboyBrian",
+      "messages": [],
+      "total_additions": 491,
+      "total_deletions": 426,
+      "accepted_lines": 479,
+      "overriden_lines": 1
+    },
+    "b6f000910df11e43": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "3d096318-65e3-463e-8834-6783b2c016a4",
+        "model": "gpt-5.5"
+      },
+      "human_author": "JoyboyBrian",
+      "messages": [],
+      "total_additions": 70,
+      "total_deletions": 70,
+      "accepted_lines": 70,
+      "overriden_lines": 0
+    }
+  }
+}

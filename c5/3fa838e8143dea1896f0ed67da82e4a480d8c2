@@ -1,0 +1,23 @@
+osmosis_ai/platform/auth/local_config.py
+  1d0f4ea02a956ae4 296-299
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.17",
+  "base_commit_sha": "c53fa838e8143dea1896f0ed67da82e4a480d8c2",
+  "prompts": {
+    "1d0f4ea02a956ae4": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "93682492-6bb8-4e3f-875c-d04c94640656",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>",
+      "messages": [],
+      "total_additions": 4,
+      "total_deletions": 3,
+      "accepted_lines": 4,
+      "overriden_lines": 0
+    }
+  }
+}
