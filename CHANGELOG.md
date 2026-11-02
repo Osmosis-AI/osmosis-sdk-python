@@ -2,7 +2,7 @@
 
 This file records changes to `osmosis-ai`. For earlier versions, see [GitHub Releases](https://github.com/Osmosis-AI/osmosis-sdk-python/releases).
 
-## 0.3.10 - 2026-11-01
+## 0.3.10 - 2026-11-02
 
 ### Breaking Changes
 
