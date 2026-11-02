@@ -7,6 +7,7 @@ import os
 import subprocess
 import sys
 from collections.abc import Iterator
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
@@ -470,9 +471,12 @@ def test_reap_terminates_a_verified_orphan_group(
     state = _state_for(sleeper)
     state.write(path)
 
-    assert reap_orphan_server(path, grace_sec=5.0) == state
+    # Reap our child while terminating, as init would for a real orphan.
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        exited = executor.submit(sleeper.wait, timeout=10)
+        assert reap_orphan_server(path, grace_sec=5.0) == state
+        assert exited.result() != 0
     assert not path.exists()
-    assert sleeper.wait(timeout=10) != 0
 
 
 def test_reap_never_kills_a_recycled_pid(

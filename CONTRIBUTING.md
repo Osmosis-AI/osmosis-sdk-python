@@ -47,7 +47,7 @@ The table below lists all development commands. If you installed with **pip**, d
 
 Use the [task map](docs/README.md#task-map) to select focused tests before the full suite. For dependency changes, start with [Dependency changes](#dependency-changes). The commands above and [type-checking guidance](#type-checking) are the shared verification reference for agent instructions, PR preparation, and releases; copy checklist items from the current [PR template](.github/PULL_REQUEST_TEMPLATE.md).
 
-Before handing off a code or dependency change, run Ruff lint and format checks, ty, Pyright public API verification, and pytest from the command table, plus `git diff --check`. For documentation-only changes, run `uv run pytest tests/unit/docs/test_doc_links.py` and `git diff --check`; inspect changed inline paths and heading anchors because the link test checks file targets only. Report commands actually run and any unverified gates. [CI](.github/workflows/tests.yml) additionally checks the supported Python matrix, coverage, built artifacts, and isolated wheel installations; local focused tests do not establish those results or deployment acceptance.
+Before handing off a code or dependency change, run Ruff lint and format checks, ty, Pyright public API verification, and pytest from the command table, plus `git diff --check`. For documentation-only changes, run `python -I -S tests/unit/docs/test_doc_links.py` and `git diff --check`; inspect changed inline paths and heading anchors because the link test checks file targets only. Report commands actually run and any unverified gates. [CI](.github/workflows/tests.yml) additionally checks the supported Python matrix, coverage, built artifacts, and isolated wheel installations; local focused tests do not establish those results or deployment acceptance.
 
 ## Dependency changes
 
@@ -92,7 +92,9 @@ pre-commit install
 
 > **Tip:** Run `uv run ty check --error-on-warning osmosis_ai/` before pushing to catch type errors early. Also run `uv run --no-editable pyright --verifytypes osmosis_ai --ignoreexternal` and inspect any errors against the narrow Harbor exception above.
 
-CI runs all tests with four pytest-xdist workers using `worksteal` scheduling, including coverage on Python 3.12 and the complete suites on Python 3.13 and 3.14. Local `uv run pytest` remains serial for debugging.
+CI runs all tests on Python 3.12, 3.13, and 3.14 with four pytest-xdist workers using `worksteal` scheduling. Branch coverage runs on Python 3.14, where coverage.py uses the lower-overhead `sys.monitoring` core; the 70% threshold is unchanged. Local `uv run pytest` remains serial for debugging.
+
+PRs that change only Markdown under `docs/`, `AGENTS.md`, or `CONTRIBUTING.md` run Ruff and documentation link checks. The link checks run with `python -I -S tests/unit/docs/test_doc_links.py` using only the standard library, without installing the SDK or its dependencies. The [scope classifier](.github/scripts/ci-scope.py) checks the actual merge diff, including both paths of a rename, and defaults to the full suite for empty or unverifiable diffs. README, dependency, source, test, and CI changes still run all checks, as do main pushes and releases. Required Python matrix checks remain present on documentation-only PRs; `typecheck-pyright` checks their documentation links. The required `build` check aggregates all applicable jobs, including Python 3.14 coverage and wheel installations, while `package` produces the release artifacts. uv caches are separated by job purpose and install scenario so a small build cannot populate the test cache first.
 
 ## Pull Requests
 
@@ -170,4 +172,4 @@ If the title does not match the convention, the labeling job fails rather than r
 3. Complete the applicable [verification](#verification)
 4. Submit a pull request with a properly formatted title; title-derived labels are added automatically
 
-CI will run linting, type checking (ty and Pyright public API verification), tests on supported Python versions (see `requires-python` in `pyproject.toml`), PR title validation, and a build validation on every PR.
+CI runs linting, type checking (ty and Pyright public API verification), tests on supported Python versions (see `requires-python` in `pyproject.toml`), PR title validation, and build validation on code PRs. Documentation-only PRs use the fast path described above, with the same required check names.

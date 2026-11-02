@@ -36,15 +36,28 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 2
+      - name: Classify the tested merge diff
+        id: scope
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: python .github/scripts/ci-scope.py
       - uses: astral-sh/setup-uv@v7
+        if: steps.scope.outputs.docs-only != 'true'
         with:
           python-version: "3.12"
           enable-cache: true
+          cache-suffix: typecheck
       - name: Install dependencies
+        if: steps.scope.outputs.docs-only != 'true'
         run: uv sync --locked --all-extras --group dev
       - name: Run ty
+        if: steps.scope.outputs.docs-only != 'true'
         run: uv run --no-sync ty check --error-on-warning osmosis_ai/
       - name: Verify public API types
+        if: steps.scope.outputs.docs-only != 'true'
         run: |
           output=$(uv run --no-editable pyright --verifytypes osmosis_ai --ignoreexternal 2>&1) || true
           echo "$output"
@@ -66,6 +79,10 @@ jobs:
             exit 1
           fi
 
+      - name: Check documentation links
+        if: steps.scope.outputs.docs-only == 'true'
+        run: python -I -S tests/unit/docs/test_doc_links.py
+
   pytest:
     runs-on: ubuntu-latest
     # Must exceed the suite's normal wall clock plus at least one per-test
@@ -78,28 +95,39 @@ jobs:
         python-version: ["3.12", "3.13", "3.14"]
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 2
+      - name: Classify the tested merge diff
+        id: scope
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: python .github/scripts/ci-scope.py
 
       - uses: astral-sh/setup-uv@v7
+        if: steps.scope.outputs.docs-only != 'true'
         with:
           python-version: ${{ matrix.python-version }}
           enable-cache: true
+          cache-suffix: pytest
 
       - name: Install dependencies
+        if: steps.scope.outputs.docs-only != 'true'
         run: uv sync --locked --all-extras --group dev
 
       - name: Run tests with coverage
-        if: matrix.python-version == '3.12'
+        if: steps.scope.outputs.docs-only != 'true' && matrix.python-version == '3.14'
         run: uv run --no-sync pytest -n 4 --dist worksteal --durations=30 --cov=osmosis_ai --cov-branch --cov-report=term-missing --cov-report=xml
 
       - name: Upload coverage to Codecov
-        if: matrix.python-version == '3.12' && !github.event.pull_request.head.repo.fork
+        if: steps.scope.outputs.docs-only != 'true' && matrix.python-version == '3.14' && !github.event.pull_request.head.repo.fork
         uses: codecov/codecov-action@v7
         with:
           files: coverage.xml
           token: ${{ secrets.CODECOV_TOKEN }}
 
       - name: Run tests
-        if: matrix.python-version != '3.12'
+        if: steps.scope.outputs.docs-only != 'true' && matrix.python-version != '3.14'
         run: uv run --no-sync pytest -n 4 --dist worksteal --durations=30
 
   harbor-compatibility:
@@ -117,11 +145,22 @@ jobs:
             requirement: "harbor[daytona,opensandbox] @ git+https://github.com/Osmosis-AI/harbor@e8257a65a90dde2d6b353d16acffcd70c6b54c5d"
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 2
+      - name: Classify the tested merge diff
+        id: scope
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: python .github/scripts/ci-scope.py
       - uses: astral-sh/setup-uv@v7
+        if: steps.scope.outputs.docs-only != 'true'
         with:
           python-version: "3.12"
           enable-cache: true
+          cache-suffix: harbor-${{ matrix.name }}
       - name: Install the selected Harbor implementation
+        if: steps.scope.outputs.docs-only != 'true'
         env:
           HARBOR_REQUIREMENT: ${{ matrix.requirement }}
         run: |
@@ -130,6 +169,7 @@ jobs:
           uv pip check
           uv run --no-sync python -c 'from importlib.metadata import distribution; d = distribution("harbor"); print(d.version); print(d.read_text("direct_url.json"))'
       - name: Verify Harbor contracts
+        if: steps.scope.outputs.docs-only != 'true'
         run: >-
           uv run --no-sync pytest
           tests/unit/test_harbor_images.py
@@ -137,27 +177,43 @@ jobs:
           tests/unit/rollout/test_native_evidence.py
           tests/unit/rollout/test_trajectory_atif.py
 
-  build:
+  package:
+    outputs:
+      docs-only: ${{ steps.scope.outputs.docs-only }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 2
+      - name: Classify the tested merge diff
+        id: scope
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: python .github/scripts/ci-scope.py
 
       - uses: astral-sh/setup-uv@v7
+        if: steps.scope.outputs.docs-only != 'true'
         with:
           python-version: "3.12"
           enable-cache: true
+          cache-suffix: package
 
       - name: Build package
+        if: steps.scope.outputs.docs-only != 'true'
         run: uv build
 
       - name: Check package
+        if: steps.scope.outputs.docs-only != 'true'
         run: uvx twine check --strict dist/*
 
       - name: Verify public artifacts exclude internal tooling
+        if: steps.scope.outputs.docs-only != 'true'
         run: uv run --no-project --python 3.12 python .github/scripts/verify-public-artifacts.py dist/*.whl dist/*.tar.gz
 
       - name: Verify artifact filenames match package version
+        if: steps.scope.outputs.docs-only != 'true'
         run: |
           VERSION=$(uv run --no-project --python 3.12 python -c 'import re, pathlib; text = pathlib.Path("osmosis_ai/consts.py").read_text(); print(re.search(r"^PACKAGE_VERSION\s*=\s*\"([^\"]+)\"", text, re.MULTILINE).group(1))')
           uv run --no-project --python 3.12 python - "$VERSION" <<'PY'
@@ -192,6 +248,7 @@ jobs:
           PY
 
       - name: Upload dist artifact
+        if: steps.scope.outputs.docs-only != 'true'
         uses: actions/upload-artifact@v7
         with:
           name: dist
@@ -199,7 +256,8 @@ jobs:
 
   wheel-smoke:
     name: Wheel smoke (${{ matrix.scenario }})
-    needs: build
+    needs: package
+    if: needs.package.outputs.docs-only != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     strategy:
@@ -231,6 +289,7 @@ jobs:
         with:
           python-version: "3.12"
           enable-cache: true
+          cache-suffix: wheel-${{ matrix.scenario }}
 
       - name: Download built wheel
         uses: actions/download-artifact@v8
@@ -263,3 +322,15 @@ jobs:
               --scenario "$SMOKE_SCENARIO" \
               --source-root "$GITHUB_WORKSPACE"
           )
+
+  build:
+    # Preserve the required check and gate coverage on 3.14 without a ruleset change.
+    needs: [lint, typecheck-pyright, pytest, harbor-compatibility, package, wheel-smoke]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require all applicable checks
+        env:
+          CHECKS_PASSED: ${{ !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') && (needs.package.outputs.docs-only == 'true' || !contains(needs.*.result, 'skipped')) }}
+        run: test "$CHECKS_PASSED" = true
