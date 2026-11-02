@@ -2063,8 +2063,6 @@ async def test_orphan_reaping_does_not_follow_a_state_file_symlink(
 
 
 async def test_reap_terminates_an_orphaned_tunnel_record(tmp_path: Path) -> None:
-    import subprocess
-
     from osmosis_ai.eval.local.state import (
         TUNNEL_STATE_FILENAME,
         ServerProcessState,
@@ -2080,7 +2078,8 @@ async def test_reap_terminates_an_orphaned_tunnel_record(tmp_path: Path) -> None
 
     # A real child in its own session stands in for the orphaned cloudflared:
     # the reap must prove ownership (pid + start token) before signalling.
-    child = subprocess.Popen(["sleep", "60"], start_new_session=True)
+    # asyncio reaps the child on exit, avoiding a zombie throughout the grace.
+    child = await asyncio.create_subprocess_exec("sleep", "60", start_new_session=True)
     try:
         token = process_start_token(child.pid)
         assert token is not None
@@ -2097,11 +2096,11 @@ async def test_reap_terminates_an_orphaned_tunnel_record(tmp_path: Path) -> None
 
         assert not (run_dir / TUNNEL_STATE_FILENAME).exists()
         assert any("orphaned cloudflared tunnel" in note for note in notes)
-        assert child.wait(timeout=10) != 0
+        assert await asyncio.wait_for(child.wait(), timeout=10) != 0
     finally:
-        if child.poll() is None:
+        if child.returncode is None:
             child.kill()
-            child.wait(timeout=10)
+        await asyncio.wait_for(child.wait(), timeout=10)
 
 
 async def test_tunnel_record_is_written_and_cleared_with_the_run(
