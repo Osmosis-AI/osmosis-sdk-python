@@ -45,11 +45,13 @@ jobs:
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: python .github/scripts/ci-scope.py
       - uses: astral-sh/setup-uv@v7
+        if: steps.scope.outputs.docs-only != 'true'
         with:
           python-version: "3.12"
           enable-cache: true
           cache-suffix: typecheck
       - name: Install dependencies
+        if: steps.scope.outputs.docs-only != 'true'
         run: uv sync --locked --all-extras --group dev
       - name: Run ty
         if: steps.scope.outputs.docs-only != 'true'
@@ -79,7 +81,7 @@ jobs:
 
       - name: Check documentation links
         if: steps.scope.outputs.docs-only == 'true'
-        run: uv run --no-sync pytest tests/unit/docs/test_doc_links.py
+        run: python -I -S tests/unit/docs/test_doc_links.py
 
   pytest:
     runs-on: ubuntu-latest

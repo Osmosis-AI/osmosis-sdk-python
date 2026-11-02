@@ -127,3 +127,9 @@ def test_local_markdown_links_resolve() -> None:
                 broken.append(f"{rel}:{lineno} -> {target}")
 
     assert not broken, "Broken relative links in markdown:\n" + "\n".join(broken)
+
+
+if __name__ == "__main__":
+    test_scanner_is_not_vacuous()
+    test_local_markdown_links_resolve()
+    print("Documentation links passed.")
