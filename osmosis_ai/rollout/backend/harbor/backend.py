@@ -676,6 +676,7 @@ class HarborBackend(ExecutionBackend):
             # Only the bundled harness reads the top-level input file; don't
             # stage the api_key without a consumer.
             write_input=self.bundle is not None and self.native is None,
+            native_agent=self.native is not None,
         )
 
     async def execute(

@@ -745,6 +745,76 @@ class TestNativeAgents:
         with pytest.raises(ValueError, match="unknown native agent"):
             self.backend_for("claude-code", template_task)
 
+    @pytest.mark.parametrize("agent", ["opencode", "mini-swe-agent", "terminus-2"])
+    @pytest.mark.parametrize(
+        ("prompt", "instruction"),
+        [
+            (
+                [{"role": "user", "content": "计算 2 * 3\nKeep precision."}],
+                "计算 2 * 3\nKeep precision.",
+            ),
+            (
+                [
+                    {"role": "system", "content": "Return #### <answer>."},
+                    {"role": "user", "content": "2 * 3"},
+                ],
+                "Return #### <answer>.\n\n2 * 3",
+            ),
+        ],
+    )
+    def test_native_template_renders_task_text(
+        self, template_task, agent, prompt, instruction
+    ):
+        backend = self.backend_for(agent, template_task)
+        request = request_for(prompt)
+        container_input = backend.build_input(request)
+        task_dir = backend.materialize_task(
+            backend.select_task(request), request.id, container_input
+        )
+
+        assert (task_dir / "instruction.md").read_text() == instruction
+        assert container_input.prompt == prompt
+
+    @pytest.mark.parametrize(
+        "prompt",
+        [
+            [
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": "https://example.com/image.png"},
+                        }
+                    ],
+                }
+            ],
+            [
+                {
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": [
+                        {
+                            "id": "call-1",
+                            "type": "function",
+                            "function": {"name": "multiply", "arguments": "{}"},
+                        }
+                    ],
+                }
+            ],
+            [{"role": "user", "content": "solve", "name": "Alice"}],
+        ],
+    )
+    def test_native_template_preserves_structured_prompts(self, template_task, prompt):
+        backend = self.backend_for("opencode", template_task)
+        request = request_for(prompt)
+        container_input = backend.build_input(request)
+        task_dir = backend.materialize_task(
+            backend.select_task(request), request.id, container_input
+        )
+
+        assert json.loads((task_dir / "instruction.md").read_text()) == prompt
+
     def test_env_wired_agent_receives_endpoint(self, template_task):
         backend = self.backend_for("mini-swe-agent", template_task)
         container_input = ContainerInput(
@@ -1023,7 +1093,8 @@ class TestNativeAgents:
                 native_agent_kwargs={"config": {}},
             )
 
-    def test_dataset_mode_keeps_task_instruction(self, tmp_path, bundle):
+    @pytest.mark.parametrize("native", [False, True])
+    def test_dataset_mode_keeps_task_instruction(self, tmp_path, bundle, native):
         root = tmp_path / "dataset"
         task = root / "task-a"
         (task / "environment").mkdir(parents=True)
@@ -1032,7 +1103,8 @@ class TestNativeAgents:
             orchestrator=TrialQueue(n_concurrent=1),
             tasks_dir=root,
             task_mode=TaskMode.DATASET,
-            bundle=bundle,
+            agent="opencode" if native else None,
+            bundle=None if native else bundle,
         )
         request = request_for(
             [{"role": "user", "content": "row prompt"}],
@@ -1041,8 +1113,8 @@ class TestNativeAgents:
         container_input = backend.build_input(request)
         assert container_input.prompt == []
 
-        task_dir = backend.select_task(request).materialize(
-            backend.rollouts_dir / request.id, container_input
+        task_dir = backend.materialize_task(
+            backend.select_task(request), request.id, container_input
         )
         assert (task_dir / "instruction.md").read_text() == "real instruction"
 
@@ -2834,12 +2906,17 @@ class TestContainerInputGating:
             bundle=bundle,
         )
         backend.rollouts_dir = tmp_path / "rollouts"
+        prompt = [
+            {"role": "system", "content": "Return #### <answer>."},
+            {"role": "user", "content": "2 * 3"},
+        ]
         task_dir = backend.materialize_task(
             HarborTask(template_task),
             "r1",
-            ContainerInput(rollout_id="r1", prompt=[{"role": "user", "content": "x"}]),
+            ContainerInput(rollout_id="r1", prompt=prompt),
         )
-        assert (task_dir / "container_input.json").exists()
+        assert ContainerInput.read(task_dir / "container_input.json").prompt == prompt
+        assert json.loads((task_dir / "instruction.md").read_text()) == prompt
 
     def test_native_with_grader_bundle_ships_input_only_in_tests(
         self, bundle, template_task, tmp_path
