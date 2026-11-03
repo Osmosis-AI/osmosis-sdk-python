@@ -702,3 +702,8 @@ def test_a_step_reporting_one_side_counts_the_other_as_zero() -> None:
 def test_steps_reporting_zero_usage_have_no_max_context() -> None:
     steps = [_agent_step(1, prompt_tokens=0, completion_tokens=0)]
     assert atif_max_context_tokens(_atif(ROLLOUT_A, steps=steps)) is None
+
+
+@pytest.mark.parametrize("steps", [None, ["not a step"]])
+def test_malformed_steps_have_no_max_context(steps: Any) -> None:
+    assert atif_max_context_tokens({"steps": steps}) is None
