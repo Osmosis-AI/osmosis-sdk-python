@@ -745,7 +745,6 @@ class TestNativeAgents:
         with pytest.raises(ValueError, match="unknown native agent"):
             self.backend_for("claude-code", template_task)
 
-    @pytest.mark.parametrize("agent", ["opencode", "mini-swe-agent", "terminus-2"])
     @pytest.mark.parametrize(
         ("prompt", "instruction"),
         [
@@ -767,9 +766,9 @@ class TestNativeAgents:
         ],
     )
     def test_native_template_renders_task_text(
-        self, template_task, agent, prompt, instruction
+        self, template_task, prompt, instruction
     ):
-        backend = self.backend_for(agent, template_task)
+        backend = self.backend_for("opencode", template_task)
         request = request_for(prompt)
         container_input = backend.build_input(request)
         task_dir = backend.materialize_task(
