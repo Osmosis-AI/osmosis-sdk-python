@@ -754,6 +754,10 @@ class TestNativeAgents:
                 "计算 2 * 3\nKeep precision.",
             ),
             (
+                [{"role": "user", "content": "repair \ud800 and \udfff text"}],
+                r"repair \ud800 and \udfff text",
+            ),
+            (
                 [
                     {"role": "system", "content": "Return #### <answer>."},
                     {"role": "user", "content": "2 * 3"},

@@ -207,7 +207,9 @@ class HarborTask:
                 instruction = "\n\n".join(message["content"] for message in prompt)
             else:
                 instruction = json.dumps(prompt, default=str)
-            (task_dir / "instruction.md").write_text(instruction)
+            (task_dir / "instruction.md").write_text(
+                instruction, encoding="utf-8", errors="backslashreplace"
+            )
         elif not (task_dir / "instruction.md").exists():
             raise ValueError(f"task {self.path.name} has no instruction and no prompt")
 
