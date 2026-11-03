@@ -174,6 +174,7 @@ class HarborTask:
         grader_wheel: Path | None = None,
         sdk_requirements: list[str] | None = None,
         write_input: bool = True,
+        native_agent: bool = False,
     ) -> Path:
         """Copy this task into *out_dir* and stage one rollout's files.
 
@@ -184,6 +185,8 @@ class HarborTask:
         isolated venv, so per-trial installs stop downloading dependencies.
         ``write_input=False`` skips the top-level container input file — it
         carries the api_key in cleartext, so it is not staged without a consumer.
+        Native agents receive plain system/user text as task instructions;
+        structured prompts retain their JSON representation.
         """
         self._reject_symlinks()
         task_dir = out_dir / self.path.name
@@ -193,8 +196,19 @@ class HarborTask:
             patch_dockerfile_with_sdk(task_dir / "environment", sdk_requirements)
 
         if container_input.prompt:
+            prompt = container_input.prompt
+            # Keep roles/fields for histories and multimodal inputs we cannot flatten.
+            if native_agent and all(
+                message.get("role") in ("system", "user")
+                and isinstance(message.get("content"), str)
+                and message.keys() <= {"role", "content"}
+                for message in prompt
+            ):
+                instruction = "\n\n".join(message["content"] for message in prompt)
+            else:
+                instruction = json.dumps(prompt, default=str)
             (task_dir / "instruction.md").write_text(
-                json.dumps(container_input.prompt, default=str)
+                instruction, encoding="utf-8", errors="backslashreplace"
             )
         elif not (task_dir / "instruction.md").exists():
             raise ValueError(f"task {self.path.name} has no instruction and no prompt")
