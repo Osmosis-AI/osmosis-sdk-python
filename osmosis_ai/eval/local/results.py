@@ -409,12 +409,12 @@ def atif_max_context_tokens(document: Mapping[str, Any]) -> int | None:
         metrics = step.get("metrics") if isinstance(step, Mapping) else None
         if not isinstance(metrics, Mapping):
             continue
-        size: int | None = None
+        size = 0
         for key in ("prompt_tokens", "completion_tokens"):
             value = metrics.get(key)
             if isinstance(value, int) and not isinstance(value, bool):
-                size = (size or 0) + value
-        if size:
+                size += value
+        if size > 0:
             largest = size if largest is None else max(largest, size)
     return largest
 
