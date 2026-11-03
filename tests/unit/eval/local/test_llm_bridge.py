@@ -314,6 +314,17 @@ async def test_max_context_counts_a_missing_side_as_zero_and_needs_usage(
     assert bridge.collect_tokens(other) is None
 
 
+async def test_max_context_ignores_the_zero_usage_litellm_reports_for_a_missing_block(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    zero = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+    fake = _FakeLiteLLM(response={**_response(), "usage": zero})
+    _install(monkeypatch, fake)
+    bridge = LiteLLMBridge(model="anthropic/claude-test")
+    await bridge.complete(_body(), rollout_id=ROLLOUT_ID)
+    assert bridge.collect_max_context(ROLLOUT_ID) is None
+
+
 async def test_stream_serves_single_chunk_sse(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

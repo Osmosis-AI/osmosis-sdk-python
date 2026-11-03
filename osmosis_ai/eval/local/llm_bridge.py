@@ -409,10 +409,12 @@ class LiteLLMBridge:
             self._tokens[rollout_id] = (
                 self._tokens.get(rollout_id, 0) + usage["total_tokens"]
             )
-            self._max_context[rollout_id] = max(
-                self._max_context.get(rollout_id, 0),
-                usage["prompt_tokens"] + usage["completion_tokens"],
-            )
+            size = usage["prompt_tokens"] + usage["completion_tokens"]
+            # LiteLLM reports a response without a usage block as all zeros.
+            if size > 0:
+                self._max_context[rollout_id] = max(
+                    self._max_context.get(rollout_id, 0), size
+                )
         return response
 
     def collect_tokens(self, rollout_id: str) -> int | None:

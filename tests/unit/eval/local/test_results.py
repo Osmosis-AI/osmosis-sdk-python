@@ -697,3 +697,8 @@ def test_max_context_is_the_largest_call_in_the_trajectory_while_tokens_sum(
 def test_a_step_reporting_one_side_counts_the_other_as_zero() -> None:
     steps = [_agent_step(1, prompt_tokens=30), _agent_step(2, completion_tokens=40)]
     assert atif_max_context_tokens(_atif(ROLLOUT_A, steps=steps)) == 40
+
+
+def test_steps_reporting_zero_usage_have_no_max_context() -> None:
+    steps = [_agent_step(1, prompt_tokens=0, completion_tokens=0)]
+    assert atif_max_context_tokens(_atif(ROLLOUT_A, steps=steps)) is None

@@ -399,7 +399,7 @@ def atif_max_context_tokens(document: Mapping[str, Any]) -> int | None:
     """Largest single step's ``prompt_tokens + completion_tokens``.
 
     A step reporting only one of the two counts the other as zero; ``None``
-    means no step reported either.
+    means no step reported a nonzero size.
     """
     steps = document.get("steps")
     if not isinstance(steps, list):
@@ -414,7 +414,7 @@ def atif_max_context_tokens(document: Mapping[str, Any]) -> int | None:
             value = metrics.get(key)
             if isinstance(value, int) and not isinstance(value, bool):
                 size = (size or 0) + value
-        if size is not None:
+        if size:
             largest = size if largest is None else max(largest, size)
     return largest
 
