@@ -61,7 +61,7 @@ async def _open_journal(path: Path) -> TerminalJournal:
 async def test_append_then_replay_round_trips(tmp_path: Path) -> None:
     journal = await _open_journal(tmp_path / "events.jsonl")
     try:
-        await journal.append(_record(0, 0))
+        await journal.append(_record(0, 0, max_context_tokens=22_000))
         await journal.append(
             _record(1, 0, status="failed", reward=None, error_type="boom")
         )
@@ -71,6 +71,8 @@ async def test_append_then_replay_round_trips(tmp_path: Path) -> None:
     replay = TerminalJournal(tmp_path / "events.jsonl").replay()
     assert [r.key for r in replay.records] == [(0, 0), (1, 0)]
     assert replay.truncated_bytes == 0
+    assert replay.latest[(0, 0)].max_context_tokens == 22_000
+    assert replay.latest[(1, 0)].max_context_tokens is None
     failed = replay.latest[(1, 0)]
     assert failed.status == "failed"
     assert failed.reward is None
@@ -167,6 +169,7 @@ def test_replay_refuses_a_malformed_committed_record(tmp_path: Path) -> None:
         ({"rollout_id": "nested/id"}, "rollout_id must be a single path segment"),
         ({"rollout_id": 7}, "rollout_id must be a string"),
         ({"tokens": "many"}, "tokens must be an integer"),
+        ({"max_context_tokens": 1.5}, "max_context_tokens must be an integer"),
         # A required field written as JSON null is as unusable as an absent one.
         ({"run_index": None}, "run_index is missing"),
     ],

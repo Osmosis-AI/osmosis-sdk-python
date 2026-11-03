@@ -12,6 +12,7 @@ from osmosis_ai.eval.local.results import (
     Materializer,
     RunIdentity,
     aggregate_metrics,
+    atif_max_context_tokens,
     atif_rollout_identity,
     build_index_row,
     pass_at_k,
@@ -77,6 +78,7 @@ MONOLITH_INDEX_FIELDS = (
     "status",
     "reward",
     "tokens",
+    "max_context_tokens",
     "duration_ms",
     "error_type",
     "resumed",
@@ -87,7 +89,7 @@ def test_the_emittable_key_set_matches_the_monolith_index_schema() -> None:
     # A synthetic maximal record: every optional field populated at once, which
     # no single real attempt produces, so that the row carries the whole schema.
     row = build_index_row(
-        _record(0, 0, rollout_id=ROLLOUT_A, error_type="timeout"),
+        _record(0, 0, rollout_id=ROLLOUT_A, error_type="timeout", max_context_tokens=9),
         trajectory_filename="trajectory.json",
         resumed=True,
     )
@@ -100,6 +102,7 @@ def test_the_emittable_key_set_matches_the_monolith_index_schema() -> None:
         "status": "success",
         "reward": 1.0,
         "tokens": 11,
+        "max_context_tokens": 9,
         "duration_ms": 42.0,
         "error_type": "timeout",
         "resumed": True,
@@ -110,6 +113,7 @@ def test_none_valued_fields_are_omitted_by_the_builder() -> None:
     row = build_index_row(_record(0, 0, rollout_id=ROLLOUT_A, reward=None, tokens=None))
     assert "reward" not in row
     assert "tokens" not in row
+    assert "max_context_tokens" not in row
     # The platform drops a line carrying a null field silently, so a serialized
     # row must never contain one.
     assert "null" not in json.dumps(row, allow_nan=False)
@@ -648,3 +652,48 @@ def test_a_trajectory_without_final_metrics_leaves_tokens_absent(
         total_runs=1,
     )
     assert "tokens" not in rows[0]
+
+
+def _agent_step(step_id: int, **metrics: int) -> dict[str, Any]:
+    return {"step_id": step_id, "source": "agent", "message": "", "metrics": metrics}
+
+
+def test_max_context_is_the_largest_call_in_the_trajectory_while_tokens_sum(
+    tmp_path: Path,
+) -> None:
+    trials = tmp_path / "rollout_trials"
+    document = _atif(
+        ROLLOUT_A,
+        steps=[
+            {"step_id": 1, "source": "user", "message": "hi"},
+            _agent_step(2, prompt_tokens=10_000, completion_tokens=1_000),
+            _agent_step(3, prompt_tokens=20_000, completion_tokens=2_000),
+            _agent_step(4, prompt_tokens=15_000, completion_tokens=500),
+        ],
+        final_metrics={"total_prompt_tokens": 45_000, "total_completion_tokens": 3_500},
+    )
+    _write_trajectory(trials, ROLLOUT_A, document)
+    latest = {
+        (0, 0): _record(0, 0, rollout_id=ROLLOUT_A, tokens=None),
+        (1, 0): _record(1, 0, rollout_id=ROLLOUT_B, tokens=None),
+    }
+    _write_trajectory(trials, ROLLOUT_B, _atif(ROLLOUT_B))
+    Materializer(tmp_path).refresh(
+        select_attempts(latest, trials_dir=trials),
+        identity=_identity(),
+        pass_threshold=1.0,
+        sampled_rows=2,
+        total_dataset_rows=2,
+        total_runs=2,
+    )
+    with_usage, without_usage = (
+        json.loads(line) for line in (tmp_path / "index.jsonl").read_text().splitlines()
+    )
+    assert with_usage["max_context_tokens"] == 22_000
+    assert with_usage["tokens"] == 48_500
+    assert "max_context_tokens" not in without_usage
+
+
+def test_a_step_reporting_one_side_counts_the_other_as_zero() -> None:
+    steps = [_agent_step(1, prompt_tokens=30), _agent_step(2, completion_tokens=40)]
+    assert atif_max_context_tokens(_atif(ROLLOUT_A, steps=steps)) == 40

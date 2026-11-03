@@ -50,6 +50,7 @@ def build_index_row(
     trajectory_filename: str | None = None,
     resumed: bool = False,
     tokens: int | None = None,
+    max_context_tokens: int | None = None,
 ) -> dict[str, Any]:
     """Project one terminal record into an ``index.jsonl`` row.
 
@@ -74,6 +75,11 @@ def build_index_row(
             "status": record.status,
             "reward": record.reward,
             "tokens": record.tokens if tokens is None else tokens,
+            "max_context_tokens": (
+                record.max_context_tokens
+                if max_context_tokens is None
+                else max_context_tokens
+            ),
             "duration_ms": record.duration_ms,
             "error_type": record.error_type,
             "resumed": True if resumed else None,
@@ -363,6 +369,7 @@ class SelectedAttempt:
     resumed: bool
     trajectory_filename: str | None
     tokens: int | None = None
+    max_context_tokens: int | None = None
 
     @property
     def key(self) -> WorkKey:
@@ -388,6 +395,30 @@ def atif_total_tokens(document: Mapping[str, Any]) -> int | None:
     return total if seen else None
 
 
+def atif_max_context_tokens(document: Mapping[str, Any]) -> int | None:
+    """Largest single step's ``prompt_tokens + completion_tokens``.
+
+    A step reporting only one of the two counts the other as zero; ``None``
+    means no step reported either.
+    """
+    steps = document.get("steps")
+    if not isinstance(steps, list):
+        return None
+    largest: int | None = None
+    for step in steps:
+        metrics = step.get("metrics") if isinstance(step, Mapping) else None
+        if not isinstance(metrics, Mapping):
+            continue
+        size: int | None = None
+        for key in ("prompt_tokens", "completion_tokens"):
+            value = metrics.get(key)
+            if isinstance(value, int) and not isinstance(value, bool):
+                size = (size or 0) + value
+        if size is not None:
+            largest = size if largest is None else max(largest, size)
+    return largest
+
+
 def select_attempts(
     latest: Mapping[WorkKey, TerminalRecord],
     *,
@@ -409,6 +440,9 @@ def select_attempts(
         tokens = record.tokens
         if tokens is None and document is not None:
             tokens = atif_total_tokens(document)
+        max_context_tokens = record.max_context_tokens
+        if max_context_tokens is None and document is not None:
+            max_context_tokens = atif_max_context_tokens(document)
         selected.append(
             SelectedAttempt(
                 record=record,
@@ -417,6 +451,7 @@ def select_attempts(
                     CANONICAL_TRAJECTORY_FILENAME if document is not None else None
                 ),
                 tokens=tokens,
+                max_context_tokens=max_context_tokens,
             )
         )
     return selected
@@ -460,6 +495,7 @@ class Materializer:
                 trajectory_filename=attempt.trajectory_filename,
                 resumed=attempt.resumed,
                 tokens=attempt.tokens,
+                max_context_tokens=attempt.max_context_tokens,
             )
             for attempt in attempts
         ]
