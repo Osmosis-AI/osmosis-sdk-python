@@ -60,6 +60,7 @@ from osmosis_ai.eval.local.results import (
     Materializer,
     RunIdentity,
     aggregate_metrics,
+    read_run_duration_ms,
     read_valid_trajectory,
     select_attempts,
 )
@@ -835,6 +836,9 @@ class LocalEvalRunner:
             model_name=self._spec.model_path,
             rollout_name=self._spec.rollout_name,
             started_at=self._started_at,
+            prior_duration_ms=read_run_duration_ms(
+                run_dir, local_run_id=manifest.local_run_id
+            ),
         )
         self._materializer = Materializer(run_dir)
 
@@ -2037,6 +2041,10 @@ class LocalEvalRunner:
         item that just finished. ``None`` projects everything.
         """
         assert self._materializer is not None and self._identity is not None
+        identity = self._identity
+        # Kept current so a resume after a crash still counts this invocation.
+        if identity.status == "running":
+            identity = replace(identity, duration_ms=self._invocation_ms())
         attempts = select_attempts(
             self._latest,
             trials_dir=self._materializer.trials_dir,
@@ -2044,7 +2052,7 @@ class LocalEvalRunner:
         )
         return self._materializer.refresh(
             attempts,
-            identity=self._identity,
+            identity=identity,
             pass_threshold=self._spec.pass_threshold,
             sampled_rows=len(self._selection.rows),
             total_dataset_rows=self._selection.total_dataset_rows,
@@ -2075,7 +2083,7 @@ class LocalEvalRunner:
         run_dir = self._run_dir
         started = self._identity
         assert run_dir is not None and started is not None
-        duration_ms = (time.monotonic() - self._started_monotonic) * 1000.0
+        duration_ms = self._invocation_ms()
         total = len(self._selection.rows) * max(1, self._spec.n)
         complete = len(self._latest) >= total
         identity = replace(
@@ -2098,10 +2106,13 @@ class LocalEvalRunner:
             skipped=sum(1 for status in statuses if status == "skipped"),
             resumed=len(self._resumed_keys),
             cancelled=cancelled,
-            duration_ms=duration_ms,
+            duration_ms=identity.prior_duration_ms + duration_ms,
             metrics=aggregate_metrics(rows, pass_threshold=self._spec.pass_threshold),
             failures=self._collect_failures(),
         )
+
+    def _invocation_ms(self) -> float:
+        return (time.monotonic() - self._started_monotonic) * 1000.0
 
     def _collect_failures(self) -> list[FailedWorkItem]:
         assert self._run_dir is not None

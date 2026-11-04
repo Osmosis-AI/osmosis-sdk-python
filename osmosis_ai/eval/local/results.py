@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import shutil
 import statistics
 from collections.abc import Iterable, Mapping, Sequence
@@ -344,6 +345,7 @@ class RunIdentity:
     status: str = "running"
     completed_at: str | None = None
     duration_ms: float = 0.0
+    prior_duration_ms: float = 0.0
 
     def to_payload(self) -> dict[str, Any]:
         return drop_none_values(
@@ -355,10 +357,36 @@ class RunIdentity:
                 "model_name": self.model_name,
                 "rollout_name": self.rollout_name,
                 "duration_ms": self.duration_ms,
+                "prior_duration_ms": self.prior_duration_ms,
                 "started_at": self.started_at,
                 "completed_at": self.completed_at,
             }
         )
+
+
+def read_run_duration_ms(run_dir: Path, *, local_run_id: str) -> float:
+    """Active time the run's earlier invocations recorded in ``metrics.json``.
+
+    ``0.0`` when the file is absent, unreadable, or belongs to another run.
+    """
+    try:
+        payload = json.loads((run_dir / METRICS_FILENAME).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+        return 0.0
+    identity = payload.get("eval_run") if isinstance(payload, dict) else None
+    if not isinstance(identity, Mapping) or identity.get("id") != local_run_id:
+        return 0.0
+    total = 0.0
+    for key in ("prior_duration_ms", "duration_ms"):
+        value = identity.get(key)
+        if (
+            isinstance(value, (int, float))
+            and not isinstance(value, bool)
+            and math.isfinite(value)
+            and value > 0
+        ):
+            total += value
+    return total
 
 
 @dataclass(frozen=True)

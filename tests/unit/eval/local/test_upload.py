@@ -368,6 +368,21 @@ def test_index_row_indices_must_be_the_contiguous_selected_range(
         build_eval_upload_plan(run_dir)
 
 
+@pytest.mark.parametrize(
+    ("prior_duration_ms", "expected"), [(7_200_000, 7_200.0), (0, None)]
+)
+def test_a_resumed_run_sends_its_earlier_invocation_time(
+    tmp_path: Path, prior_duration_ms: float, expected: float | None
+) -> None:
+    run_dir = _run_dir(tmp_path, trajectory=False)
+    metrics_path = run_dir / "metrics.json"
+    metrics = json.loads(metrics_path.read_text(encoding="utf-8"))
+    metrics["eval_run"]["prior_duration_ms"] = prior_duration_ms
+    _write_json(metrics_path, metrics)
+
+    assert build_eval_upload_plan(run_dir).run.get("prior_active_seconds") == expected
+
+
 def test_oversized_integer_pass_threshold_is_a_validation_error(
     tmp_path: Path,
 ) -> None:

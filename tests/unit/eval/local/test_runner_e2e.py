@@ -573,6 +573,18 @@ def _refuse_admission(monkeypatch: pytest.MonkeyPatch, status_code: int) -> None
     monkeypatch.setattr(RolloutClient, "run_rollout_async", refused)
 
 
+async def test_a_resumed_run_counts_every_invocation_in_its_duration(
+    harness: RunnerHarness,
+) -> None:
+    first = await harness.runner().run()
+    resumed = await harness.runner().run()
+
+    metrics_path = harness.run_dir() / "metrics.json"
+    eval_run = json.loads(metrics_path.read_text(encoding="utf-8"))["eval_run"]
+    assert eval_run["prior_duration_ms"] == first.duration_ms
+    assert resumed.duration_ms == first.duration_ms + eval_run["duration_ms"]
+
+
 @pytest.mark.parametrize(
     "admission_fault",
     [

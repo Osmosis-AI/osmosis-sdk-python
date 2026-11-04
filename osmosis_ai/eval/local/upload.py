@@ -538,6 +538,11 @@ def build_eval_upload_plan(
     completed_at = _string(
         identity.get("completed_at"), where="metrics.json eval_run.completed_at"
     )
+    prior_duration_ms = identity.get("prior_duration_ms", 0)
+    if not _is_finite_number(prior_duration_ms) or prior_duration_ms < 0:
+        raise LocalEvalUploadError(
+            "metrics.json eval_run.prior_duration_ms must be a non-negative number"
+        )
     dataset_name = _string(
         identity.get("dataset_name"), where="metrics.json eval_run.dataset_name"
     )
@@ -605,29 +610,34 @@ def build_eval_upload_plan(
         rollout_config["branch"] = provenance["config_branch"]
     if "config_commit_sha" in provenance:
         rollout_config["commit_sha"] = provenance["config_commit_sha"]
+    run: dict[str, Any] = {
+        "name": run_name,
+        "started_at": started_at,
+        "completed_at": completed_at,
+        "experiment_config": {
+            "rollout": rollout_config,
+            "entrypoint": entrypoint,
+            "model_path": model_path,
+            "dataset": {
+                "name": dataset_name,
+                "sha256": dataset_sha256,
+                "selected_source_rows": selected_source_rows,
+            },
+        },
+        "evaluation_config": {
+            "n": n_value,
+            "pass_threshold": float(pass_threshold),
+        },
+    }
+    # Sent only for resumed runs, so a single-invocation upload still works
+    # against a platform that predates the field.
+    if prior_duration_ms > 0:
+        run["prior_active_seconds"] = prior_duration_ms / 1000
     return EvalUploadPlan(
         run_dir=run_dir,
         local_run_id=local_run_id,
         manifest_digest=manifest_digest,
-        run={
-            "name": run_name,
-            "started_at": started_at,
-            "completed_at": completed_at,
-            "experiment_config": {
-                "rollout": rollout_config,
-                "entrypoint": entrypoint,
-                "model_path": model_path,
-                "dataset": {
-                    "name": dataset_name,
-                    "sha256": dataset_sha256,
-                    "selected_source_rows": selected_source_rows,
-                },
-            },
-            "evaluation_config": {
-                "n": n_value,
-                "pass_threshold": float(pass_threshold),
-            },
-        },
+        run=run,
         schema_versions=dict(schema_versions),
         provenance=provenance,
         files=files,
