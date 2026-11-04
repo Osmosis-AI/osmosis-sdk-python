@@ -255,13 +255,10 @@ app = create_rollout_server(backend=backend)
 ```python
 from pathlib import Path
 
-from harbor.trial.queue import TrialQueue
-
 from osmosis_ai.rollout.backend.harbor import HarborBackend
 from osmosis_ai.rollout.server import create_rollout_server
 
 backend = HarborBackend(
-    orchestrator=TrialQueue(n_concurrent=4),
     tasks_dir=Path("tasks"),
     agent=MyWorkflow,  # or a native agent name, such as "opencode"
     grader=MyGrader,  # used when the task has no tests/test.sh
@@ -269,6 +266,7 @@ backend = HarborBackend(
 app = create_rollout_server(backend=backend, lifespan=backend.prewarm_lifespan())
 ```
 
+- The trial limit is how many trials the server runs at once. On the platform it is the run's number from `_OSMOSIS_ROLLOUT_CONCURRENCY` (at most 32), and an `orchestrator=TrialQueue(n_concurrent=N)` applies only when `N` is lower. Local runs use `N`, or 8 without a queue. `N` below 1 stops the server from starting. The server logs the limit and its source at startup and reports it as `concurrency.max_concurrent` in `/health`; callers send at most that many rollouts at once.
 - Tasks come from `tasks_dir` (`task_mode="template"` or `"dataset"`), or per rollout via `metadata["harbor_task"]` — a local path, a registry package `"org/name[@ref]"`, or a git checkout (`metadata["git_url"]`, ideally with a pinned `metadata["git_commit_id"]`).
 - In template mode, native agents receive plain-text `system`/`user` message contents joined in input order with blank lines in `instruction.md`. Dataset system prompts become part of the user task, not a replacement for the harness's own system prompt. This changes the effective task text from the previous JSON message-list representation. Prompts containing other roles, non-string content, or additional message fields retain that JSON representation to avoid dropping structured information; this fallback is not conversation replay or native multimodal input. Bundled workflows still receive the original structured messages through `ContainerInput`, and dataset mode preserves the task's authored instruction. The conversion lives in [Harbor task materialization](../osmosis_ai/rollout/backend/harbor/tasks.py).
 - Reward precedence is deterministic: a task-provided `tests/test.sh` wins over `grader=`. To use the SDK grader, supply a task without that file; the backend never overwrites a benchmark's native verifier.

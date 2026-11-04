@@ -83,6 +83,7 @@ def create_rollout_server(
     """
     if configure_logging:
         _configure_default_logging()
+    backend.log_startup()
 
     scheduled_tasks: set[asyncio.Task[None]] = set()
     preview_tasks: set[asyncio.Task[None]] = set()
