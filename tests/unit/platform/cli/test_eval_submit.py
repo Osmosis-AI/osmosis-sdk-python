@@ -174,6 +174,7 @@ def test_eval_submit_passes_new_schema_to_evaluation_run_api(
                 status="pending",
                 created_at="2026-05-27T00:00:00Z",
                 platform_url="https://platform.example.test/evals/eval-1",
+                rollout_concurrency=32,
             )
 
     monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
@@ -181,6 +182,9 @@ def test_eval_submit_passes_new_schema_to_evaluation_run_api(
 
     result = eval_module.submit(config_path=config_path, yes=True)
 
+    assert "Rollouts at once: up to 32" in result.display_next_steps
+    assert result.resource is not None
+    assert result.resource["rollout_concurrency"] == 32
     assert captured_kwargs["git_identity"] == GIT_IDENTITY
     assert captured_kwargs["credentials"] is FAKE_CREDENTIALS
     assert captured_kwargs["env_config"] == {"LOG_LEVEL": "INFO"}

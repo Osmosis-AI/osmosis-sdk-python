@@ -104,6 +104,11 @@ def submit_next_steps(
     """Shared success hints for train/eval cloud submit."""
     display = [
         f"Status: {result.status}",
+        *(
+            [f"Rollouts at once: up to {result.rollout_concurrency}"]
+            if result.rollout_concurrency is not None
+            else []
+        ),
         f"Rollout: {config.experiment_rollout}",
         f"Model: {config.experiment_model_path}",
         f"Dataset: {config.experiment_dataset}",
@@ -529,6 +534,11 @@ def run_cloud_submit[ConfigT: BaseSubmitConfig](
             "dataset_name": config.experiment_dataset,
             "created_at": result.created_at,
             **({"url": result.platform_url} if result.platform_url else {}),
+            **(
+                {"rollout_concurrency": result.rollout_concurrency}
+                if result.rollout_concurrency is not None
+                else {}
+            ),
             **result_context,
             "config": {
                 "rollout": config.experiment_rollout,

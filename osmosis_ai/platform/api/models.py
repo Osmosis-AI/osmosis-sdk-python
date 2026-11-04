@@ -532,6 +532,7 @@ class SubmitRunResult:
     status: str
     created_at: str
     platform_url: str | None = None
+    rollout_concurrency: int | None = None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> SubmitRunResult:
@@ -541,6 +542,7 @@ class SubmitRunResult:
             status=data["status"],
             created_at=data["created_at"],
             platform_url=data.get("platform_url"),
+            rollout_concurrency=data.get("rollout_concurrency"),
         )
 
 
