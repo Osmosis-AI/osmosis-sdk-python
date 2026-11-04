@@ -38,11 +38,6 @@ def _repo(path: Path, *, origin: str | None = None) -> None:
         )
 
 
-def _scaffold(path: Path) -> None:
-    for rel in ("rollouts", "configs/training", "configs/eval", "data"):
-        (path / rel).mkdir(parents=True, exist_ok=True)
-
-
 def test_optional_git_identity_resolves_origin(tmp_path: Path) -> None:
     _repo(tmp_path, origin="https://github.com/Acme/Rollouts.git")
 
@@ -76,8 +71,8 @@ def test_optional_git_identity_ignores_malformed_origin(tmp_path: Path) -> None:
 def test_platform_context_requires_origin_and_credentials(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """Platform-only commands need the Git identity, not the scaffold paths."""
     _repo(tmp_path, origin="https://github.com/Acme/Rollouts.git")
-    _scaffold(tmp_path)
     remote_calls: list[Path] = []
     normalize_calls: list[str] = []
     normalize_git_identity = workspace_directory_context.normalize_git_identity
@@ -114,7 +109,6 @@ def test_platform_context_requires_origin_and_credentials(
 
 def test_platform_context_rejects_missing_origin(tmp_path: Path) -> None:
     _repo(tmp_path)
-    _scaffold(tmp_path)
 
     with pytest.raises(CLIError) as exc:
         workspace_directory_context.resolve_git_workspace_directory_context(
@@ -144,7 +138,6 @@ def test_platform_context_preserves_invalid_origin_error(
     message: str,
 ) -> None:
     _repo(tmp_path, origin=origin)
-    _scaffold(tmp_path)
     monkeypatch.setattr(
         workspace_directory_context,
         "load_credentials",
@@ -162,7 +155,6 @@ def test_platform_context_requires_credentials(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _repo(tmp_path, origin="https://github.com/acme/rollouts.git")
-    _scaffold(tmp_path)
     monkeypatch.setattr(workspace_directory_context, "load_credentials", lambda: None)
 
     with pytest.raises(CLIError, match="Not logged in") as exc_info:
@@ -176,7 +168,6 @@ def test_platform_context_rejects_expired_credentials(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _repo(tmp_path, origin="https://github.com/acme/rollouts.git")
-    _scaffold(tmp_path)
     monkeypatch.setattr(
         workspace_directory_context,
         "load_credentials",
@@ -218,7 +209,6 @@ def test_local_git_context_does_not_load_credentials(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _repo(tmp_path, origin="https://github.com/acme/rollouts.git")
-    _scaffold(tmp_path)
     monkeypatch.setattr(
         workspace_directory_context,
         "load_credentials",
@@ -237,7 +227,6 @@ def test_local_workspace_context_does_not_require_origin(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _repo(tmp_path)
-    _scaffold(tmp_path)
     monkeypatch.setattr(
         workspace_directory_context,
         "load_credentials",
@@ -266,7 +255,6 @@ def test_local_workspace_context_ignores_invalid_origin(
     tmp_path: Path, origin: str
 ) -> None:
     _repo(tmp_path, origin=origin)
-    _scaffold(tmp_path)
 
     ctx = workspace_directory_context.resolve_local_workspace_directory_context(
         cwd=tmp_path

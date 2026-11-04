@@ -10,7 +10,6 @@ from osmosis_ai.platform.auth import AuthenticationExpiredError, load_credential
 from .workspace_directory_contract import (
     find_workspace_directory,
     resolve_workspace_directory,
-    validate_workspace_directory_contract,
 )
 from .workspace_repo import get_local_git_remote_url, normalize_git_identity
 
@@ -82,8 +81,8 @@ def _require_credentials() -> Credentials:
 
 
 def _resolve_workspace_and_remote(cwd: Path | None) -> tuple[Path, str | None]:
+    # Scaffold paths are checked only by commands that read local source.
     workspace_directory = resolve_workspace_directory(cwd)
-    validate_workspace_directory_contract(workspace_directory)
     return workspace_directory, get_local_git_remote_url(workspace_directory)
 
 

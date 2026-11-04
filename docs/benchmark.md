@@ -18,7 +18,7 @@ osmosis benchmark submit configs/benchmark/<name>.toml --secrets-file .env.run
 osmosis --workspace <name> benchmark submit /any/path/<name>.toml --yes
 ```
 
-The config may live at any readable path. Root `--workspace <name>` lets the command run without a local Git repository or Osmosis scaffold; without it, the CLI preserves the existing current-directory Git scope. Get a benchmark key from `osmosis benchmark list` (the shell-safe `Key` column, e.g. `terminal-bench-2-1`).
+The config may live at any readable path. Root `--workspace <name>` lets the command run without a local Git repository; without it, the CLI preserves the existing current-directory Git scope. Get a benchmark key from `osmosis benchmark list` (the shell-safe `Key` column, e.g. `terminal-bench-2-1`).
 
 ### Config contract (what the SDK validates)
 
