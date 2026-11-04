@@ -1,0 +1,35 @@
+tests/unit/eval/local/test_runner_units.py
+  s_477c015da74954::t_eee7a2e99c4a76 615-617,619
+osmosis_ai/rollout/server/app.py
+  s_477c015da74954::t_482856dbfd1dac 86
+docs/rollout-sdk.md
+  s_477c015da74954::t_081492ae0ea6a0 269
+tests/unit/rollout/test_harbor_backend.py
+  s_477c015da74954::t_e661b5324606c5 1431,1472,1922,1925
+osmosis_ai/rollout/backend/base.py
+  s_477c015da74954::t_8c5490cd11a560 49-52
+osmosis_ai/rollout/backend/harbor/backend.py
+  s_477c015da74954::t_a23c0b48da8da7 51,108-111,158,311,331-341,443-451,500,704-707,751
+osmosis_ai/rollout/backend/harbor/trial_limit.py
+  s_477c015da74954::t_b14506faf7dcaf 1-77
+tests/unit/rollout/test_harbor_trial_limit.py
+  s_477c015da74954::t_08d22c94d102de 1-142
+osmosis_ai/eval/local/runner.py
+  s_477c015da74954::t_886b6f5a9d01a3 609-612,617
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "dc5c48cd822a05b1d2cefad5d6bac78529a877f6",
+  "prompts": {},
+  "sessions": {
+    "s_477c015da74954": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "bd780945-be5c-463d-8d7e-c18d5293658d",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Allen Lin <allen@osmosis.ai>"
+    }
+  }
+}
