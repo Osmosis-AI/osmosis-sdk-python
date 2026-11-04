@@ -111,6 +111,8 @@ def _run_dir(tmp_path: Path, *, trajectory: bool = True) -> Path:
         "run_index": 0,
         "rollout_id": ROLLOUT_ID,
         "status": "success",
+        "tokens": 48_500,
+        "max_context_tokens": 22_000,
     }
     if trajectory:
         row["trajectory_filename"] = "trajectory.json"

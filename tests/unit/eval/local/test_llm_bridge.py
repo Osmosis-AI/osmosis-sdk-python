@@ -276,6 +276,55 @@ async def test_tokens_accumulate_across_calls_per_rollout(
     assert bridge.collect_tokens("b" * 32) is None
 
 
+async def test_max_context_is_the_largest_single_call_while_tokens_sum(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = _FakeLiteLLM()
+    _install(monkeypatch, fake)
+    bridge = LiteLLMBridge(model="anthropic/claude-test")
+    for prompt, completion in ((10_000, 1_000), (20_000, 2_000), (15_000, 500)):
+        fake._response = {
+            **_response(),
+            "usage": {
+                "prompt_tokens": prompt,
+                "completion_tokens": completion,
+                "total_tokens": prompt + completion,
+            },
+        }
+        await bridge.complete(_body(), rollout_id=ROLLOUT_ID)
+    assert bridge.collect_tokens(ROLLOUT_ID) == 48_500
+    assert bridge.collect_max_context(ROLLOUT_ID) == 22_000
+    assert bridge.collect_max_context(ROLLOUT_ID) is None
+
+
+async def test_max_context_counts_a_missing_side_as_zero_and_needs_usage(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    other = "b" * 32
+    fake = _FakeLiteLLM(response={**_response(), "usage": {"prompt_tokens": 9}})
+    _install(monkeypatch, fake)
+    bridge = LiteLLMBridge(model="anthropic/claude-test")
+    await bridge.complete(_body(), rollout_id=ROLLOUT_ID)
+    fake._response = {
+        key: value for key, value in _response().items() if key != "usage"
+    }
+    await bridge.complete(_body(), rollout_id=other)
+    assert bridge.collect_max_context(ROLLOUT_ID) == 9
+    assert bridge.collect_max_context(other) is None
+    assert bridge.collect_tokens(other) is None
+
+
+async def test_max_context_ignores_the_zero_usage_litellm_reports_for_a_missing_block(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    zero = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+    fake = _FakeLiteLLM(response={**_response(), "usage": zero})
+    _install(monkeypatch, fake)
+    bridge = LiteLLMBridge(model="anthropic/claude-test")
+    await bridge.complete(_body(), rollout_id=ROLLOUT_ID)
+    assert bridge.collect_max_context(ROLLOUT_ID) is None
+
+
 async def test_stream_serves_single_chunk_sse(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -207,6 +207,7 @@ _RECORD_FIELDS: tuple[tuple[str, type | tuple[type, ...], str, bool], ...] = (
     ("source_row_index", int, "an integer", False),
     ("reward", (int, float), "a number", False),
     ("tokens", int, "an integer", False),
+    ("max_context_tokens", int, "an integer", False),
     ("duration_ms", (int, float), "a number", False),
     ("error_type", str, "a string", False),
 )
@@ -227,6 +228,7 @@ class TerminalRecord:
     source_row_index: int | None = None
     reward: float | None = None
     tokens: int | None = None
+    max_context_tokens: int | None = None
     duration_ms: float = 0.0
     error_type: str | None = None
 

@@ -1479,6 +1479,7 @@ class LocalEvalRunner:
         self, item: WorkItem, outcome: RolloutResultResponse
     ) -> None:
         status, reward, error_type = _classify_outcome(outcome)
+        tokens, max_context_tokens = self._collect_usage(outcome.rollout_id or "")
         record = TerminalRecord(
             row_index=item.row.row_index,
             run_index=item.run_index,
@@ -1486,7 +1487,8 @@ class LocalEvalRunner:
             status=status,
             source_row_index=item.row.source_row_index,
             reward=reward,
-            tokens=self._collect_tokens(outcome.rollout_id or ""),
+            tokens=tokens,
+            max_context_tokens=max_context_tokens,
             duration_ms=self._elapsed_ms(outcome.rollout_id or ""),
             error_type=error_type,
         )
@@ -1524,6 +1526,7 @@ class LocalEvalRunner:
             run_index=item.run_index,
             error=f"{type(exc).__name__}: {exc}",
         )
+        tokens, max_context_tokens = self._collect_usage(rollout_id)
         await self._append_record(
             TerminalRecord(
                 row_index=item.row.row_index,
@@ -1531,7 +1534,8 @@ class LocalEvalRunner:
                 rollout_id=rollout_id,
                 status="failed",
                 source_row_index=item.row.source_row_index,
-                tokens=self._collect_tokens(rollout_id),
+                tokens=tokens,
+                max_context_tokens=max_context_tokens,
                 duration_ms=self._elapsed_ms(rollout_id),
                 error_type=_error_type_for(exc),
             )
@@ -1547,10 +1551,13 @@ class LocalEvalRunner:
             return 0.0
         return (time.monotonic() - started) * 1000.0
 
-    def _collect_tokens(self, rollout_id: str) -> int | None:
+    def _collect_usage(self, rollout_id: str) -> tuple[int | None, int | None]:
         if self._bridge is None:
-            return None
-        return self._bridge.collect_tokens(rollout_id)
+            return None, None
+        return (
+            self._bridge.collect_tokens(rollout_id),
+            self._bridge.collect_max_context(rollout_id),
+        )
 
     def _forget(self, rollout_id: str) -> None:
         self._dispatch_started.pop(rollout_id, None)

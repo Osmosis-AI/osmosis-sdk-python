@@ -7,9 +7,10 @@ the host; the container only ever sees the loopback URL and a per-run bearer.
 The bridge is non-streaming toward the provider. When a client requests
 ``stream=true`` it gets a valid SSE stream — heartbeat comments while the
 completion is in flight, then a single chunk carrying the full delta,
-``finish_reason`` and usage, then ``[DONE]``. Per-rollout token totals are
-accumulated for the run index and read once with
-:meth:`LiteLLMBridge.collect_tokens`.
+``finish_reason`` and usage, then ``[DONE]``. Per-rollout token totals and the
+largest single call's context are accumulated for the run index and read once
+with :meth:`LiteLLMBridge.collect_tokens` and
+:meth:`LiteLLMBridge.collect_max_context`.
 """
 
 from __future__ import annotations
@@ -307,6 +308,7 @@ class LiteLLMBridge:
         # Every value an error may echo, known before any error is re-encoded.
         self._secret_values = (api_key, api_base, *secret_values)
         self._tokens: dict[str, int] = {}
+        self._max_context: dict[str, int] = {}
         self._reasoning: dict[str, dict[str, dict[str, Any]]] = {}
 
     def _build_kwargs(self, body: dict[str, Any]) -> dict[str, Any]:
@@ -407,6 +409,12 @@ class LiteLLMBridge:
             self._tokens[rollout_id] = (
                 self._tokens.get(rollout_id, 0) + usage["total_tokens"]
             )
+            size = usage["prompt_tokens"] + usage["completion_tokens"]
+            # LiteLLM reports a response without a usage block as all zeros.
+            if size > 0:
+                self._max_context[rollout_id] = max(
+                    self._max_context.get(rollout_id, 0), size
+                )
         return response
 
     def collect_tokens(self, rollout_id: str) -> int | None:
@@ -414,8 +422,13 @@ class LiteLLMBridge:
         self._reasoning.pop(rollout_id, None)
         return self._tokens.pop(rollout_id, None)
 
+    def collect_max_context(self, rollout_id: str) -> int | None:
+        """Pop the largest single call's prompt + completion; None without usage."""
+        return self._max_context.pop(rollout_id, None)
+
     def discard(self, rollout_id: str) -> None:
         self._tokens.pop(rollout_id, None)
+        self._max_context.pop(rollout_id, None)
         self._reasoning.pop(rollout_id, None)
 
 

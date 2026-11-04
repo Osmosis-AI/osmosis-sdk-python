@@ -63,6 +63,8 @@ async def test_a_full_run_produces_the_download_layout(harness: RunnerHarness) -
         assert len(row["rollout_id"]) == 32
         assert row["trajectory_filename"] == "trajectory.json"
         assert isinstance(row["duration_ms"], float)
+        # One stub call per rollout: 7 prompt + 3 completion tokens.
+        assert (row["tokens"], row["max_context_tokens"]) == (10, 10)
     assert (run_dir / "summary.jsonl").read_text() == (
         run_dir / "index.jsonl"
     ).read_text()
@@ -198,6 +200,7 @@ async def test_a_second_run_of_the_same_name_dispatches_nothing(
     # No pending work means credentials and the subprocess are never needed.
     assert hooks.secret_requests == []
     assert all(row["resumed"] is True for row in harness.index_rows())
+    assert all(row["max_context_tokens"] == 10 for row in harness.index_rows())
     # The complete run offered a new run; declining kept the no-op.
     assert hooks.new_run_prompts == [("run-1", 4)]
 
