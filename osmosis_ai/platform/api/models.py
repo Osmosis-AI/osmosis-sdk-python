@@ -878,6 +878,7 @@ class BenchmarkRunDetail(BenchmarkRun):
     totals: dict[str, Any] | None = None
     agent_metrics: list[dict[str, Any]] | None = None
     is_internal_user: bool = False
+    duration_ms: float | None = None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> BenchmarkRunDetail:
@@ -957,6 +958,7 @@ class BenchmarkRunDetail(BenchmarkRun):
             totals=totals,
             agent_metrics=agent_metrics,
             is_internal_user=data.get("is_internal_user", False),
+            duration_ms=_number_or_none(run.get("duration_ms")),
         )
 
 

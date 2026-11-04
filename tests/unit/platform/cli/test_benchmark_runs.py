@@ -208,6 +208,30 @@ def test_run_info_returns_config_agents_results_and_next_steps(
     assert "osmosis benchmark runs download hle-smoke" in result.display_hints[-1]
 
 
+def test_run_info_prefers_the_platform_duration_with_earlier_attempts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    detail = _detail(status="finished")
+    detail.started_at = "2026-07-30T00:05:00Z"
+    detail.completed_at = "2026-07-30T00:35:00Z"
+    detail.duration_ms = 9_000_000
+
+    class FakeClient:
+        def get_benchmark_run(self, *_: Any, **__: Any) -> BenchmarkRunDetail:
+            return detail
+
+    monkeypatch.setattr(
+        benchmark_module, "require_platform_workspace_context", _context
+    )
+    monkeypatch.setattr(benchmark_module, "OsmosisClient", FakeClient)
+
+    fields = {
+        field.label: field.value
+        for field in benchmark_module.run_info("hle-smoke").fields
+    }
+    assert fields["Duration"] == "2h 30m"
+
+
 def test_run_info_reports_duration_and_per_agent_metrics(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

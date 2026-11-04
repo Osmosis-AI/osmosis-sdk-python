@@ -18,6 +18,7 @@ from osmosis_ai.cli.output import (
     serialize_benchmark_run,
 )
 from osmosis_ai.cli.output.display import (
+    format_duration_ms,
     format_elapsed,
     format_local_date,
     format_local_datetime,
@@ -884,7 +885,12 @@ def run_info(name: str) -> DetailResult:
     progress_label = format_progress(progress)
     if progress_label:
         rows.append(("Progress", progress_label))
-    duration = format_elapsed(detail.started_at, detail.completed_at)
+    # A platform without duration_ms reports only the last attempt's window.
+    duration = (
+        format_duration_ms(detail.duration_ms)
+        if detail.duration_ms is not None
+        else format_elapsed(detail.started_at, detail.completed_at)
+    )
     if duration:
         rows.append(("Duration", duration))
     if detail.best_pass_at_1 is not None:
