@@ -24,15 +24,16 @@ from osmosis_ai.rollout.server.observability import RolloutObservability
 from osmosis_ai.rollout.server.result_registry import (
     DuplicateRolloutError,
     RolloutFutureRegistry,
+    RolloutPendingError,
     UnknownRolloutError,
 )
 from osmosis_ai.rollout.trajectory import save_trajectory
-from osmosis_ai.rollout.trajectory.save import read_saved_trajectory
 from osmosis_ai.rollout.trajectory.preview import (
     collect_source,
     preview_root,
     publish_previews,
 )
+from osmosis_ai.rollout.trajectory.save import read_saved_trajectory
 from osmosis_ai.rollout.types import (
     POLLING_LEASE_HEADER,
     CancelRolloutsRequest,
@@ -331,14 +332,23 @@ def create_rollout_server(
             ) from exc
 
     @app.get("/rollout/{rollout_id}/trajectory")
-    async def rollout_trajectory(rollout_id: str) -> Response:
+    async def rollout_trajectory(
+        rollout_id: str,
+        lease_token: str = Header(alias=POLLING_LEASE_HEADER, min_length=1),
+    ) -> Response:
         try:
-            finished = await registry.finished(rollout_id)
+            by_run = await registry.published_by_run(rollout_id, lease_token)
         except UnknownRolloutError as exc:
             raise HTTPException(status_code=404, detail="unknown rollout_id") from exc
-        if not finished:
-            raise HTTPException(status_code=409, detail="rollout has not finished")
-        document = await read_saved_trajectory(rollout_id)
+        except InvalidLeaseError as exc:
+            raise HTTPException(
+                status_code=403, detail="invalid polling lease"
+            ) from exc
+        except RolloutPendingError as exc:
+            raise HTTPException(
+                status_code=409, detail="rollout has not finished"
+            ) from exc
+        document = await read_saved_trajectory(rollout_id) if by_run else None
         if document is None:
             return Response(status_code=204)
         return Response(document, media_type="application/json")

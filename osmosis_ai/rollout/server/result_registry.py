@@ -26,6 +26,10 @@ class DuplicateRolloutError(ValueError):
     pass
 
 
+class RolloutPendingError(RuntimeError):
+    pass
+
+
 @dataclass
 class RolloutFuture:
     rollout_id: str
@@ -36,6 +40,8 @@ class RolloutFuture:
     cancel_result_task: asyncio.Task[None] | None = None
     cancel_disposition: str | None = None
     cancel_task_on_bind: bool = False
+    # The rollout's own run published the result, after saving its files.
+    published_by_run: bool = False
 
 
 class RolloutFutureRegistry:
@@ -120,9 +126,18 @@ class RolloutFutureRegistry:
             if entry is not None:
                 self.leases.remove(rollout_id)
 
-    async def finished(self, rollout_id: str) -> bool:
+    async def published_by_run(self, rollout_id: str, lease_token: str) -> bool:
+        """Whether the rollout's own run published its result.
+
+        Raises RolloutPendingError until a result is published. Lease expiry and
+        crashes publish a stand-in result while the run may still be writing.
+        """
         async with self.lock:
-            return self.entry(rollout_id).result.done()
+            entry = self.entry(rollout_id)
+            self.leases.authenticate(rollout_id, lease_token)
+            if not entry.result.done():
+                raise RolloutPendingError(rollout_id)
+            return entry.published_by_run
 
     async def get_progress(self, rollout_id: str) -> RolloutProgress:
         async with self.lock:
@@ -139,6 +154,7 @@ class RolloutFutureRegistry:
                     rollout_id, entry.progress.agent_started_at
                 )
                 expired = True
+            entry.published_by_run = not expired
             self.finish(entry, response)
         if expired:
             self.cancel_execution(entry)
