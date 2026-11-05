@@ -1,0 +1,21 @@
+osmosis_ai/rollout/backend/harbor/trial_limit.py
+  s_477c015da74954::t_38950fcda8ee47 27,33
+tests/unit/rollout/test_harbor_trial_limit.py
+  s_477c015da74954::t_338fcecff6d89e 99
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "641aca4b9012206c1d57057e10c823c5704f166b",
+  "prompts": {},
+  "sessions": {
+    "s_477c015da74954": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "bd780945-be5c-463d-8d7e-c18d5293658d",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Allen Lin <allen@osmosis.ai>"
+    }
+  }
+}
