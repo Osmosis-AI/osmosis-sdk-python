@@ -96,8 +96,7 @@ def test_zero_trial_limit_refuses_to_start(monkeypatch, template_task):
             agent="terminus-2",
         )
     assert str(error.value) == (
-        "Trial limit must be at least 1, got 0 (TrialQueue(n_concurrent=0)). "
-        "The rollout server did not start."
+        "Trial limit must be at least 1, got 0 (TrialQueue(n_concurrent=0))."
     )
 
 

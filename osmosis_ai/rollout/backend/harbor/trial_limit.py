@@ -24,15 +24,13 @@ def resolve_trial_limit(orchestrator: TrialQueue | None) -> TrialLimit:
     platform = int(raw) if raw else None
     if platform is not None and platform < 1:
         raise ValueError(
-            f"{PLATFORM_TRIAL_LIMIT_ENV} must be at least 1, got {platform}. "
-            "The rollout server did not start."
+            f"{PLATFORM_TRIAL_LIMIT_ENV} must be at least 1, got {platform}."
         )
     # Harbor exposes no public accessor for the queue's limit.
     own = None if orchestrator is None else orchestrator._n_concurrent
     if own is not None and own < 1:
         raise ValueError(
-            f"Trial limit must be at least 1, got {own} ({queue_label(own)}). "
-            "The rollout server did not start."
+            f"Trial limit must be at least 1, got {own} ({queue_label(own)})."
         )
     if platform is None:
         return local_trial_limit(own)
