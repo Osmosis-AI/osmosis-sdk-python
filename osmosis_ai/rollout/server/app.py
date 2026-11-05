@@ -33,7 +33,10 @@ from osmosis_ai.rollout.trajectory.preview import (
     preview_root,
     publish_previews,
 )
-from osmosis_ai.rollout.trajectory.save import read_saved_trajectory
+from osmosis_ai.rollout.trajectory.save import (
+    read_saved_trajectory,
+    remove_saved_trajectory,
+)
 from osmosis_ai.rollout.types import (
     POLLING_LEASE_HEADER,
     CancelRolloutsRequest,
@@ -388,6 +391,9 @@ async def _handle_rollout(
     preview_path: Path | None = None,
 ) -> RolloutResultResponse:
     rollout_id = request.rollout_id
+    # An id reused after result retention must never serve an earlier document,
+    # including when this run ends before it saves one.
+    await remove_saved_trajectory(rollout_id)
     rollout_ctx = RolloutContext(
         chat_completions_url=request.chat_completions_url,
         api_key=request.llm_api_key,

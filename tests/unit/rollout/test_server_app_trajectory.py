@@ -316,3 +316,26 @@ async def test_trajectory_route_rejects_unknown_and_unfinished_rollouts(
 
     assert unknown.status_code == 404
     assert running.status_code == 409
+
+
+class RaisingBackend(ExecutionBackend):
+    async def execute(self, request: ExecutionRequest) -> ExecutionOutcome:
+        raise RuntimeError("agent crashed")
+
+
+async def test_a_run_that_saves_nothing_never_serves_an_earlier_document(
+    tmp_path: Path, monkeypatch
+) -> None:
+    patch_artifact_root(monkeypatch, tmp_path)
+    (tmp_path / "r1").mkdir()
+    (tmp_path / "r1" / "trajectory.json").write_text('{"session_id": "earlier"}')
+    app = create_rollout_server(backend=RaisingBackend())
+    async with app.router.lifespan_context(app):
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://rollout"
+        ) as client:
+            headers = await finish_rollout(client)
+            response = await client.get("/rollout/r1/trajectory", headers=headers)
+
+    assert response.status_code == 204
+    assert not (tmp_path / "r1" / "trajectory.json").exists()

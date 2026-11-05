@@ -29,6 +29,12 @@ def _document_path(artifact_root: Path, rollout_id: str) -> Path:
     return artifact_root / rollout_id / "trajectory.json"
 
 
+async def remove_saved_trajectory(rollout_id: str) -> None:
+    """Delete the document an earlier rollout saved under this id, if any."""
+    path = _document_path(default_artifact_root(), rollout_id)
+    await asyncio.to_thread(path.unlink, missing_ok=True)
+
+
 async def read_saved_trajectory(rollout_id: str) -> bytes | None:
     """The document ``save_trajectory`` wrote for this rollout, or None."""
     path = _document_path(default_artifact_root(), rollout_id)
@@ -111,19 +117,17 @@ async def _save(
             "Saved rollout diagnostics for %s -> %s", rollout_id, diagnostics_dest
         )
 
-    dest = _document_path(artifact_root, rollout_id)
     sample = result.sample
-    if sample is None or sample.trajectory_messages is None:
-        # A rollout id reused after retention must not serve an earlier document.
-        await asyncio.to_thread(dest.unlink, missing_ok=True)
-        if sample is not None:
-            # Explicit opt-out, or an upstream conversion/snapshot failure
-            # that already warned with a traceback -- not worth a warning here.
-            logger.info(
-                "Skipping trajectory for rollout %s: no trajectory messages "
-                "(persistence disabled or conversion failed upstream)",
-                rollout_id,
-            )
+    if sample is None:
+        return
+    if sample.trajectory_messages is None:
+        # Explicit opt-out, or an upstream conversion/snapshot failure
+        # that already warned with a traceback -- not worth a warning here.
+        logger.info(
+            "Skipping trajectory for rollout %s: no trajectory messages "
+            "(persistence disabled or conversion failed upstream)",
+            rollout_id,
+        )
         return
 
     matched_report, unmatched_reports = _resolve_sample_report(report)
@@ -145,6 +149,7 @@ async def _save(
         default_model_name=report.model_name if report else None,
         unmatched_sample_reports=unmatched_reports or None,
     )
+    dest = _document_path(artifact_root, rollout_id)
     # Keep large token-id/logprob arrays compact inside the pretty document.
     data = format_trajectory_json(trajectory.to_json_dict()).encode()
     await asyncio.to_thread(_write_document, dest, data)
