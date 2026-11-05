@@ -1919,10 +1919,10 @@ class FakeQueue:
     """A TrialQueue that fires hooks, then simulates harbor's secret scrub
     after the END hook and before submit() resolves."""
 
-    def __init__(self, run=None, n_concurrent=8):
+    def __init__(self, run=None):
         self.hooks = {}
         self.run = run
-        self._n_concurrent = n_concurrent
+        self._n_concurrent = 8
 
     def add_hook(self, event, hook):
         self.hooks.setdefault(event, []).append(hook)

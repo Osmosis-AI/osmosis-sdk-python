@@ -247,7 +247,6 @@ class BlockingBackend(ExecutionBackend):
 
 
 async def finish_rollout(client: httpx.AsyncClient) -> dict[str, str]:
-    """Run r1 to its result and return the lease header for it."""
     admission = await client.post(
         "/rollout", json=make_request().model_dump(mode="json")
     )

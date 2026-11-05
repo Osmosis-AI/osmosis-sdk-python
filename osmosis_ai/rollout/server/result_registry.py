@@ -40,7 +40,8 @@ class RolloutFuture:
     cancel_result_task: asyncio.Task[None] | None = None
     cancel_disposition: str | None = None
     cancel_task_on_bind: bool = False
-    # The rollout's own run published the result, after saving its files.
+    # Set only by complete(), after the run saved its files; stand-in results
+    # (lease expiry, crash) leave it False.
     published_by_run: bool = False
 
 
@@ -127,11 +128,6 @@ class RolloutFutureRegistry:
                 self.leases.remove(rollout_id)
 
     async def published_by_run(self, rollout_id: str, lease_token: str) -> bool:
-        """Whether the rollout's own run published its result.
-
-        Raises RolloutPendingError until a result is published. Lease expiry and
-        crashes publish a stand-in result while the run may still be writing.
-        """
         async with self.lock:
             entry = self.entry(rollout_id)
             self.leases.authenticate(rollout_id, lease_token)
@@ -336,5 +332,6 @@ __all__ = [
     "DuplicateRolloutError",
     "RolloutFuture",
     "RolloutFutureRegistry",
+    "RolloutPendingError",
     "UnknownRolloutError",
 ]

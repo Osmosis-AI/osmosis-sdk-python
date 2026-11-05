@@ -30,13 +30,11 @@ def _document_path(artifact_root: Path, rollout_id: str) -> Path:
 
 
 async def remove_saved_trajectory(rollout_id: str) -> None:
-    """Delete the document an earlier rollout saved under this id, if any."""
     path = _document_path(default_artifact_root(), rollout_id)
     await asyncio.to_thread(path.unlink, missing_ok=True)
 
 
 async def read_saved_trajectory(rollout_id: str) -> bytes | None:
-    """The document ``save_trajectory`` wrote for this rollout, or None."""
     path = _document_path(default_artifact_root(), rollout_id)
     try:
         return await asyncio.to_thread(path.read_bytes)
