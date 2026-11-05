@@ -1,0 +1,21 @@
+pyproject.toml
+  s_ee7b411c86eb9d::t_25da2349f18181 280
+tests/unit/eval/local/test_upload_archive.py
+  s_ee7b411c86eb9d::t_3339d0cfc460a1 226-256
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "796e384434d7bce8ac33aaf51d81e3b8e3692824",
+  "prompts": {},
+  "sessions": {
+    "s_ee7b411c86eb9d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "dc2813cd-2024-46e3-a173-71955e61fc91",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Allen Lin <allen@osmosis.ai>"
+    }
+  }
+}

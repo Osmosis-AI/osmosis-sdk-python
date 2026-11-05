@@ -1,0 +1,23 @@
+osmosis_ai/platform/cli/eval_upload.py
+  s_ee7b411c86eb9d::t_5b86721370ac74 235-236
+tests/unit/eval/local/test_upload.py
+  s_ee7b411c86eb9d::t_c2f6c60b827f23 214
+tests/unit/platform/cli/test_eval_upload.py
+  s_ee7b411c86eb9d::t_3393b0053799bf 511-512
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "097ea6b1e09df7ba4b44011d8d746d9c0cedfe53",
+  "prompts": {},
+  "sessions": {
+    "s_ee7b411c86eb9d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "dc2813cd-2024-46e3-a173-71955e61fc91",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Allen Lin <allen@osmosis.ai>"
+    }
+  }
+}
