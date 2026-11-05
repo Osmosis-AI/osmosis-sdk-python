@@ -120,6 +120,10 @@ class RolloutFutureRegistry:
             if entry is not None:
                 self.leases.remove(rollout_id)
 
+    async def finished(self, rollout_id: str) -> bool:
+        async with self.lock:
+            return self.entry(rollout_id).result.done()
+
     async def get_progress(self, rollout_id: str) -> RolloutProgress:
         async with self.lock:
             return self.entry(rollout_id).progress

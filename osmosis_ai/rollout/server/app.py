@@ -15,7 +15,7 @@ from typing import Any
 from uuid import uuid4
 
 from fastapi import FastAPI, Header, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 
 from osmosis_ai.rollout.backend.base import ExecutionBackend
 from osmosis_ai.rollout.context import RolloutContext, RolloutProgress
@@ -27,6 +27,7 @@ from osmosis_ai.rollout.server.result_registry import (
     UnknownRolloutError,
 )
 from osmosis_ai.rollout.trajectory import save_trajectory
+from osmosis_ai.rollout.trajectory.save import read_saved_trajectory
 from osmosis_ai.rollout.trajectory.preview import (
     collect_source,
     preview_root,
@@ -328,6 +329,19 @@ def create_rollout_server(
             raise HTTPException(
                 status_code=403, detail="invalid polling lease"
             ) from exc
+
+    @app.get("/rollout/{rollout_id}/trajectory")
+    async def rollout_trajectory(rollout_id: str) -> Response:
+        try:
+            finished = await registry.finished(rollout_id)
+        except UnknownRolloutError as exc:
+            raise HTTPException(status_code=404, detail="unknown rollout_id") from exc
+        if not finished:
+            raise HTTPException(status_code=409, detail="rollout has not finished")
+        document = await read_saved_trajectory(rollout_id)
+        if document is None:
+            return Response(status_code=204)
+        return Response(document, media_type="application/json")
 
     @app.post("/rollout/cancel")
     async def cancel(request: CancelRolloutsRequest) -> CancelRolloutsResponse:
