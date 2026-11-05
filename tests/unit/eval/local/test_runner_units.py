@@ -612,11 +612,15 @@ async def _resolved_concurrency(
     ("health", "expected"),
     [
         ({"concurrency": {"max_concurrent": 4}}, 4),
-        ({"max_queue_depth": 3, "concurrency": {"max_concurrent": 4}}, 4),
+        ({"max_queue_depth": 3, "concurrency": {"max_concurrent": 4}}, 3),
         # Older Harbor servers advertise only their queue depth.
         ({"max_queue_depth": 3}, 3),
     ],
-    ids=["backend-limit", "limit-over-queue-depth", "older-harbor-queue-depth"],
+    ids=[
+        "backend-limit",
+        "smaller-of-limit-and-queue-depth",
+        "older-harbor-queue-depth",
+    ],
 )
 async def test_health_capacity_caps_an_unset_concurrency(
     tmp_path: Path,

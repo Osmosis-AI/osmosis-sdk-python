@@ -81,6 +81,12 @@ def test_resolve_trial_limit(monkeypatch, platform, own, value, level, message):
     assert (limit.value, limit.log_level, limit.message) == (value, level, message)
 
 
+def test_zero_platform_limit_refuses_to_start(monkeypatch):
+    monkeypatch.setenv(PLATFORM_ENV, "0")
+    with pytest.raises(ValueError, match="must be at least 1, got 0"):
+        resolve_trial_limit(None)
+
+
 def test_zero_trial_limit_refuses_to_start(monkeypatch, template_task):
     monkeypatch.setenv(PLATFORM_ENV, "32")
     with pytest.raises(ValueError) as error:
