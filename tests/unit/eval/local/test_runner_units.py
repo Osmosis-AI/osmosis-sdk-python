@@ -611,12 +611,16 @@ async def _resolved_concurrency(
 @pytest.mark.parametrize(
     ("health", "expected"),
     [
-        # Harbor advertises its queue depth at top level...
-        ({"max_queue_depth": 3}, 3),
-        # ...LocalBackend reports the limiter snapshot it actually enforces.
         ({"concurrency": {"max_concurrent": 4}}, 4),
+        ({"max_queue_depth": 3, "concurrency": {"max_concurrent": 4}}, 3),
+        # Older Harbor servers advertise only their queue depth.
+        ({"max_queue_depth": 3}, 3),
     ],
-    ids=["harbor-queue-depth", "local-backend-limiter"],
+    ids=[
+        "backend-limit",
+        "smaller-of-limit-and-queue-depth",
+        "older-harbor-queue-depth",
+    ],
 )
 async def test_health_capacity_caps_an_unset_concurrency(
     tmp_path: Path,

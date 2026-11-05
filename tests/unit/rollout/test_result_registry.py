@@ -9,6 +9,7 @@ from osmosis_ai.rollout.server.lease import InvalidLeaseError
 from osmosis_ai.rollout.server.result_registry import (
     DuplicateRolloutError,
     RolloutFutureRegistry,
+    RolloutPendingError,
     UnknownRolloutError,
 )
 from osmosis_ai.rollout.types import (
@@ -207,6 +208,21 @@ async def test_completion_after_lease_deadline_reports_agent_start(
     result = store.entry("r1").result.result()
     assert result.err_category is RolloutErrorCategory.LEASE_EXPIRED
     assert result.agent_started_at == AGENT_STARTED_AT
+    await store.close()
+
+
+@pytest.mark.parametrize("expired", [False, True])
+async def test_published_by_run_excludes_lease_expiry(monkeypatch, expired) -> None:
+    store = registry([])
+    lease = await store.register("r1")
+    with pytest.raises(RolloutPendingError):
+        await store.published_by_run("r1", lease)
+    with pytest.raises(InvalidLeaseError):
+        await store.published_by_run("r1", "wrong")
+    monkeypatch.setattr(store.leases, "expired", lambda _rollout_id: expired)
+    finished = RolloutResultResponse(rollout_id="r1", status=RolloutStatus.SUCCESS)
+    await store.complete("r1", finished)
+    assert await store.published_by_run("r1", lease) is not expired
     await store.close()
 
 

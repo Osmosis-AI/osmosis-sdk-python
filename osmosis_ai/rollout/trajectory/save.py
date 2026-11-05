@@ -25,6 +25,23 @@ def _write_document(dest: Path, payload: bytes) -> None:
     dest.write_bytes(payload)
 
 
+def _document_path(artifact_root: Path, rollout_id: str) -> Path:
+    return artifact_root / rollout_id / "trajectory.json"
+
+
+async def remove_saved_trajectory(rollout_id: str) -> None:
+    path = _document_path(default_artifact_root(), rollout_id)
+    await asyncio.to_thread(path.unlink, missing_ok=True)
+
+
+async def read_saved_trajectory(rollout_id: str) -> bytes | None:
+    path = _document_path(default_artifact_root(), rollout_id)
+    try:
+        return await asyncio.to_thread(path.read_bytes)
+    except FileNotFoundError:
+        return None
+
+
 def _resolve_sample_report(
     report: TrajectoryReport | None,
 ) -> tuple[SampleReport | None, dict[str, SampleReport]]:
@@ -130,7 +147,7 @@ async def _save(
         default_model_name=report.model_name if report else None,
         unmatched_sample_reports=unmatched_reports or None,
     )
-    dest = artifact_root / rollout_id / "trajectory.json"
+    dest = _document_path(artifact_root, rollout_id)
     # Keep large token-id/logprob arrays compact inside the pretty document.
     data = format_trajectory_json(trajectory.to_json_dict()).encode()
     await asyncio.to_thread(_write_document, dest, data)

@@ -46,6 +46,10 @@ class ExecutionBackend(ABC):
     def health(self) -> dict[str, Any]:
         return {"status": "ok"}
 
+    def log_startup(self) -> None:
+        """Log the backend's settings; the server calls this once logging is set up."""
+        return None
+
     async def shutdown(self) -> None:
         """Release backend resources after the server stops admitting work.
 

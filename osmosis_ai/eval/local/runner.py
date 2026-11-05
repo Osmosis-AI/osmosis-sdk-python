@@ -606,19 +606,21 @@ async def probe_health(
 def health_capacity(health: Mapping[str, Any]) -> int | None:
     """Backend-advertised in-flight capacity from ``/health``, if any.
 
-    Two shapes, because both backends answer this endpoint: Harbor reports
-    ``max_queue_depth`` at top level, LocalBackend reports its limiter snapshot
-    under ``concurrency``. Anything absent, non-integer, boolean, or
-    non-positive means "unbounded" and yields no cap.
+    The smaller of ``concurrency.max_concurrent`` (how many rollouts the backend
+    runs at once) and Harbor's ``max_queue_depth`` (how many it admits while
+    they wait to start). Anything absent, non-integer, boolean, or non-positive
+    means "unbounded" and yields no cap.
     """
     nested = health.get("concurrency")
-    for value in (
-        health.get("max_queue_depth"),
-        nested.get("max_concurrent") if isinstance(nested, Mapping) else None,
-    ):
-        if isinstance(value, int) and not isinstance(value, bool) and value > 0:
-            return value
-    return None
+    limits = [
+        value
+        for value in (
+            nested.get("max_concurrent") if isinstance(nested, Mapping) else None,
+            health.get("max_queue_depth"),
+        )
+        if isinstance(value, int) and not isinstance(value, bool) and value > 0
+    ]
+    return min(limits, default=None)
 
 
 def public_chat_endpoint_environment(

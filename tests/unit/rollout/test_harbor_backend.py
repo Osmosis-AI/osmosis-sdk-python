@@ -1428,7 +1428,7 @@ class TestTaskResolution:
             raise RuntimeError("stop before harbor")
 
         orchestrator = SimpleNamespace(
-            add_hook=lambda *args: None, submit=failing_submit
+            add_hook=lambda *args: None, submit=failing_submit, _n_concurrent=1
         )
         backend = HarborBackend(
             orchestrator=orchestrator,
@@ -1469,7 +1469,7 @@ class TestTaskResolution:
             raise RuntimeError("stop before harbor")
 
         orchestrator = SimpleNamespace(
-            add_hook=lambda *args: None, submit=failing_submit
+            add_hook=lambda *args: None, submit=failing_submit, _n_concurrent=1
         )
         backend = HarborBackend(
             orchestrator=orchestrator,
@@ -1922,6 +1922,7 @@ class FakeQueue:
     def __init__(self, run=None):
         self.hooks = {}
         self.run = run
+        self._n_concurrent = 8
 
     def add_hook(self, event, hook):
         self.hooks.setdefault(event, []).append(hook)
