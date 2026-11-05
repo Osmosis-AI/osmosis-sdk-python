@@ -590,6 +590,7 @@ def benchmark_info(key: str, *, limit: int, all_: bool) -> DetailResult:
         "runner_family": benchmark.runner_family,
         "supports_harness": benchmark.supports_harness,
         "requires_harness": benchmark.requires_harness,
+        "requires_model_context_window": benchmark.requires_model_context_window,
         "default_harness": benchmark.default_harness,
         "requires_judge_model": benchmark.requires_judge_model,
         "requires_judge_api_key": benchmark.requires_judge_api_key,
@@ -610,6 +611,13 @@ def benchmark_info(key: str, *, limit: int, all_: bool) -> DetailResult:
         "Use osmosis benchmark runs info <run-name> for a run's details.",
         *_sync_hints(benchmark),
     ]
+    if benchmark.requires_model_context_window:
+        display_hints.insert(
+            0,
+            "Set max_input_tokens in each [agents.model] to the model's supported "
+            "input token limit. Use a provider or endpoint model; hosted models "
+            "cannot supply this value.",
+        )
     if benchmark.default_harness:
         display_hints.insert(
             0,

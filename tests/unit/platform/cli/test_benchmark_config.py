@@ -45,6 +45,7 @@ type = "endpoint"
 base_url = "https://models.example.com/v1"
 model = "custom-model"
 api_key_secret = "CUSTOM_API_KEY"
+max_input_tokens = 65536
 
 [execution]
 attempts_per_task = 2
@@ -79,6 +80,28 @@ LOG_LEVEL = "info"
         },
         "env": {"AGENT_MODE": "strict"},
     }
+    assert config.agents_config[1]["model"]["max_input_tokens"] == 65536
+
+
+@pytest.mark.parametrize("value", ["0", "-1", "1.5", '"131072"', "true"])
+def test_model_context_window_must_be_a_positive_integer(
+    tmp_path: Path, value: str
+) -> None:
+    path = _write_config(
+        tmp_path / "benchmark.toml",
+        f"""
+[experiment]
+benchmark = "loca-bench"
+[[agents]]
+[agents.model]
+type = "provider"
+model = "openai/gpt-5"
+api_key_secret = "OPENAI_API_KEY"
+max_input_tokens = {value}
+""",
+    )
+    with pytest.raises(CLIError, match="max_input_tokens"):
+        load_benchmark_submit_config(path)
 
 
 @pytest.mark.parametrize(
