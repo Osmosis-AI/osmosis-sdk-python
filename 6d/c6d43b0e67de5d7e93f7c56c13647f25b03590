@@ -1,0 +1,23 @@
+osmosis_ai/rollout/server/app.py
+  s_477c015da74954::t_14fc8a2099d9e4 36-39,394-396
+osmosis_ai/rollout/trajectory/save.py
+  s_477c015da74954::t_cbd30510417dce 32-37,121-130,152
+tests/unit/rollout/test_server_app_trajectory.py
+  s_477c015da74954::t_7e45413fd503d7 319-341
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "6dc6d43b0e67de5d7e93f7c56c13647f25b03590",
+  "prompts": {},
+  "sessions": {
+    "s_477c015da74954": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "bd780945-be5c-463d-8d7e-c18d5293658d",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Allen Lin <allen@osmosis.ai>"
+    }
+  }
+}
