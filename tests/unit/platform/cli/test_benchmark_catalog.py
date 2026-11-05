@@ -407,24 +407,23 @@ def test_benchmark_info_reports_a_scaffold_only_benchmark(
 
     class FakeClient:
         def get_benchmark(self, *_: Any, **__: Any) -> BenchmarkCatalogDetail:
-            return BenchmarkCatalogDetail(
-                id="benchmark-4",
-                name="Toolathlon-Verified",
-                description=None,
-                source_type="osmosis_managed",
-                source_ref="toolathlon-verified",
-                task_count=5,
-                category_count=1,
-                task_sets=[],
-                runner_family="toolathlon",
-                supports_harness=False,
-                requires_harness=False,
-                requires_judge_model=False,
-                judge_model_default=None,
-                pass_threshold=1,
-                categories=[],
-                tasks=[],
-                unavailable_tasks=None,
+            return BenchmarkCatalogDetail.from_dict(
+                {
+                    "benchmark": {
+                        "id": "benchmark-4",
+                        "name": "LOCA-bench",
+                        "source_type": "osmosis_managed",
+                        "source_ref": "loca-bench",
+                        "task_count": 5,
+                        "category_count": 1,
+                        "runner_family": "harbor",
+                        "supports_harness": False,
+                        "requires_harness": False,
+                        "requires_judge_model": False,
+                        "requires_model_context_window": True,
+                        "pass_threshold": 1,
+                    }
+                }
             )
 
         list_benchmark_runs = staticmethod(_empty_runs_page)
@@ -437,11 +436,13 @@ def test_benchmark_info_reports_a_scaffold_only_benchmark(
     monkeypatch.setattr(benchmark_module, "OsmosisClient", FakeClient)
 
     result = benchmark_module.benchmark_info(
-        "toolathlon-verified", limit=DEFAULT_PAGE_SIZE, all_=False
+        "loca-bench", limit=DEFAULT_PAGE_SIZE, all_=False
     )
 
     fields = {field.label: field.value for field in result.fields}
     assert fields["Harness"] == "Official scaffold only"
+    assert result.data["benchmark"]["requires_model_context_window"] is True
+    assert any("max_input_tokens" in hint for hint in result.display_hints)
 
 
 def test_benchmark_info_renders_leaderboard_and_runs(
