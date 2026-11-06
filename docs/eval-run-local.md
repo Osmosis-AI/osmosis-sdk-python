@@ -63,10 +63,11 @@ Add `--upload` to import a completed local run into the platform before `eval ru
 osmosis eval run configs/eval/my-rollout.toml --name my-local-run --upload
 ```
 
-An existing completed run can be uploaded or resumed independently:
+An existing completed run can be uploaded or resumed independently. By default the destination is the workspace connected to the current Git repository. To upload to a different workspace, pass the root `--workspace` option. A run name or directory still refers to local files:
 
 ```bash
 osmosis eval upload my-local-run
+osmosis --workspace team-b eval upload my-local-run
 ```
 
 ## Options
@@ -177,6 +178,13 @@ This is deliberate. The common loop — "some rows failed, edit the agent, re-ru
 The run's provenance records the workspace-relative config path, so the platform can show the exact `--retry-failed` command on the run's detail page and `osmosis eval retry` can print it instead of refusing. Configs must live under the workspace's `configs/eval/` directory; other paths are rejected. `eval run --upload` sends the config it actually ran, which supersedes the manifest's when a resume follows a rename; a standalone `eval upload` has no invocation to read and sends the manifest's. The manifest itself is never rewritten, because its bytes are the `manifest_digest` that identifies the import.
 
 Publishing a retried run needs `--replace`, which `eval run --retry-failed --upload` passes for you; `eval upload <run-name> --replace` is the standalone form. Without it the platform refuses, because a run whose local id it already imported would otherwise be overwritten silently. The manifest digest still has to match, which is what proves both attempts evaluated the same resolved inputs. The platform run keeps its id and URL.
+
+If you used `osmosis --workspace team-b eval retry my-run`, the CLI suggests two commands. The first reruns the failed samples locally; only after it succeeds does the second publish the results to `team-b`, even if the source repository is connected to a different workspace:
+
+```bash
+osmosis eval run configs/eval/my-rollout.toml --name my-run --retry-failed &&
+  osmosis --workspace team-b eval upload my-run --replace
+```
 
 Throughput knobs (`--max-in-flight`, `evaluation.batch_size`) are excluded from the lock, so you can change concurrency and still resume.
 

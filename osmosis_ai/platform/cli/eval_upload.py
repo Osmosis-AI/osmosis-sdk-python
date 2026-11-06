@@ -39,13 +39,17 @@ from osmosis_ai.platform.api.models import EvalRunImportResult, UploadInfo
 from osmosis_ai.platform.auth.platform_client import PlatformAPIError
 from osmosis_ai.platform.cli.utils import (
     format_size,
-    require_git_workspace_directory_context,
+    require_platform_workspace_context,
 )
-from osmosis_ai.platform.cli.workspace_directory_context import git_result_context
+from osmosis_ai.platform.cli.workspace_directory_context import workspace_result_context
+from osmosis_ai.platform.cli.workspace_directory_contract import (
+    find_workspace_directory,
+)
 
 if TYPE_CHECKING:
     from osmosis_ai.platform.cli.workspace_directory_context import (
         GitWorkspaceDirectoryContext,
+        PlatformWorkspaceContext,
     )
 
 _EXTRACTION_POLL_SECONDS = 5.0
@@ -169,7 +173,7 @@ def _upload_slots(
     *,
     plan: EvalUploadPlan,
     archive: RunArchive,
-    context: GitWorkspaceDirectoryContext,
+    context: GitWorkspaceDirectoryContext | PlatformWorkspaceContext,
 ) -> None:
     response = client.get_eval_run_import_uploads(
         session_id,
@@ -209,7 +213,7 @@ def _wait_for_extraction(
     session_id: str,
     *,
     archive: RunArchive,
-    context: GitWorkspaceDirectoryContext,
+    context: GitWorkspaceDirectoryContext | PlatformWorkspaceContext,
 ) -> None:
     with get_output_context().status("Extracting uploaded files on the platform..."):
         state = client.start_eval_run_import_extraction(
@@ -254,7 +258,7 @@ def prepare_eval_upload_plan(
 def upload_plan(
     plan: EvalUploadPlan,
     *,
-    context: GitWorkspaceDirectoryContext,
+    context: GitWorkspaceDirectoryContext | PlatformWorkspaceContext,
     client: OsmosisClient | None = None,
     replace: bool = False,
 ) -> EvalRunImportResult:
@@ -311,7 +315,7 @@ def _result(
     plan: EvalUploadPlan,
     imported: EvalRunImportResult,
     *,
-    context: GitWorkspaceDirectoryContext,
+    context: PlatformWorkspaceContext,
 ) -> OperationResult:
     resource: dict[str, Any] = {
         "session_id": imported.session_id,
@@ -323,7 +327,7 @@ def _result(
         "expected_files": imported.expected_files,
         "uploaded_files": imported.uploaded_files,
         "platform_url": imported.platform_url,
-        **git_result_context(context),
+        **workspace_result_context(context),
     }
     name = imported.eval_run_name or plan.run["name"]
     next_steps = (
@@ -344,7 +348,7 @@ def _result(
     )
 
 
-def _resolve_run_dir(requested: Path, *, workspace_directory: Path) -> Path:
+def _resolve_run_dir(requested: Path, *, workspace_directory: Path | None) -> Path:
     """Resolve a run name from the default eval root, or preserve an explicit path."""
     requested = requested.expanduser()
     direct = Path(os.path.abspath(requested))
@@ -356,12 +360,15 @@ def _resolve_run_dir(requested: Path, *, workspace_directory: Path) -> Path:
         run_name = validate_run_name(str(requested))
     except LocalEvalStateError:
         return direct
-    return Path(os.path.abspath(workspace_directory / ".osmosis" / "evals" / run_name))
+    if workspace_directory is None:
+        cwd = Path.cwd()
+        workspace_directory = find_workspace_directory(cwd) or cwd
+    return workspace_directory / ".osmosis" / "evals" / run_name
 
 
 def upload(run_dir: Path, *, replace: bool = False) -> OperationResult:
     """Upload one completed local evaluation by run name or directory."""
-    context = require_git_workspace_directory_context()
+    context = require_platform_workspace_context()
     candidate = _resolve_run_dir(
         run_dir, workspace_directory=context.workspace_directory
     )
@@ -377,7 +384,12 @@ def upload(run_dir: Path, *, replace: bool = False) -> OperationResult:
         # platform's other conflicts carry their own remedy.
         if exc.error_code == "EVAL_IMPORT_EXISTS" and not replace:
             classified = classify_error(exc)
-            command = f"osmosis eval upload {quote(str(run_dir))} --replace"
+            scope = (
+                f" --workspace {quote(context.workspace_name)}"
+                if context.workspace_name
+                else ""
+            )
+            command = f"osmosis{scope} eval upload {quote(str(run_dir))} --replace"
             raise CLIError(
                 f"{exc} Re-run it with --retry-failed, then republish with: "
                 f"{console.escape(command)}",

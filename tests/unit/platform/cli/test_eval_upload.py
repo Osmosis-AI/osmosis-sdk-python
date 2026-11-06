@@ -500,7 +500,7 @@ def test_failed_extraction_reason_reaches_the_cli_error(
     monkeypatch.setattr(eval_upload_module, "RunLock", lambda _path: nullcontext())
     monkeypatch.setattr(
         eval_upload_module,
-        "require_git_workspace_directory_context",
+        "require_platform_workspace_context",
         lambda: SimpleNamespace(workspace_directory=tmp_path, **vars(CONTEXT)),
     )
     monkeypatch.setattr(
@@ -625,41 +625,50 @@ def test_replace_is_forwarded_to_the_import_start(
     assert server.calls[0][2] is replace
 
 
-def test_conflict_without_replace_keeps_platform_details_and_quotes_the_path(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.fixture
+def repo_a(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    import subprocess
+
+    monkeypatch.chdir(tmp_path)
+    subprocess.run(["git", "init", "-q"], check=True)
+    subprocess.run(
+        ["git", "remote", "add", "origin", "https://github.com/acme/a.git"], check=True
+    )
+    monkeypatch.setenv("OSMOSIS_TOKEN", "test-upload-token")
+    monkeypatch.setenv("OSMOSIS_PLATFORM_URL", "https://platform.example")
+    monkeypatch.setenv("OSMOSIS_TOKEN_PLATFORM_URL", "https://platform.example")
+    return tmp_path
+
+
+@pytest.mark.parametrize("select_b", [False, True], ids=["git-origin", "workspace-b"])
+def test_upload_request_and_replace_hint_use_selected_workspace(
+    repo_a: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    select_b: bool,
 ) -> None:
-    from osmosis_ai.cli.errors import CLIError
+    from urllib.request import Request
+
+    import osmosis_ai.cli.main as cli
     from osmosis_ai.platform.auth.platform_client import PlatformAPIError
-    from osmosis_ai.platform.cli.eval_upload import upload as upload_run
 
-    class DummyLock:
-        def __init__(self, *_args: Any, **_kwargs: Any) -> None:
-            pass
-
-        def __enter__(self) -> DummyLock:
-            return self
-
-        def __exit__(self, *_args: Any) -> bool:
-            return False
-
+    plan = _plan(repo_a / "local evals", BODIES)
     monkeypatch.setattr(
-        "osmosis_ai.platform.cli.eval_upload.RunLock",
-        DummyLock,
+        "osmosis_ai.platform.cli.eval_upload.prepare_eval_upload_plan", lambda _: plan
     )
-    monkeypatch.setattr(
-        "osmosis_ai.platform.cli.eval_upload.require_git_workspace_directory_context",
-        lambda: SimpleNamespace(
-            workspace_directory=tmp_path,
-            credentials=None,
-            git_identity="acme/repo",
-        ),
-    )
-    monkeypatch.setattr(
-        "osmosis_ai.platform.cli.eval_upload.prepare_eval_upload_plan",
-        lambda _run_dir: SimpleNamespace(),
-    )
+    scopes = []
 
-    def _upload_plan(*_args: Any, **_kwargs: Any) -> None:
+    def conflict(request: Request, **_kwargs: Any) -> None:
+        assert (
+            request.get_method() == "POST"
+            and request.selector == "/api/cli/eval-runs/imports"
+        )
+        scopes.append(
+            (
+                request.get_header("X-osmosis-git"),
+                request.get_header("X-osmosis-workspace"),
+            )
+        )
         raise PlatformAPIError(
             "already imported",
             status_code=409,
@@ -667,19 +676,83 @@ def test_conflict_without_replace_keeps_platform_details_and_quotes_the_path(
             details={"local_run_id": "abc"},
         )
 
+    monkeypatch.setattr("osmosis_ai.platform.auth.platform_client.urlopen", conflict)
+    flags = ["--workspace", "workspace-b"] if select_b else []
+    assert cli.main([*flags, "--json", "eval", "upload", "local evals/run-1"]) == 1
+    assert scopes == ([(None, "workspace-b")] if select_b else [("acme/a", None)])
+    error = json.loads(capsys.readouterr().err)["error"]
+    assert error["code"] == "CONFLICT"
+    assert error["details"]["platform_code"] == "EVAL_IMPORT_EXISTS"
+    assert error["details"]["local_run_id"] == "abc"
+    command = "osmosis --workspace workspace-b" if select_b else "osmosis"
+    assert f"{command} eval upload 'local evals/run-1' --replace" in error["message"]
+
+
+@pytest.mark.parametrize("config", ["configs/eval/my config.toml", None])
+def test_local_retry_from_repo_a_republishes_only_to_selected_workspace(
+    repo_a: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    config: str | None,
+) -> None:
+    import shlex
+    from unittest.mock import Mock
+
+    from osmosis_ai.cli.main import main
+    from osmosis_ai.platform.auth.platform_client import PlatformAPIError
+
+    workspace = "Team B"
+    plan = _plan(repo_a / ".osmosis/evals", BODIES)
+    prepare = Mock(return_value=plan)
     monkeypatch.setattr(
-        "osmosis_ai.platform.cli.eval_upload.upload_plan",
-        _upload_plan,
+        "osmosis_ai.platform.cli.eval_upload.prepare_eval_upload_plan", prepare
     )
+    transport = Mock(
+        side_effect=[
+            PlatformAPIError(
+                "Retry locally",
+                status_code=409,
+                details={
+                    "local_run": {"config_path": config, "eval_run_name": "run-1"},
+                },
+            ),
+            PlatformAPIError("Intercepted before upload", status_code=403),
+        ]
+    )
+    monkeypatch.setattr("osmosis_ai.platform.auth.platform_client.urlopen", transport)
+    assert (
+        main(["--json", "--workspace", workspace, "eval", "retry", "eval-id", "--yes"])
+        == 1
+    )
+    message = json.loads(capsys.readouterr().err)["error"]["message"]
+    commands = [
+        shlex.split(line)
+        for line in message.splitlines()
+        if line.strip().startswith("osmosis ")
+    ]
+    assert commands[0] == [
+        "osmosis",
+        "eval",
+        "run",
+        config or "<config>",
+        "--name",
+        "run-1",
+        "--retry-failed",
+        "&&",
+    ]
+    assert len(commands) == 2 and commands[1][0] == "osmosis"
+    assert main(["--json", *commands[1][1:]]) == 1
+    prepare.assert_called_once_with(plan.run_dir)
 
-    with pytest.raises(CLIError) as excinfo:
-        upload_run(Path("my run"), replace=False)
-
-    err = excinfo.value
-    assert err.code == "CONFLICT"
-    assert err.details["platform_code"] == "EVAL_IMPORT_EXISTS"
-    assert err.details["local_run_id"] == "abc"
-    assert "osmosis eval upload 'my run' --replace" in str(err)
+    retry, publish = [call.args[0] for call in transport.call_args_list]
+    assert (retry.selector, publish.selector) == (
+        "/api/cli/eval-runs/eval-id/retry",
+        "/api/cli/eval-runs/imports",
+    )
+    for request in (retry, publish):
+        assert request.get_header("X-osmosis-workspace") == workspace
+        assert request.get_header("X-osmosis-git") is None
+    assert json.loads(publish.data)["reimport"] is True
 
 
 def test_other_conflicts_do_not_suggest_replace(
@@ -689,7 +762,7 @@ def test_other_conflicts_do_not_suggest_replace(
     from osmosis_ai.platform.cli.eval_upload import upload as upload_run
 
     monkeypatch.setattr(
-        "osmosis_ai.platform.cli.eval_upload.require_git_workspace_directory_context",
+        "osmosis_ai.platform.cli.eval_upload.require_platform_workspace_context",
         lambda: SimpleNamespace(
             workspace_directory=tmp_path,
             credentials=None,
@@ -716,7 +789,7 @@ def test_other_conflicts_do_not_suggest_replace(
     )
 
     with pytest.raises(PlatformAPIError) as excinfo:
-        upload_run(Path("my run"), replace=False)
+        upload_run(tmp_path / "my run", replace=False)
 
     assert str(excinfo.value) == message
 
@@ -749,7 +822,7 @@ def test_standalone_upload_errors_never_print_an_ambient_key(
     monkeypatch.setenv("OPENAI_API_KEY", secret)
     monkeypatch.setattr(
         eval_upload_module,
-        "require_git_workspace_directory_context",
+        "require_platform_workspace_context",
         lambda: SimpleNamespace(
             workspace_directory=workspace,
             git_identity="example/fixture",

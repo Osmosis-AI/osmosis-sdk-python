@@ -49,6 +49,7 @@ def console_capture(monkeypatch: pytest.MonkeyPatch) -> StringIO:
 def _mock_git_context(monkeypatch: pytest.MonkeyPatch) -> None:
     def _git_context():
         return SimpleNamespace(
+            workspace_name=None,
             workspace_directory="/repo",
             git_identity=GIT_IDENTITY,
             repo_url=REPO_URL,

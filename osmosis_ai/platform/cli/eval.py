@@ -755,22 +755,24 @@ def retry(name: str, *, yes: bool, secrets_file: str | None = None) -> Operation
             run_name = local_run.get("eval_run_name") or name
             quoted_name = quote(str(run_name))
             if isinstance(config, str) and config:
-                command = (
-                    f"osmosis eval run {quote(config)} --name {quoted_name} "
-                    "--retry-failed --upload"
+                config_arg = quote(config)
+                hint = "Retry it with:"
+            else:
+                config_arg = "<config>"
+                hint = "This run has no recorded config path; pass the original config:"
+            command = (
+                f"osmosis eval run {config_arg} --name {quoted_name} --retry-failed"
+            )
+            if context.workspace_name is None:
+                command += " --upload"
+            else:
+                command += (
+                    f" &&\n  osmosis --workspace {quote(context.workspace_name)} "
+                    f"eval upload {quoted_name} --replace"
                 )
-                raise CLIError(
-                    "Local evaluation runs are retried on the machine that "
-                    "produced them. Retry it with:\n"
-                    f"  {console.escape(command)}",
-                    code=CLIErrorCode.VALIDATION,
-                ) from None
             raise CLIError(
                 "Local evaluation runs are retried on the machine that "
-                "produced them. This run has no recorded config path; pass "
-                "the original config:\n"
-                f"  osmosis eval run <config> --name {console.escape(quoted_name)} "
-                "--retry-failed --upload",
+                f"produced them. {hint}\n  {console.escape(command)}",
                 code=CLIErrorCode.VALIDATION,
             ) from None
         # The run supplied these itself and their values are never stored, so

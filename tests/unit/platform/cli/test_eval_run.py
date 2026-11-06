@@ -239,6 +239,29 @@ def test_dataset_file_run_does_not_require_platform_credentials(
     assert len(captured_runner.calls) == 1
 
 
+def test_eval_run_still_requires_scaffold_paths(
+    workspace: Path,
+    captured_runner: type[_CapturedRunner],
+    console_capture: StringIO,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The shared context resolvers no longer check the scaffold; eval run must."""
+    from osmosis_ai.platform.cli.workspace_directory_contract import (
+        validate_workspace_directory_contract,
+    )
+
+    monkeypatch.setattr(
+        eval_run_module,
+        "validate_workspace_directory_contract",
+        validate_workspace_directory_contract,
+    )
+    (workspace / "configs" / "training").rmdir()
+
+    with pytest.raises(CLIError, match="missing required Osmosis scaffold paths"):
+        _run(workspace)
+    assert captured_runner.calls == []
+
+
 def test_evaluation_limit_selects_the_first_rows(
     workspace: Path, captured_runner: type[_CapturedRunner], console_capture: StringIO
 ) -> None:

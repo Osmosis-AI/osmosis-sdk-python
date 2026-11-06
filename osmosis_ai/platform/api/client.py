@@ -704,7 +704,7 @@ class OsmosisClient:
         archive: dict[str, Any],
         reimport: bool = False,
         credentials: Credentials | None = None,
-        git_identity: str,
+        git_identity: str | None,
     ) -> EvalRunImportResult:
         """Start or resume the server-authoritative import for a local eval.
 
@@ -736,7 +736,7 @@ class OsmosisClient:
         *,
         paths: Sequence[str],
         credentials: Credentials | None = None,
-        git_identity: str,
+        git_identity: str | None,
     ) -> EvalRunImportUploads:
         """Return upload instructions for up to 100 slots still missing."""
         if not 1 <= len(paths) <= 100:
@@ -757,7 +757,7 @@ class OsmosisClient:
         path: str,
         parts: list[dict[str, Any]] | None = None,
         credentials: Credentials | None = None,
-        git_identity: str,
+        git_identity: str | None,
     ) -> None:
         """Record one simple or multipart file upload as complete."""
         payload: dict[str, Any] = {"path": path}
@@ -784,7 +784,7 @@ class OsmosisClient:
         session_id: str,
         *,
         credentials: Credentials | None = None,
-        git_identity: str,
+        git_identity: str | None,
     ) -> EvalRunImportExtraction:
         """Start extracting the uploaded archive unless an extraction is running.
 
@@ -805,7 +805,7 @@ class OsmosisClient:
         session_id: str,
         *,
         credentials: Credentials | None = None,
-        git_identity: str,
+        git_identity: str | None,
     ) -> EvalRunImportExtraction:
         result = platform_request(
             f"/api/cli/eval-runs/imports/{_safe_path(session_id)}/extraction",
@@ -819,7 +819,7 @@ class OsmosisClient:
         session_id: str,
         *,
         credentials: Credentials | None = None,
-        git_identity: str,
+        git_identity: str | None,
     ) -> EvalRunImportResult:
         """Finalize an import after all declared files have been uploaded."""
         result = platform_request(

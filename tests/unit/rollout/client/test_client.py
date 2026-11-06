@@ -4,7 +4,7 @@ import asyncio
 import json
 import logging
 from typing import Any
-from unittest.mock import AsyncMock, call
+from unittest.mock import AsyncMock, Mock, call
 
 import httpx
 import pytest
@@ -687,6 +687,7 @@ async def test_admission_timeout_bounds_the_http_request() -> None:
 @pytest.mark.parametrize("existing_rollout", [False, True])
 async def test_lost_admission_response_preserves_lease_ownership(
     existing_rollout: bool,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from osmosis_ai.rollout.backend.base import ExecutionBackend
     from osmosis_ai.rollout.server.app import create_rollout_server
@@ -709,6 +710,14 @@ async def test_lost_admission_response_preserves_lease_ownership(
     )
     transport = httpx.ASGITransport(app=app)
     paths: list[str] = []
+    # Expire only the client's admission deadline, after the server has acted.
+    admission_timeout_sec = 0.05
+    admission_deadline = asyncio.timeout(None)
+    client_asyncio = Mock(wraps=asyncio)
+    client_asyncio.timeout.side_effect = lambda delay: (
+        admission_deadline if delay == admission_timeout_sec else asyncio.timeout(delay)
+    )
+    monkeypatch.setattr("osmosis_ai.rollout.client.client.asyncio", client_asyncio)
 
     async def handler(http_request: httpx.Request) -> httpx.Response:
         paths.append(http_request.url.path)
@@ -716,6 +725,7 @@ async def test_lost_admission_response_preserves_lease_ownership(
         if http_request.url.path == "/rollout":
             assert response.status_code == (409 if existing_rollout else 202)
             await started.wait()
+            admission_deadline.reschedule(asyncio.get_running_loop().time())
             await asyncio.Event().wait()
         return response
 
@@ -726,7 +736,9 @@ async def test_lost_admission_response_preserves_lease_ownership(
             if existing_rollout:
                 accepted = await owner.post("/rollout", json=request())
                 assert accepted.status_code == 202
-            rollout_client = client(handler, admission_timeout_sec=0.05)
+            rollout_client = client(
+                handler, admission_timeout_sec=admission_timeout_sec
+            )
             try:
                 async with asyncio.timeout(1.0):
                     with pytest.raises(RolloutAdmissionTimeoutError):

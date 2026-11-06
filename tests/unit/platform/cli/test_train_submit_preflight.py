@@ -190,3 +190,26 @@ def test_train_submit_preflight_still_fails_on_syntax_error(
     with pytest.raises(CLIError):
         train_module.submit(config_path=config_path, yes=True)
     assert submitted == []
+
+
+def test_train_submit_still_requires_scaffold_paths(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """The shared Git resolver no longer checks the scaffold; submit must."""
+    workspace_directory = _make_workspace_directory(
+        tmp_path / "project", main_py="print('ok')\n"
+    )
+    (workspace_directory / "data").rmdir()
+    config_path = _write_train_config(
+        workspace_directory / "configs" / "training" / "default.toml"
+    )
+    monkeypatch.chdir(workspace_directory)
+    submitted: list[bool] = []
+    fake = _fake_client_class(submitted)
+    monkeypatch.setattr(api_client_module, "OsmosisClient", fake)
+    monkeypatch.setattr(shared_submit_module, "OsmosisClient", fake)
+
+    with pytest.raises(CLIError, match="missing required Osmosis scaffold paths"):
+        train_module.submit(config_path=config_path, yes=True)
+    assert submitted == []
