@@ -304,12 +304,86 @@ def _ensure_pi_support() -> None:
         return
     import contextlib
     import json
+    import shlex
+    from types import SimpleNamespace
 
     from harbor.agents.installed.pi import Pi
     from harbor.utils.trajectory_utils import format_trajectory_json
 
-    orig_build_models = Pi._build_custom_models_json
-    orig_write_models = Pi._write_custom_models_json
+    has_native_custom_models = hasattr(Pi, "_build_custom_models_json")
+    if not hasattr(Pi, "_upload_config_text"):
+
+        async def _fallback_upload_config_text(
+            self: Any,
+            environment: Any,
+            *,
+            content: str,
+            remote_path: str,
+            filename: str,
+        ) -> None:
+            _ = filename
+            await self.exec_as_agent(
+                environment,
+                command=(
+                    f"mkdir -p $(dirname {shlex.quote(remote_path)}) && "
+                    f"printf '%s' {shlex.quote(content)} > {shlex.quote(remote_path)}"
+                ),
+            )
+
+        Pi._upload_config_text = _fallback_upload_config_text
+
+    if has_native_custom_models:
+        orig_build_models = Pi._build_custom_models_json
+        orig_write_models = Pi._write_custom_models_json
+    else:
+        orig_init = Pi.__init__
+
+        def _init_pi(
+            self: Any, *args: Any, model_api: str | None = None, **kwargs: Any
+        ) -> None:
+            if model_api is not None and not isinstance(model_api, str):
+                raise TypeError("model_api must be a string")
+            orig_init(self, *args, **kwargs)
+            self._model_api = model_api
+
+        Pi.__init__ = _init_pi
+
+        def orig_build_models(
+            self: Any, access: Any, model_id: str
+        ) -> dict[str, Any] | None:
+            endpoint = getattr(access, "configured_base_url", None)
+            if not endpoint:
+                return None
+            model_api = getattr(self, "_model_api", None) or "openai-completions"
+            return {
+                "providers": {
+                    "harbor-endpoint": {
+                        "baseUrl": endpoint,
+                        "apiKey": "$OPENAI_API_KEY",
+                        "api": model_api,
+                        "models": [{"id": model_id}],
+                    }
+                }
+            }
+
+        async def orig_write_models(
+            self: Any, environment: Any, models_json: dict[str, Any]
+        ) -> None:
+            await self.exec_as_agent(
+                environment,
+                command="mkdir -p /tmp/harbor-pi-agent && chmod 700 /tmp/harbor-pi-agent",
+            )
+            await self._upload_config_text(
+                environment,
+                content=json.dumps(models_json, indent=2) + "\n",
+                remote_path="/tmp/harbor-pi-agent/models.json",
+                filename="models.json",
+            )
+            await self.exec_as_agent(
+                environment,
+                command="chmod 600 /tmp/harbor-pi-agent/models.json",
+            )
+
     orig_run = Pi.run
 
     def _build_custom_models_json(
@@ -371,9 +445,55 @@ def _ensure_pi_support() -> None:
         environment: Any,
         context: Any,
     ) -> None:
-        await orig_run(
-            self, _adapt_pi_subagent_instruction(instruction), environment, context
-        )
+        adapted = _adapt_pi_subagent_instruction(instruction)
+        if not has_native_custom_models and self.model_name and "/" in self.model_name:
+            endpoint = self._get_env("OPENAI_BASE_URL") or self._get_env(
+                "OPENAI_API_BASE"
+            )
+            if endpoint:
+                _, model_id = self.model_name.split("/", 1)
+                access = SimpleNamespace(
+                    configured_base_url=endpoint,
+                    api_key=self._get_env("OPENAI_API_KEY"),
+                    env=dict(self._extra_env),
+                )
+                models_json = self._build_custom_models_json(access, model_id)
+                if models_json is not None:
+                    await self._write_custom_models_json(environment, models_json)
+                escaped_instruction = shlex.quote(
+                    self.render_instruction(adapted)
+                    if hasattr(self, "render_instruction")
+                    else adapted
+                )
+                cli_flags = self.build_cli_flags()
+                if cli_flags:
+                    cli_flags += " "
+                resume_flag = "--continue " if getattr(self, "_resume", False) else ""
+                skills_command = self._build_register_skills_command()
+                if skills_command:
+                    await self.exec_as_agent(environment, command=skills_command)
+                env = {
+                    k: v
+                    for k in ("OPENAI_API_KEY", "OPENAI_BASE_URL", "OPENAI_API_BASE")
+                    if (v := self._get_env(k)) is not None
+                }
+                await self.exec_as_agent(
+                    environment,
+                    command=(
+                        ". ~/.nvm/nvm.sh; "
+                        "PI_CODING_AGENT_DIR=/tmp/harbor-pi-agent "
+                        "pi --print --mode json "
+                        "--session-dir /logs/agent/pi/sessions "
+                        f"{resume_flag}"
+                        f"--provider harbor-endpoint --model {model_id} "
+                        f"{cli_flags}"
+                        f"{escaped_instruction} "
+                        f'2>&1 </dev/null | grep -v \'"type":"message_update"\' | stdbuf -oL tee /logs/agent/{self._OUTPUT_FILENAME}'
+                    ),
+                    env=env,
+                )
+                return
+        await orig_run(self, adapted, environment, context)
 
     Pi._build_custom_models_json = _build_custom_models_json
     Pi._write_custom_models_json = _write_custom_models_json
