@@ -2188,7 +2188,8 @@ class TestPrewarm:
             in_flight -= 1
             return trial_result()
 
-        monkeypatch.setenv("OPENSANDBOX_MAX_SANDBOXES", "4")
+        monkeypatch.setenv("OPENSANDBOX_MAX_SANDBOXES", "100")
+        monkeypatch.setenv("_OSMOSIS_OPENSANDBOX_MAX_SANDBOXES", "4")
         backend = HarborBackend(
             orchestrator=FakeQueue(run_tracked),
             tasks_dir=root,
