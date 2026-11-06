@@ -1,0 +1,42 @@
+tests/unit/rollout/test_server_lifecycle.py
+  s_048eedd9dd3e73::t_6c4b69723d4c6e 251
+osmosis_ai/rollout/types/sample.py
+  s_048eedd9dd3e73::t_b811c21147faf5 221
+osmosis_ai/rollout/server/app.py
+  s_048eedd9dd3e73::t_b811c21147faf5 438,490
+osmosis_ai/rollout/backend/harbor/backend.py
+  s_048eedd9dd3e73::t_b811c21147faf5 805,1607,1627,1655,1674,1736
+tests/unit/rollout/test_server_app_trajectory.py
+  s_048eedd9dd3e73::t_6c4b69723d4c6e 130,139,147
+tests/unit/rollout/test_harbor_backend.py
+  s_048eedd9dd3e73::t_6c4b69723d4c6e 1264,1374-1375,1402
+osmosis_ai/rollout/types/protocol.py
+  s_048eedd9dd3e73::t_b811c21147faf5 90
+tests/unit/rollout/test_server_app_metadata.py
+  s_048eedd9dd3e73::t_6c4b69723d4c6e 89,104
+tests/unit/rollout/client/test_client.py
+  s_048eedd9dd3e73::t_6c4b69723d4c6e 566-567,576-578,584-586
+osmosis_ai/rollout/backend/local/backend.py
+  s_048eedd9dd3e73::t_b811c21147faf5 210,258
+osmosis_ai/rollout/server/result_registry.py
+  s_048eedd9dd3e73::t_b811c21147faf5 108,113-115
+  s_048eedd9dd3e73::t_595e00f3bc8439 116-117,123-124,324,331
+docs/rollout-sdk.md
+  s_048eedd9dd3e73::t_160c99c69dcd4b 206-207
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "70ca20a5a09eea2e8709197c522f6b8bda102f52",
+  "prompts": {},
+  "sessions": {
+    "s_048eedd9dd3e73": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a18e9a-3190-75b1-99b9-2b5d9c6e57c4",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "Mathew Han <mathewjhan@gmail.com>"
+    }
+  }
+}
