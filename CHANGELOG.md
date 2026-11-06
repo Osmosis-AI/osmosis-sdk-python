@@ -2,6 +2,26 @@
 
 This file records changes to `osmosis-ai`. For earlier versions, see [GitHub Releases](https://github.com/Osmosis-AI/osmosis-sdk-python/releases).
 
+## 0.3.11 - 2026-11-06
+
+### Added
+
+- Use `HarborBackend(agent="pi")` to run Pi with subagents, live previews, and ATIF trajectories that include subagent usage ([#475](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/475)).
+- Local eval records `max_context_tokens` in `index.jsonl` when usage is available: the largest prompt-plus-output token count for a single model call in each rollout ([#471](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/471)).
+- `osmosis benchmark info` shows when a benchmark requires a model input limit; set `max_input_tokens` in `[agents.model]` for provider or endpoint models ([#473](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/473)).
+- Use a rollout's polling lease to fetch its saved trajectory from `GET /rollout/{id}/trajectory` as soon as the rollout finishes ([#474](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/474)).
+
+### Changed
+
+- Harbor uses the platform's per-run trial limit unless you set a lower limit with `TrialQueue`; local runs default to 8 concurrent trials, and local eval caps submissions at the server's limit ([#474](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/474)).
+
+### Fixed
+
+- Platform commands that do not read rollout source now work in connected repositories without the Osmosis scaffold, and `osmosis --workspace <name> eval upload` sends the run to the named workspace ([#472](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/472)).
+- In template mode, native Harbor agents receive plain system and user messages as task text in `instruction.md`; structured prompts keep their JSON representation ([#470](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/470)).
+
+[Full changelog](https://github.com/Osmosis-AI/osmosis-sdk-python/compare/v0.3.10...v0.3.11)
+
 ## 0.3.10 - 2026-11-02
 
 ### Breaking Changes
