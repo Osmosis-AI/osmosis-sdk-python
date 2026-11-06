@@ -21,6 +21,7 @@ from harbor.agents.installed.mini_swe_agent import (
     convert_mini_swe_agent_to_atif,
 )
 from harbor.agents.installed.opencode import OpenCode
+from harbor.agents.installed.pi import Pi
 from harbor.agents.terminus_2 import Terminus2
 from harbor.environments.base import BaseEnvironment
 from harbor.models.agent.context import AgentContext
@@ -187,4 +188,28 @@ class _PreviewOpenCode(_PreviewRunMixin, OpenCode):
         converter.logger = logging.Logger(__name__, level=logging.CRITICAL + 1)
         converter.logger.disabled = True
         trajectory = converter._convert_events_to_trajectory(events)
+        return trajectory.to_json_dict() if trajectory is not None else None
+
+
+class _PreviewPi(_PreviewRunMixin, Pi):
+    async def _capture_preview(
+        self, environment: BaseEnvironment, target: Path
+    ) -> dict[str, Any] | None:
+        from osmosis_ai.rollout.backend.harbor.native_agents import (
+            _convert_pi_events_to_trajectory,
+        )
+
+        raw = await read_remote_snapshot(
+            environment,
+            str(
+                getattr(self, "environment_logs_dir", EnvironmentPaths.agent_dir)
+                / "pi.txt"
+            ),
+            target,
+        )
+        if raw is None or b"\n" not in raw:
+            return None
+        trajectory = _convert_pi_events_to_trajectory(
+            self, raw.rsplit(b"\n", 1)[0].splitlines()
+        )
         return trajectory.to_json_dict() if trajectory is not None else None

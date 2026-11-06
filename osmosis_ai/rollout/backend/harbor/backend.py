@@ -586,7 +586,7 @@ class HarborBackend(ExecutionBackend):
         if self.native is not None and isinstance(self.agent, str):
             metadata = container_input.metadata or {}
             model = metadata.get("harbor_model", self.model_name)
-            if self.native.wiring != "opencode":
+            if self.native.wiring not in ("opencode", "pi"):
                 model = model or self.model_name
             url = container_input.chat_completions_url
             if self.native.wiring != "none" and not url:
