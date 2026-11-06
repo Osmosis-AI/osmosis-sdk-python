@@ -86,6 +86,7 @@ async def test_backend_exception_becomes_a_failure_result() -> None:
     response = await _handle_rollout(FailingBackend(), make_request())
     assert response.status is RolloutStatus.FAILURE
     assert response.err_message == "boom"
+    assert response.err_type == "RuntimeError"
 
 
 async def test_failed_local_workflow_keeps_its_error_with_grading_enabled(
@@ -100,6 +101,7 @@ async def test_failed_local_workflow_keeps_its_error_with_grading_enabled(
     response = await _handle_rollout(backend, make_request())
     assert response.status is RolloutStatus.FAILURE
     assert response.err_message == "upstream model deadline"
+    assert response.err_type == "TimeoutError"
     assert response.err_category is RolloutErrorCategory.TIMEOUT
 
 

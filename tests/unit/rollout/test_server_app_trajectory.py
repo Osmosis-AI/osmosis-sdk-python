@@ -127,6 +127,7 @@ async def test_workflow_error_preserves_available_sample(
         sample=workflow_sample,
         err_message="agent failed",
         err_category=RolloutErrorCategory.AGENT_ERROR,
+        err_type="NonZeroAgentExitCodeError",
     )
     outcome = ExecutionOutcome(
         workflow=workflow,
@@ -135,6 +136,7 @@ async def test_workflow_error_preserves_available_sample(
             sample=grader_sample,
             err_message="grading failed",
             err_category=RolloutErrorCategory.VALIDATION_ERROR,
+            err_type="RewardFileNotFoundError",
         ),
     )
 
@@ -142,6 +144,7 @@ async def test_workflow_error_preserves_available_sample(
 
     assert response.status is RolloutStatus.FAILURE
     assert response.err_message == "agent failed"
+    assert response.err_type == "NonZeroAgentExitCodeError"
     assert response.err_category is RolloutErrorCategory.AGENT_ERROR
     assert response.sample is not None
     assert response.sample.messages == sample().messages

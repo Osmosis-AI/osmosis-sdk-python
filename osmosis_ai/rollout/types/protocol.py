@@ -87,6 +87,7 @@ class RolloutResultResponse(BaseModel):
     sample: RolloutSample | None = None
     err_message: str | None = None
     err_category: RolloutErrorCategory | None = None
+    err_type: str | None = None
     agent_started_at: datetime | None = None
 
 

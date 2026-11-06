@@ -105,19 +105,23 @@ class RolloutFutureRegistry:
                         ),
                     )
 
-        async def publish_failure() -> None:
+        async def publish_failure(exc: BaseException) -> None:
             async with self.lock:
                 if self.entries.get(rollout_id) is entry and not entry.result.done():
                     self.finish(
                         entry,
-                        self.crash_failure(rollout_id, entry.progress.agent_started_at),
+                        self.crash_failure(
+                            rollout_id,
+                            entry.progress.agent_started_at,
+                            type(exc).__name__,
+                        ),
                     )
 
         def complete_task(done: asyncio.Task[None]) -> None:
             if done.cancelled():
                 entry.cancel_result_task = asyncio.create_task(publish_cancelled())
-            elif done.exception() is not None:
-                entry.cancel_result_task = asyncio.create_task(publish_failure())
+            elif (exc := done.exception()) is not None:
+                entry.cancel_result_task = asyncio.create_task(publish_failure(exc))
 
         task.add_done_callback(complete_task)
 
@@ -317,13 +321,14 @@ class RolloutFutureRegistry:
 
     @staticmethod
     def crash_failure(
-        rollout_id: str, agent_started_at: datetime | None
+        rollout_id: str, agent_started_at: datetime | None, err_type: str | None = None
     ) -> RolloutResultResponse:
         return RolloutResultResponse(
             rollout_id=rollout_id,
             status=RolloutStatus.FAILURE,
             err_message="rollout task crashed",
             err_category=RolloutErrorCategory.INTERNAL_ERROR,
+            err_type=err_type,
             agent_started_at=agent_started_at,
         )
 

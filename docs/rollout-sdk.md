@@ -203,6 +203,8 @@ async with httpx.AsyncClient() as http_client:
     )
 ```
 
+Failed rollout results can include `err_type`, the exception class name reported by the execution backend (for example, `AgentTimeoutError` or `AddTestsDirError`). Local exceptions use `type(exc).__name__`; Harbor failures preserve `exception_info.exception_type`. This field does not infer an underlying cause from error text. It is `None` for older servers and results without a recorded exception. The primary workflow error retains its type when a secondary grader failure occurs.
+
 `run_rollout()` returns the terminal `RolloutResultResponse`. When the caller needs access immediately after admission, `run_rollout_async()` returns an awaitable `RolloutHandle`:
 
 ```python

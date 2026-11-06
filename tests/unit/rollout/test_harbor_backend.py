@@ -1261,6 +1261,7 @@ class TestGraderOutcome:
             grader=outcome,
         ).result
         assert combined.err_message == outcome.err_message
+        assert combined.err_type == "NonZeroAgentExitCodeError"
         assert combined.sample is captured
 
     async def test_classified_subclass_failure_stays_primary(
@@ -1370,6 +1371,8 @@ class TestGraderOutcome:
         assert outcome.extra_fields["category"] == category.value
         assert workflow.extra_fields["category"] == category.value
         assert workflow.extra_fields["harbor_exception_type"] == exception_type
+        assert workflow.err_type == exception_type
+        assert outcome.err_type == exception_type
 
     @pytest.mark.parametrize(
         "exception_type, category",
@@ -1396,6 +1399,7 @@ class TestGraderOutcome:
         assert outcome.workflow.err_category == category
         assert outcome.grader.err_category == category
         assert outcome.result.err_category == category
+        assert outcome.result.err_type == exception_type
 
 
 class TestTaskResolution:

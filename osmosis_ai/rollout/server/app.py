@@ -435,6 +435,7 @@ async def _handle_rollout(
             status=RolloutStatus.FAILURE,
             err_message=str(exc) or "Internal server error",
             err_category=categorize_exception(exc),
+            err_type=type(exc).__name__,
         )
     finally:
         rollout_ctx.preview_enabled = False
@@ -486,6 +487,7 @@ async def _handle_rollout(
         if result.err_message is not None
         else None,
         err_category=result.err_category,
+        err_type=result.err_type,
         agent_started_at=progress.agent_started_at if progress is not None else None,
     )
 

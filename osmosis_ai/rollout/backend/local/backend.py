@@ -207,6 +207,7 @@ class LocalBackend(ExecutionBackend):
                     e, deadline, "workflow", request.agent_timeout_sec, queued_sec
                 ),
                 err_category=categorize_exception(e),
+                err_type=type(e).__name__,
             )
 
         if _expired_after_return(deadline, started, budget):
@@ -254,6 +255,7 @@ class LocalBackend(ExecutionBackend):
                 sample=result.sample,
                 err_message=_failure_message(e, deadline, "grader", budget),
                 err_category=categorize_exception(e),
+                err_type=type(e).__name__,
             )
 
         if _expired_after_return(deadline, started, budget):

@@ -802,6 +802,7 @@ class HarborBackend(ExecutionBackend):
                 status=RolloutStatus.FAILURE,
                 err_message=str(e),
                 err_category=category,
+                err_type=type(e).__name__,
                 extra_fields=diagnostic_payload(
                     phase="setup",
                     category=category,
@@ -1603,6 +1604,7 @@ class HarborBackend(ExecutionBackend):
             status=RolloutStatus.FAILURE,
             err_message=err_message,
             err_category=category,
+            err_type=err.exception_type if err else None,
             extra_fields=self.event_diagnostics(event, category),
         )
 
@@ -1622,6 +1624,7 @@ class HarborBackend(ExecutionBackend):
                 sample=sample,
                 err_message=agent_err.exception_message,
                 err_category=category,
+                err_type=agent_err.exception_type,
                 extra_fields=self.event_diagnostics(event, category),
             )
 
@@ -1649,6 +1652,7 @@ class HarborBackend(ExecutionBackend):
                     sample=sample,
                     err_message=str(e),
                     err_category=RolloutErrorCategory.VALIDATION_ERROR,
+                    err_type=type(e).__name__,
                     extra_fields=self.event_diagnostics(
                         event, RolloutErrorCategory.VALIDATION_ERROR, phase="grading"
                     ),
@@ -1667,6 +1671,7 @@ class HarborBackend(ExecutionBackend):
                 sample=sample,
                 err_message=err.exception_message,
                 err_category=category,
+                err_type=err.exception_type,
                 extra_fields=self.event_diagnostics(event, category),
             )
         # A task without tests/ and without a grader has no reward source.
@@ -1728,6 +1733,7 @@ class HarborBackend(ExecutionBackend):
                         if err
                         else "Trial ended before agent completed",
                         err_category=category,
+                        err_type=err.exception_type if err else None,
                         extra_fields=self.event_diagnostics(event, category),
                     )
                 else:

@@ -248,4 +248,5 @@ async def test_crashed_rollout_task_resolves_failure_result(monkeypatch):
         assert result.status is RolloutStatus.FAILURE
         assert result.err_category is RolloutErrorCategory.INTERNAL_ERROR
         assert result.err_message == "rollout task crashed"
+        assert result.err_type == "RuntimeError"
     await registry.close()

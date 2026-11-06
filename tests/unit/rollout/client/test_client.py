@@ -563,7 +563,8 @@ async def test_run_rollout_async_returns_handle() -> None:
     assert "grader_callback_url" not in body
 
 
-async def test_failure_result_is_returned() -> None:
+@pytest.mark.parametrize("err_type", [None, "AddTestsDirError"])
+async def test_failure_result_is_returned(err_type: str | None) -> None:
     def handler(http_request: httpx.Request) -> httpx.Response:
         if http_request.method == "POST":
             return httpx.Response(202, json=admission())
@@ -572,15 +573,17 @@ async def test_failure_result_is_returned() -> None:
             json={
                 "rollout_id": ROLLOUT_ID,
                 "status": "failure",
-                "err_message": "polling lease expired",
-                "err_category": "lease_expired",
+                "err_message": "execution failed",
+                "err_category": "agent_error",
+                **({"err_type": err_type} if err_type else {}),
             },
         )
 
     outcome = await completed(client(handler))
     assert outcome.status is RolloutStatus.FAILURE
-    assert outcome.err_message == "polling lease expired"
-    assert outcome.err_category == "lease_expired"
+    assert outcome.err_message == "execution failed"
+    assert outcome.err_category == "agent_error"
+    assert outcome.err_type == err_type
 
 
 async def test_wait_for_grading_returns_terminal() -> None:
