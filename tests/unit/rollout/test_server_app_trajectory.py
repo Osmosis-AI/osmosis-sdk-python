@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 
@@ -232,3 +233,108 @@ async def test_invalid_unicode_in_labels_and_errors_is_still_pollable(
     assert payload["sample"]["label"] == "label-?"
     assert payload["sample"]["reward"] is None
     assert original.label == "label-\ud800"
+
+
+class BlockingBackend(ExecutionBackend):
+    def __init__(self) -> None:
+        self.release = asyncio.Event()
+
+    async def execute(self, request: ExecutionRequest) -> ExecutionOutcome:
+        await self.release.wait()
+        return ExecutionOutcome(
+            workflow=ExecutionResult(status=RolloutStatus.SUCCESS, sample=sample(0.7))
+        )
+
+
+async def finish_rollout(client: httpx.AsyncClient) -> dict[str, str]:
+    admission = await client.post(
+        "/rollout", json=make_request().model_dump(mode="json")
+    )
+    headers = {POLLING_LEASE_HEADER: admission.json()["polling_lease_token"]}
+    response = await client.get("/rollout/r1/result", headers=headers)
+    while response.json()["status"] in {"queued", "running", "grading"}:
+        response = await client.get("/rollout/r1/result", headers=headers)
+    return headers
+
+
+@pytest.mark.parametrize(
+    ("result_sample", "status_code"),
+    [(sample(reward=0.7), 200), (None, 204)],
+    ids=["saved", "none-saved"],
+)
+async def test_trajectory_route_serves_the_saved_document(
+    tmp_path: Path, monkeypatch, result_sample, status_code
+) -> None:
+    patch_artifact_root(monkeypatch, tmp_path)
+    # An earlier rollout's document under the same id is never served.
+    (tmp_path / "r1").mkdir()
+    (tmp_path / "r1" / "trajectory.json").write_text('{"session_id": "earlier"}')
+    result = ExecutionResult(status=RolloutStatus.SUCCESS, sample=result_sample)
+    app = create_rollout_server(backend=StubBackend(ExecutionOutcome(workflow=result)))
+    async with app.router.lifespan_context(app):
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://rollout"
+        ) as client:
+            headers = await finish_rollout(client)
+            response = await client.get("/rollout/r1/trajectory", headers=headers)
+            wrong_lease = await client.get(
+                "/rollout/r1/trajectory", headers={POLLING_LEASE_HEADER: "wrong"}
+            )
+
+    assert response.status_code == status_code
+    assert wrong_lease.status_code == 403
+    saved = tmp_path / "r1" / "trajectory.json"
+    if status_code == 200:
+        assert response.content == saved.read_bytes()
+        assert json.loads(response.content)["session_id"] == "r1"
+    else:
+        assert not saved.exists()
+
+
+async def test_trajectory_route_rejects_unknown_and_unfinished_rollouts(
+    tmp_path: Path, monkeypatch
+) -> None:
+    patch_artifact_root(monkeypatch, tmp_path)
+    backend = BlockingBackend()
+    app = create_rollout_server(backend=backend)
+    async with app.router.lifespan_context(app):
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://rollout"
+        ) as client:
+            unknown = await client.get(
+                "/rollout/r1/trajectory", headers={POLLING_LEASE_HEADER: "lease"}
+            )
+            admission = await client.post(
+                "/rollout", json=make_request().model_dump(mode="json")
+            )
+            running = await client.get(
+                "/rollout/r1/trajectory",
+                headers={POLLING_LEASE_HEADER: admission.json()["polling_lease_token"]},
+            )
+            backend.release.set()
+
+    assert unknown.status_code == 404
+    assert running.status_code == 409
+
+
+class RaisingBackend(ExecutionBackend):
+    async def execute(self, request: ExecutionRequest) -> ExecutionOutcome:
+        raise RuntimeError("agent crashed")
+
+
+async def test_a_run_that_saves_nothing_never_serves_an_earlier_document(
+    tmp_path: Path, monkeypatch
+) -> None:
+    patch_artifact_root(monkeypatch, tmp_path)
+    (tmp_path / "r1").mkdir()
+    (tmp_path / "r1" / "trajectory.json").write_text('{"session_id": "earlier"}')
+    app = create_rollout_server(backend=RaisingBackend())
+    async with app.router.lifespan_context(app):
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://rollout"
+        ) as client:
+            headers = await finish_rollout(client)
+            response = await client.get("/rollout/r1/trajectory", headers=headers)
+
+    assert response.status_code == 204
+    assert not (tmp_path / "r1" / "trajectory.json").exists()

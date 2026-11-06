@@ -48,6 +48,7 @@ from harbor.models.trial.config import (
     TrialConfig,
     VerifierConfig,
 )
+from harbor.models.trial.result import TrialResult
 from harbor.tasks.client import TaskClient
 from harbor.trial.hooks import TrialEvent, TrialHookEvent
 from harbor.trial.queue import TrialQueue
@@ -104,6 +105,10 @@ from osmosis_ai.rollout.backend.harbor.trial import (
     log_trial_exception,
     parse_rollout_id,
 )
+from osmosis_ai.rollout.backend.harbor.trial_limit import (
+    TrialLimit,
+    resolve_trial_limit,
+)
 from osmosis_ai.rollout.container.files import ContainerInput, ContainerResult
 from osmosis_ai.rollout.container.trajectories import messages_from_trajectory
 from osmosis_ai.rollout.context import get_rollout_context
@@ -150,6 +155,7 @@ HARNESS_AGENT_IMPORT_PATH = (
 )
 PREWARM_PREFIX = "prewarm-"
 STATUS_RETENTION_SEC = 900.0
+MIN_PREWARM_CONCURRENCY = 8
 SHUTDOWN_TIMEOUT_SEC = 180.0
 
 
@@ -302,7 +308,7 @@ class HarborBackend(ExecutionBackend):
     def __init__(
         self,
         *,
-        orchestrator: TrialQueue,
+        orchestrator: TrialQueue | None = None,
         tasks_dir: Path,
         agent: str | type | None = None,
         native_agent_kwargs: dict[str, Any] | None = None,
@@ -322,7 +328,17 @@ class HarborBackend(ExecutionBackend):
         prewarm: str | bool | None = None,
         verified_tasks: Sequence[str] | set[str] | bool = False,
     ) -> None:
-        self.orchestrator = orchestrator
+        self.trial_limit: TrialLimit = resolve_trial_limit(orchestrator)
+        # Prewarm runs before any rollout, so the default queue leaves it room
+        # above the trial limit; trial_slots holds rollouts to the limit.
+        self.orchestrator: TrialQueue = (
+            orchestrator
+            if orchestrator is not None
+            else TrialQueue(
+                n_concurrent=max(self.trial_limit.value, MIN_PREWARM_CONCURRENCY)
+            )
+        )
+        self.trial_slots: asyncio.Semaphore = asyncio.Semaphore(self.trial_limit.value)
         self.tasks_dir: Path = Path(tasks_dir)
         self.task_mode: TaskMode = TaskMode(task_mode)
         self.model_name = model_name
@@ -424,10 +440,15 @@ class HarborBackend(ExecutionBackend):
             thread_name_prefix="harbor-archive"
         )
 
-        orchestrator.add_hook(TrialEvent.START, self.on_trial_started)
-        orchestrator.add_hook(TrialEvent.AGENT_START, self.on_agent_start)
-        orchestrator.add_hook(TrialEvent.VERIFICATION_START, self.on_verification_start)
-        orchestrator.add_hook(TrialEvent.END, self.on_trial_end)
+        self.orchestrator.add_hook(TrialEvent.START, self.on_trial_started)
+        self.orchestrator.add_hook(TrialEvent.AGENT_START, self.on_agent_start)
+        self.orchestrator.add_hook(
+            TrialEvent.VERIFICATION_START, self.on_verification_start
+        )
+        self.orchestrator.add_hook(TrialEvent.END, self.on_trial_end)
+
+    def log_startup(self) -> None:
+        logger.log(self.trial_limit.log_level, self.trial_limit.message)
 
     def queued(self) -> int:
         return max(0, len(self.pending) - self.running)
@@ -476,6 +497,7 @@ class HarborBackend(ExecutionBackend):
             "running": self.running,
             "queued": self.queued(),
             "max_queue_depth": self.max_queue_depth,
+            "concurrency": {"max_concurrent": self.trial_limit.value},
             # The local-eval CLI runs outside this environment. Advertising
             # reachability here lets it choose ingress from the backend's
             # resolved placement instead of guessing from rollout source.
@@ -564,7 +586,7 @@ class HarborBackend(ExecutionBackend):
         if self.native is not None and isinstance(self.agent, str):
             metadata = container_input.metadata or {}
             model = metadata.get("harbor_model", self.model_name)
-            if self.native.wiring != "opencode":
+            if self.native.wiring not in ("opencode", "pi"):
                 model = model or self.model_name
             url = container_input.chat_completions_url
             if self.native.wiring != "none" and not url:
@@ -679,6 +701,10 @@ class HarborBackend(ExecutionBackend):
             native_agent=self.native is not None,
         )
 
+    async def run_trial(self, config: TrialConfig) -> TrialResult:
+        async with self.trial_slots:
+            return await self.orchestrator.submit(config)
+
     async def execute(
         self,
         request: ExecutionRequest,
@@ -722,7 +748,7 @@ class HarborBackend(ExecutionBackend):
                 )
             task_dir = self.materialize_task(task, request.id, container_input)
             pending.task = asyncio.create_task(
-                self.orchestrator.submit(
+                self.run_trial(
                     self.build_trial_config(
                         task_dir,
                         request,

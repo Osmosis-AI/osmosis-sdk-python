@@ -41,6 +41,7 @@ harness_api_key_secret = "CURSOR_API_KEY"
 type = "provider"
 model = "openai/gpt-5"
 api_key_secret = "OPENAI_API_KEY"
+max_input_tokens = 131072
 
 [execution]
 attempts_per_task = 2
@@ -143,6 +144,7 @@ def test_submit_sends_benchmark_config_and_returns_operation_result(
     assert captured["tasks_config"] is None
     assert captured["execution_config"] == {"attempts_per_task": 2}
     assert captured["agents"][0]["model"]["model"] == "openai/gpt-5"
+    assert captured["agents"][0]["model"]["max_input_tokens"] == 131072
     assert captured["agents"][0]["harness_api_key_secret"] == "CURSOR_API_KEY"
     assert captured["credentials"] is FAKE_CREDENTIALS
     assert captured["git_identity"] == GIT_IDENTITY

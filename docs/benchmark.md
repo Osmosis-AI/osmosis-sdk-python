@@ -79,6 +79,8 @@ Every section rejects unknown keys (`extra="forbid"`), so a typo fails locally r
 | `"endpoint"` | `base_url`, `model`, `api_key_secret` | Optional `extra_headers`; an `Authorization` header is **rejected** — authenticate with `api_key_secret` instead. |
 | `"hosted"` | `base_model`, `lora_model_name` | A model hosted on the platform; it references no secret. |
 
+Check `osmosis --json benchmark info <key>` for `requires_model_context_window`. When true (for example, for LOCA-bench), set `max_input_tokens` in each `[agents.model]` to the model's supported input token limit. Provider and endpoint models accept this positive integer; hosted models cannot be used for benchmarks that require it. For other benchmarks, the field is optional.
+
 ### Secret references
 
 A benchmark config can reference secrets from five places. `BenchmarkSubmitConfig.required_secrets` collects them in order, deduplicated: each agent's model `api_key_secret`, each `harness_api_key_secret`, `execution.judge_api_key_secret`, `[verifier].required`, then `[secrets].required`. Every name must match `SECRET_NAME_RE` = `^[A-Z][A-Z0-9_]*$`.

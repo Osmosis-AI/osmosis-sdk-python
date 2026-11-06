@@ -218,7 +218,7 @@ async def test_remote_staging_cannot_overwrite_linked_file(
             path.unlink(missing_ok=True)
 
 
-@pytest.mark.parametrize("agent_name", ["terminus", "mini", "opencode"])
+@pytest.mark.parametrize("agent_name", ["terminus", "mini", "opencode", "pi"])
 async def test_native_preview_updates_during_run_and_keeps_complete_snapshot(
     tmp_path, monkeypatch, agent_name, preview_agents
 ):
@@ -226,6 +226,7 @@ async def test_native_preview_updates_during_run_and_keeps_complete_snapshot(
         "terminus": (preview_agents.Terminus2, preview_agents._PreviewTerminus2),
         "mini": (preview_agents.MiniSweAgent, preview_agents._PreviewMiniSweAgent),
         "opencode": (preview_agents.OpenCode, preview_agents._PreviewOpenCode),
+        "pi": (preview_agents.Pi, preview_agents._PreviewPi),
     }[agent_name]
     monkeypatch.setattr(
         preview_agents.Terminus2, "_init_llm", lambda *a, **kw: object()
@@ -245,6 +246,23 @@ async def test_native_preview_updates_during_run_and_keeps_complete_snapshot(
                     {"type": "step_finish", "part": {}},
                     {"type": "step_start"},
                     {"type": "text", "part": {"type": "text", "text": "unfinished"}},
+                ]
+            )
+            + b"\n{"
+        )
+    elif agent_name == "pi":
+        raw = (
+            b"\n".join(
+                json.dumps(event).encode()
+                for event in [
+                    {"type": "session", "id": "session"},
+                    {
+                        "type": "message_end",
+                        "message": {
+                            "role": "assistant",
+                            "content": [{"type": "text", "text": "first"}],
+                        },
+                    },
                 ]
             )
             + b"\n{"

@@ -47,10 +47,14 @@ class BenchmarkTasksSection(_StrictSection):
     task_set: Literal["parity"] | None = None
 
 
+_ModelContextWindow = Annotated[int, Field(strict=True, gt=0)]
+
+
 class BenchmarkProviderModel(_StrictSection):
     type: Literal["provider"]
     model: str
     api_key_secret: str
+    max_input_tokens: _ModelContextWindow | None = None
 
 
 class BenchmarkEndpointModel(_StrictSection):
@@ -58,6 +62,7 @@ class BenchmarkEndpointModel(_StrictSection):
     base_url: str
     model: str
     api_key_secret: str
+    max_input_tokens: _ModelContextWindow | None = None
     extra_headers: dict[str, str] | None = None
 
     @field_validator("extra_headers")

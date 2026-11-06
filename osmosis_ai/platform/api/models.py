@@ -745,6 +745,7 @@ class BenchmarkCatalogDetail:
     # Server-computed standings; metric shapes travel verbatim like
     # BenchmarkRunDetail.agent_metrics, so the estimator stays server-side.
     leaderboard: list[dict[str, Any]] = field(default_factory=list)
+    requires_model_context_window: bool = False
 
     @property
     def is_ready(self) -> bool:
@@ -770,6 +771,9 @@ class BenchmarkCatalogDetail:
             runner_family=benchmark["runner_family"],
             supports_harness=benchmark["supports_harness"],
             requires_harness=benchmark["requires_harness"],
+            requires_model_context_window=benchmark.get(
+                "requires_model_context_window", False
+            ),
             requires_judge_model=benchmark["requires_judge_model"],
             requires_judge_api_key=benchmark.get("requires_judge_api_key", False),
             judge_model_default=benchmark.get("judge_model_default"),

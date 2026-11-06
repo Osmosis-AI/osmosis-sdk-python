@@ -851,7 +851,9 @@ class TestNativeAgents:
         backend = self.backend_for("mini-swe-agent", template_task)
         assert backend.bundle is None
 
-    @pytest.mark.parametrize("agent_name", ["terminus-2", "mini-swe-agent", "opencode"])
+    @pytest.mark.parametrize(
+        "agent_name", ["terminus-2", "mini-swe-agent", "opencode", "pi"]
+    )
     @pytest.mark.parametrize("preview_enabled", [False, True])
     def test_native_preview_config_uses_only_the_trusted_path(
         self, template_task, tmp_path, monkeypatch, agent_name, preview_enabled
@@ -978,7 +980,7 @@ class TestNativeAgents:
             == "https://wrong.example/v1"
         )
 
-    @pytest.mark.parametrize("agent", ["opencode", "mini-swe-agent"])
+    @pytest.mark.parametrize("agent", ["opencode", "pi", "mini-swe-agent"])
     def test_prewarm_preserves_native_version_without_rollout_credentials(
         self, template_task, agent
     ):
@@ -1013,8 +1015,11 @@ class TestNativeAgents:
             "openai/",
         ],
     )
-    def test_opencode_rejects_invalid_model_metadata(self, template_task, model):
-        backend = self.backend_for("opencode", template_task)
+    @pytest.mark.parametrize("agent_name", ["opencode", "pi"])
+    def test_opencode_rejects_invalid_model_metadata(
+        self, template_task, model, agent_name
+    ):
+        backend = self.backend_for(agent_name, template_task)
         with pytest.raises(ValueError, match="must have the form provider/model"):
             backend.build_agent_config(
                 template_task,
@@ -1024,6 +1029,329 @@ class TestNativeAgents:
                     metadata={"harbor_model": model},
                 ),
             )
+
+    async def test_pi_uses_session_endpoint_and_disables_compaction(
+        self, template_task, tmp_path
+    ):
+        from unittest.mock import AsyncMock
+
+        from harbor.agents.factory import AgentFactory
+        from harbor.models.agent.context import AgentContext
+
+        backend = self.backend_for(
+            "pi",
+            template_task,
+            model_name="gemini/gemini-2.5-flash",
+        )
+        config = backend.build_agent_config(
+            template_task,
+            ContainerInput(
+                rollout_id="r1",
+                chat_completions_url="https://trainer/sessions/r1/v1",
+                api_key="key-r1",
+            ),
+        )
+        assert config.model_name == "openai/gemini-2.5-flash"
+        assert config.kwargs["model_api"] == "openai-completions"
+        assert config.env["OPENAI_API_KEY"] == "key-r1"
+        assert config.env["OPENAI_BASE_URL"] == "https://trainer/sessions/r1/v1"
+        assert config.env["OPENAI_API_BASE"] == "https://trainer/sessions/r1/v1"
+
+        agent = AgentFactory.create_agent_from_config(config, tmp_path / "logs")
+        uploaded = {}
+
+        async def record_upload(environment, *, content, remote_path, filename):
+            uploaded[remote_path] = (
+                json.loads(content) if remote_path.endswith(".json") else content
+            )
+
+        agent._upload_config_text = record_upload
+        agent.exec_as_agent = AsyncMock()
+        await agent.run(
+            "Execute the required plan using real OpenCode subagents.\n\n"
+            'Your first action must be native `task` calls with `subagent_type="general"`, '
+            "one fresh child per plan step. Omit `task_id`; never reuse a child.",
+            object(),
+            AgentContext(),
+        )
+
+        models_cfg = uploaded["/tmp/harbor-pi-agent/models.json"]["providers"][
+            "harbor-endpoint"
+        ]
+        assert models_cfg["baseUrl"] == "https://trainer/sessions/r1/v1"
+        assert models_cfg["apiKey"] == "$OPENAI_API_KEY"
+        assert models_cfg["api"] == "openai-completions"
+        assert models_cfg["compat"] == {
+            "supportsStore": False,
+            "supportsDeveloperRole": False,
+            "maxTokensField": "max_tokens",
+        }
+        assert uploaded["/tmp/harbor-pi-agent/settings.json"] == {
+            "compaction": {"enabled": False}
+        }
+        for name in ("general", "worker"):
+            agent_md = uploaded[f"/tmp/harbor-pi-agent/agents/{name}.md"]
+            assert f"name: {name}\n" in agent_md
+            assert "\nmodel:" not in agent_md
+        run_cmd = agent.exec_as_agent.await_args_list[-1].kwargs["command"]
+        assert "real Pi subagents" in run_cmd
+        assert 'native `subagent` tool calls with `agent="general"`' in run_cmd
+
+        session_dir = agent.logs_dir / "pi" / "sessions"
+        session_dir.mkdir(parents=True, exist_ok=True)
+        (session_dir / "session-1.jsonl").write_text(
+            "\n".join(
+                json.dumps(ev)
+                for ev in [
+                    {"type": "session", "id": "pi-sess-1"},
+                    {
+                        "type": "message",
+                        "message": {
+                            "role": "assistant",
+                            "content": [
+                                {
+                                    "type": "toolCall",
+                                    "id": "call-1",
+                                    "name": "subagent",
+                                    "arguments": {"agent": "general", "task": "step"},
+                                }
+                            ],
+                            "usage": {"input": 10, "output": 5, "totalTokens": 15},
+                        },
+                    },
+                    {
+                        "type": "message",
+                        "message": {
+                            "role": "toolResult",
+                            "toolCallId": "call-1",
+                            "toolName": "subagent",
+                            "content": [{"type": "text", "text": "done"}],
+                            "details": {
+                                "results": [
+                                    {
+                                        "usage": {
+                                            "input": 20,
+                                            "output": 8,
+                                            "totalTokens": 28,
+                                        }
+                                    }
+                                ]
+                            },
+                        },
+                    },
+                ]
+            )
+        )
+        ctx = AgentContext()
+        agent.populate_context_post_run(ctx)
+        traj = json.loads((agent.logs_dir / "trajectory.json").read_text())
+        assert traj["session_id"] == "pi-sess-1"
+        assert traj["final_metrics"]["total_prompt_tokens"] == 30
+        assert traj["final_metrics"]["total_completion_tokens"] == 13
+        assert ctx.n_input_tokens == 30
+        assert ctx.n_output_tokens == 13
+
+    async def test_pi_trajectory_and_preview_edge_cases(self, template_task, tmp_path):
+        from harbor.agents.factory import AgentFactory
+        from harbor.models.agent.context import AgentContext
+
+        from osmosis_ai.rollout.backend.harbor import preview_agents
+
+        backend = self.backend_for(
+            "pi", template_task, model_name="gemini/gemini-3.8-flash"
+        )
+        config = backend.build_agent_config(
+            template_task,
+            ContainerInput(
+                rollout_id="r1",
+                chat_completions_url="https://trainer/sessions/r1/v1",
+                api_key="key-r1",
+            ),
+        )
+        agent = AgentFactory.create_agent_from_config(config, tmp_path / "logs")
+        session_dir = agent.logs_dir / "pi" / "sessions"
+        session_dir.mkdir(parents=True, exist_ok=True)
+
+        # 1. Multiple chronological session files + model_change + empty error turn + mixed message_end ignored
+        s1 = session_dir / "01-first.jsonl"
+        s2 = session_dir / "02-second.jsonl"
+        s1.write_text(
+            "\n".join(
+                json.dumps(ev)
+                for ev in [
+                    {"type": "session", "id": "sess-root"},
+                    {
+                        "type": "model_change",
+                        "provider": "harbor-endpoint",
+                        "modelId": "gemini-3.8-flash",
+                    },
+                    {
+                        "type": "message",
+                        "timestamp": "2026-11-05T00:00:00Z",
+                        "message": {"role": "user", "content": "multiply 6 and 7"},
+                    },
+                    {
+                        "type": "message",
+                        "message": {
+                            "role": "assistant",
+                            "stopReason": "error",
+                            "content": [],
+                        },
+                    },
+                    {
+                        "type": "message",
+                        "message": {
+                            "role": "assistant",
+                            "content": [
+                                {"type": "thinking", "thinking": "calling bash"},
+                                {
+                                    "type": "toolCall",
+                                    "id": "tc-1",
+                                    "name": "bash",
+                                    "arguments": {"command": "echo 42"},
+                                },
+                            ],
+                            "usage": {
+                                "input": 12,
+                                "output": 4,
+                                "cacheRead": 3,
+                                "cacheWrite": 1,
+                                "reasoning": 2,
+                                "totalTokens": 20,
+                                "cost": {"total": 0.005},
+                            },
+                        },
+                    },
+                    # Mixed stream event inside session file must be ignored to prevent double-counting.
+                    {
+                        "type": "message_end",
+                        "message": {
+                            "role": "assistant",
+                            "content": [{"type": "text", "text": "duplicate"}],
+                            "usage": {"input": 999, "output": 999, "totalTokens": 1998},
+                        },
+                    },
+                ]
+            )
+        )
+        os.utime(s1, ns=(1_000_000_000, 1_000_000_000))
+        s2.write_text(
+            "\n".join(
+                json.dumps(ev)
+                for ev in [
+                    {"type": "session", "id": "sess-resumed"},
+                    {
+                        "type": "message",
+                        "message": {
+                            "role": "toolResult",
+                            "toolCallId": "tc-1",
+                            "toolName": "bash",
+                            "content": [{"type": "text", "text": "42\n"}],
+                        },
+                    },
+                    {
+                        "type": "message",
+                        "message": {
+                            "role": "assistant",
+                            "content": [{"type": "text", "text": "#### 42"}],
+                            "usage": {
+                                "input": 18,
+                                "output": 2,
+                                "totalTokens": 20,
+                                "cost": {"total": 0.002},
+                            },
+                        },
+                    },
+                ]
+            )
+        )
+        os.utime(s2, ns=(2_000_000_000, 2_000_000_000))
+
+        ctx = AgentContext()
+        agent.populate_context_post_run(ctx)
+        traj = json.loads((agent.logs_dir / "trajectory.json").read_text())
+        assert traj["session_id"] == "sess-root"
+        assert traj["agent"]["model_name"] == "harbor-endpoint/gemini-3.8-flash"
+        assert len(traj["steps"]) == 3
+        assert traj["steps"][1]["reasoning_content"] == "calling bash"
+        assert traj["steps"][1]["observation"]["results"][0]["content"] == "42"
+        assert traj["final_metrics"]["total_prompt_tokens"] == (12 + 3 + 1) + 18
+        assert traj["final_metrics"]["total_completion_tokens"] == 4 + 2
+        assert traj["final_metrics"]["total_cached_tokens"] == 3
+        assert traj["final_metrics"]["total_cost_usd"] == pytest.approx(0.007)
+        assert ctx.n_input_tokens == 34
+        assert ctx.n_output_tokens == 6
+        assert ctx.n_cache_tokens == 3
+        assert ctx.cost_usd == pytest.approx(0.007)
+
+        # 2. Existing trajectory.json is preserved if already written before hook runs
+        (agent.logs_dir / "trajectory.json").write_text('{"preserved": true}')
+        agent.populate_context_post_run(AgentContext())
+        assert json.loads((agent.logs_dir / "trajectory.json").read_text()) == {
+            "preserved": True
+        }
+
+        # 3. Stream mode (pi.txt + _PreviewPi) with legacy tool_result_end and truncated tail
+        stream_bytes = (
+            b"\n".join(
+                json.dumps(ev).encode()
+                for ev in [
+                    {"type": "session", "id": "stream-sess"},
+                    {
+                        "type": "message_end",
+                        "message": {
+                            "role": "user",
+                            "content": [{"type": "text", "text": "task"}],
+                        },
+                    },
+                    {
+                        "type": "message_end",
+                        "message": {
+                            "role": "assistant",
+                            "content": [
+                                {
+                                    "type": "toolCall",
+                                    "id": "tc-stream",
+                                    "name": "bash",
+                                    "arguments": {"command": "pwd"},
+                                }
+                            ],
+                            "usage": {"input": 5, "output": 3, "totalTokens": 8},
+                        },
+                    },
+                    {
+                        "type": "tool_result_end",
+                        "message": {
+                            "role": "toolResult",
+                            "toolCallId": "tc-stream",
+                            "toolName": "bash",
+                            "content": "/workspace",
+                            "isError": False,
+                        },
+                    },
+                ]
+            )
+            + b'\n{"type": "message_end", "message": {"unterminated'
+        )
+
+        async def fake_snapshot(*_args):
+            return stream_bytes
+
+        preview_agent = preview_agents._PreviewPi(
+            logs_dir=tmp_path / "preview-logs",
+            model_name="openai/Qwen3-4B",
+            _osmosis_preview_path=str(tmp_path / "preview.json"),
+        )
+        orig_read = preview_agents.read_remote_snapshot
+        preview_agents.read_remote_snapshot = fake_snapshot
+        try:
+            doc = await preview_agent._capture_preview(object(), tmp_path / "snap")
+        finally:
+            preview_agents.read_remote_snapshot = orig_read
+        assert doc is not None
+        assert doc["session_id"] == "stream-sess"
+        assert len(doc["steps"]) == 2
+        assert doc["steps"][1]["observation"]["results"][0]["content"] == "/workspace"
 
     def test_opencode_preserves_existing_private_provider_configuration(
         self, template_task, tmp_path
@@ -1428,7 +1756,7 @@ class TestTaskResolution:
             raise RuntimeError("stop before harbor")
 
         orchestrator = SimpleNamespace(
-            add_hook=lambda *args: None, submit=failing_submit
+            add_hook=lambda *args: None, submit=failing_submit, _n_concurrent=1
         )
         backend = HarborBackend(
             orchestrator=orchestrator,
@@ -1469,7 +1797,7 @@ class TestTaskResolution:
             raise RuntimeError("stop before harbor")
 
         orchestrator = SimpleNamespace(
-            add_hook=lambda *args: None, submit=failing_submit
+            add_hook=lambda *args: None, submit=failing_submit, _n_concurrent=1
         )
         backend = HarborBackend(
             orchestrator=orchestrator,
@@ -1922,6 +2250,7 @@ class FakeQueue:
     def __init__(self, run=None):
         self.hooks = {}
         self.run = run
+        self._n_concurrent = 8
 
     def add_hook(self, event, hook):
         self.hooks.setdefault(event, []).append(hook)
