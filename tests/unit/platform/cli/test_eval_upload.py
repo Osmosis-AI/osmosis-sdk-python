@@ -625,18 +625,9 @@ def test_replace_is_forwarded_to_the_import_start(
     assert server.calls[0][2] is replace
 
 
-@pytest.mark.parametrize("select_b", [False, True], ids=["git-origin", "workspace-b"])
-def test_upload_request_and_replace_hint_use_selected_workspace(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-    select_b: bool,
-) -> None:
+@pytest.fixture
+def repo_a(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     import subprocess
-    from urllib.request import Request
-
-    import osmosis_ai.cli.main as cli
-    from osmosis_ai.platform.auth.platform_client import PlatformAPIError
 
     monkeypatch.chdir(tmp_path)
     subprocess.run(["git", "init", "-q"], check=True)
@@ -646,7 +637,22 @@ def test_upload_request_and_replace_hint_use_selected_workspace(
     monkeypatch.setenv("OSMOSIS_TOKEN", "test-upload-token")
     monkeypatch.setenv("OSMOSIS_PLATFORM_URL", "https://platform.example")
     monkeypatch.setenv("OSMOSIS_TOKEN_PLATFORM_URL", "https://platform.example")
-    plan = _plan(tmp_path / "local evals", BODIES)
+    return tmp_path
+
+
+@pytest.mark.parametrize("select_b", [False, True], ids=["git-origin", "workspace-b"])
+def test_upload_request_and_replace_hint_use_selected_workspace(
+    repo_a: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    select_b: bool,
+) -> None:
+    from urllib.request import Request
+
+    import osmosis_ai.cli.main as cli
+    from osmosis_ai.platform.auth.platform_client import PlatformAPIError
+
+    plan = _plan(repo_a / "local evals", BODIES)
     monkeypatch.setattr(
         "osmosis_ai.platform.cli.eval_upload.prepare_eval_upload_plan", lambda _: plan
     )
@@ -680,6 +686,73 @@ def test_upload_request_and_replace_hint_use_selected_workspace(
     assert error["details"]["local_run_id"] == "abc"
     command = "osmosis --workspace workspace-b" if select_b else "osmosis"
     assert f"{command} eval upload 'local evals/run-1' --replace" in error["message"]
+
+
+@pytest.mark.parametrize("config", ["configs/eval/my config.toml", None])
+def test_local_retry_from_repo_a_republishes_only_to_selected_workspace(
+    repo_a: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    config: str | None,
+) -> None:
+    import shlex
+    from unittest.mock import Mock
+
+    from osmosis_ai.cli.main import main
+    from osmosis_ai.platform.auth.platform_client import PlatformAPIError
+
+    workspace = "Team B"
+    plan = _plan(repo_a / ".osmosis/evals", BODIES)
+    prepare = Mock(return_value=plan)
+    monkeypatch.setattr(
+        "osmosis_ai.platform.cli.eval_upload.prepare_eval_upload_plan", prepare
+    )
+    transport = Mock(
+        side_effect=[
+            PlatformAPIError(
+                "Retry locally",
+                status_code=409,
+                details={
+                    "local_run": {"config_path": config, "eval_run_name": "run-1"},
+                },
+            ),
+            PlatformAPIError("Intercepted before upload", status_code=403),
+        ]
+    )
+    monkeypatch.setattr("osmosis_ai.platform.auth.platform_client.urlopen", transport)
+    assert (
+        main(["--json", "--workspace", workspace, "eval", "retry", "eval-id", "--yes"])
+        == 1
+    )
+    message = json.loads(capsys.readouterr().err)["error"]["message"]
+    commands = [
+        shlex.split(line)
+        for line in message.splitlines()
+        if line.strip().startswith("osmosis ")
+    ]
+    assert commands[0] == [
+        "osmosis",
+        "eval",
+        "run",
+        config or "<config>",
+        "--name",
+        "run-1",
+        "--retry-failed",
+        "&&",
+    ]
+    assert len(commands) == 2 and commands[1][0] == "osmosis"
+    assert main(["--json", *commands[1][1:]]) == 1
+    prepare.assert_called_once_with(plan.run_dir)
+
+    retry, publish = [call.args[0] for call in transport.call_args_list]
+    assert (retry.selector, publish.selector) == (
+        "/api/cli/eval-runs/eval-id/retry",
+        "/api/cli/eval-runs/imports",
+    )
+    for request in (retry, publish):
+        assert request.get_header("X-osmosis-workspace") == workspace
+        assert request.get_header("X-osmosis-git") is None
+    assert json.loads(publish.data)["reimport"] is True
 
 
 def test_other_conflicts_do_not_suggest_replace(

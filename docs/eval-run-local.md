@@ -179,6 +179,13 @@ The run's provenance records the workspace-relative config path, so the platform
 
 Publishing a retried run needs `--replace`, which `eval run --retry-failed --upload` passes for you; `eval upload <run-name> --replace` is the standalone form. Without it the platform refuses, because a run whose local id it already imported would otherwise be overwritten silently. The manifest digest still has to match, which is what proves both attempts evaluated the same resolved inputs. The platform run keeps its id and URL.
 
+If you used `osmosis --workspace team-b eval retry my-run`, the CLI suggests two commands. The first reruns the failed samples locally; only after it succeeds does the second publish the results to `team-b`, even if the source repository is connected to a different workspace:
+
+```bash
+osmosis eval run configs/eval/my-rollout.toml --name my-run --retry-failed &&
+  osmosis --workspace team-b eval upload my-run --replace
+```
+
 Throughput knobs (`--max-in-flight`, `evaluation.batch_size`) are excluded from the lock, so you can change concurrency and still resume.
 
 ### Source digest upgrades
