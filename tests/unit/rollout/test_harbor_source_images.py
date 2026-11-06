@@ -182,6 +182,12 @@ def test_gateway_readiness_preserves_source_and_verifier_healthcheck(tmp_path):
     assert path.read_bytes() == before
 
 
+@pytest.fixture(autouse=True)
+def no_platform_opensandbox_env(monkeypatch):
+    for name in ("RUN_ID", "REQUEST_TIMEOUT_SEC"):
+        monkeypatch.delenv(f"_OSMOSIS_OPENSANDBOX_{name}", raising=False)
+
+
 @pytest.mark.parametrize(
     ("domain", "overrides", "expected"),
     [

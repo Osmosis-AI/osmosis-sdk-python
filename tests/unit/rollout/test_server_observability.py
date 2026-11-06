@@ -24,6 +24,8 @@ def exported(monkeypatch):
     monkeypatch.setenv("OSMOSIS_ROLLOUT_SERVER_ID", "dev-owner")
     monkeypatch.setenv("_OSMOSIS_ROLLOUT_NAME", "remote-opencode")
     monkeypatch.setenv("OSMOSIS_ROLLOUT_NAMESPACE", "managed-dev-servers-staging")
+    for name in ("SERVER_ID", "NAMESPACE", "OTLP_ENDPOINT"):
+        monkeypatch.delenv(f"_OSMOSIS_ROLLOUT_{name}", raising=False)
     monkeypatch.setattr(app_module, "save_trajectory", AsyncMock())
     return exporter
 
