@@ -1,0 +1,23 @@
+osmosis_ai/platform/api/models.py
+  s_477c015da74954::t_0c96027c80e94d 535,545
+osmosis_ai/platform/cli/shared_submit.py
+  s_477c015da74954::t_2544cf821fd2e7 107-111,537-541
+tests/unit/platform/cli/test_eval_submit.py
+  s_477c015da74954::t_f8a8d468f33cf5 177,185-187
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "be2c3100db9fb073b16b69596d478ba6080091e6",
+  "prompts": {},
+  "sessions": {
+    "s_477c015da74954": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "bd780945-be5c-463d-8d7e-c18d5293658d",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Allen Lin <allen@osmosis.ai>"
+    }
+  }
+}

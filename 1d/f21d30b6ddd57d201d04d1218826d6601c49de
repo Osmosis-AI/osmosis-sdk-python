@@ -1,0 +1,22 @@
+osmosis_ai/rollout/integrations/agents/strands.py
+  s_49decdefcc7bff::t_04189aaf2be7b5 107-112
+  s_49decdefcc7bff::t_13dbd95d21df4d 141-142
+tests/unit/rollout/integrations/test_strands_integration.py
+  s_49decdefcc7bff::t_d1a276539cc803 284-297
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "1df21d30b6ddd57d201d04d1218826d6601c49de",
+  "prompts": {},
+  "sessions": {
+    "s_49decdefcc7bff": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "bfca6ecc-e83f-4052-8d24-7da7a0023420",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Allen Lin <allen@osmosis.ai>"
+    }
+  }
+}

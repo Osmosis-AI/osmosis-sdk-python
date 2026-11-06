@@ -1,0 +1,16 @@
+osmosis_ai/rollout/backend/harbor/native_agents.py
+  h_2ae8077fa5063a 112,139,141-144,535-540
+tests/unit/rollout/test_harbor_backend.py
+  h_2ae8077fa5063a 1145-1146,1151-1354
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "050008ba0efa5e1740e25c86327eef5bd074edb4",
+  "prompts": {},
+  "humans": {
+    "h_2ae8077fa5063a": {
+      "author": "Jacob Trock <jgh@geocrypt.me>"
+    }
+  }
+}

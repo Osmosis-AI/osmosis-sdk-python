@@ -1,0 +1,19 @@
+docs/rollout-sdk.md
+  s_acac490f6cee24::t_0f9d7bb14f0230 106,112-114,119-120
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "b451e0e486c4fa007f4af00aa74155cd5be9e32e",
+  "prompts": {},
+  "sessions": {
+    "s_acac490f6cee24": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "19362013-2a68-429c-9e69-d25ce0411b50",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}

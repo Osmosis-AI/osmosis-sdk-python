@@ -1,0 +1,45 @@
+osmosis_ai/eval/local/upload_archive.py
+  s_ee7b411c86eb9d::t_a7f5187541ff1d 1-134,136-337
+  s_ee7b411c86eb9d::t_5e6dd32cec0f6e 135
+docs/eval-run-local.md
+  s_ee7b411c86eb9d::t_9037491754dc8b 191-193
+tests/unit/platform/cli/test_eval_run.py
+  s_ee7b411c86eb9d::t_bb8497b27cf357 1282,1285-1294
+  s_ee7b411c86eb9d::t_ee50b6e3558551 6
+tests/unit/eval/local/test_upload_archive.py
+  s_ee7b411c86eb9d::t_dc937ccb39d710 1-225
+osmosis_ai/eval/local/upload.py
+  s_ee7b411c86eb9d::t_acc8b2540cdf86 16,55,191,196,204,219-222
+osmosis_ai/platform/api/client.py
+  s_ee7b411c86eb9d::t_44358fe9f77396 21,704,711,725,741,782-816
+osmosis_ai/platform/api/models.py
+  s_ee7b411c86eb9d::t_5778a6cec81d3f 38,40-45,93,97,108,143,147,158,165-169,173,187-189,210,221-245
+osmosis_ai/platform/api/upload.py
+  s_ee7b411c86eb9d::t_35914d9fdc735b 344-362,449,452
+osmosis_ai/platform/cli/eval_upload.py
+  s_ee7b411c86eb9d::t_1d634b5427950e 5,7-9,12,30-36,38,40-43,51-61,63-68,71-72,74,76-77,79-88,92-95,102-103,108-118,124-173,175,179-241,261-264,269,277,282,284-287,289-292,294-296,304
+tests/unit/eval/local/test_upload.py
+  s_ee7b411c86eb9d::t_f670c9225dba21 7,179,534
+tests/unit/platform/api/test_client_eval_import.py
+  s_ee7b411c86eb9d::t_4ec65fb09fc8c2 12-13,16-17,20-25,44,64,81,117-148
+tests/unit/platform/api/test_eval_import_models.py
+  s_ee7b411c86eb9d::t_2758c3c769e8cd 8,13-14,17,22-23,25,29-33,44-45,52,73-119
+tests/unit/platform/cli/test_eval_upload.py
+  s_ee7b411c86eb9d::t_cc2cc3edc5adf1 5,7-10,17-27,29,114-129,133-226,228-341,343,346-347,349-375,377-401,403-484,487-495,497-499,501-502,504,506-507,509-512,515-540,542-543,545-547,550-560,562-563,565,567-569,572-581,583,586,589-594,596-597,599,602,607,609-610,614-615,619
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "40db6651044dd3ee96646a8df0a80896107c2bb8",
+  "prompts": {},
+  "sessions": {
+    "s_ee7b411c86eb9d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "dc2813cd-2024-46e3-a173-71955e61fc91",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Allen Lin <allen@osmosis.ai>"
+    }
+  }
+}

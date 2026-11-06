@@ -1,0 +1,21 @@
+osmosis_ai/rollout/backend/harbor/backend.py
+  s_b51793c949f584::t_c4ef5781112f03 221-224,226,228-229,231-232,995-1000,1006-1007,1015,1025,1076-1083,1177,1204-1206,1208,1254,1269,1294
+osmosis_ai/rollout/backend/harbor/source.py
+  s_b51793c949f584::t_8126a1585af18b 138,148
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "9641db19a9d55fc3481f298622b8cbe94a0e9f14",
+  "prompts": {},
+  "sessions": {
+    "s_b51793c949f584": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f133799c-24f4-4f35-8c2a-f062f71c315f",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Allen Lin <allen@osmosis.ai>"
+    }
+  }
+}
