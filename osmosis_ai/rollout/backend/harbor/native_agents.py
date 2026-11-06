@@ -109,7 +109,7 @@ def _convert_pi_events_to_trajectory(
 
     session_id = "unknown"
     default_model_name = self.model_name
-    seen_message_type: str | None = None
+    seen_stream_mode: bool | None = None
     steps: list[Step] = []
     call_steps: dict[str, Step] = {}
     total_prompt = 0
@@ -136,10 +136,12 @@ def _convert_pi_events_to_trajectory(
             if isinstance(prov, str) and isinstance(mid, str):
                 default_model_name = f"{prov}/{mid}"
             continue
-        if event_type not in {"message", "message_end"}:
+        if event_type not in {"message", "message_end", "tool_result_end"}:
             continue
-        seen_message_type = seen_message_type or event_type
-        if event_type != seen_message_type:
+        is_stream_event = event_type in {"message_end", "tool_result_end"}
+        if seen_stream_mode is None:
+            seen_stream_mode = is_stream_event
+        elif is_stream_event != seen_stream_mode:
             continue
         message = event.get("message")
         if not isinstance(message, dict):
@@ -530,6 +532,12 @@ def _ensure_pi_support() -> None:
                 trajectory_path.write_text(
                     format_trajectory_json(trajectory.to_json_dict())
                 )
+            fm = trajectory.final_metrics
+            if fm is not None:
+                context.n_input_tokens = fm.total_prompt_tokens or 0
+                context.n_output_tokens = fm.total_completion_tokens or 0
+                context.n_cache_tokens = fm.total_cached_tokens or 0
+                context.cost_usd = fm.total_cost_usd
 
     Pi.populate_context_post_run = populate_context_post_run
 

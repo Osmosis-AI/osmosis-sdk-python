@@ -1142,11 +1142,216 @@ class TestNativeAgents:
                 ]
             )
         )
-        agent.populate_context_post_run(AgentContext())
+        ctx = AgentContext()
+        agent.populate_context_post_run(ctx)
         traj = json.loads((agent.logs_dir / "trajectory.json").read_text())
         assert traj["session_id"] == "pi-sess-1"
         assert traj["final_metrics"]["total_prompt_tokens"] == 30
         assert traj["final_metrics"]["total_completion_tokens"] == 13
+        assert ctx.n_input_tokens == 30
+        assert ctx.n_output_tokens == 13
+
+    async def test_pi_trajectory_and_preview_edge_cases(self, template_task, tmp_path):
+        from harbor.agents.factory import AgentFactory
+        from harbor.models.agent.context import AgentContext
+
+        from osmosis_ai.rollout.backend.harbor import preview_agents
+
+        backend = self.backend_for(
+            "pi", template_task, model_name="gemini/gemini-3.8-flash"
+        )
+        config = backend.build_agent_config(
+            template_task,
+            ContainerInput(
+                rollout_id="r1",
+                chat_completions_url="https://trainer/sessions/r1/v1",
+                api_key="key-r1",
+            ),
+        )
+        agent = AgentFactory.create_agent_from_config(config, tmp_path / "logs")
+        session_dir = agent.logs_dir / "pi" / "sessions"
+        session_dir.mkdir(parents=True, exist_ok=True)
+
+        # 1. Multiple chronological session files + model_change + empty error turn + mixed message_end ignored
+        s1 = session_dir / "01-first.jsonl"
+        s2 = session_dir / "02-second.jsonl"
+        s1.write_text(
+            "\n".join(
+                json.dumps(ev)
+                for ev in [
+                    {"type": "session", "id": "sess-root"},
+                    {
+                        "type": "model_change",
+                        "provider": "harbor-endpoint",
+                        "modelId": "gemini-3.8-flash",
+                    },
+                    {
+                        "type": "message",
+                        "timestamp": "2026-11-05T00:00:00Z",
+                        "message": {"role": "user", "content": "multiply 6 and 7"},
+                    },
+                    {
+                        "type": "message",
+                        "message": {
+                            "role": "assistant",
+                            "stopReason": "error",
+                            "content": [],
+                        },
+                    },
+                    {
+                        "type": "message",
+                        "message": {
+                            "role": "assistant",
+                            "content": [
+                                {"type": "thinking", "thinking": "calling bash"},
+                                {
+                                    "type": "toolCall",
+                                    "id": "tc-1",
+                                    "name": "bash",
+                                    "arguments": {"command": "echo 42"},
+                                },
+                            ],
+                            "usage": {
+                                "input": 12,
+                                "output": 4,
+                                "cacheRead": 3,
+                                "cacheWrite": 1,
+                                "reasoning": 2,
+                                "totalTokens": 20,
+                                "cost": {"total": 0.005},
+                            },
+                        },
+                    },
+                    # Mixed stream event inside session file must be ignored to prevent double-counting.
+                    {
+                        "type": "message_end",
+                        "message": {
+                            "role": "assistant",
+                            "content": [{"type": "text", "text": "duplicate"}],
+                            "usage": {"input": 999, "output": 999, "totalTokens": 1998},
+                        },
+                    },
+                ]
+            )
+        )
+        os.utime(s1, ns=(1_000_000_000, 1_000_000_000))
+        s2.write_text(
+            "\n".join(
+                json.dumps(ev)
+                for ev in [
+                    {"type": "session", "id": "sess-resumed"},
+                    {
+                        "type": "message",
+                        "message": {
+                            "role": "toolResult",
+                            "toolCallId": "tc-1",
+                            "toolName": "bash",
+                            "content": [{"type": "text", "text": "42\n"}],
+                        },
+                    },
+                    {
+                        "type": "message",
+                        "message": {
+                            "role": "assistant",
+                            "content": [{"type": "text", "text": "#### 42"}],
+                            "usage": {
+                                "input": 18,
+                                "output": 2,
+                                "totalTokens": 20,
+                                "cost": {"total": 0.002},
+                            },
+                        },
+                    },
+                ]
+            )
+        )
+        os.utime(s2, ns=(2_000_000_000, 2_000_000_000))
+
+        ctx = AgentContext()
+        agent.populate_context_post_run(ctx)
+        traj = json.loads((agent.logs_dir / "trajectory.json").read_text())
+        assert traj["session_id"] == "sess-root"
+        assert traj["agent"]["model_name"] == "harbor-endpoint/gemini-3.8-flash"
+        assert len(traj["steps"]) == 3
+        assert traj["steps"][1]["reasoning_content"] == "calling bash"
+        assert traj["steps"][1]["observation"]["results"][0]["content"] == "42"
+        assert traj["final_metrics"]["total_prompt_tokens"] == (12 + 3 + 1) + 18
+        assert traj["final_metrics"]["total_completion_tokens"] == 4 + 2
+        assert traj["final_metrics"]["total_cached_tokens"] == 3
+        assert traj["final_metrics"]["total_cost_usd"] == pytest.approx(0.007)
+        assert ctx.n_input_tokens == 34
+        assert ctx.n_output_tokens == 6
+        assert ctx.n_cache_tokens == 3
+        assert ctx.cost_usd == pytest.approx(0.007)
+
+        # 2. Existing trajectory.json is preserved if already written before hook runs
+        (agent.logs_dir / "trajectory.json").write_text('{"preserved": true}')
+        agent.populate_context_post_run(AgentContext())
+        assert json.loads((agent.logs_dir / "trajectory.json").read_text()) == {
+            "preserved": True
+        }
+
+        # 3. Stream mode (pi.txt + _PreviewPi) with legacy tool_result_end and truncated tail
+        stream_bytes = (
+            b"\n".join(
+                json.dumps(ev).encode()
+                for ev in [
+                    {"type": "session", "id": "stream-sess"},
+                    {
+                        "type": "message_end",
+                        "message": {
+                            "role": "user",
+                            "content": [{"type": "text", "text": "task"}],
+                        },
+                    },
+                    {
+                        "type": "message_end",
+                        "message": {
+                            "role": "assistant",
+                            "content": [
+                                {
+                                    "type": "toolCall",
+                                    "id": "tc-stream",
+                                    "name": "bash",
+                                    "arguments": {"command": "pwd"},
+                                }
+                            ],
+                            "usage": {"input": 5, "output": 3, "totalTokens": 8},
+                        },
+                    },
+                    {
+                        "type": "tool_result_end",
+                        "message": {
+                            "role": "toolResult",
+                            "toolCallId": "tc-stream",
+                            "toolName": "bash",
+                            "content": "/workspace",
+                            "isError": False,
+                        },
+                    },
+                ]
+            )
+            + b'\n{"type": "message_end", "message": {"unterminated'
+        )
+
+        async def fake_snapshot(*_args):
+            return stream_bytes
+
+        preview_agent = preview_agents._PreviewPi(
+            logs_dir=tmp_path / "preview-logs",
+            model_name="openai/Qwen3-4B",
+            _osmosis_preview_path=str(tmp_path / "preview.json"),
+        )
+        orig_read = preview_agents.read_remote_snapshot
+        preview_agents.read_remote_snapshot = fake_snapshot
+        try:
+            doc = await preview_agent._capture_preview(object(), tmp_path / "snap")
+        finally:
+            preview_agents.read_remote_snapshot = orig_read
+        assert doc is not None
+        assert doc["session_id"] == "stream-sess"
+        assert len(doc["steps"]) == 2
+        assert doc["steps"][1]["observation"]["results"][0]["content"] == "/workspace"
 
     def test_opencode_preserves_existing_private_provider_configuration(
         self, template_task, tmp_path
