@@ -63,10 +63,11 @@ Add `--upload` to import a completed local run into the platform before `eval ru
 osmosis eval run configs/eval/my-rollout.toml --name my-local-run --upload
 ```
 
-An existing completed run can be uploaded or resumed independently:
+An existing completed run can be uploaded or resumed independently. By default the destination is the workspace connected to the current Git repository. To upload to a different workspace, pass the root `--workspace` option. A run name or directory still refers to local files:
 
 ```bash
 osmosis eval upload my-local-run
+osmosis --workspace team-b eval upload my-local-run
 ```
 
 ## Options
