@@ -182,6 +182,12 @@ def test_gateway_readiness_preserves_source_and_verifier_healthcheck(tmp_path):
     assert path.read_bytes() == before
 
 
+@pytest.fixture(autouse=True)
+def no_platform_opensandbox_env(monkeypatch):
+    for name in ("RUN_ID", "REQUEST_TIMEOUT_SEC"):
+        monkeypatch.delenv(f"_OSMOSIS_OPENSANDBOX_{name}", raising=False)
+
+
 @pytest.mark.parametrize(
     ("domain", "overrides", "expected"),
     [
@@ -246,6 +252,27 @@ def test_self_hosted_opensandbox_keeps_harbors_direct_default(monkeypatch):
     apply_opensandbox_defaults(kwargs)
 
     assert kwargs == {"protocol": "http"}
+
+
+def test_osmosis_prefixed_opensandbox_names_take_precedence(monkeypatch):
+    from osmosis_ai.rollout.backend.harbor.environment import (
+        apply_opensandbox_defaults,
+    )
+
+    monkeypatch.setenv("OPENSANDBOX_DOMAIN", "https://opensandbox.example")
+    monkeypatch.delenv("OPENSANDBOX_RUN_ID", raising=False)
+    monkeypatch.setenv("_OSMOSIS_OPENSANDBOX_RUN_ID", "run-1")
+    monkeypatch.setenv("OPENSANDBOX_REQUEST_TIMEOUT_SEC", "120")
+    monkeypatch.setenv("_OSMOSIS_OPENSANDBOX_REQUEST_TIMEOUT_SEC", "660")
+    kwargs: dict = {}
+
+    apply_opensandbox_defaults(kwargs)
+
+    assert kwargs == {
+        "protocol": "https",
+        "use_server_proxy": True,
+        "request_timeout_sec": 660,
+    }
 
 
 def test_request_timeout_comes_from_platform_env(monkeypatch):
