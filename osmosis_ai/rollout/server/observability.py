@@ -37,18 +37,23 @@ class RolloutObservability:
         self.log: Logger | None = None
         self._sequence: int = 0
         owner = {
-            "server_id": os.environ.get("OSMOSIS_ROLLOUT_SERVER_ID")
+            "server_id": os.environ.get("_OSMOSIS_ROLLOUT_SERVER_ID")
+            or os.environ.get("OSMOSIS_ROLLOUT_SERVER_ID")
             or os.environ.get("_OSMOSIS_ROLLOUT_INSTANCE_ID")
             or socket.gethostname(),
             "server_name": os.environ.get("_OSMOSIS_ROLLOUT_NAME", ""),
-            "namespace": os.environ.get("OSMOSIS_ROLLOUT_NAMESPACE", ""),
+            "namespace": os.environ.get("_OSMOSIS_ROLLOUT_NAMESPACE")
+            or os.environ.get("OSMOSIS_ROLLOUT_NAMESPACE", ""),
         }
         self.owner: dict[str, str] = {
             key: value for key, value in owner.items() if _text(value) is not None
         }
 
     def start(self) -> None:
-        endpoint = os.environ.get("OSMOSIS_ROLLOUT_OTLP_ENDPOINT", "").rstrip("/")
+        endpoint = (
+            os.environ.get("_OSMOSIS_ROLLOUT_OTLP_ENDPOINT")
+            or os.environ.get("OSMOSIS_ROLLOUT_OTLP_ENDPOINT", "")
+        ).rstrip("/")
         if not endpoint:
             return
         # Own a provider rather than replacing an application's global provider.

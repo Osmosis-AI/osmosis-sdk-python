@@ -531,8 +531,9 @@ async def test_execution_survives_failed_response_send() -> None:
     backend = StubBackend()
     app = create_rollout_server(backend=backend)
     await post_rollout_with_failing_send(app, init_body())
-    for _ in range(10):
-        await asyncio.sleep(0)
+    async with asyncio.timeout(5):
+        while backend.execute_count == 0:
+            await asyncio.sleep(0.01)
     assert backend.execute_count == 1
 
 

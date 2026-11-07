@@ -1025,8 +1025,8 @@ class HarborBackend(ExecutionBackend):
 
     def _resolve_prewarm_concurrency_cap(self) -> int | None:
         raw = (
-            os.environ.get("OPENSANDBOX_MAX_SANDBOXES")
-            or os.environ.get("_OSMOSIS_OPENSANDBOX_MAX_SANDBOXES")
+            os.environ.get("_OSMOSIS_OPENSANDBOX_MAX_SANDBOXES")
+            or os.environ.get("OPENSANDBOX_MAX_SANDBOXES")
             or ""
         ).strip()
         if not raw:

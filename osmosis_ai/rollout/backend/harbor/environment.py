@@ -35,10 +35,16 @@ def apply_opensandbox_defaults(kwargs: dict[str, Any]) -> None:
     kwargs.setdefault("protocol", scheme if scheme in {"http", "https"} else "https")
     # Managed sandboxes are reachable only through the server. The managed
     # entrypoint always exports a run ID; self-hosted servers keep Harbor's default.
-    if os.environ.get("OPENSANDBOX_RUN_ID"):
+    # The unprefixed names are what platform images wrote before the _OSMOSIS_ names.
+    if os.environ.get("_OSMOSIS_OPENSANDBOX_RUN_ID") or os.environ.get(
+        "OPENSANDBOX_RUN_ID"
+    ):
         kwargs.setdefault("use_server_proxy", True)
     try:
-        request_timeout_sec = int(os.environ.get("OPENSANDBOX_REQUEST_TIMEOUT_SEC", ""))
+        request_timeout_sec = int(
+            os.environ.get("_OSMOSIS_OPENSANDBOX_REQUEST_TIMEOUT_SEC")
+            or os.environ.get("OPENSANDBOX_REQUEST_TIMEOUT_SEC", "")
+        )
     except ValueError:
         request_timeout_sec = 0
     if request_timeout_sec > 0:
