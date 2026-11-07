@@ -484,3 +484,40 @@ def test_a_failed_download_asks_for_dataset_file(tmp_path: Path) -> None:
     ):
         resolve_platform_dataset("multiply", cache=cache, fetcher=fetcher)
     assert list(cache.directory_for("ds-1").iterdir()) == []
+
+
+def test_the_platform_fetcher_downloads_the_version_it_described(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import osmosis_ai.platform.api.client as api_client_module
+    import osmosis_ai.platform.api.download as download_module
+    from osmosis_ai.eval.local.dataset import PlatformDatasetFetcher
+    from osmosis_ai.platform.api.models import DatasetDownloadInfo, DatasetFile
+
+    requested: list[str] = []
+
+    class FakeClient:
+        def get_ready_dataset(self, name, *, credentials=None, git_identity):
+            return DatasetFile(
+                id="3f2a9c1-id",
+                file_name="train",
+                file_size=10,
+                status="uploaded",
+                file_format="jsonl",
+                version="3f2a9c1",
+            )
+
+        def get_dataset_download_url(self, ref, *, credentials=None, git_identity):
+            requested.append(ref)
+            return DatasetDownloadInfo(presigned_url="https://example.com/train")
+
+    monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+    monkeypatch.setattr(download_module, "download_file_to", lambda _url, _dest: None)
+
+    fetcher = PlatformDatasetFetcher(credentials=None, git_identity="acme/rollouts")
+    description = fetcher.describe("train")
+    fetcher.download_to("train", tmp_path / "train.jsonl")
+
+    assert description.dataset_id == "3f2a9c1-id"
+    # A newer version that becomes ready in between does not change the bytes.
+    assert requested == ["train@3f2a9c1"]
