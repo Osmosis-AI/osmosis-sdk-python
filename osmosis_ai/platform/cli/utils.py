@@ -231,6 +231,19 @@ def build_dataset_detail_rows(ds: Any, *, include_id: bool) -> list[tuple[str, s
     ]
     if include_id:
         rows.append(("ID", ds.id))
+    version = getattr(ds, "version", None)
+    if version:
+        latest = getattr(ds, "latest_version", None)
+        note = (
+            " (latest)"
+            if latest == version
+            else f" (latest: {latest})"
+            if latest
+            else ""
+        )
+        rows.append(("Version", f"{version}{note}"))
+    if getattr(ds, "version_count", None):
+        rows.append(("Versions", str(ds.version_count)))
     rows.append(("Status", ds.status.replace("_", " ").title()))
     file_format = getattr(ds, "file_format", None)
     original_format = getattr(ds, "original_file_format", None)

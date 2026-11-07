@@ -12,11 +12,13 @@ from osmosis_ai.platform.constants import (
 )
 
 from .models import (
+    STATUSES_SUCCESS,
     BaseModelDetail,
     BenchmarkCatalogDetail,
     BenchmarkRunDetail,
     DatasetDownloadInfo,
     DatasetFile,
+    DatasetVersions,
     EnvironmentSecretInfo,
     EvalRunImportExtraction,
     EvalRunImportResult,
@@ -266,6 +268,49 @@ class OsmosisClient:
             git_identity=git_identity,
         )
         return DatasetFile.from_dict(data)
+
+    def get_ready_dataset(
+        self,
+        name_or_ref: str,
+        *,
+        credentials: Credentials | None = None,
+        git_identity: str | None,
+    ) -> DatasetFile:
+        """The dataset version a run uses for ``name_or_ref``.
+
+        A bare name whose newest upload is still processing or failed resolves to
+        its newest ready version, as run submission does; a pinned
+        ``name@version`` or an ID is returned as is.
+        """
+        dataset = self.get_dataset(
+            name_or_ref, credentials=credentials, git_identity=git_identity
+        )
+        if (
+            name_or_ref == dataset.file_name
+            and dataset.status not in STATUSES_SUCCESS
+            and dataset.latest_version
+            and dataset.latest_version != dataset.version
+        ):
+            dataset = self.get_dataset(
+                f"{dataset.file_name}@{dataset.latest_version}",
+                credentials=credentials,
+                git_identity=git_identity,
+            )
+        return dataset
+
+    def list_dataset_versions(
+        self,
+        name_or_id: str,
+        *,
+        credentials: Credentials | None = None,
+        git_identity: str | None,
+    ) -> DatasetVersions:
+        data = platform_request(
+            f"/api/cli/datasets/{_safe_path(name_or_id)}/versions",
+            credentials=credentials,
+            git_identity=git_identity,
+        )
+        return DatasetVersions.from_dict(data)
 
     def get_dataset_download_url(
         self,

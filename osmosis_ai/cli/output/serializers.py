@@ -59,6 +59,11 @@ def serialize_dataset(df: DatasetFile) -> dict[str, Any]:
     }
     if df.platform_url:
         data["platform_url"] = df.platform_url
+    # Absent on a platform without dataset versions.
+    for key in ("version", "version_count", "latest_version"):
+        value = getattr(df, key)
+        if value is not None:
+            data[key] = value
     return data
 
 

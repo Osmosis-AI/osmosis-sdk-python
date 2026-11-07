@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from contextlib import nullcontext
 from io import StringIO
+from types import SimpleNamespace
 
 import pytest
 
@@ -66,7 +67,7 @@ class TestPerformUpload:
             dataset_name="data",
             file_size=2,
             ext="jsonl",
-            overwrite=False,
+            existing_ok=False,
             git_identity=GIT_IDENTITY,
             credentials=None,
         )
@@ -301,10 +302,9 @@ class TestPerformUpload:
         assert aborted.get("called")
         assert ("Upload interrupted." in output.getvalue()) is shows_interrupted_message
 
-    def test_duplicate_name_without_overwrite_raises_guided_conflict(
-        self, monkeypatch, tmp_path
-    ):
-        """_perform_upload points users to --overwrite on duplicate names."""
+    def test_unexpected_existing_name_asks_to_rerun(self, monkeypatch, tmp_path):
+        """A name created after the existence check is not uploaded over; the
+        user reruns so the confirmation shows the existing dataset."""
         import osmosis_ai.platform.api.client as api_client_module
         from osmosis_ai.cli.errors import CLIError
         from osmosis_ai.platform.auth import PlatformAPIError
@@ -340,14 +340,15 @@ class TestPerformUpload:
 
         assert exc_info.value.code == "CONFLICT"
         assert exc_info.value.details["existing_dataset_id"] == "dataset-old"
-        assert "--overwrite" in exc_info.value.message
+        assert "Run the upload again" in exc_info.value.message
         assert "osmosis dataset upload" not in exc_info.value.message
         assert str(file_path) not in exc_info.value.message
 
-    def test_overwrite_retries_create_with_existing_dataset_id(
+    def test_existing_name_retries_create_with_existing_dataset_id(
         self, monkeypatch, tmp_path
     ):
-        """_perform_upload retries create with overwrite_dataset_id before S3 upload."""
+        """A confirmed existing name retries create with its ID before the S3
+        upload, which adds a version."""
         import osmosis_ai.platform.api.client as api_client_module
         import osmosis_ai.platform.api.upload as upload_module
         from osmosis_ai.platform.auth import PlatformAPIError
@@ -424,7 +425,7 @@ class TestPerformUpload:
             file_size=file_size,
             git_identity=GIT_IDENTITY,
             credentials=None,
-            overwrite=True,
+            existing_ok=True,
         )
 
         assert result.status == "uploaded"
@@ -464,7 +465,7 @@ class TestPerformUpload:
                 file_size=2,
                 git_identity=GIT_IDENTITY,
                 credentials=None,
-                overwrite=True,
+                existing_ok=True,
             )
 
         assert exc_info.value is conflict
@@ -501,6 +502,7 @@ class TestUploadCommand:
             "_perform_upload",
             lambda **_kwargs: uploaded,
         )
+        monkeypatch.setattr(dataset_module, "_find_dataset", lambda *_a, **_k: None)
         import osmosis_ai.cli.prompts as prompts_module
 
         monkeypatch.setattr(
@@ -520,9 +522,10 @@ class TestUploadCommand:
     def test_overwrite_warning_visible_in_interactive_prompt(
         self, monkeypatch, tmp_path
     ):
-        """The destructive --overwrite warning must reach the rich interactive
-        prompt itself (not only the JSON/plain details), and the prompt must
-        default to "no" so a bare Enter never overwrites."""
+        """On a platform without dataset versions, the destructive --overwrite
+        warning must reach the rich interactive prompt itself (not only the
+        JSON/plain details), and the prompt must default to "no" so a bare Enter
+        never overwrites."""
         import osmosis_ai.cli.prompts as prompts_module
         import osmosis_ai.platform.cli.dataset as dataset_module
 
@@ -551,6 +554,11 @@ class TestUploadCommand:
         monkeypatch.setattr(
             dataset_module, "_perform_upload", lambda **_kwargs: uploaded
         )
+        monkeypatch.setattr(
+            dataset_module,
+            "_find_dataset",
+            lambda *_a, **_k: _make_fake_dataset(),  # no version: no versions
+        )
 
         seen: dict[str, object] = {}
 
@@ -567,3 +575,88 @@ class TestUploadCommand:
         assert result.status == "success"
         assert "overwrite" in str(seen["message"]).lower()
         assert seen["default"] is False
+
+    def test_existing_name_confirms_a_new_version_with_yes_as_default(
+        self, monkeypatch, tmp_path
+    ):
+        import osmosis_ai.cli.prompts as prompts_module
+        import osmosis_ai.platform.cli.dataset as dataset_module
+
+        file_path = tmp_path / "data.jsonl"
+        row = '{"system_prompt": "s", "user_prompt": "u", "ground_truth": "g"}\n'
+        file_path.write_text(row * 4)
+        fake_context = type(
+            "Context",
+            (),
+            {
+                "credentials": object(),
+                "git_identity": GIT_IDENTITY,
+                "workspace_directory": tmp_path,
+                "repo_url": "https://github.com/acme/rollouts.git",
+            },
+        )()
+        existing = DatasetFile(
+            id="dataset-old",
+            file_name="data",
+            file_size=2,
+            status="uploaded",
+            version="9b8e7d6",
+            version_count=1,
+            latest_version="9b8e7d6",
+        )
+        performed: dict[str, object] = {}
+
+        def fake_perform_upload(**kwargs):
+            performed.update(kwargs)
+            return _make_fake_dataset()
+
+        monkeypatch.setattr(
+            dataset_module, "require_platform_workspace_context", lambda: fake_context
+        )
+        monkeypatch.setattr(dataset_module, "_find_dataset", lambda *_a, **_k: existing)
+        monkeypatch.setattr(dataset_module, "_perform_upload", fake_perform_upload)
+        seen: dict[str, object] = {}
+
+        def fake_confirm(message, default=True):
+            seen["default"] = default
+            return True
+
+        monkeypatch.setattr(prompts_module, "confirm", fake_confirm)
+
+        with override_output_context(format=OutputFormat.rich, interactive=True):
+            dataset_module.upload(str(file_path))
+
+        assert seen["default"] is True
+        assert performed["existing_ok"] is True
+
+    def test_name_with_at_sign_is_rejected_before_upload(self, tmp_path, monkeypatch):
+        import osmosis_ai.platform.cli.dataset as dataset_module
+        from osmosis_ai.cli.errors import CLIError
+
+        file_path = tmp_path / "data@v2.jsonl"
+        file_path.write_text("{}")
+        monkeypatch.setattr(
+            dataset_module,
+            "require_platform_workspace_context",
+            lambda: SimpleNamespace(credentials=None, git_identity=GIT_IDENTITY),
+        )
+
+        with pytest.raises(CLIError, match="cannot contain '@'"):
+            dataset_module.upload(str(file_path), yes=True)
+
+
+class TestFindDataset:
+    def test_missing_name_is_none_and_other_errors_propagate(self):
+        from osmosis_ai.platform.auth import PlatformAPIError
+        from osmosis_ai.platform.cli.dataset import _find_dataset
+
+        class FakeClient:
+            def __init__(self, status_code):
+                self.status_code = status_code
+
+            def get_dataset(self, name, *, credentials=None, git_identity):
+                raise PlatformAPIError("boom", status_code=self.status_code)
+
+        assert _find_dataset(FakeClient(404), "data", git_identity=GIT_IDENTITY) is None
+        with pytest.raises(PlatformAPIError):
+            _find_dataset(FakeClient(500), "data", git_identity=GIT_IDENTITY)
