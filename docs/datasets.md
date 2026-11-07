@@ -1,6 +1,8 @@
 # Dataset contract
 
-> The dataset shape the SDK validates locally before upload. Uploading and managing datasets (`osmosis dataset upload`, overwrite/processing semantics) is covered at [docs.osmosis.ai](https://docs.osmosis.ai/platform/datasets).
+> The dataset shape the SDK validates locally before upload. Uploading and managing datasets (`osmosis dataset upload`, versions and processing) is covered at [docs.osmosis.ai](https://docs.osmosis.ai/platform/datasets).
+
+An upload under an existing dataset name adds a version of that dataset ([../osmosis_ai/platform/cli/dataset.py](../osmosis_ai/platform/cli/dataset.py), `upload`). A config's `dataset = "name"` runs with the newest version that finished processing; `dataset = "name@3f2a9c1"` pins one version, named by the first characters of its ID. `osmosis dataset versions <name>` lists them.
 
 Datasets supply prompt/answer pairs or metadata-driven examples for cloud `osmosis eval submit` and `osmosis train submit` runs. The contract below is enforced by the local validator before any bytes hit the platform.
 

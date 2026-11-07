@@ -21,6 +21,7 @@ from osmosis_ai.platform.api.models import (
     PaginatedDatasets,
     UploadInfo,
 )
+from osmosis_ai.platform.auth import PlatformAPIError
 
 GIT_IDENTITY = "acme/rollouts"
 REPO_URL = "https://github.com/acme/rollouts.git"
@@ -110,6 +111,11 @@ def test_upload_passes_git_context_to_api_calls_without_subscription_preflight(
     )
 
     class FakeClient:
+        def get_dataset(self, name: str, *, credentials=None, git_identity: str):
+            calls["find_credentials"] = credentials
+            calls["find_git_identity"] = git_identity
+            raise PlatformAPIError("Dataset not found", status_code=404)
+
         def create_dataset(
             self,
             file_name: str,
@@ -161,6 +167,8 @@ def test_upload_passes_git_context_to_api_calls_without_subscription_preflight(
     result = dataset_module.upload(str(file_path), yes=True)
 
     assert calls == {
+        "find_credentials": fake_credentials,
+        "find_git_identity": GIT_IDENTITY,
         "create_credentials": fake_credentials,
         "create_git_identity": GIT_IDENTITY,
         "complete_credentials": fake_credentials,
@@ -201,7 +209,7 @@ def test_download_uses_git_context_and_saves_file(
     )
 
     class FakeClient:
-        def get_dataset(
+        def get_ready_dataset(
             self,
             file_id: str,
             *,
@@ -281,7 +289,7 @@ def test_download_preserves_trailing_separator_as_directory_intent(
     fake_credentials = _stub_git_context(monkeypatch)
 
     class FakeClient:
-        def get_dataset(
+        def get_ready_dataset(
             self,
             file_id: str,
             *,
@@ -345,7 +353,7 @@ def test_download_rejects_processing_dataset(monkeypatch) -> None:
     fake_credentials = _stub_git_context(monkeypatch)
 
     class FakeClient:
-        def get_dataset(
+        def get_ready_dataset(
             self,
             file_id: str,
             *,

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Iterable
+from dataclasses import asdict
 from pathlib import Path, PurePosixPath
 from typing import Any
 from urllib.parse import unquote, urlparse
@@ -28,6 +29,7 @@ from osmosis_ai.platform.api.models import (
     STATUSES_ERROR,
     STATUSES_IN_PROGRESS,
     STATUSES_SUCCESS,
+    DatasetFile,
 )
 from osmosis_ai.platform.auth import (
     AuthenticationExpiredError,
@@ -200,17 +202,47 @@ def _existing_dataset_id_from_conflict(exc: PlatformAPIError) -> str | None:
     return existing_dataset_id if isinstance(existing_dataset_id, str) else None
 
 
+def _find_dataset(
+    client: Any,
+    dataset_name: str,
+    *,
+    git_identity: str | None,
+    credentials: Any | None = None,
+) -> DatasetFile | None:
+    """The dataset an upload named ``dataset_name`` would add a version to."""
+    try:
+        return client.get_dataset(
+            dataset_name,
+            credentials=credentials,
+            git_identity=git_identity,
+        )
+    except PlatformAPIError as exc:
+        if exc.status_code == 404:
+            return None
+        raise
+
+
+def _describe_existing_dataset(existing: DatasetFile) -> str:
+    count = existing.version_count or 1
+    parts = [f"{count} version{'s' if count != 1 else ''}"]
+    if existing.latest_version:
+        parts.append(f"latest {existing.latest_version}")
+    return f"{existing.file_name} (exists: {', '.join(parts)})"
+
+
 def _create_dataset_for_upload(
     *,
     client: Any,
     dataset_name: str,
     file_size: int,
     ext: str,
-    overwrite: bool,
+    existing_ok: bool,
     git_identity: str | None,
     credentials: Any | None = None,
 ) -> Any:
-    """Create the dataset record, retrying with overwrite when explicitly requested."""
+    """Create the dataset record. When the name exists and ``existing_ok`` is
+    set (the user confirmed it), retry with its ID, which adds a version, or
+    replaces the dataset on a platform without dataset versions."""
     try:
         return platform_call(
             "Uploading dataset...",
@@ -226,18 +258,18 @@ def _create_dataset_for_upload(
         existing_dataset_id = _existing_dataset_id_from_conflict(exc)
         if existing_dataset_id is None:
             raise
-        if not overwrite:
+        if not existing_ok:
             details = dict(exc.details or {})
             details.setdefault("status_code", exc.status_code)
             raise CLIError(
-                f"A dataset named '{dataset_name}' already exists. "
-                "Use --overwrite to replace it.",
+                f"A dataset named '{dataset_name}' was created while this upload "
+                "started. Run the upload again to add it as a new version.",
                 code="CONFLICT",
                 details=details,
             ) from exc
 
         return platform_call(
-            "Replacing existing dataset...",
+            "Uploading dataset...",
             lambda: client.create_dataset(
                 dataset_name,
                 file_size,
@@ -256,7 +288,7 @@ def _perform_upload(
     file_size: int,
     git_identity: str | None,
     credentials: Any | None = None,
-    overwrite: bool = False,
+    existing_ok: bool = False,
 ) -> Any:
     """Core upload: create dataset record → S3 upload → complete.
 
@@ -278,7 +310,7 @@ def _perform_upload(
         dataset_name=dataset_name,
         file_size=file_size,
         ext=ext,
-        overwrite=overwrite,
+        existing_ok=existing_ok,
         credentials=credentials,
         git_identity=git_identity,
     )
@@ -343,7 +375,10 @@ def _perform_upload(
         git_identity=git_identity,
     )
 
-    return completed or dataset
+    result = completed or dataset
+    # The complete response does not repeat the version the create assigned.
+    result.version = result.version or dataset.version
+    return result
 
 
 def upload(
@@ -351,12 +386,23 @@ def upload(
     overwrite: bool = False,
     yes: bool = False,
 ) -> CommandResult:
-    """Upload a dataset file."""
+    """Upload a dataset file.
+
+    An upload under an existing name adds a version of that dataset; earlier
+    versions stay usable as ``name@version``. A platform without dataset
+    versions replaces the dataset instead, which still needs ``overwrite``.
+    """
     context = require_platform_workspace_context()
     credentials = context.credentials
     git_identity = context.git_identity
 
     file_path, ext, file_size = _check_file_basics(file)
+    dataset_name = _dataset_name_from_path(file_path)
+    if "@" in dataset_name:
+        raise CLIError(
+            f"Dataset name '{dataset_name}' cannot contain '@', which marks a "
+            "version (name@version). Rename the file and upload again."
+        )
 
     # Validate file contents before uploading
     errors, warnings = _validate_file_with_warnings(file_path, ext)
@@ -367,29 +413,59 @@ def upload(
     for warning in warnings:
         console.print_warning(warning, code="PARQUET_VALIDATION_SKIPPED")
 
-    overwrite_warning = (
-        "--overwrite will replace the existing dataset with the same name."
-    )
-    require_confirmation(
-        (
-            "This will overwrite the existing dataset with the same name. "
-            "Proceed with upload?"
-            if overwrite
-            else "Proceed with upload?"
+    from osmosis_ai.platform.api.client import OsmosisClient
+
+    client = OsmosisClient()
+    existing = platform_call(
+        "Checking dataset...",
+        lambda: _find_dataset(
+            client,
+            dataset_name,
+            credentials=credentials,
+            git_identity=git_identity,
         ),
-        yes=yes,
-        # Default to "no" for the destructive overwrite path so a bare Enter
-        # does not replace data; non-destructive uploads keep the "yes" default.
-        default=not overwrite,
-        summary=[("File", file_path.name), ("Size", format_size(file_size))],
-        warnings=[overwrite_warning] if overwrite else None,
     )
+    replaces = existing is not None and existing.version is None
+    if replaces and not overwrite:
+        raise CLIError(
+            f"A dataset named '{dataset_name}' already exists. "
+            "Use --overwrite to replace it.",
+            code="CONFLICT",
+            details={"existing_dataset_id": existing.id},
+        )
+
+    summary = [("File", file_path.name), ("Size", format_size(file_size))]
+    if replaces:
+        require_confirmation(
+            "This will overwrite the existing dataset with the same name. "
+            "Proceed with upload?",
+            yes=yes,
+            # Default to "no" for the destructive overwrite path so a bare Enter
+            # does not replace data.
+            default=False,
+            summary=summary,
+            warnings=[
+                "--overwrite will replace the existing dataset with the same name."
+            ],
+        )
+    elif existing is not None:
+        require_confirmation(
+            "Proceed with upload?",
+            yes=yes,
+            summary=[*summary, ("Dataset", _describe_existing_dataset(existing))],
+            warnings=[
+                f'This upload becomes a new version of "{dataset_name}". Runs '
+                "that name it without a version switch to it after processing."
+            ],
+        )
+    else:
+        require_confirmation("Proceed with upload?", yes=yes, summary=summary)
 
     dataset = _perform_upload(
         file_path=file_path,
         ext=ext,
         file_size=file_size,
-        overwrite=overwrite,
+        existing_ok=existing is not None,
         credentials=credentials,
         git_identity=git_identity,
     )
@@ -400,9 +476,13 @@ def upload(
         (
             f"Processing will continue on the platform. Check status at: {dataset.platform_url}"
             if dataset.platform_url
-            else f"Processing will continue on the platform. Check status with: osmosis dataset info {dataset.file_name}"
+            else f"Processing will continue on the platform. Check status with: osmosis dataset info {dataset.ref}"
         )
     ]
+    if dataset.version:
+        display_next_steps.append(
+            f'Pin this version in a config with: dataset = "{dataset.ref}"'
+        )
     next_steps_structured = (
         [{"label": "View dataset", "url": dataset.platform_url}]
         if dataset.platform_url
@@ -412,7 +492,7 @@ def upload(
         operation="dataset.upload",
         status="success",
         resource=resource,
-        message=f"Dataset uploaded: {dataset.file_name}",
+        message=f"Dataset uploaded: {dataset.ref}",
         display_next_steps=display_next_steps,
         next_steps_structured=next_steps_structured,
         extra={"warnings": warnings} if warnings else {},
@@ -457,6 +537,8 @@ def list_datasets(limit: int = DEFAULT_PAGE_SIZE, all_: bool = False) -> Command
         extra=workspace_result_context(context),
         columns=[
             ListColumn(key="file_name", label="Name", ratio=4, overflow="fold"),
+            ListColumn(key="version", label="Latest", no_wrap=True, ratio=1),
+            ListColumn(key="version_count", label="Versions", no_wrap=True, ratio=1),
             ListColumn(key="status", label="Status", no_wrap=True, ratio=1),
             ListColumn(key="file_size", label="Size", no_wrap=True, ratio=1),
             ListColumn(key="created_at", label="Uploaded", no_wrap=True, ratio=1),
@@ -465,6 +547,8 @@ def list_datasets(limit: int = DEFAULT_PAGE_SIZE, all_: bool = False) -> Command
         display_items=[
             {
                 **serialize_dataset(d),
+                "version": d.version or "–",
+                "version_count": d.version_count or "–",
                 "status": format_dataset_status(d),
                 "file_size": format_size(d.file_size),
                 "created_at": format_local_date(d.created_at),
@@ -499,14 +583,68 @@ def info(
     data.update(workspace_result_context(context))
     display_hints = [f"View: {ds.platform_url}"] if ds.platform_url else []
     if ds.status in STATUSES_ERROR:
+        display_hints.append(f"See logs with: osmosis dataset logs {ds.ref or name}")
+    if (ds.version_count or 0) > 1:
         display_hints.append(
-            f"See logs with: osmosis dataset logs {ds.file_name or name}"
+            f"List its versions with: osmosis dataset versions {ds.file_name}"
         )
     return DetailResult(
         title="Dataset",
         data=data,
         fields=detail_fields(rows),
         display_hints=display_hints,
+    )
+
+
+def versions(name: str) -> CommandResult:
+    """List every version of a dataset, newest first."""
+    context = require_platform_workspace_context()
+    credentials = context.credentials
+    git_identity = context.git_identity
+    from osmosis_ai.platform.api.client import OsmosisClient
+
+    client = OsmosisClient()
+    result = platform_call(
+        "Fetching versions...",
+        lambda: client.list_dataset_versions(
+            name,
+            credentials=credentials,
+            git_identity=git_identity,
+        ),
+    )
+    return ListResult(
+        title=f"Versions of {result.file_name}",
+        items=[asdict(v) for v in result.versions],
+        total_count=len(result.versions),
+        has_more=False,
+        next_offset=None,
+        extra=workspace_result_context(context),
+        columns=[
+            ListColumn(key="version", label="Version", no_wrap=True, ratio=2),
+            ListColumn(key="status", label="Status", no_wrap=True, ratio=1),
+            ListColumn(key="row_count", label="Rows", no_wrap=True, ratio=1),
+            ListColumn(key="created_at", label="Uploaded", no_wrap=True, ratio=1),
+            ListColumn(key="creator_name", label="Uploaded By", no_wrap=True, ratio=1),
+        ],
+        display_items=[
+            {
+                **asdict(v),
+                "version": f"{v.version} (latest)" if v.is_latest else v.version,
+                "status": format_dataset_status(v),
+                "row_count": f"{v.row_count:,}" if v.row_count is not None else "–",
+                "created_at": format_local_date(v.created_at),
+                "creator_name": v.creator_name or "–",
+            }
+            for v in result.versions
+        ],
+        display_hints=(
+            [
+                "Pin a version in a config with: "
+                f'dataset = "{result.file_name}@{result.versions[0].version}"'
+            ]
+            if result.versions
+            else []
+        ),
     )
 
 
@@ -639,7 +777,7 @@ def download(
     client = OsmosisClient()
     ds = platform_call(
         "Fetching dataset...",
-        lambda: client.get_dataset(
+        lambda: client.get_ready_dataset(
             name,
             credentials=credentials,
             git_identity=git_identity,
@@ -653,10 +791,12 @@ def download(
             )
         raise CLIError(f"Dataset is not available for download (status: {ds.status}).")
 
+    # Download the version just checked, even if a newer one lands meanwhile.
+    ref = ds.ref if ds.version else name
     info = platform_call(
         "Preparing download...",
         lambda: client.get_dataset_download_url(
-            name,
+            ref,
             credentials=credentials,
             git_identity=git_identity,
         ),
