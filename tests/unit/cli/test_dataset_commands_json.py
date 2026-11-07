@@ -926,6 +926,10 @@ def test_dataset_versions_lists_newest_first_and_marks_latest(
     lines = captured.out.splitlines()
     assert lines[0].startswith("a91c0de\t[processing]\t–\t")
     assert lines[1].startswith("3f2a9c1 (latest)\t[uploaded]\t12,340\t")
+    # The pin hint names the version runs use, not the upload still processing.
+    assert dataset_module.versions("train").display_hints == [
+        'Pin a version in a config with: dataset = "train@3f2a9c1"'
+    ]
 
 
 def test_dataset_download_json_includes_output_path(

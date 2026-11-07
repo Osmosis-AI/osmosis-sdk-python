@@ -637,14 +637,13 @@ def versions(name: str) -> CommandResult:
             }
             for v in result.versions
         ],
-        display_hints=(
-            [
-                "Pin a version in a config with: "
-                f'dataset = "{result.file_name}@{result.versions[0].version}"'
-            ]
-            if result.versions
-            else []
-        ),
+        # Suggest the version runs use now, not a newer upload still processing.
+        display_hints=[
+            "Pin a version in a config with: "
+            f'dataset = "{result.file_name}@{v.version}"'
+            for v in result.versions
+            if v.is_latest
+        ],
     )
 
 
