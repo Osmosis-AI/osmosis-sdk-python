@@ -70,7 +70,12 @@ class TestGrader(Grader):
     return root
 
 
-def _write_eval_config(path: Path, *, commit_sha: str | None = None) -> Path:
+def _write_eval_config(
+    path: Path,
+    *,
+    commit_sha: str | None = None,
+    concurrency_key: str = "max_concurrent_attempts",
+) -> Path:
     commit_line = f'commit_sha = "{commit_sha}"\n' if commit_sha is not None else ""
     path.write_text(
         (
@@ -83,7 +88,7 @@ def _write_eval_config(path: Path, *, commit_sha: str | None = None) -> Path:
             "[evaluation]\n"
             "limit = 200\n"
             "n = 2\n"
-            "batch_size = 1\n"
+            f"{concurrency_key} = 1\n"
             "pass_threshold = 1.0\n"
             "agent_workflow_timeout_s = 450\n"
             "grader_timeout_s = 150\n\n"
@@ -152,15 +157,18 @@ def _mock_workspace_repo(monkeypatch: pytest.MonkeyPatch) -> None:
     disable_commit_preflight(monkeypatch)
 
 
+@pytest.mark.parametrize("concurrency_key", ["max_concurrent_attempts", "batch_size"])
 def test_eval_submit_passes_new_schema_to_evaluation_run_api(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     console_capture: StringIO,
+    concurrency_key: str,
 ) -> None:
     workspace_directory = _make_workspace_directory(tmp_path / "project")
     config_path = _write_eval_config(
         workspace_directory / "configs" / "eval" / "default.toml",
         commit_sha="deadbeef",
+        concurrency_key=concurrency_key,
     )
     monkeypatch.chdir(workspace_directory)
     captured_kwargs: dict[str, Any] = {}
@@ -196,7 +204,7 @@ def test_eval_submit_passes_new_schema_to_evaluation_run_api(
     assert captured_kwargs["evaluation_config"] == {
         "limit": 200,
         "n": 2,
-        "batch_size": 1,
+        "max_concurrent_attempts": 1,
         "pass_threshold": 1.0,
         "agent_workflow_timeout_s": 450.0,
         "grader_timeout_s": 150.0,

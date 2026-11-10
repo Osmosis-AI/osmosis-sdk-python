@@ -167,7 +167,7 @@ class TestEvalInfo:
             dataset={"id": "dataset-1", "name": "eval.jsonl"},
             rollout={"id": "rollout-1", "name": "math-rollout"},
             creator_name="alice",
-            config={"n": 2, "batch_size": 5, "pass_threshold": 0.5},
+            config={"n": 2, "max_concurrent_attempts": 5, "pass_threshold": 0.5},
             entrypoint="main.py",
             commit_sha="abcdef1234567890",
             env_config={"PROMPT_MODE": "strict"},
@@ -250,7 +250,10 @@ class TestEvalInfo:
         ]
         assert section_titles == ["Configuration", "Results"]
         assert section_plain["Entrypoint"] == "main.py"
-        assert section_plain["Config"] == "n=2, batch_size=5, pass_threshold=0.5"
+        assert (
+            section_plain["Config"]
+            == "n=2, max_concurrent_attempts=5, pass_threshold=0.5"
+        )
         assert section_plain["Commit"] == "abcdef1"
         assert section_plain["Secrets"] == (
             "ANTHROPIC_API_KEY (personal, overrides workspace), "

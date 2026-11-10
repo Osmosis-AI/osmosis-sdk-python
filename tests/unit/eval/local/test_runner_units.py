@@ -266,12 +266,14 @@ def test_row_selection_changes_the_fingerprint(tmp_path: Path) -> None:
     assert narrowed["dataset"]["selected_source_rows"] == "0"
 
 
-@pytest.mark.parametrize("field_name", ["batch_size", "branch", "commit_sha"])
+@pytest.mark.parametrize(
+    "field_name", ["max_concurrent_attempts", "branch", "commit_sha"]
+)
 def test_throughput_and_display_fields_are_excluded(
     tmp_path: Path, field_name: str
 ) -> None:
     values: dict[str, Any] = {
-        "batch_size": 32,
+        "max_concurrent_attempts": 32,
         "branch": "other",
         "commit_sha": "abcdef1",
     }
@@ -615,11 +617,13 @@ async def _resolved_concurrency(
         ({"max_queue_depth": 3, "concurrency": {"max_concurrent": 4}}, 3),
         # Older Harbor servers advertise only their queue depth.
         ({"max_queue_depth": 3}, 3),
+        ({"concurrency": {"max_concurrent": 16}}, 8),
     ],
     ids=[
         "backend-limit",
         "smaller-of-limit-and-queue-depth",
         "older-harbor-queue-depth",
+        "default-below-backend-limit",
     ],
 )
 async def test_health_capacity_caps_an_unset_concurrency(
@@ -658,9 +662,9 @@ async def test_health_capacity_caps_an_unset_concurrency(
 async def test_absent_or_garbage_capacity_falls_back(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, health: dict[str, Any] | None
 ) -> None:
-    # No advertised cap means one worker, not an unbounded fan-out.
+    # No advertised cap means the default of 8, not an unbounded fan-out.
     runner = _runner(_spec(), tmp_path)
-    assert await _resolved_concurrency(runner, monkeypatch, health) == 1
+    assert await _resolved_concurrency(runner, monkeypatch, health) == 8
 
 
 async def test_health_capacity_bounds_a_configured_concurrency(
@@ -669,7 +673,7 @@ async def test_health_capacity_bounds_a_configured_concurrency(
     # Over-queueing a backend that reported its own limit creates work it cannot
     # service, so the advertised capacity is a hard cap on the request.
     runner = _runner(
-        _spec(batch_size=16),
+        _spec(max_concurrent_attempts=16),
         tmp_path,
         options=LocalEvalOptions(name="run-1", max_in_flight=8),
     )
@@ -677,11 +681,11 @@ async def test_health_capacity_bounds_a_configured_concurrency(
     assert await _resolved_concurrency(runner, monkeypatch, health) == 2
 
 
-async def test_max_in_flight_takes_precedence_over_batch_size(
+async def test_max_in_flight_takes_precedence_over_max_concurrent_attempts(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     runner = _runner(
-        _spec(batch_size=1),
+        _spec(max_concurrent_attempts=1),
         tmp_path,
         options=LocalEvalOptions(name="run-1", max_in_flight=3),
     )
