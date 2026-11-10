@@ -1,0 +1,51 @@
+tests/unit/platform/cli/test_eval_config.py
+  s_0bd98c660e4699::t_bfaf8e13a30f24 79-106
+  s_0bd98c660e4699::t_9052082a566cd2 40,63
+tests/unit/eval/local/test_runner_units.py
+  s_0bd98c660e4699::t_77be9ed561d328 285-308
+  s_0bd98c660e4699::t_220091d081f47d 269-271,276,309-314,704,712,716
+docs/eval-run-local.md
+  s_0bd98c660e4699::t_392e251a635040 84,189
+docs/eval.md
+  s_0bd98c660e4699::t_820b9c40a950b6 53
+osmosis_ai/cli/commands/eval.py
+  s_0bd98c660e4699::t_74b1b8d3bb492a 169-170
+osmosis_ai/eval/local/runner.py
+  s_0bd98c660e4699::t_fe239e96b2aec5 174,344-345,1205-1208,1211-1214
+osmosis_ai/platform/cli/eval.py
+  s_0bd98c660e4699::t_725e6c0177a73f 217
+osmosis_ai/platform/cli/eval_config.py
+  s_0bd98c660e4699::t_c89a20952e3dbd 8,22,27-39
+osmosis_ai/platform/cli/eval_run.py
+  s_0bd98c660e4699::t_e4739d8c771c5b 391-393
+osmosis_ai/rollout/backend/harbor/trial_limit.py
+  s_0bd98c660e4699::t_097ad8c8b109a0 46
+osmosis_ai/templates/_scaffolds/rollout/eval.toml.tpl
+  s_0bd98c660e4699::t_d82629ec9f746f 17
+tests/unit/cli/test_eval_commands.py
+  s_0bd98c660e4699::t_f0b1a3012f8f4a 170,253-256
+tests/unit/eval/local/test_runner_crash_resume.py
+  s_0bd98c660e4699::t_8300699f9d9b21 79
+tests/unit/platform/cli/test_eval_run.py
+  s_0bd98c660e4699::t_4b5e4dc389c3c0 57,216,609-613
+tests/unit/platform/cli/test_eval_submit.py
+  s_0bd98c660e4699::t_adff59cdd99ad0 73-78,91,160,165,171,207
+tests/unit/rollout/test_harbor_trial_limit.py
+  s_0bd98c660e4699::t_53ef3ac7aabdb4 58-59
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "3dd964040c19bf3bdf6fd1d7e3dbea83947aead0",
+  "prompts": {},
+  "sessions": {
+    "s_0bd98c660e4699": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1cbf0596-e315-44aa-a182-e8e4bdfc843a",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Allen Lin <allen@osmosis.ai>"
+    }
+  }
+}
