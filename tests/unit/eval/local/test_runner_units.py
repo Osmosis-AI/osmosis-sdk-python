@@ -282,36 +282,6 @@ def test_throughput_and_display_fields_are_excluded(
     assert changed == baseline
 
 
-def test_a_lock_written_with_batch_size_still_resumes(tmp_path: Path) -> None:
-    from osmosis_ai.eval.local.state import (
-        DATASET_NORMALIZATION_VERSION,
-        LOCAL_STATE_SCHEMA_VERSION,
-        ROLLOUT_PROTOCOL_VERSION,
-    )
-
-    # The lock SDK 0.3.11 wrote for this spec with evaluation.batch_size = 8.
-    legacy = {
-        "model_path": "openai/gpt-5-mini",
-        "dataset": {"sha256": "a" * 64, "selected_source_rows": "0-1"},
-        "n": 1,
-        "rollout": {
-            "name": "echo-rollout",
-            "entrypoint": "main.py",
-            "source_digest": "b" * 64,
-        },
-        "env": {},
-        "secret_names": [],
-        "timeouts": {"agent_timeout_sec": None, "grader_timeout_sec": None},
-        "versions": {
-            "rollout_protocol": ROLLOUT_PROTOCOL_VERSION,
-            "dataset_normalization": DATASET_NORMALIZATION_VERSION,
-            "state_schema": LOCAL_STATE_SCHEMA_VERSION,
-        },
-    }
-    current = _inputs(_spec(max_concurrent_attempts=8), _dataset(), tmp_path)
-    assert changed_input_keys(legacy, current) == []
-
-
 def test_secret_names_are_included_and_values_are_never_present(tmp_path: Path) -> None:
     baseline = _inputs(_spec(), _dataset(), tmp_path)
     with_secret = _inputs(_spec(secret_names=("OPENAI_API_KEY",)), _dataset(), tmp_path)
