@@ -167,7 +167,8 @@ def eval_run(
         "--max-in-flight",
         help=(
             "Samples evaluated at once (default: "
-            "evaluation.max_concurrent_attempts, then backend capacity, then 1)."
+            "evaluation.max_concurrent_attempts, then 8; capped at the backend's "
+            "capacity)."
         ),
     ),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt."),

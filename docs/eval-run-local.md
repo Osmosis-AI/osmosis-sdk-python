@@ -81,7 +81,7 @@ osmosis --workspace team-b eval upload my-local-run
 | `--rows` | Dataset rows to run, e.g. `3,7,10-20`. Overrides `evaluation.limit`. |
 | `--fresh` | Archive this name's existing results and start clean. |
 | `--retry-failed` | Also re-run failed and skipped work items. Successes are kept. |
-| `--max-in-flight` | Samples evaluated at once. Default: `evaluation.max_concurrent_attempts`, then the backend's advertised capacity, then 1. |
+| `--max-in-flight` | Samples evaluated at once. Default: `evaluation.max_concurrent_attempts`, then 8. Capped at the backend's advertised capacity. |
 | `--yes`, `-y` | Skip the cost confirmation. |
 | `--tunnel` | Force an auto-managed tunnel. Usually unnecessary for a current Harbor backend, which selects one when required. Providers: `cloudflared`. |
 | `--upload` | Import completed results into the platform while the run lock is still held. |

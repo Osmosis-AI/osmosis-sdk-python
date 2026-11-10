@@ -104,6 +104,8 @@ from osmosis_ai.source_scan import reject_directory_symlinks, source_digest
 logger: logging.Logger = logging.getLogger(__name__)
 
 LOGS_FILENAME = "logs.txt"
+# Matches the platform's default for managed eval runs.
+DEFAULT_MAX_CONCURRENT_ATTEMPTS = 8
 
 _HEALTH_TIMEOUT_SEC = 90.0
 _HEALTH_POLL_INTERVAL_SEC = 0.2
@@ -1204,17 +1206,23 @@ class LocalEvalRunner:
     ) -> int:
         """Resolve worker count (§10).
 
-        ``--max-in-flight`` -> ``max_concurrent_attempts`` -> ``/health`` capacity -> 1.
+        ``--max-in-flight`` -> ``max_concurrent_attempts`` -> 8, capped at the
+        ``/health`` capacity.
         """
         health = await probe_health(http_client, base_url) or {}
         hard_cap = health_capacity(health)
-        for candidate in (
-            self._options.max_in_flight,
-            self._spec.max_concurrent_attempts,
-        ):
-            if isinstance(candidate, int) and candidate > 0:
-                return min(candidate, hard_cap) if hard_cap else candidate
-        return hard_cap or 1
+        requested = next(
+            (
+                candidate
+                for candidate in (
+                    self._options.max_in_flight,
+                    self._spec.max_concurrent_attempts,
+                )
+                if isinstance(candidate, int) and candidate > 0
+            ),
+            DEFAULT_MAX_CONCURRENT_ATTEMPTS,
+        )
+        return min(requested, hard_cap) if hard_cap else requested
 
     async def _schedule(
         self,

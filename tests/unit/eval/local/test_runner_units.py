@@ -647,11 +647,13 @@ async def _resolved_concurrency(
         ({"max_queue_depth": 3, "concurrency": {"max_concurrent": 4}}, 3),
         # Older Harbor servers advertise only their queue depth.
         ({"max_queue_depth": 3}, 3),
+        ({"concurrency": {"max_concurrent": 16}}, 8),
     ],
     ids=[
         "backend-limit",
         "smaller-of-limit-and-queue-depth",
         "older-harbor-queue-depth",
+        "default-below-backend-limit",
     ],
 )
 async def test_health_capacity_caps_an_unset_concurrency(
@@ -690,9 +692,9 @@ async def test_health_capacity_caps_an_unset_concurrency(
 async def test_absent_or_garbage_capacity_falls_back(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, health: dict[str, Any] | None
 ) -> None:
-    # No advertised cap means one worker, not an unbounded fan-out.
+    # No advertised cap means the default of 8, not an unbounded fan-out.
     runner = _runner(_spec(), tmp_path)
-    assert await _resolved_concurrency(runner, monkeypatch, health) == 1
+    assert await _resolved_concurrency(runner, monkeypatch, health) == 8
 
 
 async def test_health_capacity_bounds_a_configured_concurrency(
