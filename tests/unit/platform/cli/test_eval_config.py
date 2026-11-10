@@ -37,7 +37,7 @@ commit_sha = "deadbeef"
 [evaluation]
 limit = 200
 n = 2
-batch_size = 3
+max_concurrent_attempts = 3
 pass_threshold = 0.75
 agent_workflow_timeout_s = 450
 grader_timeout_s = 150
@@ -60,7 +60,7 @@ required = ["OPENAI_API_KEY", "GITHUB_TOKEN"]
     assert config.evaluation_config == {
         "limit": 200,
         "n": 2,
-        "batch_size": 3,
+        "max_concurrent_attempts": 3,
         "pass_threshold": 0.75,
         "agent_workflow_timeout_s": 450.0,
         "grader_timeout_s": 150.0,
@@ -74,6 +74,34 @@ required = ["OPENAI_API_KEY", "GITHUB_TOKEN"]
         "dataset": "multiply",
         "commit_sha": "deadbeef",
     }
+
+
+def test_load_eval_submit_config_rejects_batch_size_with_max_concurrent_attempts(
+    tmp_path: Path,
+) -> None:
+    path = _write_config(
+        tmp_path / "eval.toml",
+        """
+[experiment]
+rollout = "calculator"
+entrypoint = "main.py"
+model_path = "openai/gpt-5-mini"
+dataset = "multiply"
+
+[evaluation]
+batch_size = 3
+max_concurrent_attempts = 4
+
+[secrets]
+required = []
+""",
+    )
+
+    with pytest.raises(
+        CLIError,
+        match=r"Set only `max_concurrent_attempts`; `batch_size` is its old name\.",
+    ):
+        load_eval_submit_config(path)
 
 
 def test_load_eval_submit_config_accepts_full_length_commit_sha(

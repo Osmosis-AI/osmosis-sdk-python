@@ -43,7 +43,7 @@ def local_trial_limit(own: int | None) -> TrialLimit:
             LOCAL_TRIAL_LIMIT,
             logging.INFO,
             f"Trial limit: {LOCAL_TRIAL_LIMIT} at once (SDK default for local runs; "
-            "eval batch_size is capped to match).",
+            "eval max_concurrent_attempts is capped to match).",
         )
     return TrialLimit(
         own,

@@ -266,18 +266,50 @@ def test_row_selection_changes_the_fingerprint(tmp_path: Path) -> None:
     assert narrowed["dataset"]["selected_source_rows"] == "0"
 
 
-@pytest.mark.parametrize("field_name", ["batch_size", "branch", "commit_sha"])
+@pytest.mark.parametrize(
+    "field_name", ["max_concurrent_attempts", "branch", "commit_sha"]
+)
 def test_throughput_and_display_fields_are_excluded(
     tmp_path: Path, field_name: str
 ) -> None:
     values: dict[str, Any] = {
-        "batch_size": 32,
+        "max_concurrent_attempts": 32,
         "branch": "other",
         "commit_sha": "abcdef1",
     }
     baseline = _inputs(_spec(), _dataset(), tmp_path)
     changed = _inputs(_spec(**{field_name: values[field_name]}), _dataset(), tmp_path)
     assert changed == baseline
+
+
+def test_a_lock_written_with_batch_size_still_resumes(tmp_path: Path) -> None:
+    from osmosis_ai.eval.local.state import (
+        DATASET_NORMALIZATION_VERSION,
+        LOCAL_STATE_SCHEMA_VERSION,
+        ROLLOUT_PROTOCOL_VERSION,
+    )
+
+    # The lock SDK 0.3.11 wrote for this spec with evaluation.batch_size = 8.
+    legacy = {
+        "model_path": "openai/gpt-5-mini",
+        "dataset": {"sha256": "a" * 64, "selected_source_rows": "0-1"},
+        "n": 1,
+        "rollout": {
+            "name": "echo-rollout",
+            "entrypoint": "main.py",
+            "source_digest": "b" * 64,
+        },
+        "env": {},
+        "secret_names": [],
+        "timeouts": {"agent_timeout_sec": None, "grader_timeout_sec": None},
+        "versions": {
+            "rollout_protocol": ROLLOUT_PROTOCOL_VERSION,
+            "dataset_normalization": DATASET_NORMALIZATION_VERSION,
+            "state_schema": LOCAL_STATE_SCHEMA_VERSION,
+        },
+    }
+    current = _inputs(_spec(max_concurrent_attempts=8), _dataset(), tmp_path)
+    assert changed_input_keys(legacy, current) == []
 
 
 def test_secret_names_are_included_and_values_are_never_present(tmp_path: Path) -> None:
@@ -669,7 +701,7 @@ async def test_health_capacity_bounds_a_configured_concurrency(
     # Over-queueing a backend that reported its own limit creates work it cannot
     # service, so the advertised capacity is a hard cap on the request.
     runner = _runner(
-        _spec(batch_size=16),
+        _spec(max_concurrent_attempts=16),
         tmp_path,
         options=LocalEvalOptions(name="run-1", max_in_flight=8),
     )
@@ -677,11 +709,11 @@ async def test_health_capacity_bounds_a_configured_concurrency(
     assert await _resolved_concurrency(runner, monkeypatch, health) == 2
 
 
-async def test_max_in_flight_takes_precedence_over_batch_size(
+async def test_max_in_flight_takes_precedence_over_max_concurrent_attempts(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     runner = _runner(
-        _spec(batch_size=1),
+        _spec(max_concurrent_attempts=1),
         tmp_path,
         options=LocalEvalOptions(name="run-1", max_in_flight=3),
     )

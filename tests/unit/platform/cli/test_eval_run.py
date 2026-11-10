@@ -54,7 +54,7 @@ dataset = "multiply"
 [evaluation]
 limit = 3
 n = 2
-batch_size = 4
+max_concurrent_attempts = 4
 pass_threshold = 0.5
 agent_workflow_timeout_s = 450
 grader_timeout_s = 150
@@ -213,7 +213,7 @@ def test_the_shared_eval_toml_maps_onto_the_run_spec(
     assert spec.model_path == "openai/gpt-5-mini"
     assert spec.dataset_name == "multiply"
     assert spec.n == 2
-    assert spec.batch_size == 4
+    assert spec.max_concurrent_attempts == 4
     assert spec.pass_threshold == 0.5
     assert spec.agent_timeout_sec == 450.0
     assert spec.grader_timeout_sec == 150.0
@@ -606,7 +606,11 @@ def test_a_nonpositive_n_is_a_cli_error(
     [
         ("n", '"two"', "evaluation.n must be an integer"),
         ("pass_threshold", '"high"', "evaluation.pass_threshold must be a number"),
-        ("batch_size", "1.5", "evaluation.batch_size must be an integer"),
+        (
+            "max_concurrent_attempts",
+            "1.5",
+            "evaluation.max_concurrent_attempts must be an integer",
+        ),
     ],
 )
 def test_non_numeric_evaluation_fields_are_reported(

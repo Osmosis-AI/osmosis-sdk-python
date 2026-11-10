@@ -388,7 +388,9 @@ def run(
         model_path=config.experiment_model_path,
         dataset_name=config.experiment_dataset,
         n=1 if n is None else n,
-        batch_size=_integer(evaluation.get("batch_size"), field="batch_size"),
+        max_concurrent_attempts=_integer(
+            evaluation.get("max_concurrent_attempts"), field="max_concurrent_attempts"
+        ),
         pass_threshold=1.0 if pass_threshold is None else pass_threshold,
         agent_timeout_sec=_numeric(
             evaluation.get("agent_workflow_timeout_s"), field="agent_workflow_timeout_s"

@@ -166,8 +166,8 @@ def eval_run(
         None,
         "--max-in-flight",
         help=(
-            "Concurrent rollouts (default: evaluation.batch_size, then backend "
-            "capacity, then 1)."
+            "Samples evaluated at once (default: "
+            "evaluation.max_concurrent_attempts, then backend capacity, then 1)."
         ),
     ),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt."),

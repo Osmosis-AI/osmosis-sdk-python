@@ -55,8 +55,8 @@ def template_task(tmp_path):
             None,
             8,
             logging.INFO,
-            "Trial limit: 8 at once (SDK default for local runs; eval batch_size "
-            "is capped to match).",
+            "Trial limit: 8 at once (SDK default for local runs; eval "
+            "max_concurrent_attempts is capped to match).",
         ),
         (
             None,

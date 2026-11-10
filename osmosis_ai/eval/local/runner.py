@@ -171,7 +171,7 @@ class EvalRunSpec:
     model_path: str
     dataset_name: str
     n: int = 1
-    batch_size: int | None = None
+    max_concurrent_attempts: int | None = None
     pass_threshold: float = 1.0
     agent_timeout_sec: float | None = None
     grader_timeout_sec: float | None = None
@@ -341,8 +341,8 @@ def build_run_inputs(
 
     Deliberately excluded so an unrelated change never refuses a resume: run
     name, output path, throughput knobs (``--max-in-flight``,
-    ``evaluation.batch_size``), UI flags, SDK version, branch display name, and
-    timestamps. Secret *names* are included; values never are.
+    ``evaluation.max_concurrent_attempts``), UI flags, SDK version, branch
+    display name, and timestamps. Secret *names* are included; values never are.
     """
     return {
         "model_path": spec.model_path,
@@ -1202,10 +1202,16 @@ class LocalEvalRunner:
     async def _resolve_concurrency(
         self, http_client: httpx.AsyncClient, base_url: str
     ) -> int:
-        """``--max-in-flight`` -> ``batch_size`` -> ``/health`` capacity -> 1 (§10)."""
+        """Resolve worker count (§10).
+
+        ``--max-in-flight`` -> ``max_concurrent_attempts`` -> ``/health`` capacity -> 1.
+        """
         health = await probe_health(http_client, base_url) or {}
         hard_cap = health_capacity(health)
-        for candidate in (self._options.max_in_flight, self._spec.batch_size):
+        for candidate in (
+            self._options.max_in_flight,
+            self._spec.max_concurrent_attempts,
+        ):
             if isinstance(candidate, int) and candidate > 0:
                 return min(candidate, hard_cap) if hard_cap else candidate
         return hard_cap or 1

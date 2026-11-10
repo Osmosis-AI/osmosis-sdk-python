@@ -50,7 +50,7 @@ required = ["OPENAI_API_KEY"]
 | Section | Required | SDK enforces locally |
 |---------|----------|----------------------|
 | `[experiment]` | yes | `rollout`, `entrypoint`, `model_path`, `dataset` present; `commit_sha` (if set) is 7-40 hex chars; `rollout` is a single-segment name resolving under `rollouts/`; unknown keys rejected (`ExperimentSection`). |
-| `[evaluation]` | no | Structure only — known keys are `limit`, `n`, `batch_size`, `pass_threshold`, `agent_workflow_timeout_s`, `grader_timeout_s`; unknown keys rejected, **values forwarded unvalidated** (`_EvaluationSection`). |
+| `[evaluation]` | no | Structure only — known keys are `limit`, `n`, `max_concurrent_attempts`, `pass_threshold`, `agent_workflow_timeout_s`, `grader_timeout_s`; `batch_size` is read as `max_concurrent_attempts` (its old name) and setting both is rejected; unknown keys rejected, **values forwarded unvalidated** (`_EvaluationSection`). |
 | `[advanced]` | no | Passthrough — extra keys allowed and forwarded for server-side validation (`AdvancedPassthroughSection`). |
 | `[env]` | no | Names match `ENV_VAR_NAME_RE` = `^[A-Z_][A-Z0-9_]*$`, must not start with `_OSMOSIS_` (reserved), values must be strings. |
 | `[secrets]` | yes (eval) | Only the `required` key (a list of strings); names match `SECRET_NAME_RE` = `^[A-Z][A-Z0-9_]*$`; unknown keys rejected. Training configs may omit the section; **eval configs must include it** — use `required = []` when no secrets are needed. |
