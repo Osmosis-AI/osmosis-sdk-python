@@ -1,0 +1,27 @@
+docs/eval-run-local.md
+  s_0bd98c660e4699::t_eeb43ecfd4733f 84
+osmosis_ai/cli/commands/eval.py
+  s_0bd98c660e4699::t_7eeece84da3018 170-171
+osmosis_ai/eval/local/runner.py
+  s_0bd98c660e4699::t_9c03e1577fc412 107-108,1209-1210,1214-1225
+osmosis_ai/templates/_scaffolds/rollout/eval.toml.tpl
+  s_0bd98c660e4699::t_35ef29372101b5 17
+tests/unit/eval/local/test_runner_units.py
+  s_0bd98c660e4699::t_ae13cf2ac3e0f8 650,656,695,697
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "4e037b5bd30eb1f05a38b8c24aa4d1bb568ed13c",
+  "prompts": {},
+  "sessions": {
+    "s_0bd98c660e4699": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1cbf0596-e315-44aa-a182-e8e4bdfc843a",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Allen Lin <allen@osmosis.ai>"
+    }
+  }
+}
