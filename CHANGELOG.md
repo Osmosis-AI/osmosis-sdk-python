@@ -7,7 +7,7 @@ This file records changes to `osmosis-ai`. For earlier versions, see [GitHub Rel
 ### Breaking Changes
 
 - Direct local-eval integrations must replace `EvalRunSpec(batch_size=...)` with `max_concurrent_attempts=...` and update custom `DatasetFetcher.download_to()` implementations to accept the described dataset ID instead of its name ([#482](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/482), [#480](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/480)).
-- New dataset names cannot contain `@`; rename source files before uploading, and use `name@version` to reference an existing dataset version ([#480](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/480)).
+- New dataset names cannot contain `@`; rename source files before uploading and use `name@version` to pin a version, while existing names containing `@` remain usable and exact-name lookup takes precedence over version parsing ([#480](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/480)).
 
 ### Added
 
@@ -17,7 +17,7 @@ This file records changes to `osmosis-ai`. For earlier versions, see [GitHub Rel
 
 ### Changed
 
-- Use `[evaluation].max_concurrent_attempts` instead of `batch_size`; the old config key remains accepted, setting both is rejected, and cloud submissions require a platform that supports the new field ([#482](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/482)).
+- Use `[evaluation].max_concurrent_attempts` instead of `batch_size`; the old config key remains accepted, setting both is rejected, and older platforms may accept cloud submissions while silently ignoring the new field ([#482](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/482)).
 - Local eval defaults to 8 concurrent attempts, capped at the backend's capacity; `--max-in-flight` overrides the configured `max_concurrent_attempts` ([#482](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/482)).
 - Managed OpenSandbox settings and rollout telemetry prefer the platform's `_OSMOSIS_` environment variables while retaining the previous names as fallbacks ([#479](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/479)).
 
