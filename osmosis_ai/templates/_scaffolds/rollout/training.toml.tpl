@@ -10,7 +10,7 @@
 rollout = "<your-rollout>"  # Rollout name (directory under rollouts/)
 entrypoint = "main.py"  # Entrypoint file name
 model_path = "<your-model-path>"  # Base model from `osmosis model list --type base`
-dataset = "<your-dataset-name>"  # Platform dataset name from `osmosis dataset list`
+dataset = "<your-dataset-name>"  # Platform dataset name from `osmosis dataset list`; name@version pins one version
 # branch = "my-feature"              # Pin to a branch (mutually exclusive with commit_sha)
 # commit_sha =                        # Pin to a specific commit (default: latest on default branch)
 

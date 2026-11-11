@@ -320,6 +320,7 @@ class FakeFetcher:
         self.file_size = file_size
         self.describe_calls = 0
         self.download_calls = 0
+        self.downloaded_ids: list[str] = []
         self.describe_error: Exception | None = None
         self.download_error: Exception | None = None
 
@@ -335,8 +336,9 @@ class FakeFetcher:
             file_size=self.file_size,
         )
 
-    def download_to(self, dataset_name: str, destination: Path) -> None:
+    def download_to(self, dataset_id: str, destination: Path) -> None:
         self.download_calls += 1
+        self.downloaded_ids.append(dataset_id)
         if self.download_error is not None:
             raise self.download_error
         _write_jsonl(destination, self.rows)
@@ -484,3 +486,15 @@ def test_a_failed_download_asks_for_dataset_file(tmp_path: Path) -> None:
     ):
         resolve_platform_dataset("multiply", cache=cache, fetcher=fetcher)
     assert list(cache.directory_for("ds-1").iterdir()) == []
+
+
+def test_a_download_names_the_version_that_was_described(tmp_path: Path) -> None:
+    fetcher = FakeFetcher(rows=PROMPT_ROWS)
+
+    resolve_platform_dataset(
+        "multiply", cache=DatasetCache(tmp_path / "cache"), fetcher=fetcher
+    )
+
+    # The described version's ID, not the name: a name can move to a newer
+    # version between the describe and the download.
+    assert fetcher.downloaded_ids == ["ds-1"]

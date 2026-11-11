@@ -19,6 +19,8 @@ from osmosis_ai.cli.output import OperationResult
 from osmosis_ai.platform.api.models import (
     DatasetDownloadInfo,
     DatasetFile,
+    DatasetVersion,
+    DatasetVersions,
     LogEntry,
     LogsPage,
     PaginatedDatasets,
@@ -54,6 +56,16 @@ def _stub_git_context(monkeypatch: pytest.MonkeyPatch) -> object:
         lambda: context,
     )
     return fake_credentials
+
+
+@pytest.fixture(autouse=True)
+def _upload_names_are_new(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Uploads here use a new dataset name unless a test sets an existing one."""
+    monkeypatch.setattr(dataset_module, "_find_dataset", lambda *_a, **_k: None)
+
+
+def _existing_dataset(monkeypatch: pytest.MonkeyPatch, existing: DatasetFile) -> None:
+    monkeypatch.setattr(dataset_module, "_find_dataset", lambda *_a, **_k: existing)
 
 
 def test_dataset_list_requires_linked_project(
@@ -94,6 +106,9 @@ def _dataset(
     status: str = "uploaded",
     data_preview=None,
     platform_url: str | None = None,
+    version: str | None = None,
+    version_count: int | None = None,
+    latest_version: str | None = None,
 ) -> DatasetFile:
     return DatasetFile(
         id=id,
@@ -104,6 +119,9 @@ def _dataset(
         created_at="2026-04-26T00:00:00Z",
         updated_at="2026-04-26T00:00:01Z",
         platform_url=platform_url,
+        version=version,
+        version_count=version_count,
+        latest_version=latest_version,
     )
 
 
@@ -146,7 +164,13 @@ def test_dataset_list_plain_emits_tab_separated_rows(monkeypatch, capsys) -> Non
             assert git_identity == GIT_IDENTITY
             return PaginatedDatasets(
                 datasets=[
-                    _dataset(id="ds_1", file_name="a.jsonl", status="uploaded"),
+                    _dataset(
+                        id="ds_1",
+                        file_name="a.jsonl",
+                        status="uploaded",
+                        version="3f2a9c1",
+                        version_count=2,
+                    ),
                     _dataset(id="ds_2", file_name="b.jsonl", status="pending"),
                 ],
                 total_count=2,
@@ -160,10 +184,10 @@ def test_dataset_list_plain_emits_tab_separated_rows(monkeypatch, capsys) -> Non
 
     assert exit_code == 0
     lines = captured.out.splitlines()
-    assert len(lines[0].split("\t")) == 5
-    assert lines[0].startswith("a.jsonl\t[uploaded]\t100 B\t")
-    assert len(lines[1].split("\t")) == 5
-    assert lines[1].startswith("b.jsonl\t[pending]\t100 B\t")
+    assert len(lines[0].split("\t")) == 7
+    assert lines[0].startswith("a.jsonl\t3f2a9c1\t2\t[uploaded]\t100 B\t")
+    assert len(lines[1].split("\t")) == 7
+    assert lines[1].startswith("b.jsonl\t–\t–\t[pending]\t100 B\t")
     assert "\tds_1" not in lines[0]
     assert "\tds_2" not in lines[1]
 
@@ -446,7 +470,14 @@ def test_dataset_upload_json_stdout_is_one_envelope(
 
     class FakeClient:
         def create_dataset(
-            self, file_name, file_size, extension, *, git_identity, credentials=None
+            self,
+            file_name,
+            file_size,
+            extension,
+            *,
+            git_identity,
+            credentials=None,
+            overwrite_dataset_id=None,
         ):
             assert credentials is fake_credentials
             assert git_identity == GIT_IDENTITY
@@ -517,7 +548,14 @@ def test_dataset_upload_json_surfaces_parquet_skip_warning(
 
     class FakeClient:
         def create_dataset(
-            self, file_name, file_size, extension, *, git_identity, credentials=None
+            self,
+            file_name,
+            file_size,
+            extension,
+            *,
+            git_identity,
+            credentials=None,
+            overwrite_dataset_id=None,
         ):
             assert credentials is fake_credentials
             assert git_identity == GIT_IDENTITY
@@ -622,9 +660,11 @@ def test_dataset_upload_json_overwrite_without_yes_warns_destructive(
     tmp_path: Path,
     capsys,
 ) -> None:
-    """Regression: --overwrite without --yes must also be gated, and the
-    INTERACTIVE_REQUIRED envelope must surface the destructive-overwrite warning."""
+    """Regression: on a platform without dataset versions, --overwrite without
+    --yes must also be gated, and the INTERACTIVE_REQUIRED envelope must surface
+    the destructive-overwrite warning."""
     _stub_git_context(monkeypatch)
+    _existing_dataset(monkeypatch, _dataset(id="ds_existing"))
     file_path = tmp_path / "train.jsonl"
     row = json.dumps({"system_prompt": "s", "user_prompt": "u", "ground_truth": "g"})
     file_path.write_text((row + "\n") * 4, encoding="utf-8")
@@ -651,26 +691,16 @@ def test_dataset_upload_json_conflict_preserves_existing_dataset_id(
     tmp_path: Path,
     capsys,
 ) -> None:
+    """A platform without dataset versions still needs --overwrite to replace."""
     _stub_git_context(monkeypatch)
+    _existing_dataset(monkeypatch, _dataset(id="ds_existing"))
     file_path = tmp_path / "train.jsonl"
     row = json.dumps({"system_prompt": "s", "user_prompt": "u", "ground_truth": "g"})
     file_path.write_text((row + "\n") * 4, encoding="utf-8")
 
-    from osmosis_ai.platform.auth import PlatformAPIError
-
     class FakeClient:
-        def create_dataset(
-            self, file_name, file_size, extension, *, git_identity, credentials=None
-        ):
-            assert git_identity == GIT_IDENTITY
-            raise PlatformAPIError(
-                "A dataset with this name already exists",
-                status_code=409,
-                details={
-                    "error": "A dataset with this name already exists",
-                    "existing_dataset_id": "ds_existing",
-                },
-            )
+        def create_dataset(self, *args, **kwargs):
+            raise AssertionError("an unconfirmed replace must not reach create")
 
     monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
 
@@ -686,12 +716,59 @@ def test_dataset_upload_json_conflict_preserves_existing_dataset_id(
     assert str(file_path) not in payload["error"]["message"]
 
 
+def test_dataset_upload_json_name_created_during_upload_is_a_conflict(
+    monkeypatch,
+    tmp_path: Path,
+    capsys,
+) -> None:
+    """The name is free at the check, then the platform's create reports it
+    taken: the upload stops instead of adding a version nobody confirmed."""
+    _stub_git_context(monkeypatch)
+    file_path = tmp_path / "train.jsonl"
+    row = json.dumps({"system_prompt": "s", "user_prompt": "u", "ground_truth": "g"})
+    file_path.write_text((row + "\n") * 4, encoding="utf-8")
+
+    class FakeClient:
+        def create_dataset(
+            self,
+            file_name,
+            file_size,
+            extension,
+            *,
+            git_identity,
+            credentials=None,
+            overwrite_dataset_id=None,
+        ):
+            assert overwrite_dataset_id is None
+            raise PlatformAPIError(
+                "A dataset with this name already exists",
+                status_code=409,
+                details={
+                    "error": "A dataset with this name already exists",
+                    "existing_dataset_id": "ds_existing",
+                },
+            )
+
+    monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+
+    exit_code = cli.main(["--json", "dataset", "upload", str(file_path), "--yes"])
+    captured = capsys.readouterr()
+
+    assert exit_code == 1
+    assert captured.out == ""
+    payload = json.loads(captured.err)
+    assert payload["error"]["code"] == "CONFLICT"
+    assert payload["error"]["details"]["existing_dataset_id"] == "ds_existing"
+    assert "Run the upload again" in payload["error"]["message"]
+
+
 def test_dataset_upload_json_overwrite_stdout_is_one_envelope(
     monkeypatch,
     tmp_path: Path,
     capsys,
 ) -> None:
     fake_credentials = _stub_git_context(monkeypatch)
+    _existing_dataset(monkeypatch, _dataset(id="ds_existing"))
     file_path = tmp_path / "train.jsonl"
     row = json.dumps({"system_prompt": "s", "user_prompt": "u", "ground_truth": "g"})
     file_path.write_text((row + "\n") * 4, encoding="utf-8")
@@ -706,8 +783,6 @@ def test_dataset_upload_json_overwrite_stdout_is_one_envelope(
         lambda _file_path, _upload_info, progress_callback=None: None,
     )
 
-    from osmosis_ai.platform.auth import PlatformAPIError
-
     class FakeClient:
         def create_dataset(
             self,
@@ -721,15 +796,6 @@ def test_dataset_upload_json_overwrite_stdout_is_one_envelope(
         ):
             assert credentials is fake_credentials
             assert git_identity == GIT_IDENTITY
-            if overwrite_dataset_id is None:
-                raise PlatformAPIError(
-                    "A dataset with this name already exists",
-                    status_code=409,
-                    details={
-                        "error": "A dataset with this name already exists",
-                        "existing_dataset_id": "ds_existing",
-                    },
-                )
             assert overwrite_dataset_id == "ds_existing"
             return DatasetFile(
                 id="ds_new",
@@ -771,6 +837,145 @@ def test_dataset_upload_json_overwrite_stdout_is_one_envelope(
     assert "Uploading" not in captured.out
 
 
+def test_dataset_upload_json_existing_name_without_yes_shows_the_new_version(
+    monkeypatch,
+    tmp_path: Path,
+    capsys,
+) -> None:
+    _stub_git_context(monkeypatch)
+    _existing_dataset(
+        monkeypatch,
+        _dataset(
+            id="ds_existing",
+            file_name="train",
+            version="9b8e7d6",
+            version_count=2,
+            latest_version="9b8e7d6",
+        ),
+    )
+    file_path = tmp_path / "train.jsonl"
+    row = json.dumps({"system_prompt": "s", "user_prompt": "u", "ground_truth": "g"})
+    file_path.write_text((row + "\n") * 4, encoding="utf-8")
+
+    class FakeClient:
+        def create_dataset(self, *args, **kwargs):
+            raise AssertionError("upload must not proceed without confirmation")
+
+    monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+
+    exit_code = cli.main(["--json", "dataset", "upload", str(file_path)])
+    captured = capsys.readouterr()
+
+    assert exit_code == 1
+    details = json.loads(captured.err)["error"]["details"]
+    assert details["summary"]["Dataset"] == (
+        "train (exists: 2 versions, latest 9b8e7d6)"
+    )
+    assert any("new version" in warning for warning in details["warnings"])
+    assert "overwrite" not in details["prompt"].lower()
+
+
+def test_dataset_upload_json_existing_name_adds_a_version(
+    monkeypatch,
+    tmp_path: Path,
+    capsys,
+) -> None:
+    _stub_git_context(monkeypatch)
+    _existing_dataset(
+        monkeypatch,
+        _dataset(id="ds_existing", file_name="train", version="9b8e7d6"),
+    )
+    file_path = tmp_path / "train.jsonl"
+    row = json.dumps({"system_prompt": "s", "user_prompt": "u", "ground_truth": "g"})
+    file_path.write_text((row + "\n") * 4, encoding="utf-8")
+    monkeypatch.setattr(
+        upload_module,
+        "make_progress_bar",
+        lambda _size, **_kwargs: (nullcontext(), lambda _done, _total: None),
+    )
+    monkeypatch.setattr(
+        upload_module,
+        "upload_file_simple",
+        lambda _file_path, _upload_info, progress_callback=None: None,
+    )
+
+    class FakeClient:
+        def create_dataset(
+            self,
+            file_name,
+            file_size,
+            extension,
+            *,
+            git_identity,
+            credentials=None,
+            overwrite_dataset_id=None,
+        ):
+            assert overwrite_dataset_id == "ds_existing"
+            return DatasetFile(
+                id="ds_new",
+                file_name=file_name,
+                file_size=file_size,
+                status="created",
+                version="a91c0de",
+                upload=UploadInfo(
+                    method="simple",
+                    presigned_url="https://example.com/upload",
+                ),
+            )
+
+        def complete_upload(self, file_id, parts=None, **_kwargs):
+            # The complete response does not repeat the version.
+            return _dataset(id=file_id, file_name="train", status="processing")
+
+    monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+
+    exit_code = cli.main(["--plain", "dataset", "upload", str(file_path), "--yes"])
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert "train@a91c0de" in captured.out
+    assert 'dataset = "train@a91c0de"' in captured.out
+
+
+def test_dataset_versions_lists_newest_first_and_marks_latest(
+    monkeypatch, capsys
+) -> None:
+    _stub_git_context(monkeypatch)
+
+    class FakeClient:
+        def list_dataset_versions(self, name, *, git_identity, credentials=None):
+            assert name == "train"
+            return DatasetVersions(
+                file_name="train",
+                versions=[
+                    DatasetVersion(
+                        id="a91c0de-1", version="a91c0de", status="processing"
+                    ),
+                    DatasetVersion(
+                        id="3f2a9c1-1",
+                        version="3f2a9c1",
+                        status="uploaded",
+                        row_count=12340,
+                        is_latest=True,
+                    ),
+                ],
+            )
+
+    monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+
+    exit_code = cli.main(["--plain", "dataset", "versions", "train"])
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    lines = captured.out.splitlines()
+    assert lines[0].startswith("a91c0de\t[processing]\t–\t")
+    assert lines[1].startswith("3f2a9c1 (latest)\t[uploaded]\t12,340\t")
+    # The pin hint names the version runs use, not the upload still processing.
+    assert dataset_module.versions("train").display_hints == [
+        'Pin a version in a config with: dataset = "train@3f2a9c1"'
+    ]
+
+
 def test_dataset_download_json_includes_output_path(
     monkeypatch,
     tmp_path: Path,
@@ -782,9 +987,11 @@ def test_dataset_download_json_includes_output_path(
     class FakeClient:
         def get_dataset(self, name, *, git_identity, credentials=None):
             assert git_identity == GIT_IDENTITY
-            return _dataset()
+            return _dataset(id="ds_resolved")
 
-        def get_dataset_download_url(self, name, *, git_identity, credentials=None):
+        def get_dataset_download_url(self, file_id, *, git_identity, credentials=None):
+            # The version just checked, not whatever the name resolves to now.
+            assert file_id == "ds_resolved"
             assert git_identity == GIT_IDENTITY
             return DatasetDownloadInfo(
                 presigned_url="https://example.com/train.jsonl",
@@ -846,7 +1053,14 @@ def test_dataset_upload_no_platform_url_hint_uses_file_name(
 
     class FakeClient:
         def create_dataset(
-            self, file_name, file_size, extension, *, git_identity, credentials=None
+            self,
+            file_name,
+            file_size,
+            extension,
+            *,
+            git_identity,
+            credentials=None,
+            overwrite_dataset_id=None,
         ):
             assert credentials is fake_credentials
             return DatasetFile(

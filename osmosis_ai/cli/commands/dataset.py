@@ -13,7 +13,7 @@ from osmosis_ai.cli.options import (
 from osmosis_ai.cli.output import CommandResult
 
 app: typer.Typer = typer.Typer(
-    help="Manage datasets (upload, download, list, info, preview, validate).",
+    help="Manage datasets (upload, download, list, info, versions, preview, validate).",
     no_args_is_help=True,
 )
 
@@ -24,11 +24,12 @@ def upload(
     overwrite: bool = typer.Option(
         False,
         "--overwrite",
-        help="Replace an existing dataset with the same name.",
+        hidden=True,
+        help="Replace an existing dataset on a platform without dataset versions.",
     ),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt."),
 ) -> CommandResult:
-    """Upload a dataset file."""
+    """Upload a dataset file. An existing name gets a new version."""
     from osmosis_ai.platform.cli.dataset import upload as _upload
 
     return _upload(file=file, overwrite=overwrite, yes=yes)
@@ -36,7 +37,9 @@ def upload(
 
 @app.command("download")
 def download(
-    name: str = typer.Argument(..., help="Dataset name."),
+    name: str = typer.Argument(
+        ..., help="Dataset name, or name@version for one version."
+    ),
     output: str | None = typer.Option(
         None,
         "--output",
@@ -68,7 +71,9 @@ def list_datasets(
 
 @app.command("info")
 def info(
-    name: str = typer.Argument(..., help="Dataset name."),
+    name: str = typer.Argument(
+        ..., help="Dataset name, or name@version for one version."
+    ),
 ) -> CommandResult:
     """Show dataset details and processing status."""
     from osmosis_ai.platform.cli.dataset import info as _info
@@ -76,9 +81,21 @@ def info(
     return _info(name=name)
 
 
+@app.command("versions")
+def versions(
+    name: str = typer.Argument(..., help="Dataset name."),
+) -> CommandResult:
+    """List a dataset's versions, newest first."""
+    from osmosis_ai.platform.cli.dataset import versions as _versions
+
+    return _versions(name=name)
+
+
 @app.command("logs")
 def logs(
-    name: str = typer.Argument(..., help="Dataset name."),
+    name: str = typer.Argument(
+        ..., help="Dataset name, or name@version for one version."
+    ),
     limit: int = log_limit_option(),
     cursor: str | None = cursor_option(),
 ) -> CommandResult:
@@ -90,7 +107,9 @@ def logs(
 
 @app.command("preview")
 def preview(
-    name: str = typer.Argument(..., help="Dataset name."),
+    name: str = typer.Argument(
+        ..., help="Dataset name, or name@version for one version."
+    ),
     rows: int = typer.Option(5, "--rows", help="Number of rows to show."),
 ) -> CommandResult:
     """Preview dataset rows."""

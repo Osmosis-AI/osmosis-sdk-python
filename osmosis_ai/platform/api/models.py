@@ -263,6 +263,16 @@ class DatasetFile:
     is_internal_user: bool = False
     # Upload info — only present in create_dataset response
     upload: UploadInfo | None = None
+    # Each upload under a name is a version of that dataset. None from a
+    # platform without dataset versions.
+    version: str | None = None
+    version_count: int | None = None
+    latest_version: str | None = None
+
+    @property
+    def ref(self) -> str:
+        """``name@version``, the reference that pins this version."""
+        return f"{self.file_name}@{self.version}" if self.version else self.file_name
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> DatasetFile:
@@ -284,6 +294,51 @@ class DatasetFile:
             platform_url=data.get("platform_url"),
             is_internal_user=data.get("is_internal_user", False),
             upload=upload,
+            version=data.get("version"),
+            version_count=data.get("version_count"),
+            latest_version=data.get("latest_version"),
+        )
+
+
+@dataclass
+class DatasetVersion:
+    """One version of a dataset: one upload under its name."""
+
+    id: str
+    version: str
+    status: str
+    row_count: int | None = None
+    creator_name: str | None = None
+    created_at: str = ""
+    is_latest: bool = False
+    platform_url: str | None = None
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> DatasetVersion:
+        return cls(
+            id=data["id"],
+            version=data.get("version", ""),
+            status=data.get("status", ""),
+            row_count=data.get("row_count"),
+            creator_name=data.get("creator_name"),
+            created_at=data.get("created_at", ""),
+            is_latest=data.get("is_latest", False),
+            platform_url=data.get("platform_url"),
+        )
+
+
+@dataclass
+class DatasetVersions:
+    """Every version of a dataset, newest first."""
+
+    file_name: str
+    versions: list[DatasetVersion]
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> DatasetVersions:
+        return cls(
+            file_name=data.get("file_name", ""),
+            versions=[DatasetVersion.from_dict(v) for v in data.get("versions", [])],
         )
 
 

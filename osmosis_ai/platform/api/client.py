@@ -17,6 +17,7 @@ from .models import (
     BenchmarkRunDetail,
     DatasetDownloadInfo,
     DatasetFile,
+    DatasetVersions,
     EnvironmentSecretInfo,
     EvalRunImportExtraction,
     EvalRunImportResult,
@@ -266,6 +267,20 @@ class OsmosisClient:
             git_identity=git_identity,
         )
         return DatasetFile.from_dict(data)
+
+    def list_dataset_versions(
+        self,
+        name_or_id: str,
+        *,
+        credentials: Credentials | None = None,
+        git_identity: str | None,
+    ) -> DatasetVersions:
+        data = platform_request(
+            f"/api/cli/datasets/{_safe_path(name_or_id)}/versions",
+            credentials=credentials,
+            git_identity=git_identity,
+        )
+        return DatasetVersions.from_dict(data)
 
     def get_dataset_download_url(
         self,

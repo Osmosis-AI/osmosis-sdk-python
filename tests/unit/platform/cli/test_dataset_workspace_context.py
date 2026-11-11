@@ -21,6 +21,7 @@ from osmosis_ai.platform.api.models import (
     PaginatedDatasets,
     UploadInfo,
 )
+from osmosis_ai.platform.auth import PlatformAPIError
 
 GIT_IDENTITY = "acme/rollouts"
 REPO_URL = "https://github.com/acme/rollouts.git"
@@ -110,16 +111,23 @@ def test_upload_passes_git_context_to_api_calls_without_subscription_preflight(
     )
 
     class FakeClient:
+        def get_dataset(self, name: str, *, credentials=None, git_identity: str):
+            calls["find_credentials"] = credentials
+            calls["find_git_identity"] = git_identity
+            raise PlatformAPIError("Dataset not found", status_code=404)
+
         def create_dataset(
             self,
             file_name: str,
             file_size: int,
             extension: str,
             *,
+            overwrite_dataset_id: str | None = None,
             credentials=None,
             git_identity: str,
         ) -> DatasetFile:
             assert file_name == "data"
+            assert overwrite_dataset_id is None
             assert file_size > 0
             assert extension == "jsonl"
             calls["create_credentials"] = credentials
@@ -161,6 +169,8 @@ def test_upload_passes_git_context_to_api_calls_without_subscription_preflight(
     result = dataset_module.upload(str(file_path), yes=True)
 
     assert calls == {
+        "find_credentials": fake_credentials,
+        "find_git_identity": GIT_IDENTITY,
         "create_credentials": fake_credentials,
         "create_git_identity": GIT_IDENTITY,
         "complete_credentials": fake_credentials,
