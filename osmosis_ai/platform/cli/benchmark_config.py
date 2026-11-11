@@ -103,6 +103,7 @@ class BenchmarkExecutionSection(_StrictSection):
     attempts_per_task: Any = None
     max_concurrent_attempts: Any = None
     timeout_multiplier: Any = None
+    verifier_timeout_multiplier: Any = None
     max_retries: Any = None
     pass_threshold: Any = None
     judge_model: Any = None

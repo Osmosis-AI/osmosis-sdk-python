@@ -50,6 +50,7 @@ max_input_tokens = 65536
 [execution]
 attempts_per_task = 2
 max_concurrent_attempts = 8
+verifier_timeout_multiplier = 2.0
 
 [env]
 LOG_LEVEL = "info"
@@ -63,6 +64,7 @@ LOG_LEVEL = "info"
     assert config.execution_config == {
         "attempts_per_task": 2,
         "max_concurrent_attempts": 8,
+        "verifier_timeout_multiplier": 2.0,
     }
     assert config.env == {"LOG_LEVEL": "info"}
     assert config.required_secrets == [
