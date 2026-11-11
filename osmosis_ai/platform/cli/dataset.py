@@ -190,8 +190,12 @@ def _check_file_basics(file: str) -> tuple[Path, str, int]:
 
 
 def _dataset_name_from_path(file_path: Path) -> str:
-    """Derive the platform dataset name from a local file path."""
-    return file_path.stem
+    """Derive the platform dataset name from a local file path.
+
+    The platform trims names, so an untrimmed one would miss the dataset it
+    then uploads to.
+    """
+    return file_path.stem.strip()
 
 
 def _existing_dataset_id_from_conflict(exc: PlatformAPIError) -> str | None:

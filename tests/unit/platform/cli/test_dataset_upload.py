@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from contextlib import nullcontext
 from io import StringIO
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -101,6 +102,7 @@ class TestPerformUpload:
         calls: dict[str, bool] = {}
         fake_credentials = object()
         fake_dataset = _make_fake_dataset(file_size=file_size, method=method)
+        fake_dataset.version = "3f2a9c1"
         expected_parts = (
             [{"PartNumber": 1, "ETag": "etag"}] if method == "multipart" else None
         )
@@ -168,9 +170,16 @@ class TestPerformUpload:
         )
 
         assert result.id == "dataset-1"
+        # The complete response carries no version; the create's is kept.
+        assert result.version == "3f2a9c1"
         assert calls["create"]
         assert calls["s3_upload"]
         assert calls["complete"]
+
+    def test_dataset_name_is_trimmed_like_the_platform_trims_it(self):
+        from osmosis_ai.platform.cli.dataset import _dataset_name_from_path
+
+        assert _dataset_name_from_path(Path(" data .jsonl")) == "data"
 
     def test_strips_extension_from_dataset_name(self, monkeypatch, tmp_path):
         """_perform_upload sends the dataset name without the file extension."""
@@ -621,7 +630,9 @@ class TestUploadCommand:
 
         def fake_perform_upload(**kwargs):
             performed.update(kwargs)
-            return _make_fake_dataset()
+            uploaded = _make_fake_dataset()
+            uploaded.version = "3f2a9c1"
+            return uploaded
 
         monkeypatch.setattr(
             dataset_module, "require_platform_workspace_context", lambda: fake_context
@@ -645,7 +656,7 @@ class TestUploadCommand:
         monkeypatch.setattr(prompts_module, "confirm", fake_confirm)
 
         with override_output_context(format=OutputFormat.rich, interactive=True):
-            dataset_module.upload(str(file_path))
+            result = dataset_module.upload(str(file_path))
 
         assert "data (exists: 1 version, latest 9b8e7d6)" in str(
             seen["shown_before_prompt"]
@@ -653,6 +664,11 @@ class TestUploadCommand:
         assert "becomes a new version" in str(seen["shown_before_prompt"])
         assert seen["default"] is True
         assert performed["existing_dataset_id"] == "dataset-old"
+        assert result.message == "Dataset uploaded: data@3f2a9c1"
+        assert (
+            'Pin this version in a config with: dataset = "data@3f2a9c1"'
+            in result.display_next_steps
+        )
 
     @pytest.mark.parametrize(
         "existing",
