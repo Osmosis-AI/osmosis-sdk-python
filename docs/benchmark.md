@@ -60,7 +60,7 @@ LOG_LEVEL = "info"
 | `[experiment]` | yes | Only `benchmark`, the benchmark key (`BenchmarkExperimentSection`). |
 | `[tasks]` | no | `categories` and `task_names` are lists of non-blank strings; `task_set` accepts only `"parity"`. Omitting the section selects every task. |
 | `[[agents]]` | yes | An array of tables with 1-8 entries; each has `harness`, optional `harness_api_key_secret` (`cursor-cli` only), `model` (see [Agent models](#agent-models)), and `env` (`BenchmarkAgentSection`). |
-| `[execution]` | no | Structure only — known keys are `attempts_per_task`, `max_concurrent_attempts`, `timeout_multiplier`, `max_retries`, `pass_threshold`, `judge_model`, `judge_api_key_secret`; unknown keys rejected, **values forwarded unvalidated**. |
+| `[execution]` | no | Structure only — known keys are `attempts_per_task`, `max_concurrent_attempts`, `timeout_multiplier`, `verifier_timeout_multiplier`, `max_retries`, `pass_threshold`, `judge_model`, `judge_api_key_secret`; unknown keys rejected, **values forwarded unvalidated**. |
 | `[verifier]` | no | Only `required`, up to 16 secret record names the dataset's verifier reads. Forwarded to the platform as `execution.verifier_secrets`. |
 | `[secrets]` | no | Only `required`, up to 16 names — the only references that may be supplied per run. |
 | `[env]` | no | Names match `ENV_VAR_NAME_RE` = `^[A-Z_][A-Z0-9_]*$`, must not start with `_OSMOSIS_` (reserved), values must be strings. Applies to every agent; a name repeated in `[agents.env]` overrides it for that agent. |
