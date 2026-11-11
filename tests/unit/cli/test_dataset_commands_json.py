@@ -470,7 +470,14 @@ def test_dataset_upload_json_stdout_is_one_envelope(
 
     class FakeClient:
         def create_dataset(
-            self, file_name, file_size, extension, *, git_identity, credentials=None
+            self,
+            file_name,
+            file_size,
+            extension,
+            *,
+            git_identity,
+            credentials=None,
+            overwrite_dataset_id=None,
         ):
             assert credentials is fake_credentials
             assert git_identity == GIT_IDENTITY
@@ -541,7 +548,14 @@ def test_dataset_upload_json_surfaces_parquet_skip_warning(
 
     class FakeClient:
         def create_dataset(
-            self, file_name, file_size, extension, *, git_identity, credentials=None
+            self,
+            file_name,
+            file_size,
+            extension,
+            *,
+            git_identity,
+            credentials=None,
+            overwrite_dataset_id=None,
         ):
             assert credentials is fake_credentials
             assert git_identity == GIT_IDENTITY
@@ -723,8 +737,6 @@ def test_dataset_upload_json_overwrite_stdout_is_one_envelope(
         lambda _file_path, _upload_info, progress_callback=None: None,
     )
 
-    from osmosis_ai.platform.auth import PlatformAPIError
-
     class FakeClient:
         def create_dataset(
             self,
@@ -738,15 +750,6 @@ def test_dataset_upload_json_overwrite_stdout_is_one_envelope(
         ):
             assert credentials is fake_credentials
             assert git_identity == GIT_IDENTITY
-            if overwrite_dataset_id is None:
-                raise PlatformAPIError(
-                    "A dataset with this name already exists",
-                    status_code=409,
-                    details={
-                        "error": "A dataset with this name already exists",
-                        "existing_dataset_id": "ds_existing",
-                    },
-                )
             assert overwrite_dataset_id == "ds_existing"
             return DatasetFile(
                 id="ds_new",
@@ -861,12 +864,7 @@ def test_dataset_upload_json_existing_name_adds_a_version(
             credentials=None,
             overwrite_dataset_id=None,
         ):
-            if overwrite_dataset_id is None:
-                raise PlatformAPIError(
-                    "A dataset with this name already exists",
-                    status_code=409,
-                    details={"existing_dataset_id": "ds_existing"},
-                )
+            assert overwrite_dataset_id == "ds_existing"
             return DatasetFile(
                 id="ds_new",
                 file_name=file_name,
@@ -943,9 +941,11 @@ def test_dataset_download_json_includes_output_path(
     class FakeClient:
         def get_ready_dataset(self, name, *, git_identity, credentials=None):
             assert git_identity == GIT_IDENTITY
-            return _dataset()
+            return _dataset(id="ds_resolved")
 
-        def get_dataset_download_url(self, name, *, git_identity, credentials=None):
+        def get_dataset_download_url(self, file_id, *, git_identity, credentials=None):
+            # The version just checked, not whatever the name resolves to now.
+            assert file_id == "ds_resolved"
             assert git_identity == GIT_IDENTITY
             return DatasetDownloadInfo(
                 presigned_url="https://example.com/train.jsonl",
@@ -1007,7 +1007,14 @@ def test_dataset_upload_no_platform_url_hint_uses_file_name(
 
     class FakeClient:
         def create_dataset(
-            self, file_name, file_size, extension, *, git_identity, credentials=None
+            self,
+            file_name,
+            file_size,
+            extension,
+            *,
+            git_identity,
+            credentials=None,
+            overwrite_dataset_id=None,
         ):
             assert credentials is fake_credentials
             return DatasetFile(

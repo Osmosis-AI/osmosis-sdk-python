@@ -569,9 +569,9 @@ class PlatformDatasetFetcher:
     def __init__(self, *, credentials: Any, git_identity: str) -> None:
         self._credentials = credentials
         self._git_identity = git_identity
-        # The version ``describe`` resolved each name to, so the download fetches
-        # those bytes even if a newer version becomes ready in between.
-        self._pinned_refs: dict[str, str] = {}
+        # The dataset ID ``describe`` resolved each name to, so the download
+        # fetches those bytes even if a newer version becomes ready in between.
+        self._resolved_ids: dict[str, str] = {}
 
     def describe(self, dataset_name: str) -> DatasetDescription:
         from osmosis_ai.platform.api.client import OsmosisClient
@@ -595,8 +595,7 @@ class PlatformDatasetFetcher:
                 f"dataset {dataset_name!r} is not available "
                 f"(status: {record.status}).{hint}"
             )
-        if record.version:
-            self._pinned_refs[dataset_name] = record.ref
+        self._resolved_ids[dataset_name] = record.id
         return DatasetDescription(
             dataset_id=record.id,
             dataset_name=record.file_name or dataset_name,
@@ -610,7 +609,7 @@ class PlatformDatasetFetcher:
         from osmosis_ai.platform.api.download import download_file_to
 
         info = OsmosisClient().get_dataset_download_url(
-            self._pinned_refs.get(dataset_name, dataset_name),
+            self._resolved_ids.get(dataset_name, dataset_name),
             credentials=self._credentials,
             git_identity=self._git_identity,
         )

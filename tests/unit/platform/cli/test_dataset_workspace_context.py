@@ -122,10 +122,12 @@ def test_upload_passes_git_context_to_api_calls_without_subscription_preflight(
             file_size: int,
             extension: str,
             *,
+            overwrite_dataset_id: str | None = None,
             credentials=None,
             git_identity: str,
         ) -> DatasetFile:
             assert file_name == "data"
+            assert overwrite_dataset_id is None
             assert file_size > 0
             assert extension == "jsonl"
             calls["create_credentials"] = credentials

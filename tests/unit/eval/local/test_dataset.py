@@ -507,8 +507,8 @@ def test_the_platform_fetcher_downloads_the_version_it_described(
                 version="3f2a9c1",
             )
 
-        def get_dataset_download_url(self, ref, *, credentials=None, git_identity):
-            requested.append(ref)
+        def get_dataset_download_url(self, file_id, *, credentials=None, git_identity):
+            requested.append(file_id)
             return DatasetDownloadInfo(presigned_url="https://example.com/train")
 
     monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
@@ -520,4 +520,4 @@ def test_the_platform_fetcher_downloads_the_version_it_described(
 
     assert description.dataset_id == "3f2a9c1-id"
     # A newer version that becomes ready in between does not change the bytes.
-    assert requested == ["train@3f2a9c1"]
+    assert requested == ["3f2a9c1-id"]

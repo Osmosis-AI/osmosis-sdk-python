@@ -48,7 +48,14 @@ class TestPerformUpload:
 
         class FakeClient:
             def create_dataset(
-                self, file_name, file_size, ext, *, git_identity, credentials=None
+                self,
+                file_name,
+                file_size,
+                ext,
+                *,
+                git_identity,
+                credentials=None,
+                overwrite_dataset_id=None,
             ):
                 assert file_name == "data"
                 assert file_size == 2
@@ -67,7 +74,7 @@ class TestPerformUpload:
             dataset_name="data",
             file_size=2,
             ext="jsonl",
-            existing_ok=False,
+            existing_dataset_id=None,
             git_identity=GIT_IDENTITY,
             credentials=None,
         )
@@ -94,7 +101,14 @@ class TestPerformUpload:
 
         class FakeClient:
             def create_dataset(
-                self, file_name, file_size, ext, *, git_identity, credentials=None
+                self,
+                file_name,
+                file_size,
+                ext,
+                *,
+                git_identity,
+                credentials=None,
+                overwrite_dataset_id=None,
             ):
                 calls["create"] = True
                 assert file_name == "data"
@@ -165,7 +179,14 @@ class TestPerformUpload:
 
         class FakeClient:
             def create_dataset(
-                self, file_name, file_size, ext, *, git_identity, credentials=None
+                self,
+                file_name,
+                file_size,
+                ext,
+                *,
+                git_identity,
+                credentials=None,
+                overwrite_dataset_id=None,
             ):
                 assert git_identity == GIT_IDENTITY
                 created["file_name"] = file_name
@@ -344,14 +365,13 @@ class TestPerformUpload:
         assert "osmosis dataset upload" not in exc_info.value.message
         assert str(file_path) not in exc_info.value.message
 
-    def test_existing_name_retries_create_with_existing_dataset_id(
+    def test_existing_name_creates_with_the_existing_dataset_id(
         self, monkeypatch, tmp_path
     ):
-        """A confirmed existing name retries create with its ID before the S3
-        upload, which adds a version."""
+        """A confirmed existing name sends its ID with the one create call,
+        which adds a version."""
         import osmosis_ai.platform.api.client as api_client_module
         import osmosis_ai.platform.api.upload as upload_module
-        from osmosis_ai.platform.auth import PlatformAPIError
 
         file_path = tmp_path / "data.jsonl"
         file_path.write_text("{}")
@@ -376,16 +396,6 @@ class TestPerformUpload:
                     }
                 )
                 assert git_identity == GIT_IDENTITY
-                if overwrite_dataset_id is None:
-                    raise PlatformAPIError(
-                        "A dataset with this name already exists",
-                        status_code=409,
-                        details={
-                            "error": "A dataset with this name already exists",
-                            "existing_dataset_id": "dataset-old",
-                        },
-                    )
-                assert overwrite_dataset_id == "dataset-old"
                 return _make_fake_dataset(file_name=file_name, file_size=file_size)
 
             def complete_upload(
@@ -425,14 +435,11 @@ class TestPerformUpload:
             file_size=file_size,
             git_identity=GIT_IDENTITY,
             credentials=None,
-            existing_ok=True,
+            existing_dataset_id="dataset-old",
         )
 
         assert result.status == "uploaded"
-        assert calls == [
-            {"file_name": "data", "overwrite_dataset_id": None},
-            {"file_name": "data", "overwrite_dataset_id": "dataset-old"},
-        ]
+        assert calls == [{"file_name": "data", "overwrite_dataset_id": "dataset-old"}]
 
     def test_conflict_without_existing_dataset_id_is_not_treated_as_overwriteable(
         self, monkeypatch, tmp_path
@@ -465,7 +472,7 @@ class TestPerformUpload:
                 file_size=2,
                 git_identity=GIT_IDENTITY,
                 credentials=None,
-                existing_ok=True,
+                existing_dataset_id="dataset-old",
             )
 
         assert exc_info.value is conflict
@@ -627,7 +634,7 @@ class TestUploadCommand:
             dataset_module.upload(str(file_path))
 
         assert seen["default"] is True
-        assert performed["existing_ok"] is True
+        assert performed["existing_dataset_id"] == "dataset-old"
 
     def test_name_with_at_sign_is_rejected_before_upload(self, tmp_path, monkeypatch):
         import osmosis_ai.platform.cli.dataset as dataset_module

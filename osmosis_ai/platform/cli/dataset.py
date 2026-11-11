@@ -236,38 +236,14 @@ def _create_dataset_for_upload(
     dataset_name: str,
     file_size: int,
     ext: str,
-    existing_ok: bool,
+    existing_dataset_id: str | None,
     git_identity: str | None,
     credentials: Any | None = None,
 ) -> Any:
-    """Create the dataset record. When the name exists and ``existing_ok`` is
-    set (the user confirmed it), retry with its ID, which adds a version, or
-    replaces the dataset on a platform without dataset versions."""
+    """Create the dataset record. ``existing_dataset_id`` is the dataset of this
+    name the user confirmed uploading to: the platform adds a version to it, or
+    replaces it on a platform without dataset versions."""
     try:
-        return platform_call(
-            "Uploading dataset...",
-            lambda: client.create_dataset(
-                dataset_name,
-                file_size,
-                ext,
-                credentials=credentials,
-                git_identity=git_identity,
-            ),
-        )
-    except PlatformAPIError as exc:
-        existing_dataset_id = _existing_dataset_id_from_conflict(exc)
-        if existing_dataset_id is None:
-            raise
-        if not existing_ok:
-            details = dict(exc.details or {})
-            details.setdefault("status_code", exc.status_code)
-            raise CLIError(
-                f"A dataset named '{dataset_name}' was created while this upload "
-                "started. Run the upload again to add it as a new version.",
-                code="CONFLICT",
-                details=details,
-            ) from exc
-
         return platform_call(
             "Uploading dataset...",
             lambda: client.create_dataset(
@@ -279,6 +255,18 @@ def _create_dataset_for_upload(
                 git_identity=git_identity,
             ),
         )
+    except PlatformAPIError as exc:
+        # The platform reports a name conflict only for a create without an ID.
+        if _existing_dataset_id_from_conflict(exc) is None:
+            raise
+        details = dict(exc.details or {})
+        details.setdefault("status_code", exc.status_code)
+        raise CLIError(
+            f"A dataset named '{dataset_name}' was created while this upload "
+            "started. Run the upload again to add it as a new version.",
+            code="CONFLICT",
+            details=details,
+        ) from exc
 
 
 def _perform_upload(
@@ -288,7 +276,7 @@ def _perform_upload(
     file_size: int,
     git_identity: str | None,
     credentials: Any | None = None,
-    existing_ok: bool = False,
+    existing_dataset_id: str | None = None,
 ) -> Any:
     """Core upload: create dataset record → S3 upload → complete.
 
@@ -310,7 +298,7 @@ def _perform_upload(
         dataset_name=dataset_name,
         file_size=file_size,
         ext=ext,
-        existing_ok=existing_ok,
+        existing_dataset_id=existing_dataset_id,
         credentials=credentials,
         git_identity=git_identity,
     )
@@ -465,7 +453,7 @@ def upload(
         file_path=file_path,
         ext=ext,
         file_size=file_size,
-        existing_ok=existing is not None,
+        existing_dataset_id=existing.id if existing else None,
         credentials=credentials,
         git_identity=git_identity,
     )
@@ -791,11 +779,10 @@ def download(
         raise CLIError(f"Dataset is not available for download (status: {ds.status}).")
 
     # Download the version just checked, even if a newer one lands meanwhile.
-    ref = ds.ref if ds.version else name
     info = platform_call(
         "Preparing download...",
         lambda: client.get_dataset_download_url(
-            ref,
+            ds.id,
             credentials=credentials,
             git_identity=git_identity,
         ),
