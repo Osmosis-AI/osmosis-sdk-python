@@ -24,6 +24,8 @@ def exported(monkeypatch):
     monkeypatch.setenv("OSMOSIS_ROLLOUT_SERVER_ID", "dev-owner")
     monkeypatch.setenv("_OSMOSIS_ROLLOUT_NAME", "remote-opencode")
     monkeypatch.setenv("OSMOSIS_ROLLOUT_NAMESPACE", "managed-dev-servers-staging")
+    for name in ("SERVER_ID", "NAMESPACE", "OTLP_ENDPOINT"):
+        monkeypatch.delenv(f"_OSMOSIS_ROLLOUT_{name}", raising=False)
     monkeypatch.setattr(app_module, "save_trajectory", AsyncMock())
     return exporter
 
@@ -132,10 +134,24 @@ async def test_cancellation_and_lease_expiry_publish_terminal_ownership(
 
 def test_no_endpoint_leaves_app_telemetry_disabled(monkeypatch):
     monkeypatch.delenv("OSMOSIS_ROLLOUT_OTLP_ENDPOINT", raising=False)
+    monkeypatch.delenv("_OSMOSIS_ROLLOUT_OTLP_ENDPOINT", raising=False)
     observer = RolloutObservability()
     observer.start()
     assert observer.provider is None
     observer.record(observer.fields("episode", {}), RolloutStatus.RUNNING)
+    observer.close()
+
+
+def test_osmosis_prefixed_names_take_precedence(exported, monkeypatch):
+    monkeypatch.delenv("OSMOSIS_ROLLOUT_OTLP_ENDPOINT")
+    monkeypatch.setenv("_OSMOSIS_ROLLOUT_OTLP_ENDPOINT", "http://collector")
+    monkeypatch.setenv("_OSMOSIS_ROLLOUT_SERVER_ID", "platform-owner")
+    monkeypatch.setenv("_OSMOSIS_ROLLOUT_NAMESPACE", "platform-namespace")
+    observer = RolloutObservability()
+    observer.start()
+    assert observer.provider is not None
+    assert observer.owner["server_id"] == "platform-owner"
+    assert observer.owner["namespace"] == "platform-namespace"
     observer.close()
 
 

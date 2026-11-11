@@ -214,7 +214,7 @@ def _format_eval_config(config: dict[str, Any] | None) -> str | None:
     ordered_keys = (
         "limit",
         "n",
-        "batch_size",
+        "max_concurrent_attempts",
         "pass_threshold",
         "agent_workflow_timeout_s",
         "grader_timeout_s",

@@ -76,7 +76,7 @@ async def main() -> int:
             pass_threshold=1.0,
             agent_timeout_sec=60.0,
             grader_timeout_sec=30.0,
-            batch_size=1,
+            max_concurrent_attempts=1,
         ),
         # Same as RunnerHarness: the fake rollout project has no pyproject.toml,
         # so the server is spawned directly instead of through uv.

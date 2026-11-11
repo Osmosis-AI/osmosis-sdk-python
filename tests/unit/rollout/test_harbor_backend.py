@@ -2188,7 +2188,8 @@ class TestPrewarm:
             in_flight -= 1
             return trial_result()
 
-        monkeypatch.setenv("OPENSANDBOX_MAX_SANDBOXES", "4")
+        monkeypatch.setenv("OPENSANDBOX_MAX_SANDBOXES", "100")
+        monkeypatch.setenv("_OSMOSIS_OPENSANDBOX_MAX_SANDBOXES", "4")
         backend = HarborBackend(
             orchestrator=FakeQueue(run_tracked),
             tasks_dir=root,
@@ -2395,6 +2396,8 @@ class TestConfigValidation:
         monkeypatch.setenv("OPENSANDBOX_DOMAIN", "https://opensandbox.example.com")
         monkeypatch.setenv("OPENSANDBOX_RUN_ID", "run-1")
         monkeypatch.delenv("OPENSANDBOX_REQUEST_TIMEOUT_SEC", raising=False)
+        monkeypatch.delenv("_OSMOSIS_OPENSANDBOX_RUN_ID", raising=False)
+        monkeypatch.delenv("_OSMOSIS_OPENSANDBOX_REQUEST_TIMEOUT_SEC", raising=False)
         caller_config = EnvironmentConfig(type="opensandbox", import_path=import_path)
         backend = self.backend_for(
             template_task, agent="oracle", environment_config=caller_config

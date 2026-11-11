@@ -14,7 +14,7 @@ dataset = "<your-dataset-name>"       # Platform dataset name; name@version pins
 # Uncomment a field only when you want to override platform behavior.
 # limit = 200                         # Optional row cap
 # n = 1                               # Number of evaluation attempts
-# batch_size = 1                      # Rows evaluated per batch
+# max_concurrent_attempts = 8         # Samples evaluated at once
 # pass_threshold = 1.0                # Minimum passing score
 # agent_workflow_timeout_s = 450      # Agent workflow timeout per row
 # grader_timeout_s = 150              # Grader timeout per row

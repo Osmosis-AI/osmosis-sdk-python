@@ -7,10 +7,7 @@ OTLP/HTTP. Install the `server` extra and set `OSMOSIS_ROLLOUT_OTLP_ENDPOINT`
 to the collector base URL (without `/v1/logs`). No events are exported when
 the endpoint is unset.
 
-The platform sets `OSMOSIS_ROLLOUT_SERVER_ID`, `OSMOSIS_ROLLOUT_NAMESPACE`
-and `_OSMOSIS_ROLLOUT_NAME`. A standalone server can set those too; otherwise
-the server ID falls back to its instance ID or hostname. Client metadata cannot
-override server identity.
+The platform sets `_OSMOSIS_ROLLOUT_OTLP_ENDPOINT`, `_OSMOSIS_ROLLOUT_SERVER_ID`, `_OSMOSIS_ROLLOUT_NAMESPACE` and `_OSMOSIS_ROLLOUT_NAME`. A standalone server can set `OSMOSIS_ROLLOUT_SERVER_ID` and `OSMOSIS_ROLLOUT_NAMESPACE`; otherwise the server ID falls back to its instance ID or hostname. Client metadata cannot override server identity.
 
 Clients can attach a training run to each request:
 
