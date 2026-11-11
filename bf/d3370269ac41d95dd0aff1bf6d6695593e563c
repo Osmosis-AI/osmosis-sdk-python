@@ -1,0 +1,23 @@
+docs/benchmark.md
+  s_232935e3be9aee::t_a1b7768778879e 63
+osmosis_ai/platform/cli/benchmark_config.py
+  s_232935e3be9aee::t_6435b12ce37c8d 106
+tests/unit/platform/cli/test_benchmark_config.py
+  s_232935e3be9aee::t_b1c8bf8c90655d 53,67
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "bfd3370269ac41d95dd0aff1bf6d6695593e563c",
+  "prompts": {},
+  "sessions": {
+    "s_232935e3be9aee": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "61f15f13-949e-4876-a9fa-f1763491217a",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Allen Lin <allen@osmosis.ai>"
+    }
+  }
+}
