@@ -1,7 +1,7 @@
 """Tests for the `osmosis quickstart` wizard handler.
 
 The agent prompts and the wizard's user-facing questions are a cross-repo
-contract (workspace-template skills, docs), so they are asserted verbatim here.
+contract (osmosis-plugin skills, docs), so they are asserted verbatim here.
 """
 
 from __future__ import annotations
@@ -79,7 +79,7 @@ EVAL_PROMPT = (
 )
 BENCHMARK_PROMPT = (
     "I want to run a benchmark in this Osmosis workspace. Start with the "
-    "submit-benchmarks skill: read the workspace instructions, help me settle "
+    "run-benchmarks skill: read the workspace instructions, help me settle "
     "which benchmark, which tasks, and which agents to compare, and confirm the "
     "run size with me before submitting a benchmark run."
 )

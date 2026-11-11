@@ -13,6 +13,7 @@ This file records changes to `osmosis-ai`. For earlier versions, see [GitHub Rel
 
 - On platforms with dataset versioning, uploading an existing name creates a new version without `--overwrite`; pin `dataset = "name@version"` in run configs to keep a fixed version, since bare names follow the newest version that finished processing ([#480](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/480)).
 - `osmosis dataset versions <name>` lists version history, and dataset upload, info, list, and JSON output expose version details when supported by the platform ([#480](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/480)).
+- Benchmark configs accept `[execution].verifier_timeout_multiplier` to adjust verifier timeouts independently of agent timeouts on supported platforms; older platforms ignore this field ([#485](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/485)).
 
 ### Changed
 
@@ -23,6 +24,7 @@ This file records changes to `osmosis-ai`. For earlier versions, see [GitHub Rel
 ### Fixed
 
 - Dataset downloads and local eval fetch the exact dataset version they inspected, keeping size checks and cached data consistent when a newer version becomes ready during the download ([#480](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/480)).
+- `osmosis quickstart` benchmark prompts reference the Osmosis plugin's `run-benchmarks` skill instead of the removed `submit-benchmarks` skill ([#484](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/484)).
 
 [Full changelog](https://github.com/Osmosis-AI/osmosis-sdk-python/compare/v0.3.11...v0.3.12)
 

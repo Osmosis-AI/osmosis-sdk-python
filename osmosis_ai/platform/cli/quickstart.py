@@ -61,8 +61,8 @@ _SDK_OVERVIEW_DOCS_URL = f"{_DOCS_URL}/sdk/overview"
 _BENCHMARKS_DOCS_URL = f"{_DOCS_URL}/platform/benchmarks"
 
 # The agent is told to use this skill by name, so it must match the skill as
-# shipped in workspace-template.
-_BENCHMARK_SKILL = "submit-benchmarks"
+# shipped in Osmosis-AI/osmosis-plugin.
+_BENCHMARK_SKILL = "run-benchmarks"
 
 _REPO_POLL_SECONDS = 5.0
 _REPO_WAIT_TIMEOUT_SECONDS = 900.0

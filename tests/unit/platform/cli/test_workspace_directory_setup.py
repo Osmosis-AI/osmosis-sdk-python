@@ -13,7 +13,7 @@ from osmosis_ai.platform.cli.scaffold import write_scaffold
 def _write_workspace_template(root: Path) -> Path:
     (root / "configs").mkdir(parents=True)
     (root / "AGENTS.md").write_text(
-        "template agents\nproject-local skills live in .agents/skills\n",
+        "template agents\nworkflow skills live in Osmosis-AI/osmosis-plugin\n",
         encoding="utf-8",
     )
     (root / "CLAUDE.md").write_text("template claude\n", encoding="utf-8")
