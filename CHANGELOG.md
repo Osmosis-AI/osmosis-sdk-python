@@ -2,6 +2,30 @@
 
 This file records changes to `osmosis-ai`. For earlier versions, see [GitHub Releases](https://github.com/Osmosis-AI/osmosis-sdk-python/releases).
 
+## 0.3.12 - 2026-11-11
+
+### Breaking Changes
+
+- Direct local-eval integrations must replace `EvalRunSpec(batch_size=...)` with `max_concurrent_attempts=...` and update custom `DatasetFetcher.download_to()` implementations to accept the described dataset ID instead of its name ([#482](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/482), [#480](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/480)).
+- New dataset names cannot contain `@`; rename source files before uploading, and use `name@version` to reference an existing dataset version ([#480](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/480)).
+
+### Added
+
+- On platforms with dataset versioning, uploading an existing name creates a new version without `--overwrite`; pin `dataset = "name@version"` in run configs to keep a fixed version, since bare names follow the newest version that finished processing ([#480](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/480)).
+- `osmosis dataset versions <name>` lists version history, and dataset upload, info, list, and JSON output expose version details when supported by the platform ([#480](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/480)).
+
+### Changed
+
+- Use `[evaluation].max_concurrent_attempts` instead of `batch_size`; the old config key remains accepted, setting both is rejected, and cloud submissions require a platform that supports the new field ([#482](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/482)).
+- Local eval defaults to 8 concurrent attempts, capped at the backend's capacity; `--max-in-flight` overrides the configured `max_concurrent_attempts` ([#482](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/482)).
+- Managed OpenSandbox settings and rollout telemetry prefer the platform's `_OSMOSIS_` environment variables while retaining the previous names as fallbacks ([#479](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/479)).
+
+### Fixed
+
+- Dataset downloads and local eval fetch the exact dataset version they inspected, keeping size checks and cached data consistent when a newer version becomes ready during the download ([#480](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/480)).
+
+[Full changelog](https://github.com/Osmosis-AI/osmosis-sdk-python/compare/v0.3.11...v0.3.12)
+
 ## 0.3.11 - 2026-11-06
 
 ### Added
