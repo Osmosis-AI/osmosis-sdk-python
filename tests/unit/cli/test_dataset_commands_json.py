@@ -985,7 +985,7 @@ def test_dataset_download_json_includes_output_path(
     output_path = tmp_path / "out.jsonl"
 
     class FakeClient:
-        def get_ready_dataset(self, name, *, git_identity, credentials=None):
+        def get_dataset(self, name, *, git_identity, credentials=None):
             assert git_identity == GIT_IDENTITY
             return _dataset(id="ds_resolved")
 

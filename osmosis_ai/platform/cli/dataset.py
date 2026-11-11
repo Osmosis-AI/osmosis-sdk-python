@@ -532,7 +532,7 @@ def list_datasets(limit: int = DEFAULT_PAGE_SIZE, all_: bool = False) -> Command
         extra=workspace_result_context(context),
         columns=[
             ListColumn(key="file_name", label="Name", ratio=4, overflow="fold"),
-            ListColumn(key="version", label="Latest", no_wrap=True, ratio=1),
+            ListColumn(key="version", label="Newest", no_wrap=True, ratio=1),
             ListColumn(key="version_count", label="Versions", no_wrap=True, ratio=1),
             ListColumn(key="status", label="Status", no_wrap=True, ratio=1),
             ListColumn(key="file_size", label="Size", no_wrap=True, ratio=1),
@@ -771,7 +771,7 @@ def download(
     client = OsmosisClient()
     ds = platform_call(
         "Fetching dataset...",
-        lambda: client.get_ready_dataset(
+        lambda: client.get_dataset(
             name,
             credentials=credentials,
             git_identity=git_identity,

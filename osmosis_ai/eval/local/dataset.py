@@ -478,7 +478,7 @@ class DatasetFetcher(Protocol):
 
     def describe(self, dataset_name: str) -> DatasetDescription: ...
 
-    def download_to(self, dataset_name: str, destination: Path) -> None: ...
+    def download_to(self, dataset_id: str, destination: Path) -> None: ...
 
 
 def resolve_platform_dataset(
@@ -519,7 +519,9 @@ def resolve_platform_dataset(
     staging = directory / f".download.{description.extension}"
     _note(f"downloading dataset {dataset_name!r}")
     try:
-        fetcher.download_to(dataset_name, staging)
+        # By ID, so the bytes are the described version's even if the name's
+        # latest version changes in between.
+        fetcher.download_to(description.dataset_id, staging)
         staged_size = staging.stat().st_size
         # Truthiness, not ``is not None``: the platform record defaults file_size
         # to 0 when the API omits it, and there is nothing to compare against.
@@ -562,16 +564,13 @@ def _resolved_from_cache(
 class PlatformDatasetFetcher:
     """:class:`DatasetFetcher` over the platform CLI API.
 
-    The dataset endpoints accept a dataset *name* wherever they document a file
-    id, so no name-to-id lookup pass is needed.
+    The platform resolves a dataset name, or ``name@version``, to one version;
+    the download then names that version by its ID.
     """
 
     def __init__(self, *, credentials: Any, git_identity: str) -> None:
         self._credentials = credentials
         self._git_identity = git_identity
-        # The dataset ID ``describe`` resolved each name to, so the download
-        # fetches those bytes even if a newer version becomes ready in between.
-        self._resolved_ids: dict[str, str] = {}
 
     def describe(self, dataset_name: str) -> DatasetDescription:
         from osmosis_ai.platform.api.client import OsmosisClient
@@ -580,7 +579,7 @@ class PlatformDatasetFetcher:
             STATUSES_SUCCESS,
         )
 
-        record = OsmosisClient().get_ready_dataset(
+        record = OsmosisClient().get_dataset(
             dataset_name,
             credentials=self._credentials,
             git_identity=self._git_identity,
@@ -595,7 +594,6 @@ class PlatformDatasetFetcher:
                 f"dataset {dataset_name!r} is not available "
                 f"(status: {record.status}).{hint}"
             )
-        self._resolved_ids[dataset_name] = record.id
         return DatasetDescription(
             dataset_id=record.id,
             dataset_name=record.file_name or dataset_name,
@@ -604,12 +602,12 @@ class PlatformDatasetFetcher:
             file_size=record.file_size,
         )
 
-    def download_to(self, dataset_name: str, destination: Path) -> None:
+    def download_to(self, dataset_id: str, destination: Path) -> None:
         from osmosis_ai.platform.api.client import OsmosisClient
         from osmosis_ai.platform.api.download import download_file_to
 
         info = OsmosisClient().get_dataset_download_url(
-            self._resolved_ids.get(dataset_name, dataset_name),
+            dataset_id,
             credentials=self._credentials,
             git_identity=self._git_identity,
         )

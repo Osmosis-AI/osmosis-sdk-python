@@ -211,7 +211,7 @@ def test_download_uses_git_context_and_saves_file(
     )
 
     class FakeClient:
-        def get_ready_dataset(
+        def get_dataset(
             self,
             file_id: str,
             *,
@@ -291,7 +291,7 @@ def test_download_preserves_trailing_separator_as_directory_intent(
     fake_credentials = _stub_git_context(monkeypatch)
 
     class FakeClient:
-        def get_ready_dataset(
+        def get_dataset(
             self,
             file_id: str,
             *,
@@ -355,7 +355,7 @@ def test_download_rejects_processing_dataset(monkeypatch) -> None:
     fake_credentials = _stub_git_context(monkeypatch)
 
     class FakeClient:
-        def get_ready_dataset(
+        def get_dataset(
             self,
             file_id: str,
             *,

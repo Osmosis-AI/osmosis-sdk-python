@@ -320,6 +320,7 @@ class FakeFetcher:
         self.file_size = file_size
         self.describe_calls = 0
         self.download_calls = 0
+        self.downloaded_ids: list[str] = []
         self.describe_error: Exception | None = None
         self.download_error: Exception | None = None
 
@@ -335,8 +336,9 @@ class FakeFetcher:
             file_size=self.file_size,
         )
 
-    def download_to(self, dataset_name: str, destination: Path) -> None:
+    def download_to(self, dataset_id: str, destination: Path) -> None:
         self.download_calls += 1
+        self.downloaded_ids.append(dataset_id)
         if self.download_error is not None:
             raise self.download_error
         _write_jsonl(destination, self.rows)
@@ -486,39 +488,13 @@ def test_a_failed_download_asks_for_dataset_file(tmp_path: Path) -> None:
     assert list(cache.directory_for("ds-1").iterdir()) == []
 
 
-def test_the_platform_fetcher_downloads_the_version_it_described(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    import osmosis_ai.platform.api.client as api_client_module
-    import osmosis_ai.platform.api.download as download_module
-    from osmosis_ai.eval.local.dataset import PlatformDatasetFetcher
-    from osmosis_ai.platform.api.models import DatasetDownloadInfo, DatasetFile
+def test_a_download_names_the_version_that_was_described(tmp_path: Path) -> None:
+    fetcher = FakeFetcher(rows=PROMPT_ROWS)
 
-    requested: list[str] = []
-    # A newer version becomes ready after ``describe``: resolving the name
-    # again would return it.
-    ready_ids = ["3f2a9c1-id", "a91c0de-id"]
+    resolve_platform_dataset(
+        "multiply", cache=DatasetCache(tmp_path / "cache"), fetcher=fetcher
+    )
 
-    class FakeClient:
-        def get_ready_dataset(self, name, *, credentials=None, git_identity):
-            return DatasetFile(
-                id=ready_ids.pop(0),
-                file_name="train",
-                file_size=10,
-                status="uploaded",
-                file_format="jsonl",
-            )
-
-        def get_dataset_download_url(self, file_id, *, credentials=None, git_identity):
-            requested.append(file_id)
-            return DatasetDownloadInfo(presigned_url="https://example.com/train")
-
-    monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
-    monkeypatch.setattr(download_module, "download_file_to", lambda _url, _dest: None)
-
-    fetcher = PlatformDatasetFetcher(credentials=None, git_identity="acme/rollouts")
-    description = fetcher.describe("train")
-    fetcher.download_to("train", tmp_path / "train.jsonl")
-
-    assert description.dataset_id == "3f2a9c1-id"
-    assert requested == ["3f2a9c1-id"]
+    # The described version's ID, not the name: a name can move to a newer
+    # version between the describe and the download.
+    assert fetcher.downloaded_ids == ["ds-1"]

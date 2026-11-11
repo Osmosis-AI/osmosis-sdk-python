@@ -440,52 +440,6 @@ class TestURLPathSafety:
         path = mock_request.call_args[0][0]
         assert path == "/api/cli/datasets/a%2Fb"
 
-    @pytest.mark.parametrize(
-        ("ref", "expected_paths", "expected_version"),
-        [
-            # A bare name whose newest upload is processing runs on the newest
-            # ready version.
-            (
-                "train",
-                ["/api/cli/datasets/train", "/api/cli/datasets/train%403f2a9c1"],
-                "3f2a9c1",
-            ),
-            # A pinned version is returned as is, even while it is processing.
-            ("train@a91c0de", ["/api/cli/datasets/train%40a91c0de"], "a91c0de"),
-        ],
-    )
-    @patch("osmosis_ai.platform.api.client.platform_request")
-    def test_get_ready_dataset_resolves_a_bare_name_to_its_ready_version(
-        self,
-        mock_request: MagicMock,
-        ref: str,
-        expected_paths: list[str],
-        expected_version: str,
-    ) -> None:
-        records = {
-            "/api/cli/datasets/train": "a91c0de",
-            "/api/cli/datasets/train%40a91c0de": "a91c0de",
-            "/api/cli/datasets/train%403f2a9c1": "3f2a9c1",
-        }
-
-        def respond(path: str, **_kwargs):
-            version = records[path]
-            return {
-                "id": f"{version}-id",
-                "file_name": "train",
-                "file_size": 100,
-                "status": "uploaded" if version == "3f2a9c1" else "processing",
-                "version": version,
-                "latest_version": "3f2a9c1",
-            }
-
-        mock_request.side_effect = respond
-        result = OsmosisClient().get_ready_dataset(ref, git_identity="git_test")
-        assert [call.args[0] for call in mock_request.call_args_list] == (
-            expected_paths
-        )
-        assert result.version == expected_version
-
     @patch("osmosis_ai.platform.api.client.platform_request")
     def test_get_dataset_download_url_encodes_id(self, mock_request: MagicMock) -> None:
         mock_request.return_value = {
