@@ -39,6 +39,12 @@ def _make_fake_dataset(
     )
 
 
+def _write_valid_dataset(file_path):
+    row = '{"system_prompt": "s", "user_prompt": "u", "ground_truth": "g"}\n'
+    file_path.write_text(row * 4)
+    return file_path
+
+
 class TestPerformUpload:
     def test_create_dataset_loading_message_says_uploading_dataset(self, monkeypatch):
         """Dataset creation uses the upload-oriented loading message."""
@@ -622,9 +628,17 @@ class TestUploadCommand:
         )
         monkeypatch.setattr(dataset_module, "_find_dataset", lambda *_a, **_k: existing)
         monkeypatch.setattr(dataset_module, "_perform_upload", fake_perform_upload)
+        rendered = StringIO()
+        monkeypatch.setattr(
+            dataset_module,
+            "console",
+            Console(file=rendered, force_terminal=False, width=200),
+        )
         seen: dict[str, object] = {}
 
         def fake_confirm(message, default=True):
+            # What the user has read by the time the question appears.
+            seen["shown_before_prompt"] = rendered.getvalue()
             seen["default"] = default
             return True
 
@@ -633,23 +647,81 @@ class TestUploadCommand:
         with override_output_context(format=OutputFormat.rich, interactive=True):
             dataset_module.upload(str(file_path))
 
+        assert "data (exists: 1 version, latest 9b8e7d6)" in str(
+            seen["shown_before_prompt"]
+        )
+        assert "becomes a new version" in str(seen["shown_before_prompt"])
         assert seen["default"] is True
         assert performed["existing_dataset_id"] == "dataset-old"
 
-    def test_name_with_at_sign_is_rejected_before_upload(self, tmp_path, monkeypatch):
+    @pytest.mark.parametrize(
+        "existing",
+        [
+            None,
+            # The platform resolves ``data@3f2a9c1`` to that version of ``data``.
+            DatasetFile(
+                id="3f2a9c1-id",
+                file_name="data",
+                file_size=2,
+                status="uploaded",
+                version="3f2a9c1",
+            ),
+        ],
+        ids=["new name", "resolves to a version"],
+    )
+    def test_name_with_at_sign_is_rejected_before_upload(
+        self, tmp_path, monkeypatch, existing
+    ):
         import osmosis_ai.platform.cli.dataset as dataset_module
         from osmosis_ai.cli.errors import CLIError
 
-        file_path = tmp_path / "data@v2.jsonl"
-        file_path.write_text("{}")
+        file_path = _write_valid_dataset(tmp_path / "data@3f2a9c1.jsonl")
         monkeypatch.setattr(
             dataset_module,
             "require_platform_workspace_context",
             lambda: SimpleNamespace(credentials=None, git_identity=GIT_IDENTITY),
         )
+        monkeypatch.setattr(dataset_module, "_find_dataset", lambda *_a, **_k: existing)
+        monkeypatch.setattr(
+            dataset_module,
+            "_perform_upload",
+            lambda **_kwargs: pytest.fail("a name with '@' must not be uploaded"),
+        )
 
         with pytest.raises(CLIError, match="cannot contain '@'"):
             dataset_module.upload(str(file_path), yes=True)
+
+    def test_name_with_at_sign_still_replaces_on_a_platform_without_versions(
+        self, tmp_path, monkeypatch
+    ):
+        import osmosis_ai.platform.cli.dataset as dataset_module
+
+        file_path = _write_valid_dataset(tmp_path / "data@v2.jsonl")
+        existing = DatasetFile(
+            id="dataset-old", file_name="data@v2", file_size=2, status="uploaded"
+        )
+        performed: dict[str, object] = {}
+
+        def fake_perform_upload(**kwargs):
+            performed.update(kwargs)
+            return _make_fake_dataset(file_name="data@v2")
+
+        monkeypatch.setattr(
+            dataset_module,
+            "require_platform_workspace_context",
+            lambda: SimpleNamespace(
+                credentials=None,
+                git_identity=GIT_IDENTITY,
+                workspace_directory=tmp_path,
+                repo_url="https://github.com/acme/rollouts.git",
+            ),
+        )
+        monkeypatch.setattr(dataset_module, "_find_dataset", lambda *_a, **_k: existing)
+        monkeypatch.setattr(dataset_module, "_perform_upload", fake_perform_upload)
+
+        dataset_module.upload(str(file_path), overwrite=True, yes=True)
+
+        assert performed["existing_dataset_id"] == "dataset-old"
 
 
 class TestFindDataset:

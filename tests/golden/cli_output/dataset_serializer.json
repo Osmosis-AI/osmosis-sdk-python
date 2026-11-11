@@ -12,5 +12,6 @@
     "creator_name",
     "created_at",
     "updated_at"
-  ]
+  ],
+  "optional": ["platform_url", "version", "version_count", "latest_version"]
 }

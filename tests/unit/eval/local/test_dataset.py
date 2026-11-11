@@ -495,16 +495,18 @@ def test_the_platform_fetcher_downloads_the_version_it_described(
     from osmosis_ai.platform.api.models import DatasetDownloadInfo, DatasetFile
 
     requested: list[str] = []
+    # A newer version becomes ready after ``describe``: resolving the name
+    # again would return it.
+    ready_ids = ["3f2a9c1-id", "a91c0de-id"]
 
     class FakeClient:
         def get_ready_dataset(self, name, *, credentials=None, git_identity):
             return DatasetFile(
-                id="3f2a9c1-id",
+                id=ready_ids.pop(0),
                 file_name="train",
                 file_size=10,
                 status="uploaded",
                 file_format="jsonl",
-                version="3f2a9c1",
             )
 
         def get_dataset_download_url(self, file_id, *, credentials=None, git_identity):
@@ -519,5 +521,4 @@ def test_the_platform_fetcher_downloads_the_version_it_described(
     fetcher.download_to("train", tmp_path / "train.jsonl")
 
     assert description.dataset_id == "3f2a9c1-id"
-    # A newer version that becomes ready in between does not change the bytes.
     assert requested == ["3f2a9c1-id"]

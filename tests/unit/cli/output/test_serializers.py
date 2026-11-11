@@ -50,6 +50,29 @@ def test_serialize_dataset_keys() -> None:
     assert "upload" not in payload
 
 
+def test_serialize_dataset_adds_optional_keys_the_platform_returned() -> None:
+    dataset = DatasetFile.from_dict(
+        {
+            "id": "ds_1",
+            "file_name": "train",
+            "file_size": 12345,
+            "status": "uploaded",
+            "platform_url": "https://platform.example.test/ws/datasets/ds_1",
+            "version": "3f2a9c1",
+            "version_count": 2,
+            "latest_version": "9b8e7d6",
+        }
+    )
+    payload = serialize_dataset(dataset)
+    golden = json.loads(
+        (GOLDEN_DIR / "dataset_serializer.json").read_text(encoding="utf-8")
+    )
+    assert list(payload) == golden["keys"] + golden["optional"]
+    assert payload["version"] == "3f2a9c1"
+    assert payload["version_count"] == 2
+    assert payload["latest_version"] == "9b8e7d6"
+
+
 def test_serialize_dataset_keeps_none_optional_contract_fields() -> None:
     dataset = DatasetFile.from_dict(
         {

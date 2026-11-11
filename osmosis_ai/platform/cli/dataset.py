@@ -386,11 +386,6 @@ def upload(
 
     file_path, ext, file_size = _check_file_basics(file)
     dataset_name = _dataset_name_from_path(file_path)
-    if "@" in dataset_name:
-        raise CLIError(
-            f"Dataset name '{dataset_name}' cannot contain '@', which marks a "
-            "version (name@version). Rename the file and upload again."
-        )
 
     # Validate file contents before uploading
     errors, warnings = _validate_file_with_warnings(file_path, ext)
@@ -414,6 +409,13 @@ def upload(
         ),
     )
     replaces = existing is not None and existing.version is None
+    # "@" marks a version, so the platform refuses it in an uploaded name. Only
+    # a platform without dataset versions still replaces a dataset named so.
+    if "@" in dataset_name and not replaces:
+        raise CLIError(
+            f"Dataset name '{dataset_name}' cannot contain '@', which marks a "
+            "version (name@version). Rename the file and upload again."
+        )
     if replaces and not overwrite:
         raise CLIError(
             f"A dataset named '{dataset_name}' already exists. "
@@ -437,14 +439,19 @@ def upload(
             ],
         )
     elif existing is not None:
+        described = _describe_existing_dataset(existing)
+        new_version_warning = (
+            f'This upload becomes a new version of "{dataset_name}". Runs '
+            "that name it without a version switch to it after processing."
+        )
+        # The rich prompt shows only its question, so print what it confirms.
+        console.print(f"Dataset: {described}", markup=False)
+        console.print(new_version_warning, style="yellow", markup=False)
         require_confirmation(
             "Proceed with upload?",
             yes=yes,
-            summary=[*summary, ("Dataset", _describe_existing_dataset(existing))],
-            warnings=[
-                f'This upload becomes a new version of "{dataset_name}". Runs '
-                "that name it without a version switch to it after processing."
-            ],
+            summary=[*summary, ("Dataset", described)],
+            warnings=[new_version_warning],
         )
     else:
         require_confirmation("Proceed with upload?", yes=yes, summary=summary)

@@ -716,6 +716,52 @@ def test_dataset_upload_json_conflict_preserves_existing_dataset_id(
     assert str(file_path) not in payload["error"]["message"]
 
 
+def test_dataset_upload_json_name_created_during_upload_is_a_conflict(
+    monkeypatch,
+    tmp_path: Path,
+    capsys,
+) -> None:
+    """The name is free at the check, then the platform's create reports it
+    taken: the upload stops instead of adding a version nobody confirmed."""
+    _stub_git_context(monkeypatch)
+    file_path = tmp_path / "train.jsonl"
+    row = json.dumps({"system_prompt": "s", "user_prompt": "u", "ground_truth": "g"})
+    file_path.write_text((row + "\n") * 4, encoding="utf-8")
+
+    class FakeClient:
+        def create_dataset(
+            self,
+            file_name,
+            file_size,
+            extension,
+            *,
+            git_identity,
+            credentials=None,
+            overwrite_dataset_id=None,
+        ):
+            assert overwrite_dataset_id is None
+            raise PlatformAPIError(
+                "A dataset with this name already exists",
+                status_code=409,
+                details={
+                    "error": "A dataset with this name already exists",
+                    "existing_dataset_id": "ds_existing",
+                },
+            )
+
+    monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+
+    exit_code = cli.main(["--json", "dataset", "upload", str(file_path), "--yes"])
+    captured = capsys.readouterr()
+
+    assert exit_code == 1
+    assert captured.out == ""
+    payload = json.loads(captured.err)
+    assert payload["error"]["code"] == "CONFLICT"
+    assert payload["error"]["details"]["existing_dataset_id"] == "ds_existing"
+    assert "Run the upload again" in payload["error"]["message"]
+
+
 def test_dataset_upload_json_overwrite_stdout_is_one_envelope(
     monkeypatch,
     tmp_path: Path,
