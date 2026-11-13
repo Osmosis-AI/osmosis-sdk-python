@@ -628,6 +628,60 @@ async def test_tool_calls_survive_both_shapes(
     assert chunk["choices"][0]["delta"]["tool_calls"] == [{**tool_calls[0], "index": 0}]
 
 
+async def test_replay_restores_only_missing_thought_signatures(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    function = {"name": "f", "arguments": "{}"}
+    fake = _FakeLiteLLM(
+        response=_response(
+            tool_calls=[
+                {
+                    "id": "call_1__thought__sig-1",
+                    "type": "function",
+                    "function": function,
+                },
+                {
+                    "id": "call_2__thought__sig-2",
+                    "type": "function",
+                    "function": function,
+                },
+                {"type": "function", "function": function},
+            ]
+        )
+    )
+    _install(monkeypatch, fake)
+    bridge = LiteLLMBridge(model="gemini/gemini-test")
+    await bridge.complete(_body(), rollout_id=ROLLOUT_ID)
+
+    replayed = [
+        {
+            "id": "call_1",
+            "type": "function",
+            "function": function,
+            "provider_specific_fields": {"other": "kept"},
+        },
+        {
+            "id": "call_2",
+            "type": "function",
+            "function": function,
+            "provider_specific_fields": {"thought_signature": "client-sig"},
+        },
+        {"id": "call_3", "type": "function", "function": function},
+    ]
+    messages = [
+        {"role": "user", "content": "hi"},
+        {"role": "assistant", "content": None, "tool_calls": replayed},
+    ]
+    await bridge.complete(_body(messages=messages), rollout_id=ROLLOUT_ID)
+
+    sent = fake.completion_kwargs[-1]["messages"][1]["tool_calls"]
+    assert sent[0]["provider_specific_fields"] == {
+        "other": "kept",
+        "thought_signature": "sig-1",
+    }
+    assert sent[1:] == replayed[1:]
+
+
 async def test_official_openai_uses_responses_api_with_tools(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
