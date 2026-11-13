@@ -248,7 +248,9 @@ def _with_thought_signature(call: Any, signatures: dict[str, str]) -> Any:
     signature = signatures.get(_call_id(call))
     if not signature or not isinstance(call, dict) or _thought_signature(call):
         return call
-    provider_fields = call.get("provider_specific_fields") or {}
+    provider_fields = call.get("provider_specific_fields")
+    if not isinstance(provider_fields, dict):
+        provider_fields = {}
     return {
         **call,
         "provider_specific_fields": {
