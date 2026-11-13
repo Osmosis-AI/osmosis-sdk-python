@@ -223,6 +223,41 @@ def _reasoning_fields(choice: Any) -> dict[str, Any]:
     return fields
 
 
+# LiteLLM appends Gemini's thought signature to tool call IDs and strips it from
+# requests to non-Gemini models, so OpenAI-wire agents replay calls without it.
+_THOUGHT_SIGNATURE_SEPARATOR = "__thought__"
+
+
+def _call_id(call: Any) -> str:
+    call_id = str(_getattr_or_key(call, "id") or "")
+    return call_id.split(_THOUGHT_SIGNATURE_SEPARATOR)[0]
+
+
+def _thought_signature(call: Any) -> str | None:
+    provider_fields = _getattr_or_key(call, "provider_specific_fields")
+    signature = _getattr_or_key(provider_fields, "thought_signature")
+    if signature:
+        return signature
+    _, _, signature = str(_getattr_or_key(call, "id") or "").partition(
+        _THOUGHT_SIGNATURE_SEPARATOR
+    )
+    return signature or None
+
+
+def _with_thought_signature(call: Any, signatures: dict[str, str]) -> Any:
+    signature = signatures.get(_call_id(call))
+    if not signature or not isinstance(call, dict) or _thought_signature(call):
+        return call
+    provider_fields = call.get("provider_specific_fields") or {}
+    return {
+        **call,
+        "provider_specific_fields": {
+            **provider_fields,
+            "thought_signature": signature,
+        },
+    }
+
+
 def _stream_tool_calls_payload(tool_calls: Any) -> list[Any]:
     plain = _plain_data(tool_calls)
     if not isinstance(plain, list):
@@ -310,6 +345,7 @@ class LiteLLMBridge:
         self._tokens: dict[str, int] = {}
         self._max_context: dict[str, int] = {}
         self._reasoning: dict[str, dict[str, dict[str, Any]]] = {}
+        self._thought_signatures: dict[str, dict[str, str]] = {}
 
     def _build_kwargs(self, body: dict[str, Any]) -> dict[str, Any]:
         return build_chat_kwargs(
@@ -335,15 +371,24 @@ class LiteLLMBridge:
         return await litellm.acompletion(**self._build_kwargs(body))
 
     def _with_reasoning(self, body: dict[str, Any], rollout_id: str) -> dict[str, Any]:
-        stored = self._reasoning.get(rollout_id)
+        stored = self._reasoning.get(rollout_id, {})
+        signatures = self._thought_signatures.get(rollout_id, {})
         messages = body.get("messages")
-        if not stored or not isinstance(messages, list):
+        if not (stored or signatures) or not isinstance(messages, list):
             return body
         replayed = []
         for message in messages:
             if isinstance(message, dict) and message.get("role") == "assistant":
-                for call in message.get("tool_calls") or []:
-                    fields = stored.get(_getattr_or_key(call, "id") or "")
+                calls = message.get("tool_calls") or []
+                if signatures and calls:
+                    message = {
+                        **message,
+                        "tool_calls": [
+                            _with_thought_signature(call, signatures) for call in calls
+                        ],
+                    }
+                for call in calls:
+                    fields = stored.get(_call_id(call))
                     if fields:
                         message = {
                             **message,
@@ -361,13 +406,15 @@ class LiteLLMBridge:
         for choice in _getattr_or_key(response, "choices", []) or []:
             fields = _reasoning_fields(choice)
             _, tool_calls, _ = _message_fields(choice)
-            if not fields or not tool_calls:
-                continue
-            stored = self._reasoning.setdefault(rollout_id, {})
-            for call in tool_calls:
-                call_id = _getattr_or_key(call, "id")
-                if call_id:
-                    stored[call_id] = fields
+            for call in tool_calls or []:
+                call_id = _call_id(call)
+                if not call_id:
+                    continue
+                if fields:
+                    self._reasoning.setdefault(rollout_id, {})[call_id] = fields
+                if signature := _thought_signature(call):
+                    signatures = self._thought_signatures.setdefault(rollout_id, {})
+                    signatures[call_id] = signature
 
     async def preflight_check(self) -> None:
         """One-shot completion probe; raises on persistent config problems."""
@@ -420,6 +467,7 @@ class LiteLLMBridge:
     def collect_tokens(self, rollout_id: str) -> int | None:
         """Pop the rollout's token total; None if the bridge never served it."""
         self._reasoning.pop(rollout_id, None)
+        self._thought_signatures.pop(rollout_id, None)
         return self._tokens.pop(rollout_id, None)
 
     def collect_max_context(self, rollout_id: str) -> int | None:
@@ -430,6 +478,7 @@ class LiteLLMBridge:
         self._tokens.pop(rollout_id, None)
         self._max_context.pop(rollout_id, None)
         self._reasoning.pop(rollout_id, None)
+        self._thought_signatures.pop(rollout_id, None)
 
 
 async def _trickle_json_response(
