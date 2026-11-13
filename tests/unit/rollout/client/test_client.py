@@ -21,6 +21,8 @@ from osmosis_ai.rollout.client.client import (
 from osmosis_ai.rollout.types import POLLING_LEASE_HEADER, RolloutStatus
 
 ROLLOUT_ID = "f" * 32
+# With a 40 s read and a 120 s lease, the last retry starts 79.6 s after admission.
+EXHAUSTED_DELAYS = [0.1, 0.5, 1.0, 2.0, 4.0] + [8.0] * 9
 
 
 def request() -> dict[str, Any]:
@@ -70,9 +72,27 @@ def retry_sleep(monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
     return sleep
 
 
+@pytest.fixture
+def fake_clock(monkeypatch: pytest.MonkeyPatch, retry_sleep: AsyncMock) -> None:
+    now = 0.0
+
+    def sleep(delay: float) -> None:
+        nonlocal now
+        now += delay
+
+    monkeypatch.setattr("osmosis_ai.rollout.client.client.monotonic", lambda: now)
+    retry_sleep.side_effect = sleep
+
+
 @pytest.mark.parametrize(
     "failure",
-    [httpx.RemoteProtocolError, httpx.ReadError, httpx.ConnectError, httpx.ReadTimeout],
+    [
+        httpx.RemoteProtocolError,
+        httpx.ReadError,
+        httpx.ConnectError,
+        httpx.ConnectTimeout,
+        httpx.ReadTimeout,
+    ],
 )
 @pytest.mark.parametrize("disconnects", [1, 2])
 async def test_result_read_failures_reuse_admission_and_lease(
@@ -111,6 +131,7 @@ async def test_result_read_failures_reuse_admission_and_lease(
 async def test_exhausted_result_retries_wake_all_lifecycle_waiters(
     failure_type: type[httpx.TransportError],
     retry_sleep: AsyncMock,
+    fake_clock: None,
 ) -> None:
     release_failure = asyncio.Event()
     failures: list[httpx.TransportError] = []
@@ -135,13 +156,13 @@ async def test_exhausted_result_retries_wake_all_lifecycle_waiters(
         asyncio.get_running_loop().call_soon(release_failure.set)
         async with asyncio.timeout(1.0):
             errors = await waiters
-        assert len(failures) == 3
+        assert len(failures) == len(EXHAUSTED_DELAYS) + 1
         assert all(error is failures[-1] for error in errors)
         assert rollout.done() and rollout.polling_finished
         assert rollout.status is RolloutStatus.QUEUED
     finally:
         await rollout_client.http_client.aclose()
-    assert retry_sleep.await_args_list == [call(0.1), call(0.5)]
+    assert retry_sleep.await_args_list == [call(d) for d in EXHAUSTED_DELAYS]
 
 
 @pytest.mark.parametrize(
@@ -207,9 +228,6 @@ async def test_result_retry_has_a_wall_clock_lease_deadline(
     monkeypatch.setattr(
         "osmosis_ai.rollout.client.client._RESULT_RETRY_DELAYS_SEC", (0.001,)
     )
-    monkeypatch.setattr(
-        "osmosis_ai.rollout.client.client._GATEWAY_RETRY_DELAYS_SEC", (0.001,)
-    )
     polls = 0
     cancelled = asyncio.Event()
     error = httpx.ReadTimeout("lost result response")
@@ -263,12 +281,11 @@ async def test_result_retry_has_a_wall_clock_lease_deadline(
 @pytest.mark.parametrize(
     ("failures", "delays"),
     [
-        *(((status,), [0.25]) for status in (502, 503, 504)),
-        ((502, 503, 504), [0.25, 0.5, 1.0]),
-        # Transport and gateway failures draw on independent schedules.
+        *(((status,), [0.1]) for status in (502, 503, 504)),
+        ((502, 503, 504), [0.1, 0.5, 1.0]),
         (
             (httpx.ReadError, 502, httpx.RemoteProtocolError, 504),
-            [0.1, 0.25, 0.5, 0.5],
+            [0.1, 0.5, 1.0, 2.0],
         ),
     ],
 )
@@ -304,8 +321,8 @@ async def test_result_gateway_errors_reuse_admission_and_lease(
     assert retry_sleep.await_args_list == [call(delay) for delay in delays]
 
 
-async def test_persistent_gateway_errors_exhaust_the_retry_schedule(
-    retry_sleep: AsyncMock, caplog: pytest.LogCaptureFixture
+async def test_persistent_gateway_errors_retry_until_the_lease_deadline(
+    retry_sleep: AsyncMock, fake_clock: None, caplog: pytest.LogCaptureFixture
 ) -> None:
     caplog.set_level(logging.WARNING, logger="osmosis_ai.rollout.client.client")
     polls = 0
@@ -326,13 +343,12 @@ async def test_persistent_gateway_errors_exhaust_the_retry_schedule(
 
     assert raised.value.status_code == 503
     assert str(raised.value) == f"GET /rollout/{ROLLOUT_ID}/result returned 503"
-    assert polls == 7
-    delays = [0.25, 0.5, 1.0, 2.0, 4.0, 8.0]
-    assert retry_sleep.await_args_list == [call(delay) for delay in delays]
+    assert polls == len(EXHAUSTED_DELAYS) + 1
+    assert retry_sleep.await_args_list == [call(d) for d in EXHAUSTED_DELAYS]
     assert [record.getMessage() for record in caplog.records] == [
         f"Retrying result read for rollout {ROLLOUT_ID} after HTTP 503 "
         f"(attempt {attempt}) in {delay:.2f}s"
-        for attempt, delay in enumerate(delays, start=1)
+        for attempt, delay in enumerate(EXHAUSTED_DELAYS, start=1)
     ]
 
 
@@ -388,12 +404,7 @@ async def test_gateway_retries_respect_last_confirmed_lease(
 
 @pytest.mark.parametrize(
     "failure",
-    [
-        httpx.ConnectTimeout,
-        httpx.WriteTimeout,
-        httpx.PoolTimeout,
-        asyncio.CancelledError,
-    ],
+    [httpx.WriteTimeout, httpx.PoolTimeout, asyncio.CancelledError],
 )
 async def test_other_result_timeouts_and_cancellation_are_not_retried(
     failure: type[BaseException], retry_sleep: AsyncMock
