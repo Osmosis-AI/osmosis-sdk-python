@@ -14,6 +14,28 @@ from fastapi import FastAPI
 
 from osmosis_ai.eval.local.llm_bridge import LiteLLMBridge, create_bridge_router
 
+GEMINI_TOOL_TURN = {
+    "candidates": [
+        {
+            "content": {
+                "role": "model",
+                "parts": [
+                    {
+                        "functionCall": {"name": "lookup", "args": {}},
+                        "thoughtSignature": "sig-1",
+                    }
+                ],
+            },
+            "finishReason": "STOP",
+        }
+    ],
+    "usageMetadata": {
+        "promptTokenCount": 2,
+        "candidatesTokenCount": 3,
+        "totalTokenCount": 5,
+    },
+}
+
 
 @pytest.fixture
 async def upstream(
@@ -29,9 +51,12 @@ async def upstream(
         assert request.method == "POST" and str(request.url) in {
             "https://anthropic.example/v1/messages",
             "https://router.example/v1/chat/completions",
+            "https://gemini.example/models/gemini-2.5-flash:generateContent",
         }, f"Unexpected upstream request: {request.method} {request.url}"
         requests.append(request)
         body = json.loads(request.content)
+        if request.url.host == "gemini.example":
+            return httpx.Response(200, json=GEMINI_TOOL_TURN)
         has_tool_result = any(
             message.get("role") == "tool"
             or (
@@ -296,6 +321,52 @@ async def test_openrouter_tool_loop_replays_provider_reasoning_details(
     assert assistant["reasoning_details"] == [
         {"type": "reasoning.encrypted", "data": "opaque"}
     ]
+
+
+async def test_gemini_tool_loop_replays_stripped_thought_signatures(
+    upstream: list[httpx.Request],
+) -> None:
+    bridge = LiteLLMBridge(
+        model="gemini/gemini-2.5-flash",
+        api_base="https://gemini.example",
+        api_key="wire-test-secret",
+    )
+    body = {
+        "messages": [{"role": "user", "content": "lookup"}],
+        "tools": [
+            {
+                "type": "function",
+                "function": {"name": "lookup", "parameters": {"type": "object"}},
+            }
+        ],
+    }
+    response = await bridge.complete(body, rollout_id="test")
+    call = response.choices[0].message.tool_calls[0]
+    # A LiteLLM client strips the signature from the ID for its non-Gemini model name.
+    call_id = call.id.split("__thought__")[0]
+    await bridge.complete(
+        {
+            **body,
+            "messages": [
+                *body["messages"],
+                {
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": [
+                        {
+                            "id": call_id,
+                            "type": "function",
+                            "function": call.function.model_dump(),
+                        }
+                    ],
+                },
+                {"role": "tool", "tool_call_id": call_id, "content": "done"},
+            ],
+        },
+        rollout_id="test",
+    )
+    model_turn = json.loads(upstream[1].content)["contents"][1]
+    assert model_turn["parts"][0]["thoughtSignature"] == "sig-1"
 
 
 @pytest.mark.parametrize("stream", [False, True])
