@@ -25,8 +25,8 @@ _RETRY_AFTER_FLOOR_SEC = 0.05
 _MAX_RETRY_AFTER_SEC = 60.0
 _CANCEL_REQUEST_TIMEOUT_SEC = 5.0
 _RESULT_READ_GRACE_SEC = 10.0
-_RESULT_RETRY_DELAYS_SEC = (0.1, 0.5)
-_GATEWAY_RETRY_DELAYS_SEC = (0.25, 0.5, 1.0, 2.0, 4.0, 8.0)
+# The last delay repeats until the next attempt could not finish within the lease.
+_RESULT_RETRY_DELAYS_SEC = (0.1, 0.5, 1.0, 2.0, 4.0, 8.0)
 _GATEWAY_STATUS_CODES = frozenset({502, 503, 504})
 _FINISHED_STATUSES = frozenset(
     {RolloutStatus.SUCCESS, RolloutStatus.FAILURE, RolloutStatus.CANCELLED}
@@ -393,8 +393,6 @@ class RolloutClient:
         self, admission: RolloutInitResponse, *, lease_deadline: float
     ) -> tuple[RolloutResultResponse, float]:
         timeout = admission.result_wait_timeout_sec + _RESULT_READ_GRACE_SEC
-        transport_delays = iter(_RESULT_RETRY_DELAYS_SEC)
-        gateway_delays = iter(_GATEWAY_RETRY_DELAYS_SEC)
         attempt = 0
         last_error: Exception | None = None
         while True:
@@ -426,10 +424,10 @@ class RolloutClient:
             except (
                 httpx.RemoteProtocolError,
                 httpx.NetworkError,
+                httpx.ConnectTimeout,
                 httpx.ReadTimeout,
             ) as exc:
                 error: Exception = exc
-                delay = next(transport_delays, None)
                 reason = type(exc).__name__
             else:
                 try:
@@ -439,14 +437,15 @@ class RolloutClient:
                     )
                 except RolloutProtocolError as exc:
                     # A load balancer answers 502-504 itself when the server
-                    # reset or never answered the request. Result reads are
-                    # idempotent, so these get a longer schedule of their own.
+                    # reset or never answered the request.
                     if exc.status_code not in _GATEWAY_STATUS_CODES:
                         raise
                     error = exc
-                    delay = next(gateway_delays, None)
                     reason = f"HTTP {exc.status_code}"
-            if delay is None or monotonic() + delay + timeout >= lease_deadline:
+            delay = _RESULT_RETRY_DELAYS_SEC[
+                min(attempt, len(_RESULT_RETRY_DELAYS_SEC)) - 1
+            ]
+            if monotonic() + delay + timeout >= lease_deadline:
                 raise error
             logger.warning(
                 "Retrying result read for rollout %s after %s (attempt %d) in %.2fs",
