@@ -1,0 +1,30 @@
+osmosis_ai/rollout/trajectory/save.py
+  s_6f7e7a96a0c4c1::t_7c50a92878c182 22-25
+  s_6f7e7a96a0c4c1::t_bf3948d02fd644 41-57
+osmosis_ai/rollout/server/app.py
+  s_6f7e7a96a0c4c1::t_177c9064d02cdc 406
+  s_6f7e7a96a0c4c1::t_2f5311832fa51b 37
+osmosis_ai/rollout/server/result_registry.py
+  s_6f7e7a96a0c4c1::t_4e75d8f9a398d7 241-242
+  s_6f7e7a96a0c4c1::t_e351153b717568 12
+docs/rollout-sdk.md
+  s_6f7e7a96a0c4c1::t_213672102720f4 244
+tests/unit/rollout/test_server_app_trajectory.py
+  s_6f7e7a96a0c4c1::t_48df333efb56ab 341-369
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "4d486cde94da89ba4b61a3f50cf56a20a4e5c9d5",
+  "prompts": {},
+  "sessions": {
+    "s_6f7e7a96a0c4c1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a7f352af-5640-47e2-9f1e-74291bf9ee0c",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Allen Lin <allen@osmosis.ai>"
+    }
+  }
+}
