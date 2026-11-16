@@ -56,6 +56,7 @@ EXTRA_MODULES: Final[Mapping[str, frozenset[str]]] = {
             "jwt",
             "litellm",
             "multidict",
+            "openai",
             "opentelemetry",
             "orjson",
             "platformdirs",
@@ -72,6 +73,7 @@ EXTRA_MODULES: Final[Mapping[str, frozenset[str]]] = {
             "fsspec",
             "litellm",
             "multidict",
+            "openai",
             "orjson",
             "urllib3",
         }
@@ -86,6 +88,7 @@ EXTRA_MODULES: Final[Mapping[str, frozenset[str]]] = {
             "fsspec",
             "litellm",
             "multidict",
+            "openai",
             "opentelemetry",
             "pyarrow",
             "urllib3",
