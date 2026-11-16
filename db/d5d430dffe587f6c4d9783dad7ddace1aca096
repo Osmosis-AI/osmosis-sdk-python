@@ -1,0 +1,19 @@
+osmosis_ai/rollout/server/result_registry.py
+  s_6f7e7a96a0c4c1::t_a3755a6faae6e0 242-243
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "dbd5d430dffe587f6c4d9783dad7ddace1aca096",
+  "prompts": {},
+  "sessions": {
+    "s_6f7e7a96a0c4c1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a7f352af-5640-47e2-9f1e-74291bf9ee0c",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Allen Lin <allen@osmosis.ai>"
+    }
+  }
+}
