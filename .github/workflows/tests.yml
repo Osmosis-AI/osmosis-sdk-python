@@ -92,7 +92,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.12", "3.13", "3.14"]
+        python-version: ["3.12", "3.13", "3.14", "3.15"]
     steps:
       - uses: actions/checkout@v7
         with:
@@ -266,7 +266,7 @@ jobs:
           path: dist/
 
   wheel-smoke:
-    name: Wheel smoke (${{ matrix.scenario }})
+    name: Wheel smoke (${{ matrix.scenario }}, Python ${{ matrix.python-version }})
     needs: package
     if: needs.package.outputs.docs-only != 'true'
     runs-on: ubuntu-latest
@@ -277,30 +277,45 @@ jobs:
         include:
           - scenario: bare
             extra: ""
+            python-version: "3.12"
           - scenario: server
             extra: "[server]"
+            python-version: "3.12"
           - scenario: strands
             extra: "[strands]"
+            python-version: "3.12"
           - scenario: openai-agents
             extra: "[openai-agents]"
+            python-version: "3.12"
           - scenario: harbor
             extra: "[harbor]"
+            python-version: "3.12"
           - scenario: rubric
             extra: "[rubric]"
+            python-version: "3.12"
           - scenario: parquet
             extra: "[parquet]"
+            python-version: "3.12"
           - scenario: eval
             extra: "[eval]"
+            python-version: "3.12"
           - scenario: full
             extra: "[full]"
+            python-version: "3.12"
+          - scenario: bare
+            extra: ""
+            python-version: "3.15"
+          - scenario: full
+            extra: "[full]"
+            python-version: "3.15"
     steps:
       - uses: actions/checkout@v7
 
       - uses: astral-sh/setup-uv@v7
         with:
-          python-version: "3.12"
+          python-version: ${{ matrix.python-version }}
           enable-cache: true
-          cache-suffix: wheel-${{ matrix.scenario }}
+          cache-suffix: wheel-${{ matrix.python-version }}-${{ matrix.scenario }}
 
       - name: Download built wheel
         uses: actions/download-artifact@v8
@@ -312,6 +327,7 @@ jobs:
         env:
           INSTALL_EXTRA: ${{ matrix.extra }}
           SMOKE_SCENARIO: ${{ matrix.scenario }}
+          SMOKE_PYTHON_VERSION: ${{ matrix.python-version }}
         run: |
           mapfile -t wheels < <(find "$GITHUB_WORKSPACE/dist" -maxdepth 1 -type f -name '*.whl' -print | sort)
           if [ "${#wheels[@]}" -ne 1 ]; then
@@ -323,7 +339,7 @@ jobs:
           python="$smoke_root/venv/bin/python"
           install_spec="${wheels[0]}${INSTALL_EXTRA}"
 
-          uv venv --python 3.12 "$smoke_root/venv"
+          uv venv --python "$SMOKE_PYTHON_VERSION" "$smoke_root/venv"
           (
             cd "$smoke_root"
             env -u PYTHONPATH uv pip install --python "$python" "$install_spec"

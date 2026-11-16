@@ -92,7 +92,7 @@ pre-commit install
 
 > **Tip:** Run `uv run ty check --error-on-warning osmosis_ai/` before pushing to catch type errors early. Also run `uv run --no-editable pyright --verifytypes osmosis_ai --ignoreexternal` and inspect any errors against the narrow Harbor exception above.
 
-CI runs all tests on Python 3.12, 3.13, and 3.14 with four pytest-xdist workers using `worksteal` scheduling. Branch coverage runs on Python 3.14, where coverage.py uses the lower-overhead `sys.monitoring` core; the 70% threshold is unchanged. Local `uv run pytest` remains serial for debugging.
+CI runs all tests on Python 3.12, 3.13, 3.14, and 3.15 with four pytest-xdist workers using `worksteal` scheduling. Branch coverage runs on Python 3.14, where coverage.py uses the lower-overhead `sys.monitoring` core; the 70% threshold is unchanged. Wheel installation checks cover every extra on Python 3.12 and bare/full installations on Python 3.15. Local `uv run pytest` remains serial for debugging.
 
 The Python 3.12 job also reruns the [OpenAI SDK wire tests](tests/unit/eval/test_openai_sdk_wire.py) on the newest openai 3.x. The lock keeps openai 2.x for `openai-agents`, but the `harbor`, `rubric`, and `eval` extras resolve openai 3.x through LiteLLM, so this step is deliberately unpinned.
 

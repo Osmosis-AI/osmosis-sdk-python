@@ -19,6 +19,7 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",
+    "Programming Language :: Python :: 3.15",
     "Operating System :: OS Independent",
 ]
 requires-python = ">=3.12"
@@ -73,8 +74,9 @@ server = [
 ]
 
 # Strands >=1.48.0 fixes A2A isolation and session-file security flaws.
-# LiteLLM's floor and prerelease exclusion cover GHSA-7hp6-4w63-5g45
-# and the earlier affected release lines, including GHSA-g5ff-637f-6q2m.
+# LiteLLM >=1.109.0 avoids fastuuid's unsupported native build on Python 3.15
+# and is above every release affected by GHSA-7hp6-4w63-5g45 and the earlier
+# advisories, including GHSA-g5ff-637f-6q2m and the 1.104.0rc1 prerelease.
 # LiteLLM's tool-call path imports orjson at runtime, although LiteLLM declares
 # it only through its much larger proxy extra. fsspec arrives via tokenizers
 # and huggingface-hub; >=2026.6.0 fixes GHSA-27vj-qcqg-25rc. Each owning
@@ -84,7 +86,7 @@ server = [
 strands = [
     "strands-agents[litellm]>=1.48.0,<2.0.0",
     "opentelemetry-api>=1.45.1,<2.0.0",
-    "litellm>=1.103.1,!=1.104.0rc1,<2.0.0",
+    "litellm>=1.109.0,<2.0.0",
     "fsspec>=2026.6.0",
     "filelock>=4.2.1",
     "orjson>=3.11.6,<4.0",
@@ -105,11 +107,10 @@ strands = [
 
 # OpenAI Agents adapter. >=0.18.1 supports OpenAI Python 2.45's
 # cache_write_tokens usage field. <0.21 because 0.21+ requires openai>=3.0
-# (HTTPX2 transport). LiteLLM still pins openai<3, so a wider cap would only
-# take effect silently once LiteLLM moves; review before crossing it.
+# (HTTPX2 transport); review that transport change before crossing the cap.
 openai-agents = [
     "openai-agents[litellm]>=0.18.1,<0.21",
-    "litellm>=1.103.1,!=1.104.0rc1,<2.0.0",
+    "litellm>=1.109.0,<2.0.0",
     "fsspec>=2026.6.0",
     "filelock>=4.2.1",
     "orjson>=3.11.6,<4.0",
@@ -139,7 +140,7 @@ harbor = [
     "uv>=0.13.4,<0.14",
     # Harbor uses LiteLLM, which owns these runtime and security floors in
     # this feature.
-    "litellm>=1.103.1,!=1.104.0rc1,<2.0.0",
+    "litellm>=1.109.0,<2.0.0",
     "fsspec>=2026.6.0",
     "filelock>=4.2.1",
     "orjson>=3.11.6,<4.0",
@@ -152,7 +153,7 @@ harbor = [
 
 # LLM-as-judge rubric evaluation
 rubric = [
-    "litellm>=1.103.1,!=1.104.0rc1,<2.0.0",
+    "litellm>=1.109.0,<2.0.0",
     "fsspec>=2026.6.0",
     "filelock>=4.2.1",
     "orjson>=3.11.6,<4.0",
@@ -173,7 +174,7 @@ parquet = [
 # resolves from rollouts/<name>/pyproject.toml and launches.
 eval = [
     "osmosis-ai[server,parquet]",
-    "litellm>=1.103.1,!=1.104.0rc1,<2.0.0",
+    "litellm>=1.109.0,<2.0.0",
     "fsspec>=2026.6.0",
     "filelock>=4.2.1",
     "aiohttp>=3.14.4",
