@@ -1725,8 +1725,9 @@ class TestGraderOutcome:
         assert outcome.grader.err_category == category
         assert outcome.result.err_category == category
 
+    @pytest.mark.parametrize("with_progress", [True, False])
     async def test_trial_end_reports_phase_timings_to_rollout_progress(
-        self, template_task, tmp_path
+        self, template_task, tmp_path, with_progress
     ):
         from osmosis_ai.rollout.context import RolloutContext, RolloutProgress
 
@@ -1737,14 +1738,16 @@ class TestGraderOutcome:
         )
         event.config = SimpleNamespace(trial_name="trial-r1")
         pending = PendingTrial()
-        progress = RolloutProgress()
+        # Without server progress (direct execution), reporting is a no-op.
+        progress = RolloutProgress() if with_progress else None
         pending.rollout_context = RolloutContext(progress=progress)
         backend.pending["r1"] = pending
 
         await backend.on_trial_end(event)
 
         assert pending.done.done()
-        assert progress.phase_timings == {"verifier": 4.0}
+        if progress is not None:
+            assert progress.phase_timings == {"verifier": 4.0}
 
 
 class TestTaskResolution:
