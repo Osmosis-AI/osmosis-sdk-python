@@ -105,8 +105,9 @@ strands = [
 
 # OpenAI Agents adapter. >=0.18.1 supports OpenAI Python 2.45's
 # cache_write_tokens usage field. <0.21 because 0.21+ requires openai>=3.0
-# (HTTPX2 transport), which the SDK is not tested with; the harbor, rubric and
-# eval extras cap openai below 3 for the same reason. Review before crossing it.
+# (HTTPX2 transport); review the adapter before crossing it. LiteLLM >=1.109
+# allows openai 3.x, so extras without this adapter can resolve it; the
+# "pytest (openai 3.x)" CI job covers that combination.
 openai-agents = [
     "openai-agents[litellm]>=0.18.1,<0.21",
     "litellm>=1.103.1,!=1.104.0rc1,<2.0.0",
@@ -140,11 +141,6 @@ harbor = [
     # Harbor uses LiteLLM, which owns these runtime and security floors in
     # this feature.
     "litellm>=1.103.1,!=1.104.0rc1,<2.0.0",
-    # LiteLLM >=1.109 allows openai 3.x (HTTPX2 transport), which the SDK's
-    # LiteLLM error handling is not tested with. The adapter extras stay on
-    # openai 2.x through their own dependencies; the LiteLLM-only extras need
-    # this cap. LiteLLM owns the floor. The rubric and eval extras repeat it.
-    "openai<3.0.0",
     "fsspec>=2026.6.0",
     "filelock>=4.2.1",
     "orjson>=3.11.6,<4.0",
@@ -158,8 +154,6 @@ harbor = [
 # LLM-as-judge rubric evaluation
 rubric = [
     "litellm>=1.103.1,!=1.104.0rc1,<2.0.0",
-    # Untested with openai 3.x; see the harbor extra.
-    "openai<3.0.0",
     "fsspec>=2026.6.0",
     "filelock>=4.2.1",
     "orjson>=3.11.6,<4.0",
@@ -181,8 +175,6 @@ parquet = [
 eval = [
     "osmosis-ai[server,parquet]",
     "litellm>=1.103.1,!=1.104.0rc1,<2.0.0",
-    # Untested with openai 3.x; see the harbor extra.
-    "openai<3.0.0",
     "fsspec>=2026.6.0",
     "filelock>=4.2.1",
     "aiohttp>=3.14.4",
