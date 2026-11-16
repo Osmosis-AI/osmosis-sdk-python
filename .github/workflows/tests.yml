@@ -130,6 +130,17 @@ jobs:
         if: steps.scope.outputs.docs-only != 'true' && matrix.python-version != '3.14'
         run: uv run --no-sync pytest -n 4 --dist worksteal --durations=30
 
+      - name: Rerun the OpenAI SDK wire tests on the newest openai 3.x
+        # uv.lock keeps openai 2.x because openai-agents<0.21 requires it, but
+        # the harbor, rubric and eval extras resolve openai 3.x through LiteLLM.
+        # LiteLLM gives openai 3 a legacy httpx client, an escape hatch openai
+        # may drop in any 3.x release, so this step is deliberately unpinned.
+        # One Python version is enough for a dependency check.
+        if: steps.scope.outputs.docs-only != 'true' && matrix.python-version == '3.12'
+        run: |
+          uv pip install "openai>=3,<4"
+          uv run --no-sync pytest tests/unit/eval/test_openai_sdk_wire.py
+
   harbor-compatibility:
     name: Harbor compatibility (${{ matrix.name }})
     runs-on: ubuntu-latest
