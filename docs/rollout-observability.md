@@ -38,7 +38,7 @@ The terminal event (`success`, `failure` or `cancelled`) also summarizes where t
 | `grading_sec` | Grading start to the terminal event, including trajectory saving. |
 | `phase_<name>_sec` | Backend-reported phase durations. Harbor reports `environment_setup`, `agent_setup`, `agent`, `verifier` and `total` from its trial timing records. |
 
-A duration is absent when its stage never started. Durations use wall-clock UTC timestamps rounded to milliseconds. A backend reports phases with `RolloutContext.record_phase_timings`; only identifier names with finite numeric values are exported.
+The server computes `total_sec` through `grading_sec` from wall-clock UTC timestamps. Each is absent when its stage never started, or when a backend reported a timestamp without a timezone. Backends report `phase_<name>_sec` values directly as durations in seconds through `RolloutContext.record_phase_timings`. Only identifier names with finite numeric values are exported. All durations are clamped at zero and rounded to milliseconds.
 
 Export runs in a background batch processor with a 1,024-record queue. Ownership
 logs are best-effort diagnostics; an exporter outage can drop events and never

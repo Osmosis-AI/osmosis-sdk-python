@@ -151,6 +151,7 @@ async def test_terminal_event_reports_error_category_and_backend_phases(exported
                     "environment_setup": 1.25,
                     "bad name": 2.0,
                     "agent": float("nan"),
+                    "agent_setup": 10**400,
                     "verifier": True,
                 }
             )

@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import logging
-import math
 import os
 import socket
+import sys
 import time
 from collections.abc import Mapping
 from datetime import UTC, datetime
@@ -61,9 +61,10 @@ def stage_durations(progress: RolloutProgress) -> dict[str, float]:
             and len(name) <= 64
             and isinstance(value, int | float)
             and not isinstance(value, bool)
-            and math.isfinite(value)
+            # Rejects NaN, infinity and ints beyond float range without raising.
+            and abs(value) <= sys.float_info.max
         ):
-            durations[f"phase_{name}_sec"] = round(max(0.0, value), 3)
+            durations[f"phase_{name}_sec"] = round(max(0.0, float(value)), 3)
     return {key: value for key, value in durations.items() if value is not None}
 
 
