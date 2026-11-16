@@ -180,7 +180,8 @@ jobs:
   openai-compatibility:
     # uv.lock stays on openai 2.x because openai-agents<0.21 requires it, but
     # LiteLLM >=1.109 lets the harbor, rubric and eval extras resolve openai
-    # 3.x (httpx2 transport). Run the suite on that combination as well.
+    # 3.x. LiteLLM then hands openai 3 a legacy httpx client, an escape hatch
+    # openai may drop in any 3.x release, so test the newest one, unpinned.
     name: pytest (openai 3.x)
     runs-on: ubuntu-latest
     timeout-minutes: 15

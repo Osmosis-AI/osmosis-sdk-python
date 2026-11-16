@@ -1,10 +1,11 @@
-"""Drive LiteLLM's openai/ provider through the real OpenAI SDK transport.
+"""Drive LiteLLM's openai/ provider through the real OpenAI SDK client.
 
 The other bridge and rubric tests stub LiteLLM's HTTP handler, which the
-openai/ provider never uses: it sends through the OpenAI SDK's own client
-(httpx on openai 2.x, httpx2 on 3.x). These tests answer from a real localhost
-server instead, so a transport change shows up here. CI runs them on both
-majors; see the "pytest (openai 3.x)" job.
+openai/ provider never uses: it sends through the OpenAI SDK's client. On
+openai 3.x LiteLLM still injects a legacy httpx client, an escape hatch openai
+may drop in any 3.x release. These tests answer from a real localhost server
+so such a change shows up here. CI runs them on both majors; see the
+"pytest (openai 3.x)" job.
 """
 
 from __future__ import annotations
