@@ -273,11 +273,19 @@ def create_rollout_server(
         fields = observability.fields(request.rollout_id, request.metadata)
         entry = registry.entry(request.rollout_id)
         entry.progress.on_status = partial(observability.record, fields)
+
         # Result completion also covers lease expiry and cancellation before the
         # execution task starts; observing only _run_rollout would miss those.
-        entry.result.add_done_callback(
-            lambda result: observability.record(fields, result.result().status)
-        )
+        def record_terminal(result: asyncio.Future[RolloutResultResponse]) -> None:
+            response = result.result()
+            observability.record(
+                fields,
+                response.status,
+                progress=entry.progress,
+                err_category=response.err_category,
+            )
+
+        entry.result.add_done_callback(record_terminal)
         task: asyncio.Task[None] | None = None
         root = preview_root(request.rollout_id)
         temporary: tempfile.TemporaryDirectory[str] | None = None

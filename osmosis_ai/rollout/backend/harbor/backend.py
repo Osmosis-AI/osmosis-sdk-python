@@ -1748,5 +1748,7 @@ class HarborBackend(ExecutionBackend):
             timings = trial_timings(event.result)
             if timings:
                 logger.info("rollout %s phase timings: %s", rollout_id, timings)
+                if pending.rollout_context is not None:
+                    pending.rollout_context.record_phase_timings(timings)
             if outcome is not None and not pending.done.done():
                 pending.done.set_result(outcome)

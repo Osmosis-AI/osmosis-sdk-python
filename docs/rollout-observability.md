@@ -27,6 +27,19 @@ cancellation and polling-lease expiry. Missing run metadata stays absent.
 Prompts, arbitrary metadata, callback URLs, credentials and error messages are
 never included. Run fields must be nonempty strings of at most 512 characters.
 
+The terminal event (`success`, `failure` or `cancelled`) also summarizes where the rollout spent its time, so slow or failing stages can be aggregated by `run_id` without reading trajectories:
+
+| Attribute | Meaning |
+|-----------|---------|
+| `err_category` | The rollout's error category, when it has one. Never the error message. |
+| `total_sec` | Admission to the terminal event. |
+| `startup_sec` | Admission to agent start: concurrency queueing plus, for Harbor, sandbox and agent setup. |
+| `agent_sec` | Agent start to grading start, or to the terminal event when grading never started. |
+| `grading_sec` | Grading start to the terminal event, including trajectory saving. |
+| `phase_<name>_sec` | Backend-reported phase durations. Harbor reports `environment_setup`, `agent_setup`, `agent`, `verifier` and `total` from its trial timing records. |
+
+The server computes `total_sec` through `grading_sec` from wall-clock UTC timestamps. Each is absent when its stage never started, or when a backend reported a timestamp without a timezone. Backends report `phase_<name>_sec` values directly as durations in seconds through `RolloutContext.record_phase_timings`. Only identifier names with finite numeric values are exported. All durations are clamped at zero and rounded to milliseconds.
+
 Export runs in a background batch processor with a 1,024-record queue. Ownership
 logs are best-effort diagnostics; an exporter outage can drop events and never
 blocks rollout execution. A status is the last observed event, not proof that a

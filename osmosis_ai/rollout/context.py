@@ -5,7 +5,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable
 from contextvars import ContextVar
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -57,6 +57,10 @@ class RolloutProgress:
     changed: asyncio.Condition = field(default_factory=asyncio.Condition)
     on_status: Callable[[RolloutStatus], None] | None = field(default=None, repr=False)
     agent_started_at: datetime | None = None
+    # Diagnostics only: the server reports stage durations from these marks.
+    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    grading_started_at: datetime | None = None
+    phase_timings: dict[str, float] = field(default_factory=dict)
 
     async def set_status(self, status: RolloutStatus) -> None:
         async with self.changed:
@@ -67,6 +71,8 @@ class RolloutProgress:
             }:
                 return
             self.status = status
+            if status is RolloutStatus.GRADING and self.grading_started_at is None:
+                self.grading_started_at = datetime.now(UTC)
             self.changed.notify_all()
         if self.on_status is not None:
             try:
@@ -163,6 +169,11 @@ class RolloutContext:
     async def mark_agent_started(self, at: datetime) -> None:
         if self.progress is not None:
             await self.progress.mark_agent_started(at)
+
+    def record_phase_timings(self, timings: dict[str, float]) -> None:
+        """Report backend phase durations in seconds for ownership telemetry."""
+        if self.progress is not None:
+            self.progress.phase_timings = dict(timings)
 
 
 def get_rollout_context() -> RolloutContext | None:
