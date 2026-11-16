@@ -55,6 +55,7 @@ Start with the row matching the behavior you need to change or review. Tests do 
 - [troubleshooting.md](./troubleshooting.md) — engineering issues (rollout timeouts, event-loop blocking, concurrency tuning).
 - [cli.md](./cli.md) — CLI internals for contributors (command shells, lazy imports, JSON envelopes).
 - [run-downloads.md](./run-downloads.md) — eval and benchmark download commands, platform route contracts, fixed local layouts, resume, confirmation, and retry behavior.
+- [Python 3.15 support validation](./research/python-315-support.md) — dependency compatibility findings, local installation/test results, and CI coverage.
 
 ## See also
 

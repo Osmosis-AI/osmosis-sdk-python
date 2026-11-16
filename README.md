@@ -23,7 +23,7 @@ Python SDK and CLI for [Osmosis AI](https://platform.osmosis.ai), a platform for
 
 ## Installation
 
-Requires **Python 3.12+**.
+Requires **Python 3.12+**; supports Python 3.12–3.15.
 
 ```bash
 pip install osmosis-ai                     # CLI + framework-neutral rollout core
@@ -39,6 +39,8 @@ pip install "osmosis-ai[full]"              # every optional feature
 ```
 
 There is one distribution, `osmosis-ai`. The `harbor` extra installs Harbor with its Daytona environment dependencies. See [Installation](https://docs.osmosis.ai/cli/installation) for product setup and [CONTRIBUTING.md](CONTRIBUTING.md) for development setup.
+
+On Python 3.15, some optional dependencies currently build from source; a C compiler is required for a full installation when compatible wheels are unavailable.
 
 ## Documentation
 

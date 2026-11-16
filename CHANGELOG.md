@@ -2,6 +2,16 @@
 
 This file records changes to `osmosis-ai`. For earlier versions, see [GitHub Releases](https://github.com/Osmosis-AI/osmosis-sdk-python/releases).
 
+## Unreleased
+
+### Added
+
+- Support Python 3.15 while retaining Python 3.12 as the minimum version.
+
+### Changed
+
+- Extras that use LiteLLM now require `>=1.109.0,<2.0.0` to avoid fastuuid's unsupported Python 3.15 native build. Some optional dependencies still require a C compiler for source installation on Python 3.15.
+
 ## 0.3.12 - 2026-11-11
 
 ### Breaking Changes
