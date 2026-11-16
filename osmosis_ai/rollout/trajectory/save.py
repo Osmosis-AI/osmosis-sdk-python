@@ -21,7 +21,7 @@ logger: logging.Logger = logging.getLogger(__name__)
 
 # The platform's artifact uploader deletes a rollout's directory once this file
 # exists and every file in it has been uploaded.
-DONE_MARKER = ".osmosis-done"
+RELEASED_MARKER = ".osmosis-released"
 
 
 def _write_document(dest: Path, payload: bytes) -> None:
@@ -38,20 +38,20 @@ async def remove_saved_trajectory(rollout_id: str) -> None:
     await asyncio.to_thread(path.unlink, missing_ok=True)
 
 
-def _mark_done(rollout_dir: Path) -> None:
+def _mark_released(rollout_dir: Path) -> None:
     if rollout_dir.is_dir():
-        (rollout_dir / DONE_MARKER).touch()
+        (rollout_dir / RELEASED_MARKER).touch()
 
 
-async def mark_rollout_done(rollout_id: str) -> None:
+async def mark_rollout_released(rollout_id: str) -> None:
     try:
-        await asyncio.to_thread(_mark_done, default_artifact_root() / rollout_id)
+        await asyncio.to_thread(_mark_released, default_artifact_root() / rollout_id)
     except OSError:
-        logger.warning("Could not mark rollout %s done", rollout_id, exc_info=True)
+        logger.warning("Could not mark rollout %s released", rollout_id, exc_info=True)
 
 
-async def clear_rollout_done(rollout_id: str) -> None:
-    path = default_artifact_root() / rollout_id / DONE_MARKER
+async def clear_rollout_released(rollout_id: str) -> None:
+    path = default_artifact_root() / rollout_id / RELEASED_MARKER
     await asyncio.to_thread(path.unlink, missing_ok=True)
 
 
