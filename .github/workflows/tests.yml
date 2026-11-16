@@ -130,6 +130,16 @@ jobs:
         if: steps.scope.outputs.docs-only != 'true' && matrix.python-version != '3.14'
         run: uv run --no-sync pytest -n 4 --dist worksteal --durations=30
 
+      - name: Test LiteLLM against the newest openai 3.x
+        # uv.lock keeps openai 2.x because openai-agents<0.21 requires it, but
+        # the harbor, rubric and eval extras resolve openai 3.x through LiteLLM.
+        # LiteLLM gives openai 3 a legacy httpx client, an escape hatch openai
+        # may drop in any 3.x release, so this step is deliberately unpinned.
+        if: steps.scope.outputs.docs-only != 'true' && matrix.python-version == '3.13'
+        run: |
+          uv pip install --upgrade-package openai "openai<4"
+          uv run --no-sync pytest tests/unit/eval/test_openai_sdk_wire.py
+
   harbor-compatibility:
     name: Harbor compatibility (${{ matrix.name }})
     runs-on: ubuntu-latest
@@ -176,42 +186,6 @@ jobs:
           tests/unit/rollout/test_harbor*.py
           tests/unit/rollout/test_native_evidence.py
           tests/unit/rollout/test_trajectory_atif.py
-
-  openai-compatibility:
-    # uv.lock stays on openai 2.x because openai-agents<0.21 requires it, but
-    # LiteLLM >=1.109 lets the harbor, rubric and eval extras resolve openai
-    # 3.x. LiteLLM then hands openai 3 a legacy httpx client, an escape hatch
-    # openai may drop in any 3.x release, so test the newest one, unpinned.
-    name: pytest (openai 3.x)
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          fetch-depth: 2
-      - name: Classify the tested merge diff
-        id: scope
-        env:
-          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: python .github/scripts/ci-scope.py
-      - uses: astral-sh/setup-uv@v7
-        if: steps.scope.outputs.docs-only != 'true'
-        with:
-          python-version: "3.12"
-          enable-cache: true
-          cache-suffix: openai3
-      - name: Install dependencies with openai 3.x
-        if: steps.scope.outputs.docs-only != 'true'
-        # No `uv pip check`: the installed openai-agents<0.21 still declares
-        # openai<3, a pair its own extra never resolves.
-        run: |
-          uv sync --locked --all-extras --group dev
-          uv pip install "litellm>=1.109.0,<2.0.0" "openai>=3,<4"
-          uv run --no-sync python -c 'from importlib.metadata import version; print({p: version(p) for p in ("openai", "litellm", "httpx2")})'
-      - name: Run tests
-        if: steps.scope.outputs.docs-only != 'true'
-        run: uv run --no-sync pytest -n 4 --dist worksteal --durations=30
 
   package:
     outputs:
@@ -361,7 +335,7 @@ jobs:
 
   build:
     # Preserve the required check and gate coverage on 3.14 without a ruleset change.
-    needs: [lint, typecheck-pyright, pytest, harbor-compatibility, openai-compatibility, package, wheel-smoke]
+    needs: [lint, typecheck-pyright, pytest, harbor-compatibility, package, wheel-smoke]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5

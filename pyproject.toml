@@ -105,10 +105,8 @@ strands = [
 
 # OpenAI Agents adapter. >=0.18.1 supports OpenAI Python 2.45's
 # cache_write_tokens usage field. <0.21 because 0.21+ requires openai>=3.0
-# (HTTPX2 transport); review the adapter before crossing it. LiteLLM >=1.109
-# allows openai 3.x, so extras without this adapter can resolve it. LiteLLM
-# then passes openai 3 a legacy httpx client, an escape hatch openai may drop
-# in any 3.x release; the "pytest (openai 3.x)" CI job tests the newest one.
+# (HTTPX2 transport). LiteLLM still pins openai<3, so a wider cap would only
+# take effect silently once LiteLLM moves; review before crossing it.
 openai-agents = [
     "openai-agents[litellm]>=0.18.1,<0.21",
     "litellm>=1.103.1,!=1.104.0rc1,<2.0.0",
