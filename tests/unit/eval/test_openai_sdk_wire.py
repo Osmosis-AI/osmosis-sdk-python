@@ -5,7 +5,7 @@ openai/ provider never uses: it sends through the OpenAI SDK's client. On
 openai 3.x LiteLLM still injects a legacy httpx client, an escape hatch openai
 may drop in any 3.x release. These tests answer from a real localhost server
 so such a change shows up here. CI runs them on both majors: every pytest job
-uses the locked openai 2.x, and the Python 3.13 job reruns this file on the
+uses the locked openai 2.x, and the Python 3.12 job reruns this file on the
 newest openai 3.x.
 """
 
