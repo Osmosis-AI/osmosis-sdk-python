@@ -19,6 +19,10 @@ from osmosis_ai.rollout.utils.file_artifacts import default_artifact_root
 
 logger: logging.Logger = logging.getLogger(__name__)
 
+# The platform's artifact uploader deletes a rollout's directory once this file
+# exists and every file in it has been uploaded.
+DONE_MARKER = ".osmosis-done"
+
 
 def _write_document(dest: Path, payload: bytes) -> None:
     dest.parent.mkdir(parents=True, exist_ok=True)
@@ -31,6 +35,23 @@ def _document_path(artifact_root: Path, rollout_id: str) -> Path:
 
 async def remove_saved_trajectory(rollout_id: str) -> None:
     path = _document_path(default_artifact_root(), rollout_id)
+    await asyncio.to_thread(path.unlink, missing_ok=True)
+
+
+def _mark_done(rollout_dir: Path) -> None:
+    if rollout_dir.is_dir():
+        (rollout_dir / DONE_MARKER).touch()
+
+
+async def mark_rollout_done(rollout_id: str) -> None:
+    try:
+        await asyncio.to_thread(_mark_done, default_artifact_root() / rollout_id)
+    except OSError:
+        logger.warning("Could not mark rollout %s done", rollout_id, exc_info=True)
+
+
+async def clear_rollout_done(rollout_id: str) -> None:
+    path = default_artifact_root() / rollout_id / DONE_MARKER
     await asyncio.to_thread(path.unlink, missing_ok=True)
 
 

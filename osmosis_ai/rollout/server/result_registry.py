@@ -9,6 +9,7 @@ from datetime import datetime
 
 from osmosis_ai.rollout.context import RolloutProgress
 from osmosis_ai.rollout.server.lease import LeaseManager
+from osmosis_ai.rollout.trajectory.save import mark_rollout_done
 from osmosis_ai.rollout.types import (
     RolloutErrorCategory,
     RolloutResultResponse,
@@ -237,6 +238,9 @@ class RolloutFutureRegistry:
                 await asyncio.wait({entry.task})
             async with self.lock:
                 if self.entries.get(entry.rollout_id) is entry:
+                    # Mark before freeing the id: a rollout reusing it can only start
+                    # afterwards, and removes the marker when it does.
+                    await mark_rollout_done(entry.rollout_id)
                     self.entries.pop(entry.rollout_id, None)
                     self.leases.remove(entry.rollout_id)
         except asyncio.CancelledError:

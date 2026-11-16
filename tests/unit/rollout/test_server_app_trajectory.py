@@ -338,3 +338,32 @@ async def test_a_run_that_saves_nothing_never_serves_an_earlier_document(
 
     assert response.status_code == 204
     assert not (tmp_path / "r1" / "trajectory.json").exists()
+
+
+async def test_marks_the_rollout_done_once_retention_ends(
+    tmp_path: Path, monkeypatch
+) -> None:
+    patch_artifact_root(monkeypatch, tmp_path)
+    marker = tmp_path / "r1" / ".osmosis-done"
+    backend = BlockingBackend()
+    backend.release.set()
+    app = create_rollout_server(backend=backend, result_retention_sec=0.0)
+    async with app.router.lifespan_context(app):
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://rollout"
+        ) as client:
+            headers = await finish_rollout(client)
+            async with asyncio.timeout(1.0):
+                while (
+                    await client.get("/rollout/r1/trajectory", headers=headers)
+                ).status_code != 404:
+                    await asyncio.sleep(0.01)
+            assert marker.is_file()
+
+            # A reused id is not done while it runs.
+            backend.release.clear()
+            await client.post("/rollout", json=make_request().model_dump(mode="json"))
+            async with asyncio.timeout(1.0):
+                while marker.exists():
+                    await asyncio.sleep(0.01)
+            backend.release.set()

@@ -34,6 +34,7 @@ from osmosis_ai.rollout.trajectory.preview import (
     publish_previews,
 )
 from osmosis_ai.rollout.trajectory.save import (
+    clear_rollout_done,
     read_saved_trajectory,
     remove_saved_trajectory,
 )
@@ -402,6 +403,7 @@ async def _handle_rollout(
     # An id reused after result retention must never serve an earlier document,
     # including when this run ends before it saves one.
     await remove_saved_trajectory(rollout_id)
+    await clear_rollout_done(rollout_id)
     rollout_ctx = RolloutContext(
         chat_completions_url=request.chat_completions_url,
         api_key=request.llm_api_key,
