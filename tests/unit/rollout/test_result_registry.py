@@ -458,3 +458,28 @@ def test_crash_failure_response() -> None:
     assert response.status is RolloutStatus.FAILURE
     assert response.err_category is RolloutErrorCategory.INTERNAL_ERROR
     assert response.err_message == "rollout task crashed"
+
+
+async def test_retention_cleanup_never_marks_an_id_reused_after_discard(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.setattr(
+        "osmosis_ai.rollout.trajectory.save.default_artifact_root", lambda: tmp_path
+    )
+    (tmp_path / "r1").mkdir()
+    store = registry([])
+    store.result_retention_sec = 0.01
+    await store.register("r1")
+    await store.complete(
+        "r1", RolloutResultResponse(rollout_id="r1", status=RolloutStatus.SUCCESS)
+    )
+    cleanup = store.entry("r1").cleanup_task
+    assert cleanup is not None
+    await store.discard("r1")
+    await store.register("r1")
+
+    await cleanup
+
+    assert not store.entry("r1").result.done()
+    assert not (tmp_path / "r1" / ".osmosis-released").exists()
+    await store.close()
