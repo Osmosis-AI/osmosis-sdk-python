@@ -239,9 +239,8 @@ class RolloutFutureRegistry:
             async with self.lock:
                 if self.entries.get(entry.rollout_id) is not entry:
                     return
-            # Mark before freeing the id: a rollout reusing it can only start
-            # afterwards, and removes the marker when it does. Unlocked, since the
-            # artifact root may be an S3 mount.
+            # Mark before freeing the id, so a rollout reusing it starts after the
+            # marker and removes it. Unlocked: the artifact root may be an S3 mount.
             await mark_rollout_done(entry.rollout_id)
             async with self.lock:
                 if self.entries.get(entry.rollout_id) is entry:
