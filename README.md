@@ -40,7 +40,7 @@ pip install "osmosis-ai[full]"              # every optional feature
 
 There is one distribution, `osmosis-ai`. The `harbor` extra installs Harbor with its Daytona environment dependencies. See [Installation](https://docs.osmosis.ai/cli/installation) for product setup and [CONTRIBUTING.md](CONTRIBUTING.md) for development setup.
 
-On Python 3.15, some optional dependencies currently build from source; a C compiler is required for a full installation when compatible wheels are unavailable.
+On Python 3.15, some optional dependencies currently build from source, so a full installation can require a C compiler. On Linux with glibc older than 2.39, the `strands`, `openai-agents`, `harbor`, `rubric`, and `full` extras also require a Rust toolchain because orjson has no compatible Python 3.15 wheel there.
 
 ## Documentation
 
