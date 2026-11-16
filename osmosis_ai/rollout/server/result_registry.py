@@ -237,10 +237,14 @@ class RolloutFutureRegistry:
             if entry.task is not None:
                 await asyncio.wait({entry.task})
             async with self.lock:
+                if self.entries.get(entry.rollout_id) is not entry:
+                    return
+            # Mark before freeing the id: a rollout reusing it can only start
+            # afterwards, and removes the marker when it does. Unlocked, since the
+            # artifact root may be an S3 mount.
+            await mark_rollout_done(entry.rollout_id)
+            async with self.lock:
                 if self.entries.get(entry.rollout_id) is entry:
-                    # Mark before freeing the id: a rollout reusing it can only start
-                    # afterwards, and removes the marker when it does.
-                    await mark_rollout_done(entry.rollout_id)
                     self.entries.pop(entry.rollout_id, None)
                     self.leases.remove(entry.rollout_id)
         except asyncio.CancelledError:
