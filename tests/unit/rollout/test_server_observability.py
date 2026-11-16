@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime
 from unittest.mock import AsyncMock
 
 import httpx
@@ -10,7 +11,10 @@ from opentelemetry.sdk._logs.export import InMemoryLogRecordExporter
 from osmosis_ai.rollout.backend.base import ExecutionBackend
 from osmosis_ai.rollout.context import RolloutProgress, get_rollout_context
 from osmosis_ai.rollout.server import app as app_module
-from osmosis_ai.rollout.server.observability import RolloutObservability
+from osmosis_ai.rollout.server.observability import (
+    RolloutObservability,
+    stage_durations,
+)
 from osmosis_ai.rollout.types import ExecutionOutcome, ExecutionResult, RolloutStatus
 
 
@@ -76,6 +80,11 @@ async def test_ownership_survives_all_phases_without_exporting_inputs(
         "grading",
         terminal.value,
     ]
+    durations = {
+        key: records[-1].pop(key) for key in list(records[-1]) if key.endswith("_sec")
+    }
+    assert set(durations) == {"total_sec", "startup_sec", "agent_sec", "grading_sec"}
+    assert all(value >= 0 for value in durations.values())
     for sequence, row in enumerate(records, 1):
         assert row == {
             "event": "rollout.ownership",
@@ -130,6 +139,51 @@ async def test_cancellation_and_lease_expiry_publish_terminal_ownership(
     assert records[-1]["status"] == result.status.value
     assert records[-1]["status"] == ("failure" if expired else "cancelled")
     assert "run_name" not in records[-1]
+
+
+async def test_terminal_event_reports_error_category_and_backend_phases(exported):
+    class Backend(ExecutionBackend):
+        async def execute(self, request):
+            ctx = get_rollout_context()
+            assert ctx is not None
+            ctx.record_phase_timings(
+                {
+                    "environment_setup": 1.25,
+                    "bad name": 2.0,
+                    "agent": float("nan"),
+                    "verifier": True,
+                }
+            )
+            raise TimeoutError("private detail")
+
+    app = app_module.create_rollout_server(backend=Backend())
+    async with app.router.lifespan_context(app):
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://server"
+        ) as client:
+            payload = {
+                "rollout_id": "episode",
+                "initial_messages": [],
+                "chat_completions_url": "http://llm",
+            }
+            assert (await client.post("/rollout", json=payload)).status_code == 202
+            await app.state.rollout_futures.entry("episode").result
+            await asyncio.sleep(0)
+    terminal = dict(exported.get_finished_logs()[-1].log_record.attributes)
+    assert terminal["status"] == "failure"
+    assert terminal["err_category"] == "timeout"
+    assert [key for key in terminal if key.startswith("phase_")] == [
+        "phase_environment_setup_sec"
+    ]
+    assert terminal["phase_environment_setup_sec"] == 1.25
+    assert "grading_sec" not in terminal
+    assert "private detail" not in str(terminal)
+
+
+def test_naive_backend_timestamp_keeps_total_duration():
+    progress = RolloutProgress()
+    progress.agent_started_at = datetime(2026, 1, 1)
+    assert set(stage_durations(progress)) == {"total_sec"}
 
 
 def test_no_endpoint_leaves_app_telemetry_disabled(monkeypatch):

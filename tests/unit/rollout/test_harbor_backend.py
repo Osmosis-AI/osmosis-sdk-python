@@ -1725,6 +1725,27 @@ class TestGraderOutcome:
         assert outcome.grader.err_category == category
         assert outcome.result.err_category == category
 
+    async def test_trial_end_reports_phase_timings_to_rollout_progress(
+        self, template_task, tmp_path
+    ):
+        from osmosis_ai.rollout.context import RolloutContext, RolloutProgress
+
+        backend = self.backend_for(template_task, tmp_path)
+        event = self.event_with(
+            exception_info=self.exception_at(0),
+            verifier=self.verifier_span(duration_sec=4),
+        )
+        event.config = SimpleNamespace(trial_name="trial-r1")
+        pending = PendingTrial()
+        progress = RolloutProgress()
+        pending.rollout_context = RolloutContext(progress=progress)
+        backend.pending["r1"] = pending
+
+        await backend.on_trial_end(event)
+
+        assert pending.done.done()
+        assert progress.phase_timings == {"verifier": 4.0}
+
 
 class TestTaskResolution:
     def backend_for(self, template_task):

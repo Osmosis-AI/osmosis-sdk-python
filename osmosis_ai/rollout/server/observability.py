@@ -3,17 +3,21 @@
 from __future__ import annotations
 
 import logging
+import math
 import os
 import socket
 import time
 from collections.abc import Mapping
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
-from osmosis_ai.rollout.types import RolloutStatus
+from osmosis_ai.rollout.types import RolloutErrorCategory, RolloutStatus
 
 if TYPE_CHECKING:
     from opentelemetry._logs import Logger
     from opentelemetry.sdk._logs import LoggerProvider
+
+    from osmosis_ai.rollout.context import RolloutProgress
 
 logger: logging.Logger = logging.getLogger(__name__)
 METADATA_KEY = "osmosis_observability"
@@ -29,6 +33,38 @@ def _text(value: object) -> str | None:
     ):
         return None
     return value
+
+
+def _seconds(start: datetime | None, end: datetime | None) -> float | None:
+    if start is None or end is None:
+        return None
+    try:
+        return round(max(0.0, (end - start).total_seconds()), 3)
+    except TypeError:  # A backend reported a naive timestamp.
+        return None
+
+
+def stage_durations(progress: RolloutProgress) -> dict[str, float]:
+    """Seconds from admission to now, split at agent start and grading start."""
+    finished = datetime.now(UTC)
+    agent, grading = progress.agent_started_at, progress.grading_started_at
+    durations = {
+        "total_sec": _seconds(progress.created_at, finished),
+        "startup_sec": _seconds(progress.created_at, agent),
+        "agent_sec": _seconds(agent, grading or finished),
+        "grading_sec": _seconds(grading, finished),
+    }
+    for name, value in progress.phase_timings.items():
+        if (
+            isinstance(name, str)
+            and name.isidentifier()
+            and len(name) <= 64
+            and isinstance(value, int | float)
+            and not isinstance(value, bool)
+            and math.isfinite(value)
+        ):
+            durations[f"phase_{name}_sec"] = round(max(0.0, value), 3)
+    return {key: value for key, value in durations.items() if value is not None}
 
 
 class RolloutObservability:
@@ -93,20 +129,33 @@ class RolloutObservability:
                     fields[key] = value
         return fields
 
-    def record(self, fields: Mapping[str, str] | None, status: RolloutStatus) -> None:
+    def record(
+        self,
+        fields: Mapping[str, str] | None,
+        status: RolloutStatus,
+        *,
+        progress: RolloutProgress | None = None,
+        err_category: RolloutErrorCategory | None = None,
+    ) -> None:
+        """Emit one ownership event; pass ``progress`` only for the terminal one."""
         if self.log is None or fields is None:
             return
         try:
             self._sequence += 1
+            attributes: dict[str, str | int | float] = {
+                **fields,
+                "status": status.value,
+                "event_sequence": self._sequence,
+            }
+            if err_category is not None:
+                attributes["err_category"] = err_category.value
+            if progress is not None:
+                attributes.update(stage_durations(progress))
             self.log.emit(
                 timestamp=time.time_ns(),
                 severity_text="INFO",
                 body="Rollout ownership",
-                attributes={
-                    **fields,
-                    "status": status.value,
-                    "event_sequence": self._sequence,
-                },
+                attributes=attributes,
             )
         except Exception:
             # Observability failures must never affect admission, leases or results.
