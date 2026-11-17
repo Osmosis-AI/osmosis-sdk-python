@@ -9,6 +9,7 @@ from datetime import datetime
 
 from osmosis_ai.rollout.context import RolloutProgress
 from osmosis_ai.rollout.server.lease import LeaseManager
+from osmosis_ai.rollout.trajectory.save import mark_rollout_released
 from osmosis_ai.rollout.types import (
     RolloutErrorCategory,
     RolloutResultResponse,
@@ -235,6 +236,12 @@ class RolloutFutureRegistry:
             # the id reserved so late completion cannot affect a new rollout.
             if entry.task is not None:
                 await asyncio.wait({entry.task})
+            async with self.lock:
+                if self.entries.get(entry.rollout_id) is not entry:
+                    return
+            # Mark before freeing the id, so a rollout reusing it starts after the
+            # marker and removes it. Unlocked: the artifact root may be an S3 mount.
+            await mark_rollout_released(entry.rollout_id)
             async with self.lock:
                 if self.entries.get(entry.rollout_id) is entry:
                     self.entries.pop(entry.rollout_id, None)

@@ -10,6 +10,7 @@ from osmosis_ai.rollout.trajectory.report import (
     SampleReport,
     TrajectoryReport,
 )
+from osmosis_ai.rollout.trajectory.save import mark_rollout_released
 from osmosis_ai.rollout.types import ExecutionResult, RolloutSample, RolloutStatus
 
 
@@ -216,3 +217,28 @@ async def test_multi_entry_report_is_preserved_not_guessed(
         "judge": {"llm_call_metrics": [{"prompt_tokens": 99}]},
     }
     assert any("preserving them under" in r.getMessage() for r in caplog.records)
+
+
+async def test_marking_released_skips_a_rollout_without_a_directory(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setattr(
+        "osmosis_ai.rollout.trajectory.save.default_artifact_root", lambda: tmp_path
+    )
+    await mark_rollout_released("r1")
+    assert not (tmp_path / "r1").exists()
+
+
+async def test_marking_released_logs_instead_of_raising(
+    tmp_path: Path, monkeypatch, caplog
+) -> None:
+    monkeypatch.setattr(
+        "osmosis_ai.rollout.trajectory.save.default_artifact_root", lambda: tmp_path
+    )
+    (tmp_path / "r1").mkdir()
+    (tmp_path / "r1" / ".osmosis-released").symlink_to(tmp_path / "missing" / "marker")
+    caplog.set_level(logging.WARNING, logger="osmosis_ai.rollout.trajectory.save")
+
+    await mark_rollout_released("r1")
+
+    assert "Could not mark rollout r1 released" in caplog.text
