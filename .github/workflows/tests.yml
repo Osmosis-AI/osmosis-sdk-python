@@ -92,7 +92,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.12", "3.13", "3.14"]
+        python-version: ["3.12", "3.13", "3.14", "3.15"]
     steps:
       - uses: actions/checkout@v7
         with:
@@ -129,6 +129,17 @@ jobs:
       - name: Run tests
         if: steps.scope.outputs.docs-only != 'true' && matrix.python-version != '3.14'
         run: uv run --no-sync pytest -n 4 --dist worksteal --durations=30
+
+      - name: Rerun the OpenAI SDK wire tests on the newest openai 3.x
+        # uv.lock keeps openai 2.x because openai-agents<0.21 requires it, but
+        # the harbor, rubric and eval extras resolve openai 3.x through LiteLLM.
+        # LiteLLM gives openai 3 a legacy httpx client, an escape hatch openai
+        # may drop in any 3.x release, so this step is deliberately unpinned.
+        # One Python version is enough for a dependency check.
+        if: steps.scope.outputs.docs-only != 'true' && matrix.python-version == '3.12'
+        run: |
+          uv pip install "openai>=3,<4"
+          uv run --no-sync pytest tests/unit/eval/test_openai_sdk_wire.py
 
   harbor-compatibility:
     name: Harbor compatibility (${{ matrix.name }})
@@ -255,7 +266,7 @@ jobs:
           path: dist/
 
   wheel-smoke:
-    name: Wheel smoke (${{ matrix.scenario }})
+    name: Wheel smoke (${{ matrix.scenario }}, Python ${{ matrix.python-version }})
     needs: package
     if: needs.package.outputs.docs-only != 'true'
     runs-on: ubuntu-latest
@@ -266,30 +277,45 @@ jobs:
         include:
           - scenario: bare
             extra: ""
+            python-version: "3.12"
           - scenario: server
             extra: "[server]"
+            python-version: "3.12"
           - scenario: strands
             extra: "[strands]"
+            python-version: "3.12"
           - scenario: openai-agents
             extra: "[openai-agents]"
+            python-version: "3.12"
           - scenario: harbor
             extra: "[harbor]"
+            python-version: "3.12"
           - scenario: rubric
             extra: "[rubric]"
+            python-version: "3.12"
           - scenario: parquet
             extra: "[parquet]"
+            python-version: "3.12"
           - scenario: eval
             extra: "[eval]"
+            python-version: "3.12"
           - scenario: full
             extra: "[full]"
+            python-version: "3.12"
+          - scenario: bare
+            extra: ""
+            python-version: "3.15"
+          - scenario: full
+            extra: "[full]"
+            python-version: "3.15"
     steps:
       - uses: actions/checkout@v7
 
       - uses: astral-sh/setup-uv@v7
         with:
-          python-version: "3.12"
+          python-version: ${{ matrix.python-version }}
           enable-cache: true
-          cache-suffix: wheel-${{ matrix.scenario }}
+          cache-suffix: wheel-${{ matrix.python-version }}-${{ matrix.scenario }}
 
       - name: Download built wheel
         uses: actions/download-artifact@v8
@@ -301,6 +327,7 @@ jobs:
         env:
           INSTALL_EXTRA: ${{ matrix.extra }}
           SMOKE_SCENARIO: ${{ matrix.scenario }}
+          SMOKE_PYTHON_VERSION: ${{ matrix.python-version }}
         run: |
           mapfile -t wheels < <(find "$GITHUB_WORKSPACE/dist" -maxdepth 1 -type f -name '*.whl' -print | sort)
           if [ "${#wheels[@]}" -ne 1 ]; then
@@ -312,7 +339,7 @@ jobs:
           python="$smoke_root/venv/bin/python"
           install_spec="${wheels[0]}${INSTALL_EXTRA}"
 
-          uv venv --python 3.12 "$smoke_root/venv"
+          uv venv --python "$SMOKE_PYTHON_VERSION" "$smoke_root/venv"
           (
             cd "$smoke_root"
             env -u PYTHONPATH uv pip install --python "$python" "$install_spec"
