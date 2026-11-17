@@ -2,15 +2,25 @@
 
 This file records changes to `osmosis-ai`. For earlier versions, see [GitHub Releases](https://github.com/Osmosis-AI/osmosis-sdk-python/releases).
 
-## Unreleased
+## 0.3.13 - 2026-11-17
 
 ### Added
 
 - Support Python 3.15 while retaining Python 3.12 as the minimum version ([#490](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/490)).
+- Rollout servers add `err_category` and stage durations to the terminal ownership event: the server computes `total_sec`, `startup_sec`, `agent_sec`, and `grading_sec` from UTC timestamps and omits any whose stage never started, while backends report their own `phase_<name>_sec` durations through the new `RolloutContext.record_phase_timings`. All durations are clamped at zero and rounded to milliseconds ([#488](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/488)).
+- Rollout servers write an empty `.osmosis-released` file in a rollout's directory (`~/.osmosis/<rollout_id>/`, not its `artifacts/` subdirectory) once its result retention ends and cleanup has finished, signalling that the server no longer needs it ([#489](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/489)).
 
 ### Changed
 
 - Extras that use LiteLLM now require `>=1.109.0,<2.0.0` to avoid fastuuid's unsupported Python 3.15 native build. On Python 3.15, some optional dependencies build from source and can require a C compiler; on Linux with glibc older than 2.39, extras that install orjson also require a Rust toolchain ([#490](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/490)).
+- With the new LiteLLM floor, fresh installs of the `harbor`, `rubric`, and `eval` extras can resolve OpenAI Python 3.x ([#490](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/490), [#491](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/491)).
+
+### Fixed
+
+- `osmosis eval run` no longer fails with HTTP 400 on Gemini 3 and newer models when an agent replays tool calls without their thought signatures ([#486](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/486)).
+- Rollout result polling retries dropped connections, connect and read timeouts, and HTTP 502/503/504 until the polling lease deadline instead of giving up within about 16 seconds ([#487](https://github.com/Osmosis-AI/osmosis-sdk-python/pull/487)).
+
+[Full changelog](https://github.com/Osmosis-AI/osmosis-sdk-python/compare/v0.3.12...v0.3.13)
 
 ## 0.3.12 - 2026-11-11
 
