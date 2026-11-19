@@ -61,8 +61,8 @@ server = [
     "fastapi>=0.100.0,<1.0.0",
     "uvicorn>=0.23.0,<1.0.0",
     "opentelemetry-sdk>=1.39.1,<2.0.0",
-    # GHSA-xcq7-p3pf-p88h: bound tracestate parsing in every owning extra.
-    "opentelemetry-api>=1.45.1,<2.0.0",
+    # Bound tracestate and traceparent parsing (GHSA-xcq7-p3pf-p88h and GHSA-mf5v-w3w3-f6cg).
+    "opentelemetry-api>=1.45.2,<2.0.0",
     "opentelemetry-exporter-otlp-proto-http>=1.39.1,<2.0.0",
     # Requests (via the OTLP exporter) needs urllib3's proxy TLS and
     # streaming-response security fixes. Other owning extras repeat this floor.
@@ -85,7 +85,7 @@ server = [
 # GHSA-v4x8-3wr5-3wq8, GHSA-567q-5qvw-pf92, and GHSA-9vhv-jxww-xfm5.
 strands = [
     "strands-agents[litellm]>=1.48.0,<2.0.0",
-    "opentelemetry-api>=1.45.1,<2.0.0",
+    "opentelemetry-api>=1.45.2,<2.0.0",
     "litellm>=1.109.0,<2.0.0",
     "fsspec>=2026.6.0",
     "filelock>=4.2.1",
@@ -127,7 +127,7 @@ openai-agents = [
 # deployments own their exact release or fork revision.
 harbor = [
     "harbor[daytona,opensandbox]>=0.20.0,<0.25",
-    "opentelemetry-api>=1.45.1,<2.0.0",
+    "opentelemetry-api>=1.45.2,<2.0.0",
     "pyyaml>=6.0.2",
     # osmosis_ai.packaging builds the bundle wheel that Harbor installs in the
     # task container: toml rewrites the rollout project's pyproject.toml and
