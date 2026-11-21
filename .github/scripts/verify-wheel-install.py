@@ -213,8 +213,11 @@ def _assert_dependency_metadata(
                 f"{raw_requirement}"
             )
         if name == "daytona":
-            assert "2.0.0" not in requirement.specifier, (
-                f"Harbor requirement allows incompatible Daytona 2.0.0: {raw_requirement}"
+            assert any(
+                bound.operator == "<" and Version(bound.version) <= Version("1")
+                for bound in requirement.specifier
+            ), (
+                f"daytona requirement allows incompatible versions without a <1 cap: {raw_requirement}"
             )
         if name == "fsspec":
             assert ">=2026.6.0" in str(requirement.specifier).split(","), (
