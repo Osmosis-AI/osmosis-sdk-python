@@ -2265,6 +2265,7 @@ eval = [
 full = [
     { name = "aiohttp" },
     { name = "click" },
+    { name = "daytona" },
     { name = "fastapi" },
     { name = "filelock" },
     { name = "fsspec" },
@@ -2290,6 +2291,7 @@ full = [
 harbor = [
     { name = "aiohttp" },
     { name = "click" },
+    { name = "daytona" },
     { name = "filelock" },
     { name = "fsspec" },
     { name = "harbor", extra = ["daytona", "opensandbox"] },
@@ -2384,6 +2386,7 @@ requires-dist = [
     { name = "click", marker = "extra == 'server'", specifier = ">=8.3.3" },
     { name = "click", marker = "extra == 'strands'", specifier = ">=8.3.3" },
     { name = "cryptography", specifier = ">=50.0.0" },
+    { name = "daytona", marker = "extra == 'harbor'", specifier = "<1" },
     { name = "fastapi", marker = "extra == 'server'", specifier = ">=0.100.0,<1.0.0" },
     { name = "filelock", marker = "extra == 'eval'", specifier = ">=4.2.1" },
     { name = "filelock", marker = "extra == 'harbor'", specifier = ">=4.2.1" },
