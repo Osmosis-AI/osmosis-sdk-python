@@ -1,4 +1,4 @@
-"""Published dependency floors and feature ownership for security fixes."""
+"""Published dependency constraints and feature ownership."""
 
 from __future__ import annotations
 
@@ -103,6 +103,7 @@ def test_locked_dependencies_meet_security_constraints(
         ("aiohttp", "~=3.14.4", True),
         ("certifi", ">=2026.10.19", True),
         ("certifi", ">=2026.10.20", True),
+        ("daytona", ">=0.210.0,<1", True),
         ("multidict", ">=6.10.0", True),
         ("mcp", ">=1.31.0,<2", True),
         ("mcp", ">=2.2.0", True),
@@ -115,6 +116,7 @@ def test_locked_dependencies_meet_security_constraints(
         ("aiohttp", ">=3.14.3", False),
         ("certifi", ">=2025.11.12", False),
         ("certifi", ">=2026.10.18", False),
+        ("daytona", "!=2.0.0", False),
         ("multidict", ">=6.7.0", False),
         ("multidict", ">=6.9.0", False),
         ("mcp", ">=1.29.1,<2", False),
@@ -149,7 +151,5 @@ def test_wheel_verifier_checks_allowed_versions(
     if safe:
         verifier(Distribution.at(tmp_path))
     else:
-        with pytest.raises(
-            AssertionError, match=f"{package} requirement allows vulnerable"
-        ):
+        with pytest.raises(AssertionError, match=f"{package} requirement allows "):
             verifier(Distribution.at(tmp_path))

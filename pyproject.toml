@@ -127,6 +127,8 @@ openai-agents = [
 # deployments own their exact release or fork revision.
 harbor = [
     "harbor[daytona,opensandbox]>=0.20.0,<0.25",
+    # Supported Harbor releases import the Daytona 0.x API from the package root.
+    "daytona<1",
     "opentelemetry-api>=1.45.2,<2.0.0",
     "pyyaml>=6.0.2",
     # osmosis_ai.packaging builds the bundle wheel that Harbor installs in the

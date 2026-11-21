@@ -50,6 +50,7 @@ EXTRA_MODULES: Final[Mapping[str, frozenset[str]]] = {
         {
             "aiohttp",
             "click",
+            "daytona",
             "filelock",
             "fsspec",
             "harbor",
