@@ -19,6 +19,7 @@ import sys
 import sysconfig
 from collections.abc import Callable, Iterable
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Any
 
 from packaging.markers import default_environment
@@ -81,6 +82,7 @@ EXTRA_REQUIREMENTS: dict[str, set[str]] = {
     "harbor": {
         "aiohttp",
         "click",
+        "daytona",
         "filelock",
         "fsspec",
         "harbor",
@@ -209,6 +211,13 @@ def _assert_dependency_metadata(
             ), (
                 f"{name} requirement allows vulnerable {vulnerable_version}: "
                 f"{raw_requirement}"
+            )
+        if name == "daytona":
+            assert any(
+                bound.operator == "<" and Version(bound.version) <= Version("1")
+                for bound in requirement.specifier
+            ), (
+                f"daytona requirement allows incompatible versions without a <1 cap: {raw_requirement}"
             )
         if name == "fsspec":
             assert ">=2026.6.0" in str(requirement.specifier).split(","), (
@@ -380,12 +389,25 @@ def _smoke_openai_agents() -> None:
 
 
 def _smoke_harbor() -> None:
+    from harbor.environments.daytona import DaytonaEnvironment
+    from harbor.models.task.config import EnvironmentConfig
+    from harbor.models.trial.paths import TrialPaths
+
     _assert_public_exports(
         "osmosis_ai.rollout.backend.harbor",
         ("HarborBackend", "TaskMode"),
     )
-    importlib.import_module("daytona")
-    importlib.import_module("harbor.environments.daytona")
+    # Harbor defers Daytona import errors until the environment is constructed.
+    with TemporaryDirectory() as directory:
+        root = Path(directory)
+        (root / "Dockerfile").write_text("FROM scratch\n", encoding="utf-8")
+        DaytonaEnvironment(
+            environment_dir=root,
+            environment_name="smoke",
+            session_id="smoke",
+            trial_paths=TrialPaths(root / "trial"),
+            task_env_config=EnvironmentConfig(),
+        )
     # The bundle builder is what installs a rollout project inside the task
     # container, so the harbor extra must carry its TOML writer.
     packaging = importlib.import_module("osmosis_ai.packaging")
