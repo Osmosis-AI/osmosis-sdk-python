@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-from pydantic import TypeAdapter
+from pydantic import TypeAdapter, ValidationError
 
 from osmosis_ai.rollout.context import RolloutProgress
 from osmosis_ai.rollout.server.lease import LeaseManager
@@ -69,6 +69,7 @@ class RolloutFuture:
     published_by_run: bool = False
     result_file: _ResultFile | None = None
     result_write_started: bool = False
+    read_failure: RolloutResultResponse | None = None
 
 
 class RolloutFutureRegistry:
@@ -168,11 +169,27 @@ class RolloutFutureRegistry:
 
     async def complete(self, rollout_id: str, response: RolloutResultResponse) -> bool:
         entry = self.entry(rollout_id)
-        if entry.result.done():
+        if entry.result.done() or entry.result_write_started:
             return False
-        # Serialize outside the event loop and the registry-wide lease lock.
-        # Publish the completion only after the entire payload can be read.
         entry.result_write_started = True
+        publication = asyncio.create_task(self._store_and_finish(entry, response))
+        # Keep execution alive until the file and its terminal state are published.
+        # Otherwise its cancellation callback can replace the backend's result.
+        cancelled = False
+        while not publication.done():
+            try:
+                await asyncio.shield(publication)
+            except asyncio.CancelledError:
+                cancelled = True
+        published = publication.result()
+        if cancelled:
+            raise asyncio.CancelledError
+        return published
+
+    async def _store_and_finish(
+        self, entry: RolloutFuture, response: RolloutResultResponse
+    ) -> bool:
+        rollout_id = entry.rollout_id
         result_file = None
         try:
             result_file = await asyncio.to_thread(_ResultFile, response)
@@ -205,8 +222,6 @@ class RolloutFutureRegistry:
                 entry.result_file = result_file
             entry.published_by_run = not expired
             self.finish(entry, terminal)
-        if expired:
-            self.cancel_execution(entry)
         return not expired
 
     async def wait_for_result(
@@ -248,8 +263,21 @@ class RolloutFutureRegistry:
                         agent_started_at=entry.progress.agent_started_at,
                     )
         if entry.result_file is not None:
-            return await asyncio.to_thread(entry.result_file.read)
-        return entry.result.result()
+            try:
+                return await asyncio.to_thread(entry.result_file.read)
+            except ValidationError:
+                # The published file is immutable. Retrying these bytes cannot
+                # recover the sample. Keep the failure available to later polls.
+                logger.error("Invalid stored result for rollout %s", rollout_id)
+                entry.read_failure = RolloutResultResponse(
+                    rollout_id=rollout_id,
+                    status=RolloutStatus.FAILURE,
+                    err_message="stored rollout result is invalid",
+                    err_category=RolloutErrorCategory.INTERNAL_ERROR,
+                    agent_started_at=entry.result.result().agent_started_at,
+                )
+                entry.result_file = None
+        return entry.read_failure or entry.result.result()
 
     async def expire(self, rollout_id: str) -> None:
         async with self.lock:
@@ -271,14 +299,14 @@ class RolloutFutureRegistry:
                 for task in (entry.cleanup_task, entry.cancel_result_task)
                 if task is not None and not task.done()
             ]
+            for entry in self.entries.values():
+                entry.result_file = None
+            self.entries.clear()
         await self.leases.close()
         for task in tasks:
             task.cancel()
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
-        for entry in self.entries.values():
-            entry.result_file = None
-        self.entries.clear()
 
     def finish(self, entry: RolloutFuture, response: RolloutResultResponse) -> None:
         entry.result.set_result(response)
@@ -335,6 +363,8 @@ class RolloutFutureRegistry:
     def cancel_execution(self, entry: RolloutFuture) -> str:
         if entry.cancel_disposition is not None:
             return entry.cancel_disposition
+        if entry.result_write_started:
+            return "not_found"
         entry.cancel_disposition = (
             "cancelled_queued"
             if entry.progress.status is RolloutStatus.QUEUED

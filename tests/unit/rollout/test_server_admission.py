@@ -180,7 +180,7 @@ def test_admission_reports_server_poll_configuration() -> None:
     assert backend.executed is True
 
 
-def test_finished_result_can_be_retried_after_a_read_failure(
+def test_finished_result_distinguishes_temporary_read_failure_from_corruption(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr("tempfile.tempdir", str(tmp_path))
@@ -197,6 +197,14 @@ def test_finished_result_can_be_retried_after_a_read_failure(
         assert client.get(route, headers=headers).status_code == 503
         moved.rename(result_file)
         assert client.get(route, headers=headers).json() == response.json()
+        result_file.write_bytes(b"{")
+        failure = client.get(route, headers=headers)
+        assert failure.status_code == 200
+        body = failure.json()
+        assert body["status"] == "failure"
+        assert body["err_category"] == "internal_error"
+        assert body["agent_started_at"] == response.json()["agent_started_at"]
+        assert client.get(route, headers=headers).json() == body
 
 
 @pytest.mark.parametrize(("fail", "status"), [(False, "success"), (True, "failure")])

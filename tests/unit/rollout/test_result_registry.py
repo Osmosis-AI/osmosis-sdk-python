@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import gc
+import tempfile
 import weakref
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -124,6 +125,49 @@ async def test_unwritable_result_storage_returns_a_terminal_error(
         assert result.err_category is RolloutErrorCategory.INTERNAL_ERROR
         assert await store.wait_for_result("r1", lease) == result
     finally:
+        await store.close()
+
+
+async def test_cancelling_during_result_write_preserves_the_backend_reward(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    writing = asyncio.Event()
+    resume = Event()
+    loop = asyncio.get_running_loop()
+    open_file = tempfile.NamedTemporaryFile
+
+    def paused_open(*args, **kwargs):
+        loop.call_soon_threadsafe(writing.set)
+        assert resume.wait(5)
+        return open_file(*args, **kwargs)
+
+    monkeypatch.setattr(tempfile, "NamedTemporaryFile", paused_open)
+    store = registry([], wait=1, lease=10)
+    lease = await store.register("r1")
+    expected = RolloutResultResponse(
+        rollout_id="r1", status=RolloutStatus.SUCCESS, sample=RolloutSample(reward=0.75)
+    )
+
+    async def execute() -> None:
+        await store.complete("r1", expected)
+
+    task = asyncio.create_task(execute())
+    await store.bind_task("r1", task)
+    try:
+        await asyncio.wait_for(writing.wait(), timeout=5)
+        disposition = await store.cancel(ids=["r1"])
+        # Shutdown can cancel the execution task directly, even repeatedly.
+        task.cancel()
+        await asyncio.sleep(0)
+        task.cancel()
+        resume.set()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert await store.wait_for_result("r1", lease) == expected
+        assert disposition == {"r1": "not_found"}
+    finally:
+        resume.set()
+        await asyncio.gather(task, return_exceptions=True)
         await store.close()
 
 

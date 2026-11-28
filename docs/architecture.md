@@ -107,6 +107,8 @@ The server owns the result futures. A result request returns when the status cha
 
 The [result registry](../osmosis_ai/rollout/server/result_registry.py) writes completed payloads to private files in the system temporary directory and keeps only terminal metadata in memory between polls. A client can retrieve the full result with its original lease throughout the retention window (15 minutes by default). Files are removed after retention and any in-flight reads finish. On memory-limited deployments, use a disk-backed temporary directory for these files.
 
+Once the backend returns and the registry starts storing its result, cancellation lets the write and publication finish. A temporary read error returns HTTP 503 so the client can retry. If the stored payload fails validation, the client receives a terminal `internal_error` on that poll and subsequent polls.
+
 ### Eval path
 
 The HTTP client lives under [../osmosis_ai/rollout/client/](../osmosis_ai/rollout/client/). The local runner and localhost LLM bridge live under [../osmosis_ai/eval/local/](../osmosis_ai/eval/local/). Eval supplies data + an LLM endpoint, keeps the polling lease alive, and consumes the finished trace + reward.

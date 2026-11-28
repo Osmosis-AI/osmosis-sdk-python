@@ -16,7 +16,6 @@ from uuid import uuid4
 
 from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.responses import JSONResponse, Response
-from pydantic import ValidationError
 
 from osmosis_ai.rollout.backend.base import ExecutionBackend
 from osmosis_ai.rollout.context import RolloutContext, RolloutProgress
@@ -343,7 +342,7 @@ def create_rollout_server(
             raise HTTPException(
                 status_code=403, detail="invalid polling lease"
             ) from exc
-        except (OSError, ValidationError) as exc:
+        except OSError as exc:
             logger.exception("Could not read stored result for rollout %s", rollout_id)
             raise HTTPException(
                 status_code=503, detail="rollout result temporarily unavailable"
