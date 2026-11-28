@@ -6,6 +6,7 @@ import time
 from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager, nullcontext
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -179,13 +180,31 @@ def test_admission_reports_server_poll_configuration() -> None:
     assert backend.executed is True
 
 
-def test_result_returns_finished_outcome() -> None:
+def test_finished_result_distinguishes_temporary_read_failure_from_corruption(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("tempfile.tempdir", str(tmp_path))
     with TestClient(create_rollout_server(backend=StubBackend())) as client:
         admission = client.post("/rollout", json=init_body())
         assert admission.status_code == 202
-        response = client.get("/rollout/r1/result", headers=lease_headers(admission))
-    assert response.status_code == 200
-    assert response.json()["status"] == "success"
+        headers = lease_headers(admission)
+        route = "/rollout/r1/result"
+        response = client.get(route, headers=headers)
+        assert response.status_code == 200
+        assert response.json()["status"] == "success"
+        (result_file,) = (p for p in tmp_path.iterdir() if p.is_file())
+        moved = result_file.rename(tmp_path / "unavailable")
+        assert client.get(route, headers=headers).status_code == 503
+        moved.rename(result_file)
+        assert client.get(route, headers=headers).json() == response.json()
+        result_file.write_bytes(b"{")
+        failure = client.get(route, headers=headers)
+        assert failure.status_code == 200
+        body = failure.json()
+        assert body["status"] == "failure"
+        assert body["err_category"] == "internal_error"
+        assert body["agent_started_at"] == response.json()["agent_started_at"]
+        assert client.get(route, headers=headers).json() == body
 
 
 @pytest.mark.parametrize(("fail", "status"), [(False, "success"), (True, "failure")])
@@ -352,15 +371,15 @@ async def test_cancel_waits_for_cleanup_and_is_idempotent(selector) -> None:
             response = await client.post("/rollout/cancel", json=selector)
             assert response.json() == {"dispositions": {"r1": "cancelled_running"}}
             await cleaning.wait()
-            await client.post("/rollout/cancel", json=selector)
-            pending = await client.get(
-                "/rollout/r1/result", headers=lease_headers(admission)
-            )
-            assert pending.json()["status"] == "running"
+            repeated = await client.post("/rollout/cancel", json=selector)
+            assert repeated.json() == response.json()
+            headers = lease_headers(admission)
+            result = await client.get("/rollout/r1/result", headers=headers)
+            assert result.json()["status"] == "running"
             finish_cleanup.set()
-            result = await client.get(
-                "/rollout/r1/result", headers=lease_headers(admission)
-            )
+            async with asyncio.timeout(5):
+                while result.json()["status"] == "running":
+                    result = await client.get("/rollout/r1/result", headers=headers)
             assert result.json()["status"] == "cancelled"
             assert cleaned.is_set()
 

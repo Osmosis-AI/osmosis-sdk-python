@@ -342,6 +342,11 @@ def create_rollout_server(
             raise HTTPException(
                 status_code=403, detail="invalid polling lease"
             ) from exc
+        except OSError as exc:
+            logger.exception("Could not read stored result for rollout %s", rollout_id)
+            raise HTTPException(
+                status_code=503, detail="rollout result temporarily unavailable"
+            ) from exc
 
     @app.get("/rollout/{rollout_id}/trajectory")
     async def rollout_trajectory(

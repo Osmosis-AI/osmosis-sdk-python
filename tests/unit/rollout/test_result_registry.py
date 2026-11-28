@@ -1,7 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import gc
+import tempfile
+import weakref
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
+from threading import Event
 
 import pytest
 
@@ -15,6 +20,7 @@ from osmosis_ai.rollout.server.result_registry import (
 from osmosis_ai.rollout.types import (
     RolloutErrorCategory,
     RolloutResultResponse,
+    RolloutSample,
     RolloutStatus,
 )
 
@@ -65,6 +71,155 @@ async def test_wait_returns_finished_result_early() -> None:
     assert await store.complete("r1", expected)
     assert await waiter == expected
     await store.close()
+
+
+async def test_completed_sample_is_released_and_retry_returns_the_full_result(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("tempfile.tempdir", str(tmp_path))
+    store = registry([], wait=1, lease=2)
+    lease = await store.register("r1")
+    sample = RolloutSample(
+        messages=[{"role": "assistant", "content": "large result" * 8192}],
+        trajectory_messages=None,
+        reward=0.0,
+        metrics={"turns": 3},
+    )
+    reference = weakref.ref(sample)
+    result = RolloutResultResponse(
+        rollout_id="r1",
+        status=RolloutStatus.SUCCESS,
+        sample=sample,
+        agent_started_at=AGENT_STARTED_AT,
+    )
+    expected = result.model_dump_json()
+    try:
+        assert await store.complete("r1", result)
+        del result, sample
+        gc.collect()
+        assert reference() is None
+        assert any(tmp_path.iterdir())
+        with pytest.raises(InvalidLeaseError):
+            await store.wait_for_result("r1", "wrong")
+        polls = await asyncio.gather(
+            *(store.wait_for_result("r1", lease) for _ in range(2))
+        )
+        assert [p.model_dump_json() for p in polls] == [expected, expected]
+    finally:
+        await store.close()
+    assert not list(tmp_path.iterdir())
+
+
+async def test_unwritable_result_storage_returns_a_terminal_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("tempfile.tempdir", str(tmp_path / "missing"))
+    store = registry([], wait=1, lease=2)
+    lease = await store.register("r1")
+    try:
+        await store.complete(
+            "r1", RolloutResultResponse(rollout_id="r1", status=RolloutStatus.SUCCESS)
+        )
+        result = await store.wait_for_result("r1", lease)
+        assert result.status is RolloutStatus.FAILURE
+        assert result.err_category is RolloutErrorCategory.INTERNAL_ERROR
+        assert await store.wait_for_result("r1", lease) == result
+    finally:
+        await store.close()
+
+
+async def test_cancelling_during_result_write_preserves_the_backend_reward(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    writing = asyncio.Event()
+    resume = Event()
+    loop = asyncio.get_running_loop()
+    open_file = tempfile.NamedTemporaryFile
+
+    def paused_open(*args, **kwargs):
+        loop.call_soon_threadsafe(writing.set)
+        assert resume.wait(5)
+        return open_file(*args, **kwargs)
+
+    monkeypatch.setattr(tempfile, "NamedTemporaryFile", paused_open)
+    store = registry([], wait=1, lease=10)
+    lease = await store.register("r1")
+    expected = RolloutResultResponse(
+        rollout_id="r1", status=RolloutStatus.SUCCESS, sample=RolloutSample(reward=0.75)
+    )
+
+    async def execute() -> None:
+        await store.complete("r1", expected)
+
+    task = asyncio.create_task(execute())
+    await store.bind_task("r1", task)
+    try:
+        await asyncio.wait_for(writing.wait(), timeout=5)
+        disposition = await store.cancel(ids=["r1"])
+        # Shutdown can cancel the execution task directly, even repeatedly.
+        task.cancel()
+        await asyncio.sleep(0)
+        task.cancel()
+        resume.set()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert await store.wait_for_result("r1", lease) == expected
+        assert disposition == {"r1": "not_found"}
+    finally:
+        resume.set()
+        await asyncio.gather(task, return_exceptions=True)
+        await store.close()
+
+
+async def test_poll_in_flight_survives_retention_and_id_reuse(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("tempfile.tempdir", str(tmp_path))
+    monkeypatch.setattr(
+        "osmosis_ai.rollout.trajectory.save.default_artifact_root", lambda: tmp_path
+    )
+    store = registry([], wait=1, lease=2)
+    store.result_retention_sec = 0
+    lease = await store.register("r1")
+    first = RolloutResultResponse(
+        rollout_id="r1", status=RolloutStatus.FAILURE, err_message="first run"
+    )
+    started = asyncio.Event()
+    resume = Event()
+    loop = asyncio.get_running_loop()
+    read_bytes = Path.read_bytes
+
+    def slow_read(path: Path) -> bytes:
+        loop.call_soon_threadsafe(started.set)
+        assert resume.wait(5)
+        return read_bytes(path)
+
+    monkeypatch.setattr(Path, "read_bytes", slow_read)
+
+    async def finish_execution_after_poll_starts() -> None:
+        await started.wait()
+
+    await store.bind_task(
+        "r1", asyncio.create_task(finish_execution_after_poll_starts())
+    )
+    try:
+        await store.complete("r1", first)
+        cleanup = store.entry("r1").cleanup_task
+        assert cleanup is not None
+        poll = asyncio.create_task(store.wait_for_result("r1", lease))
+        await asyncio.wait_for(cleanup, timeout=5)
+        next_lease = await store.register("r1")
+        with pytest.raises(InvalidLeaseError):
+            await store.wait_for_result("r1", lease)
+        resume.set()
+        assert await poll == first
+        assert not list(tmp_path.iterdir())
+        second = RolloutResultResponse(rollout_id="r1", status=RolloutStatus.SUCCESS)
+        await store.complete("r1", second)
+        assert await store.wait_for_result("r1", next_lease) == second
+    finally:
+        resume.set()
+        await store.close()
 
 
 async def test_wait_returns_on_status_change() -> None:
