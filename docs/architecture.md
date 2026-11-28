@@ -105,6 +105,8 @@ Anchors:
 
 The server owns the result futures. A result request returns when the status changes or the rollout finishes, and otherwise waits up to the server-configured timeout (30 seconds by default) before returning the current state. Each valid result request renews the server-configured polling lease (120 seconds by default). Missing the lease deadline publishes a `lease_expired` failure and cancels the rollout task. The client cannot override either timeout. `RolloutClient.run_rollout()` waits for a terminal result; `await RolloutClient.run_rollout_async()` returns an awaitable `RolloutHandle` after admission. The handle exposes the ordered lifecycle through `wait_for_running()`, `wait_for_grading()`, and `wait_for_completion()`, and returns the terminal result when awaited.
 
+The [result registry](../osmosis_ai/rollout/server/result_registry.py) writes completed payloads to private files in the system temporary directory and keeps only terminal metadata in memory between polls. A client can retrieve the full result with its original lease throughout the retention window (15 minutes by default). Files are removed after retention and any in-flight reads finish. On memory-limited deployments, use a disk-backed temporary directory for these files.
+
 ### Eval path
 
 The HTTP client lives under [../osmosis_ai/rollout/client/](../osmosis_ai/rollout/client/). The local runner and localhost LLM bridge live under [../osmosis_ai/eval/local/](../osmosis_ai/eval/local/). Eval supplies data + an LLM endpoint, keeps the polling lease alive, and consumes the finished trace + reward.

@@ -3,9 +3,14 @@ from __future__ import annotations
 import asyncio
 import logging
 import math
+import tempfile
+import weakref
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import datetime
+from pathlib import Path
+
+from pydantic import TypeAdapter
 
 from osmosis_ai.rollout.context import RolloutProgress
 from osmosis_ai.rollout.server.lease import LeaseManager
@@ -17,6 +22,7 @@ from osmosis_ai.rollout.types import (
 )
 
 logger: logging.Logger = logging.getLogger(__name__)
+_RESULT_JSON = TypeAdapter(RolloutResultResponse)
 
 
 class UnknownRolloutError(KeyError):
@@ -29,6 +35,23 @@ class DuplicateRolloutError(ValueError):
 
 class RolloutPendingError(RuntimeError):
     pass
+
+
+class _ResultFile:
+    """Private, immutable result shared by the registry and any in-flight polls."""
+
+    def __init__(self, response: RolloutResultResponse) -> None:
+        with tempfile.NamedTemporaryFile(
+            prefix="osmosis-result-", delete=False
+        ) as file:
+            self._path = Path(file.name)
+            # A poll may still be reading when retention expires. Unlink after
+            # the registry and the last reader have both released this file.
+            weakref.finalize(self, self._path.unlink, missing_ok=True)
+            file.write(_RESULT_JSON.dump_json(response))
+
+    def read(self) -> RolloutResultResponse:
+        return _RESULT_JSON.validate_json(self._path.read_bytes())
 
 
 @dataclass
@@ -44,6 +67,8 @@ class RolloutFuture:
     # Set only by complete(), after the run saved its files; stand-in results
     # (lease expiry, crash) leave it False.
     published_by_run: bool = False
+    result_file: _ResultFile | None = None
+    result_write_started: bool = False
 
 
 class RolloutFutureRegistry:
@@ -126,6 +151,7 @@ class RolloutFutureRegistry:
         async with self.lock:
             entry = self.entries.pop(rollout_id, None)
             if entry is not None:
+                entry.result_file = None
                 self.leases.remove(rollout_id)
 
     async def published_by_run(self, rollout_id: str, lease_token: str) -> bool:
@@ -141,18 +167,44 @@ class RolloutFutureRegistry:
             return self.entry(rollout_id).progress
 
     async def complete(self, rollout_id: str, response: RolloutResultResponse) -> bool:
-        expired = False
+        entry = self.entry(rollout_id)
+        if entry.result.done():
+            return False
+        # Serialize outside the event loop and the registry-wide lease lock.
+        # Publish the completion only after the entire payload can be read.
+        entry.result_write_started = True
+        result_file = None
+        try:
+            result_file = await asyncio.to_thread(_ResultFile, response)
+        except (OSError, ValueError):
+            logger.exception("Could not store result for rollout %s", rollout_id)
+            terminal = RolloutResultResponse(
+                rollout_id=rollout_id,
+                status=RolloutStatus.FAILURE,
+                err_message="could not store rollout result",
+                err_category=RolloutErrorCategory.INTERNAL_ERROR,
+                agent_started_at=response.agent_started_at,
+            )
+        else:
+            # Previews and observability only need terminal metadata.
+            terminal = RolloutResultResponse(
+                rollout_id=rollout_id,
+                status=response.status,
+                err_category=response.err_category,
+                agent_started_at=response.agent_started_at,
+            )
         async with self.lock:
-            entry = self.entry(rollout_id)
-            if entry.result.done():
+            if self.entries.get(rollout_id) is not entry or entry.result.done():
                 return False
-            if self.leases.expired(rollout_id):
-                response = self.lease_failure(
+            expired = self.leases.expired(rollout_id)
+            if expired:
+                terminal = self.lease_failure(
                     rollout_id, entry.progress.agent_started_at
                 )
-                expired = True
+            else:
+                entry.result_file = result_file
             entry.published_by_run = not expired
-            self.finish(entry, response)
+            self.finish(entry, terminal)
         if expired:
             self.cancel_execution(entry)
         return not expired
@@ -174,27 +226,30 @@ class RolloutFutureRegistry:
                     expired = True
             else:
                 self.leases.authenticate(rollout_id, lease_token)
-            future = entry.result
-            progress = entry.progress
         if expired:
             self.cancel_execution(entry)
-        if future.done():
-            return future.result()
-        try:
-            async with asyncio.timeout(self.result_wait_timeout_sec):
-                await progress.wait_for_change()
-        except TimeoutError:
-            pass
-        async with self.lock:
-            entry = self.entry(rollout_id)
-            self.leases.authenticate(rollout_id, lease_token)
-            if entry.result.done():
-                return entry.result.result()
-            return RolloutResultResponse(
-                rollout_id=rollout_id,
-                status=entry.progress.status,
-                agent_started_at=entry.progress.agent_started_at,
-            )
+        if not entry.result.done():
+            try:
+                async with asyncio.timeout(self.result_wait_timeout_sec):
+                    await entry.progress.wait_for_change()
+                    if entry.result_write_started:
+                        # A phase change may have woken this poll just as the
+                        # backend finished. Give the write the rest of this poll.
+                        await asyncio.shield(entry.result)
+            except TimeoutError:
+                pass
+            async with self.lock:
+                entry = self.entry(rollout_id)
+                self.leases.authenticate(rollout_id, lease_token)
+                if not entry.result.done():
+                    return RolloutResultResponse(
+                        rollout_id=rollout_id,
+                        status=entry.progress.status,
+                        agent_started_at=entry.progress.agent_started_at,
+                    )
+        if entry.result_file is not None:
+            return await asyncio.to_thread(entry.result_file.read)
+        return entry.result.result()
 
     async def expire(self, rollout_id: str) -> None:
         async with self.lock:
@@ -221,6 +276,9 @@ class RolloutFutureRegistry:
             task.cancel()
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
+        for entry in self.entries.values():
+            entry.result_file = None
+        self.entries.clear()
 
     def finish(self, entry: RolloutFuture, response: RolloutResultResponse) -> None:
         entry.result.set_result(response)
@@ -244,6 +302,7 @@ class RolloutFutureRegistry:
             await mark_rollout_released(entry.rollout_id)
             async with self.lock:
                 if self.entries.get(entry.rollout_id) is entry:
+                    entry.result_file = None
                     self.entries.pop(entry.rollout_id, None)
                     self.leases.remove(entry.rollout_id)
         except asyncio.CancelledError:
