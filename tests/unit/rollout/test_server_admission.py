@@ -363,15 +363,15 @@ async def test_cancel_waits_for_cleanup_and_is_idempotent(selector) -> None:
             response = await client.post("/rollout/cancel", json=selector)
             assert response.json() == {"dispositions": {"r1": "cancelled_running"}}
             await cleaning.wait()
-            await client.post("/rollout/cancel", json=selector)
-            pending = await client.get(
-                "/rollout/r1/result", headers=lease_headers(admission)
-            )
-            assert pending.json()["status"] == "running"
+            repeated = await client.post("/rollout/cancel", json=selector)
+            assert repeated.json() == response.json()
+            headers = lease_headers(admission)
+            result = await client.get("/rollout/r1/result", headers=headers)
+            assert result.json()["status"] == "running"
             finish_cleanup.set()
-            result = await client.get(
-                "/rollout/r1/result", headers=lease_headers(admission)
-            )
+            async with asyncio.timeout(5):
+                while result.json()["status"] == "running":
+                    result = await client.get("/rollout/r1/result", headers=headers)
             assert result.json()["status"] == "cancelled"
             assert cleaned.is_set()
 
